@@ -4,7 +4,7 @@ Automated bug-bounty triage. A submitted report is authenticated, scope-checked,
 
 Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs × TrueFoundry × Qodo Agent Harness Hackathon.
 
-> **Status: scaffold.** This repo currently holds the Phase 0 project scaffold (CI, contribution rules, Qodo review trail). The pipeline described below is the target MVP and is being built phase by phase — it is not yet implemented.
+> **Status: scaffold.** This repo currently holds the Phase 0 project scaffold (CI, contribution rules, Qodo review trail). The pipeline described below is the target MVP and is being built phase by phase, and is not yet implemented.
 
 
 ## Frozen MVP
@@ -22,10 +22,10 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## Qodo Code Review Evidence
 
-Every substantive change lands through a GitHub pull request reviewed by [Qodo Merge](https://github.com/apps/qodo-merge-pro) before merge — direct pushes to `main` are blocked by branch protection. For each PR, Qodo's automated review, our responses (fixes or reasoned dismissals), and any follow-up review are visible in the PR thread.
+Every substantive change lands through a GitHub pull request reviewed by [Qodo Merge](https://github.com/apps/qodo-merge-pro) before merge. Direct pushes to `main` are blocked by branch protection. For each PR, Qodo's automated review, our responses (fixes or reasoned dismissals), and any follow-up review are visible in the PR thread.
 
 Representative reviewed PRs:
-- [#1 — Phase 0 scaffold: CI, contribution rules, Qodo evidence trail](https://github.com/Vaibhav91one/bountydesk/pull/1) (Qodo flagged README/CI-pinning; both addressed in-thread)
+- [#1, Phase 0 scaffold: CI, contribution rules, Qodo evidence trail](https://github.com/Vaibhav91one/bountydesk/pull/1) (Qodo flagged README/CI-pinning; both addressed in-thread)
 
 Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
