@@ -80,7 +80,13 @@ const createdAt = () =>
 const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
-/** A GitHub App installation. Suspension and deletion are recorded, never hard-deleted. */
+/**
+ * A GitHub App installation.
+ *
+ * `deletedAt` is a tombstone. GitHub issues a new installation id when an account installs
+ * the App again, so nothing legitimate ever needs this row brought back, and never clearing
+ * it means an out-of-order or redelivered `installation.created` cannot resurrect access.
+ */
 export const githubInstallation = pgTable(
   "github_installation",
   {
@@ -106,8 +112,17 @@ export const connectedRepository = pgTable(
       .references(() => githubInstallation.id, { onDelete: "cascade" }),
     repoId: bigint("repo_id", { mode: "number" }).notNull(),
     fullName: text("full_name").notNull(),
+    /**
+     * Which target the sandbox may touch for this repository. Null means the operator has
+     * not configured it, and intake refuses the repository until they do. Only an operator
+     * sets this; no webhook ever does, which is what keeps a stale delivery from restoring
+     * intake on its own.
+     */
     targetProfileId: uuid("target_profile_id").references(() => targetProfile.id),
+    /** The installation grant: did the account select this repository for the App? */
     active: boolean("active").notNull().default(true),
+    /** Repository archive state, tracked apart from the grant so neither overwrites the other. */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -199,6 +214,27 @@ export const inboundJob = pgTable(
     index("inbound_job_claim_idx").on(t.state, t.nextAttemptAt),
     index("inbound_job_lease_idx").on(t.leaseExpiresAt),
   ],
+);
+
+/**
+ * Lifecycle webhook deliveries we have already applied.
+ *
+ * GitHub keeps the delivery id when a webhook is redelivered, by its own retries or by
+ * someone pressing Redeliver. Without this row, replaying an old `installation.created`
+ * after an uninstall would clear `deleted_at` and hand access back. Issue deliveries are
+ * not recorded here: they get their idempotency from the `inbound_job` row.
+ */
+export const lifecycleDelivery = pgTable(
+  "lifecycle_delivery",
+  {
+    id: id(),
+    /** X-GitHub-Delivery. */
+    deliveryId: text("delivery_id").notNull(),
+    event: text("event").notNull(),
+    action: text("action"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("lifecycle_delivery_delivery_id_key").on(t.deliveryId)],
 );
 
 /**

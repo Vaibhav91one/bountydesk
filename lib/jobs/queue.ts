@@ -1,6 +1,6 @@
 import { and, eq, lte, or, sql } from "drizzle-orm";
 
-import { db, inboundJob } from "@/lib/db";
+import { db, inboundJob, type Executor } from "@/lib/db";
 
 export type JobExecutionState = (typeof inboundJob.state.enumValues)[number];
 export type IntakeChannel = (typeof inboundJob.channel.enumValues)[number];
@@ -55,9 +55,15 @@ export type EnqueueResult = {
  * Record a delivery exactly once. Replays collide on (channel, delivery_id) and return the
  * existing row instead of starting a second run. The caller answers 202 either way, because
  * from the sender's point of view the delivery is accepted in both cases.
+ *
+ * Takes an optional transaction so intake can hold its authorization check and this insert
+ * in one unit, and a revocation committed in between cannot slip a job past the gate.
  */
-export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
-  const inserted = await db
+export async function enqueue(
+  input: EnqueueInput,
+  tx: Executor = db,
+): Promise<EnqueueResult> {
+  const inserted = await tx
     .insert(inboundJob)
     .values({
       channel: input.channel,
@@ -77,7 +83,7 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
     };
   }
 
-  const [existing] = await db
+  const [existing] = await tx
     .select({ id: inboundJob.id, state: inboundJob.state })
     .from(inboundJob)
     .where(

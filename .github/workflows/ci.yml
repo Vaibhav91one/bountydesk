@@ -53,6 +53,13 @@ jobs:
       - name: Migrate
         run: npm run db:migrate
 
+      # drizzle-kit decides what a migration contains by diffing the committed snapshot
+      # against the schema. A hand-written migration with no matching snapshot looks like it
+      # never happened, and the next generate writes a second CREATE TABLE for the same
+      # table. This fails the build while that is still cheap to fix.
+      - name: Check for schema drift
+        run: npm run db:drift
+
       - name: Test
         run: npm run test --if-present
       - name: Build
