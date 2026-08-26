@@ -25,7 +25,7 @@ Open [http://localhost:3000](http://localhost:3000).
 Every substantive change lands through a GitHub pull request reviewed by [Qodo Merge](https://github.com/apps/qodo-merge-pro) before merge — direct pushes to `main` are blocked by branch protection. For each PR, Qodo's automated review, our responses (fixes or reasoned dismissals), and any follow-up review are visible in the PR thread.
 
 Representative reviewed PRs:
-- _(the first merged PR link goes here once it lands)_
+- [#1 — Phase 0 scaffold: CI, contribution rules, Qodo evidence trail](https://github.com/Vaibhav91one/bountydesk/pull/1) (Qodo flagged README/CI-pinning; both addressed in-thread)
 
 Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
