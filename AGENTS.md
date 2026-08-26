@@ -70,8 +70,8 @@ placeholders only.
 
 Every substantive change ships through a Qodo-reviewed PR. Branch protection enforces this:
 `main` requires a PR, the `build` and `qodo-reviewed` checks, and resolved conversations, with
-admins included. A direct push does not count toward the hackathon eligibility trail, and that
-trail cannot be backfilled.
+admins included. A direct push does not produce the required review record, and that record
+cannot be backfilled.
 
 Security-sensitive changes land with a test. That means the scope guard, the canary oracle,
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
@@ -131,6 +131,64 @@ Review App review it, address each finding in the thread with either a fix or a 
 dismissal, wait for green checks, then `gh pr merge <n> --squash --delete-branch`. Qodo
 submits a formal review on its first pass and edits that same comment on later pushes, so the
 `qodo-reviewed` check accepts either signal and waits for it rather than failing on timing.
+
+Do not open a standalone PR for each trivial edit. Keep small, related changes on a scoped
+branch until they form one coherent, reviewable improvement, then open a single PR for that
+work. Do not bundle unrelated changes to make a PR look larger, and do not use this rule to
+push directly to `main`.
+
+The Qodo review trail has a few additional requirements:
+
+- If Qodo does not start automatically, comment `/agentic_review` on the PR.
+- Fix every valid High-severity finding before merge. Dismiss a finding only with a reasoned
+  response in its thread.
+- After pushing fixes to the same PR, run `/agentic_review` again when needed. Confirm that
+  Qodo reviewed the current head commit, not only an earlier revision.
+- Keep the exact `## Qodo Code Review Evidence` heading in `README.md`. It must link to at
+  least one representative merged PR with meaningful project code, explain in one or two
+  lines what Qodo found and what was fixed or intentionally dismissed, and leave the initial
+  and follow-up reviews visible in that PR's history.
+
+Qodo Agent Skills are an optional helper for resolving findings. Install them with
+`npx skills add qodo-ai/qodo-skills/skills`, then use `qodo-pr-resolver`. The skill does not
+replace the required Qodo review, follow-up review, green checks, or resolved conversations.
+
+Every PR description uses this template. Replace the placeholder text, check every applicable
+type of change, and leave unrelated boxes unchecked.
+
+Write the description as a natural engineering record of the change. Keep it focused on what
+the PR changes, why the change is needed, and how it was verified. Do not frame a PR around an
+event, competition, eligibility requirement, development phase, or the act of creating a PR.
+Mention a review tool only when its finding materially explains a code change. Avoid ceremony,
+promotional language, and process commentary that does not help a reviewer judge the patch.
+
+```markdown
+## Description
+- Provide a brief summary of the changes and why they are needed.
+
+## Type of change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Code style update (formatting, local variables)
+- [ ] Refactoring (no functional changes, no api changes)
+- [ ] Documentation update
+
+## Related tickets & issues
+- Fixes #[Issue Number] / JIRA-[ID]
+
+## How has this been tested?
+- Describe the tests you ran to verify your changes.
+- Provide instructions so reviewers can reproduce.
+
+## Checklist
+- [ ] My code follows the style guidelines of this project
+- [ ] I have performed a self-review of my own code
+- [ ] I have commented my code where necessary
+- [ ] I have updated the documentation accordingly
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+```
 
 Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit trailer is
 `Co-Authored-By: Claude <noreply@anthropic.com>`.
