@@ -70,8 +70,8 @@ placeholders only.
 
 Every substantive change ships through a Qodo-reviewed PR. Branch protection enforces this:
 `main` requires a PR, the `build` and `qodo-reviewed` checks, and resolved conversations, with
-admins included. A direct push does not count toward the hackathon eligibility trail, and that
-trail cannot be backfilled.
+admins included. A direct push does not produce the required review record, and that record
+cannot be backfilled.
 
 Security-sensitive changes land with a test. That means the scope guard, the canary oracle,
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
@@ -132,7 +132,7 @@ dismissal, wait for green checks, then `gh pr merge <n> --squash --delete-branch
 submits a formal review on its first pass and edits that same comment on later pushes, so the
 `qodo-reviewed` check accepts either signal and waits for it rather than failing on timing.
 
-The WeMakeDevs hackathon review trail has a few additional requirements:
+The Qodo review trail has a few additional requirements:
 
 - If Qodo does not start automatically, comment `/agentic_review` on the PR.
 - Fix every valid High-severity finding before merge. Dismiss a finding only with a reasoned
@@ -140,7 +140,7 @@ The WeMakeDevs hackathon review trail has a few additional requirements:
 - After pushing fixes to the same PR, run `/agentic_review` again when needed. Confirm that
   Qodo reviewed the current head commit, not only an earlier revision.
 - Keep the exact `## Qodo Code Review Evidence` heading in `README.md`. It must link to at
-  least one representative merged PR with meaningful hackathon code, explain in one or two
+  least one representative merged PR with meaningful project code, explain in one or two
   lines what Qodo found and what was fixed or intentionally dismissed, and leave the initial
   and follow-up reviews visible in that PR's history.
 
@@ -150,6 +150,12 @@ replace the required Qodo review, follow-up review, green checks, or resolved co
 
 Every PR description uses this template. Replace the placeholder text, check every applicable
 type of change, and leave unrelated boxes unchecked.
+
+Write the description as a natural engineering record of the change. Keep it focused on what
+the PR changes, why the change is needed, and how it was verified. Do not frame a PR around an
+event, competition, eligibility requirement, development phase, or the act of creating a PR.
+Mention a review tool only when its finding materially explains a code change. Avoid ceremony,
+promotional language, and process commentary that does not help a reviewer judge the patch.
 
 ```markdown
 ## Description
