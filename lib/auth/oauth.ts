@@ -19,8 +19,53 @@ export const OAUTH_COOKIE_TTL_SECONDS = 600;
 /** GitHub is not a dependency we want a login request to hang on. */
 const GITHUB_TIMEOUT_MS = 10_000;
 
+/** Hosts where plain http is a development machine rather than a downgrade. */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+/**
+ * Our own origin, validated.
+ *
+ * Everything security-relevant here is derived from this one string: the OAuth redirect
+ * URI, the Origin that logout accepts, and whether cookies carry Secure. An `http://` value
+ * pointing anywhere but a development machine silently drops Secure from the session
+ * cookie, which puts it on the wire in clear text and leaves no trace in any log. So http is
+ * allowed only for loopback, and anything with a path, query, fragment, or embedded
+ * credentials is refused rather than quietly normalised away: those are configuration
+ * mistakes, and guessing what was meant is how a redirect ends up somewhere unintended.
+ */
 export function appBaseUrl(): string {
-  return requireEnv("APP_BASE_URL").replace(/\/$/, "");
+  const raw = requireEnv("APP_BASE_URL");
+
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`APP_BASE_URL must be an absolute URL, for example https://bountydesk.example. Got "${raw}".`);
+  }
+
+  if (url.username || url.password) {
+    throw new Error("APP_BASE_URL must not carry credentials");
+  }
+
+  if (url.search || url.hash) {
+    throw new Error("APP_BASE_URL must not carry a query string or fragment");
+  }
+
+  if (url.pathname !== "/") {
+    throw new Error(`APP_BASE_URL must be an origin with no path. Got "${url.pathname}".`);
+  }
+
+  // URL keeps the brackets on an IPv6 literal, so http://[::1]:3000 has hostname "[::1]".
+  const host = url.hostname.replace(/^\[|\]$/g, "");
+  const loopback = LOOPBACK_HOSTS.has(host);
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error(
+      `APP_BASE_URL must use https, except on ${[...LOOPBACK_HOSTS].join(", ")} where http is allowed for development. Got "${url.protocol}//${host}".`,
+    );
+  }
+
+  // origin drops any trailing slash, so callers can concatenate a path onto it.
+  return url.origin;
 }
 
 export function callbackUrl(): string {
