@@ -26,11 +26,13 @@ jobs:
       - name: Require Qodo review of current head
         shell: bash
         run: |
-          reviews="$(gh api \
+          # --paginate walks every page; --slurp collects them as an array of page
+          # arrays, so flatten one level before matching.
+          reviews="$(gh api --paginate --slurp \
             "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
 
           if ! jq -e --arg head_sha "$HEAD_SHA" '
-            any(.[];
+            any(.[][];
               .user.login == "qodo-code-review[bot]" and
               .commit_id == $head_sha and
               .state != "DISMISSED"
