@@ -78,7 +78,7 @@ jobs:
           deadline=$(( SECONDS + WAIT_SECONDS ))
           until reviewed_head; do
             if (( SECONDS >= deadline )); then
-              echo "::error::Qodo has not reviewed ${HEAD_SHA} after ${WAIT_SECONDS}s. Comment '/review' on the PR, then re-run this check."
+              echo "::error::Qodo has not reviewed ${HEAD_SHA} after ${WAIT_SECONDS}s. Comment '/agentic_review' on the PR, then re-run this check."
               exit 1
             fi
             echo "Waiting for Qodo to review ${HEAD_SHA}..."
