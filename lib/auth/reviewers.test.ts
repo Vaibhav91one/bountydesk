@@ -27,3 +27,21 @@ test("a missing, empty or malformed allowlist fails closed", () => {
     assert.throws(() => reviewerIds(), /numeric GitHub user ids|empty/, bad);
   }
 });
+
+test("a valid cookie stops authorizing once its reviewer leaves the allowlist", async () => {
+  process.env.AUTH_SECRET = Buffer.alloc(32, "s").toString("base64");
+  process.env.REVIEWER_GITHUB_IDS = "583231";
+
+  const { newSession, seal } = await import("./session");
+  const { authorizedSession } = await import("./reviewers");
+
+  const cookie = seal(newSession("octocat", 583231));
+  assert.equal(authorizedSession(cookie)?.userId, 583231);
+
+  // Same cookie, still signed by us and nowhere near expiry. The allowlist is what changed.
+  process.env.REVIEWER_GITHUB_IDS = "42";
+  assert.equal(authorizedSession(cookie), null);
+
+  assert.equal(authorizedSession(undefined), null);
+  assert.equal(authorizedSession("not-a-cookie"), null);
+});

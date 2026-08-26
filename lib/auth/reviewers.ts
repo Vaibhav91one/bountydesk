@@ -1,5 +1,7 @@
 import { requireEnv } from "@/lib/env";
 
+import { type Session, unseal } from "./session";
+
 /**
  * Who may operate BountyDesk.
  *
@@ -38,4 +40,18 @@ export function reviewerIds(): Set<number> {
 
 export function isReviewer(userId: number): boolean {
   return reviewerIds().has(userId);
+}
+
+/**
+ * The whole authorization decision for one cookie value, with no request plumbing attached.
+ *
+ * The DAL is this function plus a cookie read, which is what lets the interesting half be
+ * tested directly: that a perfectly valid, unexpired cookie stops authorizing anything the
+ * moment its user leaves the allowlist.
+ */
+export function authorizedSession(cookieValue: string | undefined): Session | null {
+  const session = unseal(cookieValue);
+  if (!session) return null;
+
+  return isReviewer(session.userId) ? session : null;
 }

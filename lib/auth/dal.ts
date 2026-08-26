@@ -2,8 +2,8 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { isReviewer } from "./reviewers";
-import { SESSION_COOKIE, type Session, unseal } from "./session";
+import { authorizedSession } from "./reviewers";
+import { SESSION_COOKIE, type Session } from "./session";
 
 /**
  * Where authorization lives.
@@ -20,10 +20,7 @@ import { SESSION_COOKIE, type Session, unseal } from "./session";
  */
 export const currentSession = cache(async (): Promise<Session | null> => {
   const jar = await cookies();
-  const session = unseal(jar.get(SESSION_COOKIE)?.value);
-  if (!session) return null;
-
-  return isReviewer(session.userId) ? session : null;
+  return authorizedSession(jar.get(SESSION_COOKIE)?.value);
 });
 
 /** For pages that must not render for anyone else. Redirects rather than returning null. */

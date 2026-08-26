@@ -20,7 +20,12 @@ export const runtime = "nodejs";
  * the audit trail. The PKCE verifier has to be present too, so a code lifted from a redirect
  * cannot be redeemed elsewhere.
  *
- * Both cookies are cleared on every path, success or failure, so neither can be replayed.
+ * A callback that gets past the state check owns the flow, and spends both cookies on every
+ * path from there, so neither can be replayed. One that fails the state check spends
+ * nothing: it consumed no flow, and the cookies it can see may belong to a login the
+ * operator started afterwards in the same browser. Clearing them there would let a stale
+ * callback take the newer attempt down with it.
+ *
  * Being a known GitHub user is not enough to get a session: the reviewer allowlist decides.
  */
 export async function GET(request: Request): Promise<Response> {
@@ -28,10 +33,11 @@ export async function GET(request: Request): Promise<Response> {
   const secure = isSecureOrigin();
   const spent = [clearCookie(STATE_COOKIE, secure), clearCookie(VERIFIER_COOKIE, secure)];
 
-  const fail = (reason: string) => redirect(`${appBaseUrl()}/login?error=${reason}`, spent);
+  const loginError = (reason: string) => `${appBaseUrl()}/login?error=${reason}`;
+  const fail = (reason: string) => redirect(loginError(reason), spent);
 
   if (!statesMatch(readCookie(request, STATE_COOKIE), url.searchParams.get("state"))) {
-    return fail("state");
+    return redirect(loginError("state"));
   }
 
   const verifier = readCookie(request, VERIFIER_COOKIE);

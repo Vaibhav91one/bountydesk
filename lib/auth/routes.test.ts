@@ -93,14 +93,25 @@ function goodRequest(): Request {
   });
 }
 
-function assertNoSession(response: Response, reason: string) {
+function assertLoginError(response: Response, reason: string) {
   const jar = cookiesOf(response);
 
   assert.equal(response.status, 302);
   assert.equal(new URL(response.headers.get("location") as string).searchParams.get("error"), reason);
   assert.equal(jar.get(SESSION_COOKIE), undefined, "no session is issued");
+}
+
+/** A callback that owned the flow spends both cookies, whatever the outcome. */
+function assertFlowSpent(response: Response) {
+  const jar = cookiesOf(response);
+
   assert.equal(jar.get(STATE_COOKIE), "", "the state cookie is cleared");
   assert.equal(jar.get(VERIFIER_COOKIE), "", "the verifier cookie is cleared");
+}
+
+/** A callback that failed the state check owned nothing and must leave the cookies alone. */
+function assertFlowUntouched(response: Response) {
+  assert.deepEqual(response.headers.getSetCookie(), [], "no cookie is touched");
 }
 
 test("the authorize request carries PKCE and asks for no scopes", async () => {
@@ -125,23 +136,58 @@ test("the authorize request carries PKCE and asks for no scopes", async () => {
 });
 
 test("a callback with no state is refused", async () => {
-  assertNoSession(await callback(callbackRequest({})), "state");
+  const response = await callback(callbackRequest({}));
+
+  assertLoginError(response, "state");
+  assertFlowUntouched(response);
 });
 
-test("a callback whose state does not match the cookie is refused", async () => {
-  const request = callbackRequest({
-    state: "attacker-state",
-    stateCookie: "the-state",
-    verifierCookie: "the-verifier",
-  });
+test("a stale callback is refused without spending a newer login's cookies", async () => {
+  // Two logins overlap in one browser: the second one's cookies are in the jar when the
+  // first one's callback finally arrives. Clearing them here would take the live attempt
+  // down as well, and the operator would be unable to log in at all.
+  const response = await callback(
+    callbackRequest({
+      state: "older-state",
+      stateCookie: "newer-state",
+      verifierCookie: "newer-verifier",
+    }),
+  );
 
-  assertNoSession(await callback(request), "state");
+  assertLoginError(response, "state");
+  assertFlowUntouched(response);
+
+  // The newer flow still completes.
+  stubGitHub({ body: { access_token: "t" } }, { body: REVIEWER });
+  const newer = await callback(
+    callbackRequest({
+      state: "newer-state",
+      stateCookie: "newer-state",
+      verifierCookie: "newer-verifier",
+    }),
+  );
+
+  assert.equal(newer.headers.get("location"), "https://bountydesk.test/connections");
+  assert.ok(unseal(cookiesOf(newer).get(SESSION_COOKIE)));
+});
+
+test("a cookie value that cannot be decoded fails the login rather than the process", async () => {
+  const request = new Request(
+    "https://bountydesk.test/api/auth/github/callback?state=the-state&code=the-code",
+    { headers: { cookie: `${STATE_COOKIE}=%; ${VERIFIER_COOKIE}=the-verifier` } },
+  );
+
+  const response = await callback(request);
+
+  assertLoginError(response, "state");
 });
 
 test("a callback with no PKCE verifier is refused", async () => {
   const request = callbackRequest({ state: "the-state", stateCookie: "the-state" });
+  const response = await callback(request);
 
-  assertNoSession(await callback(request), "state");
+  assertLoginError(response, "state");
+  assertFlowSpent(response);
 });
 
 test("a callback with no authorization code is refused", async () => {
@@ -151,8 +197,10 @@ test("a callback with no authorization code is refused", async () => {
     verifierCookie: "the-verifier",
     code: null,
   });
+  const response = await callback(request);
 
-  assertNoSession(await callback(request), "denied");
+  assertLoginError(response, "denied");
+  assertFlowSpent(response);
 });
 
 test("every way GitHub can fail ends as a login error, not a 500", async () => {
@@ -177,14 +225,18 @@ test("every way GitHub can fail ends as a login error, not a 500", async () => {
     const response = await callback(goodRequest());
 
     assert.equal(response.status, 302, name);
-    assertNoSession(response, "github");
+    assertLoginError(response, "github");
+    assertFlowSpent(response);
   }
 });
 
 test("a GitHub account that is not on the reviewer list gets no session", async () => {
   stubGitHub({ body: { access_token: "t" } }, { body: { login: "stranger", id: 999 } });
 
-  assertNoSession(await callback(goodRequest()), "forbidden");
+  const response = await callback(goodRequest());
+
+  assertLoginError(response, "forbidden");
+  assertFlowSpent(response);
 });
 
 test("a reviewer gets a session and lands on the connections page", async () => {

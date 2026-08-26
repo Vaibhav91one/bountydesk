@@ -20,7 +20,14 @@ export function readCookie(request: Request, name: string): string | undefined {
     if (eq < 0) continue;
     if (part.slice(0, eq).trim() !== name) continue;
 
-    return decodeURIComponent(part.slice(eq + 1).trim());
+    try {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      // decodeURIComponent throws on a stray percent, and the cookie header is attacker
+      // controlled. A value we cannot decode is not one we issued, so report it as absent
+      // and let the caller fail the way it fails for a missing cookie.
+      return undefined;
+    }
   }
 
   return undefined;
