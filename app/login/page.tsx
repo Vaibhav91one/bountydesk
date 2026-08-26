@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 
-import { currentSession } from "@/lib/auth/current";
+import { currentSession } from "@/lib/auth/dal";
 
 const MESSAGES: Record<string, string> = {
   state: "That login link did not start here. Try again.",
+  forbidden: "That GitHub account is not on the reviewer list.",
   denied: "GitHub did not return an authorization code.",
   github: "GitHub would not confirm who you are. Try again.",
 };

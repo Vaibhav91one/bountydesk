@@ -1,17 +1,23 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { requireEnv, requireSecret } from "@/lib/env";
 
 /**
- * GitHub OAuth, used for identity only.
+ * GitHub OAuth, used to answer one question: which GitHub account is this.
  *
- * No scopes are requested. The operator's token grants nothing beyond their public profile,
- * and it is used once to read a login and an id and then dropped. Repository access is the
- * App installation's business, which is what keeps a compromised session from turning into
- * repository access.
+ * The token this flow returns is a GitHub App user access token, and it is privileged. Its
+ * reach is the intersection of the App's permissions, the repositories the installation
+ * covers, and what the user can already see, so with Issues read and write on the App it can
+ * carry issue access. BountyDesk uses it for a single GET /user and then drops it. It is
+ * never stored, logged, returned, or put in an error, and nothing downstream touches it:
+ * posting a comment later mints a short-lived installation token instead.
  */
 export const STATE_COOKIE = "bd_oauth_state";
-const STATE_TTL_SECONDS = 600;
+export const VERIFIER_COOKIE = "bd_oauth_verifier";
+export const OAUTH_COOKIE_TTL_SECONDS = 600;
+
+/** GitHub is not a dependency we want a login request to hang on. */
+const GITHUB_TIMEOUT_MS = 10_000;
 
 export function appBaseUrl(): string {
   return requireEnv("APP_BASE_URL").replace(/\/$/, "");
@@ -30,14 +36,13 @@ export function newState(): string {
   return randomBytes(32).toString("base64url");
 }
 
-export function stateCookieOptions(secure: boolean) {
-  return {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure,
-    path: "/",
-    maxAge: STATE_TTL_SECONDS,
-  };
+/** PKCE code verifier. GitHub accepts 43 to 128 characters; 32 bytes encodes to 43. */
+export function newVerifier(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+export function challengeFor(verifier: string): string {
+  return createHash("sha256").update(verifier).digest("base64url");
 }
 
 export function statesMatch(fromCookie: string | undefined, fromQuery: string | null): boolean {
@@ -50,11 +55,21 @@ export function statesMatch(fromCookie: string | undefined, fromQuery: string | 
   return timingSafeEqual(a, b);
 }
 
-export function authorizeUrl(state: string): string {
+/**
+ * The authorization request.
+ *
+ * No scopes are asked for, and PKCE binds the eventual code to this browser: the token
+ * exchange only succeeds for whoever holds the verifier, so a code intercepted in a redirect
+ * or a log is not enough on its own.
+ */
+export function authorizeUrl(state: string, verifier: string): string {
   const url = new URL("https://github.com/login/oauth/authorize");
   url.searchParams.set("client_id", requireEnv("GITHUB_APP_CLIENT_ID"));
   url.searchParams.set("redirect_uri", callbackUrl());
   url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", challengeFor(verifier));
+  url.searchParams.set("code_challenge_method", "S256");
+
   return url.toString();
 }
 
@@ -65,42 +80,62 @@ export function installUrl(): string {
 
 export type GitHubUser = { login: string; id: number };
 
+async function postJson(url: string, body: unknown): Promise<unknown> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+  });
+
+  if (!response.ok) throw new Error(`github responded ${response.status}`);
+  return response.json();
+}
+
 /**
  * Trade the callback code for the operator's identity.
  *
- * The access token never leaves this function. Nothing downstream needs it: posting a
- * comment later uses a short-lived installation token instead, so storing this one would be
- * a long-lived credential kept for no reason.
+ * Everything GitHub controls is treated as a possible failure: a refused connection, a
+ * timeout, a non-2xx, a body that is not JSON, a body that is JSON but the wrong shape. All
+ * of them come back as null, which the callback turns into a login error, rather than
+ * escaping as a 500 that says nothing useful. The thrown error is deliberately not
+ * propagated: the token could be in it.
  */
-export async function identify(code: string): Promise<GitHubUser | null> {
-  const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({
-      client_id: requireEnv("GITHUB_APP_CLIENT_ID"),
-      client_secret: requireSecret("GITHUB_APP_CLIENT_SECRET"),
+export async function identify(code: string, verifier: string): Promise<GitHubUser | null> {
+  // Configuration is read before the try, so a missing client secret still fails loudly
+  // instead of being reported to the operator as "GitHub is having a moment".
+  const clientId = requireEnv("GITHUB_APP_CLIENT_ID");
+  const clientSecret = requireSecret("GITHUB_APP_CLIENT_SECRET");
+
+  try {
+    const token = await postJson("https://github.com/login/oauth/access_token", {
+      client_id: clientId,
+      client_secret: clientSecret,
       code,
       redirect_uri: callbackUrl(),
-    }),
-  });
+      code_verifier: verifier,
+    });
 
-  if (!tokenResponse.ok) return null;
+    const accessToken = (token as { access_token?: unknown }).access_token;
+    if (typeof accessToken !== "string" || accessToken.length === 0) return null;
 
-  const token = (await tokenResponse.json()) as { access_token?: string };
-  if (!token.access_token) return null;
+    const response = await fetch("https://api.github.com/user", {
+      headers: {
+        accept: "application/vnd.github+json",
+        authorization: `Bearer ${accessToken}`,
+        "user-agent": "bountydesk",
+      },
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    });
 
-  const userResponse = await fetch("https://api.github.com/user", {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token.access_token}`,
-      "user-agent": "bountydesk",
-    },
-  });
+    if (!response.ok) return null;
 
-  if (!userResponse.ok) return null;
+    const user = (await response.json()) as Record<string, unknown>;
+    if (typeof user.login !== "string" || user.login.length === 0) return null;
+    if (typeof user.id !== "number" || !Number.isSafeInteger(user.id) || user.id <= 0) return null;
 
-  const user = (await userResponse.json()) as Partial<GitHubUser>;
-  if (!user.login || !user.id) return null;
-
-  return { login: user.login, id: user.id };
+    return { login: user.login, id: user.id };
+  } catch {
+    return null;
+  }
 }
