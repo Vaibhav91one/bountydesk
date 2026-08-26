@@ -1,7 +1,16 @@
 import { activeRepository } from "@/lib/github/lifecycle";
 import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
 
-import { LeaseLostError, abandon, advance, claim, complete, fail, type Lease } from "./queue";
+import {
+  LeaseLostError,
+  abandon,
+  advance,
+  claim,
+  complete,
+  fail,
+  renew,
+  type Lease,
+} from "./queue";
 
 /**
  * The worker that turns an accepted delivery into a durable report.
@@ -25,19 +34,64 @@ export type IssueDelivery = {
 };
 
 /**
- * What the triage run does once the report exists.
+ * The two durable boundaries around a triage run.
  *
- * A seam, not an abstraction for its own sake: the real implementation is a TrueForge
- * session, and this is where it plugs in. The default does nothing but say it ran, which is
- * what makes the loop testable before either exists.
+ * `ensureSession` returns only after the report's TrueForge session identity is persisted.
+ * It must use the report ID as its provider idempotency key. `run` resumes that session and
+ * obeys the abort signal when this worker loses its lease.
  */
-export type Analyze = (context: { reportId: string; lease: Lease }) => Promise<void>;
-
-export const noopAnalyze: Analyze = async ({ reportId }) => {
-  await recordEvent(reportId, "triage.skipped", {
-    reason: "no analysis is wired up yet",
-  });
+export type AnalysisContext = {
+  reportId: string;
+  lease: Lease;
+  signal: AbortSignal;
 };
+
+export type AnalysisDriver = {
+  ensureSession: (context: AnalysisContext) => Promise<void>;
+  run: (context: AnalysisContext) => Promise<void>;
+};
+
+async function runWithHeartbeat(
+  operation: (context: AnalysisContext) => Promise<void>,
+  reportId: string,
+  lease: Lease,
+  leaseSeconds: number,
+): Promise<void> {
+  const controller = new AbortController();
+  const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let renewal = Promise.resolve();
+  let rejectLeaseLoss!: (reason: unknown) => void;
+  const leaseLoss = new Promise<never>((_, reject) => {
+    rejectLeaseLoss = reject;
+  });
+
+  const heartbeat = () => {
+    renewal = renew(lease, leaseSeconds)
+      .then(() => {
+        if (!stopped) timer = setTimeout(heartbeat, intervalMs);
+      })
+      .catch((error: unknown) => {
+        controller.abort(error);
+        rejectLeaseLoss(error);
+      });
+  };
+
+  timer = setTimeout(heartbeat, intervalMs);
+  try {
+    await Promise.race([
+      operation({ reportId, lease, signal: controller.signal }),
+      leaseLoss,
+    ]);
+  } finally {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+    await renewal.catch(() => undefined);
+  }
+
+  if (controller.signal.aborted) throw controller.signal.reason;
+}
 
 export class UnprocessableDelivery extends Error {
   constructor(reason: string) {
@@ -46,10 +100,9 @@ export class UnprocessableDelivery extends Error {
   }
 }
 
-/** Turn the webhook payload into the fields a report is made of. */
 function parseDelivery(lease: Lease): {
   payload: IssueDelivery;
-  sourceRef: string;
+  issueNumber: number;
   title: string;
   body: string;
   reporterHandle: string | null;
@@ -65,8 +118,7 @@ function parseDelivery(lease: Lease): {
 
   return {
     payload,
-    // The stable pointer back to the origin, and the report's idempotency key.
-    sourceRef: `${fullName}#${number}`,
+    issueNumber: number,
     title: payload.issue?.title ?? `${fullName}#${number}`,
     body: payload.issue?.body ?? "",
     reporterHandle: payload.issue?.user?.login ?? null,
@@ -74,7 +126,7 @@ function parseDelivery(lease: Lease): {
 }
 
 async function parse(lease: Lease): Promise<Lease> {
-  const { payload, sourceRef, title, body, reporterHandle } = parseDelivery(lease);
+  const { payload, issueNumber, title, body, reporterHandle } = parseDelivery(lease);
 
   // Access is checked again here, not just at intake. A suspension or a repository removal
   // can land between the 202 and this run, and the target profile is read from the same
@@ -86,6 +138,8 @@ async function parse(lease: Lease): Promise<Lease> {
     );
   }
 
+  const sourceRef = `github:${repository.repoId}:issue:${issueNumber}`;
+
   const reportId = await ensureReport({
     channel: lease.channel,
     sourceRef,
@@ -96,11 +150,16 @@ async function parse(lease: Lease): Promise<Lease> {
     targetProfileId: repository.targetProfileId,
   });
 
-  await recordEvent(reportId, "intake.accepted", {
-    deliveryId: lease.deliveryId,
-    jobId: lease.id,
-    sourceRef,
-  });
+  await recordEvent(
+    reportId,
+    "intake.accepted",
+    {
+      deliveryId: lease.deliveryId,
+      jobId: lease.id,
+      sourceRef,
+    },
+    { idempotencyKey: `${lease.id}:intake.accepted` },
+  );
 
   return advance(lease, "PARSED", { reportId });
 }
@@ -114,7 +173,10 @@ async function parse(lease: Lease): Promise<Lease> {
  */
 export async function runOnce(
   owner: string,
-  { analyze = noopAnalyze, leaseSeconds = 60 }: { analyze?: Analyze; leaseSeconds?: number } = {},
+  {
+    analysis,
+    leaseSeconds = 60,
+  }: { analysis: AnalysisDriver; leaseSeconds?: number },
 ): Promise<string | null> {
   const claimed = await claim(owner, leaseSeconds);
   if (!claimed) return null;
@@ -123,7 +185,18 @@ export async function runOnce(
 
   try {
     if (lease.state === "RECEIVED") lease = await parse(lease);
-    if (lease.state === "PARSED") lease = await advance(lease, "SESSION_CREATED");
+    if (lease.state === "PARSED") {
+      if (!lease.reportId) {
+        throw new UnprocessableDelivery("job reached PARSED with no report attached");
+      }
+      await runWithHeartbeat(
+        analysis.ensureSession,
+        lease.reportId,
+        lease,
+        leaseSeconds,
+      );
+      lease = await advance(lease, "SESSION_CREATED");
+    }
     if (lease.state === "SESSION_CREATED") lease = await advance(lease, "RUNNING");
 
     if (lease.state === "RUNNING") {
@@ -131,7 +204,7 @@ export async function runOnce(
         throw new UnprocessableDelivery("job reached RUNNING with no report attached");
       }
 
-      await analyze({ reportId: lease.reportId, lease });
+      await runWithHeartbeat(analysis.run, lease.reportId, lease, leaseSeconds);
       await complete(lease);
     }
 
@@ -139,7 +212,7 @@ export async function runOnce(
   } catch (error) {
     // A lost lease means another worker owns this job now. Writing anything about it would
     // be writing over that worker, which is the exact thing the fence exists to prevent.
-    if (error instanceof LeaseLostError) throw error;
+    if (error instanceof LeaseLostError) return lease.id;
 
     const message = error instanceof Error ? error.message : String(error);
 

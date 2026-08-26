@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "target_profile_name_key" ON "target_profile" USING btree ("name");

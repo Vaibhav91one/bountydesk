@@ -65,13 +65,26 @@ export async function ensureReport(input: NewReport, tx: Executor = db): Promise
   if (inserted.length > 0) return inserted[0].id;
 
   const [existing] = await tx
-    .select({ id: report.id })
+    .select({
+      id: report.id,
+      connectedRepositoryId: report.connectedRepositoryId,
+      targetProfileId: report.targetProfileId,
+    })
     .from(report)
     .where(sql`${report.channel} = ${input.channel} and ${report.sourceRef} = ${input.sourceRef}`)
     .limit(1);
 
   if (!existing) {
     throw new Error(`ensureReport: conflict on ${input.channel} ${input.sourceRef} but no row found`);
+  }
+
+  if (
+    existing.connectedRepositoryId !== input.connectedRepositoryId ||
+    existing.targetProfileId !== input.targetProfileId
+  ) {
+    throw new Error(
+      `report identity ${input.channel} ${input.sourceRef} is already bound to another repository or target`,
+    );
   }
 
   return existing.id;
@@ -89,14 +102,27 @@ export async function recordEvent(
   reportId: string,
   type: string,
   data: Record<string, unknown> = {},
-  tx: Executor = db,
+  {
+    idempotencyKey,
+    tx = db,
+  }: { idempotencyKey?: string; tx?: Executor } = {},
 ): Promise<void> {
-  await tx.insert(sessionEvent).values({
+  const insert = tx.insert(sessionEvent).values({
     reportId,
     seq: sql`(select coalesce(max(seq), 0) + 1 from session_event where report_id = ${reportId})`,
     type,
+    eventKey: idempotencyKey,
     data,
   });
+
+  if (idempotencyKey) {
+    await insert.onConflictDoNothing({
+      target: [sessionEvent.reportId, sessionEvent.eventKey],
+    });
+    return;
+  }
+
+  await insert;
 }
 
 export async function reportState(reportId: string, tx: Executor = db): Promise<ReportState | null> {

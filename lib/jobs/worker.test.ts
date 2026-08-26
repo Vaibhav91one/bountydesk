@@ -17,6 +17,23 @@ let reports: typeof import("@/lib/reports/lifecycle");
 
 let targetProfileId: string;
 
+function analysisDriver(
+  overrides: Partial<import("./worker").AnalysisDriver> = {},
+): import("./worker").AnalysisDriver {
+  return {
+    ensureSession: async () => {},
+    run: async ({ reportId, lease }) => {
+      await reports.recordEvent(
+        reportId,
+        "triage.skipped",
+        { reason: "test analysis driver" },
+        { idempotencyKey: `${lease.id}:triage.skipped` },
+      );
+    },
+    ...overrides,
+  };
+}
+
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
   schema = await createSchema("worker");
@@ -114,7 +131,7 @@ async function drain() {
 
 test("an empty queue is not an error", async () => {
   await drain();
-  assert.equal(await worker.runOnce("worker-1"), null);
+  assert.equal(await worker.runOnce("worker-1", { analysis: analysisDriver() }), null);
 });
 
 test("a delivery becomes a report and the job finishes", async () => {
@@ -122,7 +139,10 @@ test("a delivery becomes a report and the job finishes", async () => {
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo);
 
-  assert.equal(await worker.runOnce("worker-1"), jobId);
+  assert.equal(
+    await worker.runOnce("worker-1", { analysis: analysisDriver() }),
+    jobId,
+  );
 
   const finished = await job(jobId);
   assert.equal(finished.state, "DONE");
@@ -134,7 +154,7 @@ test("a delivery becomes a report and the job finishes", async () => {
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, finished.reportId as string));
 
-  assert.equal(created.sourceRef, `${repo.fullName}#42`);
+  assert.equal(created.sourceRef, `github:${repo.repoId}:issue:42`);
   assert.equal(created.title, "SQL injection in product search");
   assert.equal(created.reporterHandle, "reporter");
   assert.equal(created.state, "TRIAGING");
@@ -143,11 +163,31 @@ test("a delivery becomes a report and the job finishes", async () => {
   assert.equal(created.targetProfileId, targetProfileId);
 });
 
+test("session creation commits before the job is marked SESSION_CREATED", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+  const observedStates: string[] = [];
+
+  await worker.runOnce("worker-1", {
+    analysis: {
+      ensureSession: async () => {
+        observedStates.push((await job(jobId)).state);
+      },
+      run: async () => {
+        observedStates.push((await job(jobId)).state);
+      },
+    },
+  });
+
+  assert.deepEqual(observedStates, ["PARSED", "RUNNING"]);
+});
+
 test("the audit trail records the intake", async () => {
   await drain();
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo);
-  await worker.runOnce("worker-1");
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
 
   const finished = await job(jobId);
   const events = await dbm.db
@@ -165,6 +205,37 @@ test("the audit trail records the intake", async () => {
   );
 });
 
+test("retrying a worker stage does not duplicate its audit event", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
+
+  const reportId = (await job(jobId)).reportId as string;
+  const idempotencyKey = `${jobId}:test.stage`;
+
+  await reports.recordEvent(
+    reportId,
+    "test.stage",
+    { attempt: 1 },
+    { idempotencyKey },
+  );
+  await reports.recordEvent(
+    reportId,
+    "test.stage",
+    { attempt: 2 },
+    { idempotencyKey },
+  );
+
+  const events = await dbm.db
+    .select()
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.eventKey, idempotencyKey));
+
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].data, { attempt: 1 });
+});
+
 test("a worker that dies mid-job resumes rather than starting over", async () => {
   await drain();
   const repo = await connectedRepo();
@@ -173,8 +244,11 @@ test("a worker that dies mid-job resumes rather than starting over", async () =>
   // First pass gets as far as creating the report, then the analysis step throws.
   await assert.doesNotReject(
     worker.runOnce("worker-1", {
-      analyze: async () => {
-        throw new Error("worker died");
+      analysis: {
+        ...analysisDriver(),
+        run: async () => {
+          throw new Error("worker died");
+        },
       },
     }),
   );
@@ -194,8 +268,11 @@ test("a worker that dies mid-job resumes rather than starting over", async () =>
 
   let parsedAgain = false;
   await worker.runOnce("worker-2", {
-    analyze: async () => {
-      parsedAgain = true;
+    analysis: {
+      ...analysisDriver(),
+      run: async () => {
+        parsedAgain = true;
+      },
     },
   });
 
@@ -207,7 +284,7 @@ test("a worker that dies mid-job resumes rather than starting over", async () =>
   const rows = await dbm.db
     .select({ id: dbm.report.id })
     .from(dbm.report)
-    .where(dbm.eq(dbm.report.sourceRef, `${repo.fullName}#42`));
+    .where(dbm.eq(dbm.report.sourceRef, `github:${repo.repoId}:issue:42`));
 
   assert.equal(rows.length, 1);
 });
@@ -223,7 +300,7 @@ test("a repository disconnected after the 202 is buried, not retried", async () 
     .set({ suspendedAt: new Date() })
     .where(dbm.eq(dbm.githubInstallation.installationId, repo.installationId));
 
-  await worker.runOnce("worker-1");
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
 
   const buried = await job(jobId);
   assert.equal(buried.state, "DEAD_LETTER");
@@ -233,7 +310,7 @@ test("a repository disconnected after the 202 is buried, not retried", async () 
   const rows = await dbm.db
     .select({ id: dbm.report.id })
     .from(dbm.report)
-    .where(dbm.eq(dbm.report.sourceRef, `${repo.fullName}#42`));
+    .where(dbm.eq(dbm.report.sourceRef, `github:${repo.repoId}:issue:42`));
 
   assert.equal(rows.length, 0, "no report is created");
 });
@@ -243,7 +320,7 @@ test("a repository with no target bound is buried", async () => {
   const repo = await connectedRepo({ configured: false });
   const { jobId } = await enqueueIssue(repo);
 
-  await worker.runOnce("worker-1");
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
 
   assert.equal((await job(jobId)).state, "DEAD_LETTER");
 });
@@ -253,7 +330,7 @@ test("a payload that is not a report is buried", async () => {
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo, { issue: { title: "no number" } });
 
-  await worker.runOnce("worker-1");
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
 
   const buried = await job(jobId);
   assert.equal(buried.state, "DEAD_LETTER");
@@ -266,8 +343,11 @@ test("a transient failure is retried with the state preserved", async () => {
   const { jobId } = await enqueueIssue(repo);
 
   await worker.runOnce("worker-1", {
-    analyze: async () => {
-      throw new Error("TrueForge is having a moment");
+    analysis: {
+      ...analysisDriver(),
+      run: async () => {
+        throw new Error("TrueForge is having a moment");
+      },
     },
   });
 
@@ -277,11 +357,64 @@ test("a transient failure is retried with the state preserved", async () => {
   assert.ok((failed.nextAttemptAt as Date).getTime() > Date.now(), "backoff is set");
 });
 
+test("analysis renews its lease before the initial deadline", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+  let analysisStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    analysisStarted = resolve;
+  });
+
+  const running = worker.runOnce("worker-1", {
+    leaseSeconds: 1,
+    analysis: {
+      ...analysisDriver(),
+      run: async () => {
+        analysisStarted();
+        await new Promise((resolve) => setTimeout(resolve, 1_400));
+      },
+    },
+  });
+
+  await started;
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  assert.equal(await queue.claim("worker-2", 1), null);
+  assert.equal(await running, jobId);
+  assert.equal((await job(jobId)).state, "DONE");
+});
+
+test("losing a lease stops the job without terminating the worker call", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+
+  const processed = await worker.runOnce("worker-1", {
+    leaseSeconds: 0.3,
+    analysis: {
+      ...analysisDriver(),
+      run: async ({ signal }) => {
+        await dbm.db
+          .update(dbm.inboundJob)
+          .set({ leaseOwner: "worker-2", fence: dbm.sql`${dbm.inboundJob.fence} + 1` })
+          .where(dbm.eq(dbm.inboundJob.id, jobId));
+
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+      },
+    },
+  });
+
+  assert.equal(processed, jobId);
+  assert.equal((await job(jobId)).state, "RUNNING");
+});
+
 test("a report cannot be moved from a state it is no longer in", async () => {
   await drain();
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo);
-  await worker.runOnce("worker-1");
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
 
   const reportId = (await job(jobId)).reportId as string;
 
@@ -300,4 +433,28 @@ test("a report cannot be moved from a state it is no longer in", async () => {
   );
 
   assert.equal(await reports.reportState(reportId), "REPRODUCING");
+});
+
+test("repositories that reuse a full name do not reuse a report", async () => {
+  await drain();
+  const first = await connectedRepo();
+  const second = await connectedRepo();
+
+  await dbm.db
+    .update(dbm.connectedRepository)
+    .set({ fullName: first.fullName })
+    .where(dbm.eq(dbm.connectedRepository.repoId, second.repoId));
+
+  const firstJob = await enqueueIssue(first);
+  const secondJob = await enqueueIssue({ ...second, fullName: first.fullName });
+
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
+  await worker.runOnce("worker-1", { analysis: analysisDriver() });
+
+  const firstReportId = (await job(firstJob.jobId)).reportId;
+  const secondReportId = (await job(secondJob.jobId)).reportId;
+
+  assert.ok(firstReportId);
+  assert.ok(secondReportId);
+  assert.notEqual(firstReportId, secondReportId);
 });

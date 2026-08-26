@@ -218,6 +218,24 @@ function heldBy(lease: Lease) {
   );
 }
 
+/** Extend a held lease without changing its owner or fence. */
+export async function renew(lease: Lease, leaseSeconds: number): Promise<void> {
+  if (!Number.isFinite(leaseSeconds) || leaseSeconds <= 0) {
+    throw new Error("leaseSeconds must be greater than zero");
+  }
+
+  const updated = await db
+    .update(inboundJob)
+    .set({
+      leaseExpiresAt: sql`now() + make_interval(secs => ${leaseSeconds})`,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: inboundJob.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 /**
  * Move a held job to its next state, keeping the lease.
  *

@@ -280,6 +280,7 @@ export async function applyLifecycle(
 
 export type ActiveRepository = {
   connectedRepositoryId: string;
+  repoId: number;
   fullName: string;
   /** Never null: a repository with no bound target is not admissible. */
   targetProfileId: string;
@@ -310,6 +311,7 @@ export async function activeRepository(
   const query = tx
     .select({
       connectedRepositoryId: connectedRepository.id,
+      repoId: connectedRepository.repoId,
       fullName: connectedRepository.fullName,
       targetProfileId: connectedRepository.targetProfileId,
     })
