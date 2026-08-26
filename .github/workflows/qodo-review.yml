@@ -1,0 +1,86 @@
+name: Qodo review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: qodo-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  qodo-reviewed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      BOT_LOGIN: qodo-code-review[bot]
+      # How long to wait for Qodo to catch up with a fresh push, in seconds.
+      WAIT_SECONDS: 600
+    steps:
+      - name: Require Qodo review of current head
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Qodo signals the revision it reviewed in two different ways, and which
+          # one appears depends on whether this is its first pass on the PR:
+          #   1. On the first pass it submits a formal review whose commit_id is the
+          #      reviewed SHA.
+          #   2. On later pushes it edits that same comment in place instead of
+          #      submitting another review, so commit_id goes stale. The refreshed
+          #      body links the revision it actually covers as ".../commit/<sha>".
+          # Accept either, or a PR is unmergeable after its first follow-up commit.
+
+          reviewed_head() {
+            local reviews comments
+
+            reviews="$(gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
+            if jq -e --arg bot "$BOT_LOGIN" --arg sha "$HEAD_SHA" '
+              any(.[][];
+                .user.login == $bot and
+                .commit_id == $sha and
+                .state != "DISMISSED"
+              )
+            ' <<<"$reviews" >/dev/null; then
+              echo "Found a Qodo review submitted against ${HEAD_SHA}."
+              return 0
+            fi
+
+            comments="$(gh api --paginate --slurp \
+              "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100")"
+            if jq -e --arg bot "$BOT_LOGIN" --arg sha "$HEAD_SHA" '
+              any(.[][];
+                .user.login == $bot and
+                (.body | contains("commit/" + $sha))
+              )
+            ' <<<"$comments" >/dev/null; then
+              echo "Found a Qodo review comment covering ${HEAD_SHA}."
+              return 0
+            fi
+
+            return 1
+          }
+
+          # Qodo needs a minute or two after a push, so poll rather than failing on
+          # the first miss. Without this the check goes red purely on timing and
+          # someone has to re-run it by hand.
+          deadline=$(( SECONDS + WAIT_SECONDS ))
+          until reviewed_head; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::Qodo has not reviewed ${HEAD_SHA} after ${WAIT_SECONDS}s. Comment '/review' on the PR, then re-run this check."
+              exit 1
+            fi
+            echo "Waiting for Qodo to review ${HEAD_SHA}..."
+            sleep 20
+          done
