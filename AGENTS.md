@@ -132,6 +132,53 @@ dismissal, wait for green checks, then `gh pr merge <n> --squash --delete-branch
 submits a formal review on its first pass and edits that same comment on later pushes, so the
 `qodo-reviewed` check accepts either signal and waits for it rather than failing on timing.
 
+The WeMakeDevs hackathon review trail has a few additional requirements:
+
+- If Qodo does not start automatically, comment `/agentic_review` on the PR.
+- Fix every valid High-severity finding before merge. Dismiss a finding only with a reasoned
+  response in its thread.
+- After pushing fixes to the same PR, run `/agentic_review` again when needed. Confirm that
+  Qodo reviewed the current head commit, not only an earlier revision.
+- Keep the exact `## Qodo Code Review Evidence` heading in `README.md`. It must link to at
+  least one representative merged PR with meaningful hackathon code, explain in one or two
+  lines what Qodo found and what was fixed or intentionally dismissed, and leave the initial
+  and follow-up reviews visible in that PR's history.
+
+Qodo Agent Skills are an optional helper for resolving findings. Install them with
+`npx skills add qodo-ai/qodo-skills/skills`, then use `qodo-pr-resolver`. The skill does not
+replace the required Qodo review, follow-up review, green checks, or resolved conversations.
+
+Every PR description uses this template. Replace the placeholder text, check every applicable
+type of change, and leave unrelated boxes unchecked.
+
+```markdown
+## Description
+- Provide a brief summary of the changes and why they are needed.
+
+## Type of Change
+- [ ] Bug fix (non-breaking change which fixes an issue)
+- [ ] New feature (non-breaking change which adds functionality)
+- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
+- [ ] Code style update (formatting, local variables)
+- [ ] Refactoring (no functional changes, no api changes)
+- [ ] Documentation update
+
+## Related Tickets & Issues
+- Fixes #[Issue Number] / JIRA-[ID]
+
+## How Has This Been Tested?
+- Describe the tests you ran to verify your changes.
+- Provide instructions so reviewers can reproduce.
+
+## Checklist
+- [ ] My code follows the style guidelines of this project
+- [ ] I have performed a self-review of my own code
+- [ ] I have commented my code where necessary
+- [ ] I have updated the documentation accordingly
+- [ ] My changes generate no new warnings
+- [ ] I have added tests that prove my fix is effective or that my feature works
+```
+
 Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit trailer is
 `Co-Authored-By: Claude <noreply@anthropic.com>`.
 
