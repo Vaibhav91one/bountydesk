@@ -1,12 +1,9 @@
-import { redirect } from "next/navigation";
-
-import { currentSession } from "@/lib/auth/current";
+import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import { connectedRepository, db, eq, githubInstallation } from "@/lib/db";
 
 export default async function ConnectionsPage() {
-  const session = await currentSession();
-  if (!session) redirect("/login");
+  const session = await requireReviewer();
 
   const rows = await db
     .select({
@@ -41,8 +38,8 @@ export default async function ConnectionsPage() {
             <li key={`${row.account}-${row.repo ?? index}`}>
               {row.account}
               {row.repo ? ` / ${row.repo}` : " (no repositories selected)"}
-              {row.suspendedAt ? " — suspended" : null}
-              {row.repo && !row.active ? " — disconnected" : null}
+              {row.suspendedAt ? " (suspended)" : null}
+              {row.repo && !row.active ? " (disconnected)" : null}
             </li>
           ))}
         </ul>
