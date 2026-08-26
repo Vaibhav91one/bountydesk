@@ -115,9 +115,7 @@ test("a replayed delivery does not create a second job", async () => {
     payload: { attempt: 2 },
   });
 
-  assert.equal(first.created, true);
   assert.equal(first.disposition, "CREATED");
-  assert.equal(second.created, false, "a replay must not create a new job");
   assert.equal(
     second.disposition,
     "IN_FLIGHT",

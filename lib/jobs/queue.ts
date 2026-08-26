@@ -47,8 +47,6 @@ export type EnqueueInput = {
 export type EnqueueResult = {
   jobId: string;
   state: JobExecutionState;
-  /** False when this delivery had already been recorded, i.e. the webhook was replayed. */
-  created: boolean;
   /** Tells intake whether a replay is still active or is a terminal no-op. */
   disposition: "CREATED" | "IN_FLIGHT" | "TERMINAL_REPLAY";
 };
@@ -75,7 +73,6 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
     return {
       jobId: inserted[0].id,
       state: inserted[0].state,
-      created: true,
       disposition: "CREATED",
     };
   }
@@ -102,7 +99,6 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
   return {
     jobId: existing.id,
     state: existing.state,
-    created: false,
     disposition: isTerminal(existing.state) ? "TERMINAL_REPLAY" : "IN_FLIGHT",
   };
 }
