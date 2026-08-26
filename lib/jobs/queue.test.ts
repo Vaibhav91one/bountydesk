@@ -60,9 +60,9 @@ before(async () => {
         // redirect it and the enums would collide with the real ones.
         .replace(/"public"\./g, `"${SCHEMA}".`)
         .replace(/\bpublic\./g, `"${SCHEMA}".`)
-        // The lockdown migration revokes across a whole schema; scoping it to this throwaway
-        // one keeps the test from touching anything outside itself.
-        .replace(/\bIN SCHEMA public\b/g, `IN SCHEMA "${SCHEMA}"`);
+        // The lockdown migration revokes across a whole schema. Scoping every "SCHEMA public"
+        // — ON as well as IN — keeps a test run from altering privileges outside itself.
+        .replace(/\bSCHEMA public\b/g, `SCHEMA "${SCHEMA}"`);
       await admin.unsafe(`set local search_path to "${SCHEMA}"; ${scoped}`);
     }
   }

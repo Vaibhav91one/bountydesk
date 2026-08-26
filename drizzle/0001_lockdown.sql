@@ -15,18 +15,32 @@
 --> statement-breakpoint
 
 -- 1. Close the Data API ------------------------------------------------------------------
+--
+-- `anon` and `authenticated` are Supabase's roles, not Postgres ones: they do not exist on
+-- the plain server CI and worktree-isolated agents run against. Guarding on the role means
+-- the same migration applies in both places instead of needing a Supabase-only variant.
+DO $do$
+DECLARE
+  target_role text;
+BEGIN
+  FOREACH target_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = target_role) THEN
+      EXECUTE format('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM %I', target_role);
+      EXECUTE format('REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I', target_role);
+      EXECUTE format('REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM %I', target_role);
+      EXECUTE format('REVOKE ALL ON SCHEMA public FROM %I', target_role);
 
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated;
---> statement-breakpoint
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;
---> statement-breakpoint
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated;
---> statement-breakpoint
-
--- Future tables inherit the lockout, so a table added later is not quietly world-writable.
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated;
---> statement-breakpoint
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated;
+      -- Future tables inherit the lockout, so one added later is not quietly world-writable.
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I', target_role
+      );
+      EXECUTE format(
+        'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I', target_role
+      );
+    END IF;
+  END LOOP;
+END
+$do$;
 --> statement-breakpoint
 
 -- Defence in depth. With RLS on and no policies defined, every role is denied by default.
@@ -45,17 +59,16 @@ ALTER TABLE "verdict" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
 
 -- 2. Make immutability real --------------------------------------------------------------
 
-CREATE OR REPLACE FUNCTION public.bountydesk_deny_mutation()
+CREATE OR REPLACE FUNCTION bountydesk_deny_mutation()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = ''
-AS $$
+AS $fn$
 BEGIN
   RAISE EXCEPTION
     '% is append-only; % is not permitted', TG_TABLE_NAME, TG_OP
     USING ERRCODE = 'restrict_violation';
 END;
-$$;
+$fn$;
 --> statement-breakpoint
 
 -- A verdict is the artifact a human approves by content hash. If the row could be edited
@@ -63,22 +76,22 @@ $$;
 -- means inserting the next revision, which is why (report_id, revision) is unique.
 CREATE TRIGGER verdict_is_immutable
 BEFORE UPDATE OR DELETE ON "verdict"
-FOR EACH ROW EXECUTE FUNCTION public.bountydesk_deny_mutation();
+FOR EACH ROW EXECUTE FUNCTION bountydesk_deny_mutation();
 --> statement-breakpoint
 
 -- A human decision is a fact about a moment. It is never amended.
 CREATE TRIGGER approval_decision_is_immutable
 BEFORE UPDATE OR DELETE ON "approval_decision"
-FOR EACH ROW EXECUTE FUNCTION public.bountydesk_deny_mutation();
+FOR EACH ROW EXECUTE FUNCTION bountydesk_deny_mutation();
 --> statement-breakpoint
 
 -- The audit trail. Deleting from it is the first thing an attacker would want to do.
 CREATE TRIGGER session_event_is_append_only
 BEFORE UPDATE OR DELETE ON "session_event"
-FOR EACH ROW EXECUTE FUNCTION public.bountydesk_deny_mutation();
+FOR EACH ROW EXECUTE FUNCTION bountydesk_deny_mutation();
 --> statement-breakpoint
 
 -- What actually happened on each delivery attempt, for incident review.
 CREATE TRIGGER delivery_attempt_is_append_only
 BEFORE UPDATE OR DELETE ON "delivery_attempt"
-FOR EACH ROW EXECUTE FUNCTION public.bountydesk_deny_mutation();
+FOR EACH ROW EXECUTE FUNCTION bountydesk_deny_mutation();
