@@ -44,7 +44,16 @@ const client = postgres(url, {
   prepare: false,
   ssl: isLoopback ? false : "require",
   max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+  // Integration tests point this at a disposable schema so a run cannot see, or be handed,
+  // another run's rows. Unset everywhere else, which leaves the server default (public).
+  ...(process.env.DATABASE_SCHEMA
+    ? { connection: { search_path: process.env.DATABASE_SCHEMA } }
+    : {}),
 });
 
 export const db = drizzle(client, { schema });
 export { client };
+
+// Re-exported so tests and workers can build their own predicates without each reaching into
+// drizzle-orm separately.
+export { and, eq, sql } from "drizzle-orm";

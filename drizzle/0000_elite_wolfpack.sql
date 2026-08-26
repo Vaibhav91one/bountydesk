@@ -25,6 +25,17 @@ CREATE TABLE "connected_repository" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "delivery_attempt" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"delivery_id" uuid NOT NULL,
+	"attempt" integer NOT NULL,
+	"response_status" integer,
+	"response_body" text,
+	"error" text,
+	"started_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "github_installation" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"installation_id" bigint NOT NULL,
@@ -45,6 +56,7 @@ CREATE TABLE "inbound_job" (
 	"report_id" uuid,
 	"lease_owner" text,
 	"lease_expires_at" timestamp with time zone,
+	"fence" bigint DEFAULT 0 NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
 	"max_attempts" integer DEFAULT 5 NOT NULL,
 	"next_attempt_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -60,7 +72,7 @@ CREATE TABLE "outbound_delivery" (
 	"state" "delivery_state" DEFAULT 'PENDING' NOT NULL,
 	"idempotency_key" text NOT NULL,
 	"target" text NOT NULL,
-	"body" text NOT NULL,
+	"approved_content_hash" text NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
 	"last_error" text,
 	"delivered_at" timestamp with time zone,
@@ -115,19 +127,22 @@ CREATE TABLE "verdict" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "approval_decision" ADD CONSTRAINT "approval_decision_verdict_id_verdict_id_fk" FOREIGN KEY ("verdict_id") REFERENCES "public"."verdict"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "approval_decision" ADD CONSTRAINT "approval_decision_verdict_id_verdict_id_fk" FOREIGN KEY ("verdict_id") REFERENCES "public"."verdict"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connected_repository" ADD CONSTRAINT "connected_repository_installation_id_github_installation_id_fk" FOREIGN KEY ("installation_id") REFERENCES "public"."github_installation"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "connected_repository" ADD CONSTRAINT "connected_repository_target_profile_id_target_profile_id_fk" FOREIGN KEY ("target_profile_id") REFERENCES "public"."target_profile"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "delivery_attempt" ADD CONSTRAINT "delivery_attempt_delivery_id_outbound_delivery_id_fk" FOREIGN KEY ("delivery_id") REFERENCES "public"."outbound_delivery"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "inbound_job" ADD CONSTRAINT "inbound_job_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "outbound_delivery" ADD CONSTRAINT "outbound_delivery_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "outbound_delivery" ADD CONSTRAINT "outbound_delivery_verdict_id_verdict_id_fk" FOREIGN KEY ("verdict_id") REFERENCES "public"."verdict"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "outbound_delivery" ADD CONSTRAINT "outbound_delivery_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "outbound_delivery" ADD CONSTRAINT "outbound_delivery_verdict_id_verdict_id_fk" FOREIGN KEY ("verdict_id") REFERENCES "public"."verdict"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "report" ADD CONSTRAINT "report_connected_repository_id_connected_repository_id_fk" FOREIGN KEY ("connected_repository_id") REFERENCES "public"."connected_repository"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "report" ADD CONSTRAINT "report_target_profile_id_target_profile_id_fk" FOREIGN KEY ("target_profile_id") REFERENCES "public"."target_profile"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "session_event" ADD CONSTRAINT "session_event_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "verdict" ADD CONSTRAINT "verdict_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-CREATE INDEX "approval_decision_verdict_idx" ON "approval_decision" USING btree ("verdict_id");--> statement-breakpoint
+ALTER TABLE "session_event" ADD CONSTRAINT "session_event_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "verdict" ADD CONSTRAINT "verdict_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "approval_decision_verdict_key" ON "approval_decision" USING btree ("verdict_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "connected_repository_repo_id_key" ON "connected_repository" USING btree ("repo_id");--> statement-breakpoint
 CREATE INDEX "connected_repository_installation_idx" ON "connected_repository" USING btree ("installation_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "delivery_attempt_delivery_attempt_key" ON "delivery_attempt" USING btree ("delivery_id","attempt");--> statement-breakpoint
+CREATE INDEX "delivery_attempt_delivery_idx" ON "delivery_attempt" USING btree ("delivery_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "github_installation_installation_id_key" ON "github_installation" USING btree ("installation_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "inbound_job_channel_delivery_id_key" ON "inbound_job" USING btree ("channel","delivery_id");--> statement-breakpoint
 CREATE INDEX "inbound_job_claim_idx" ON "inbound_job" USING btree ("state","next_attempt_at");--> statement-breakpoint

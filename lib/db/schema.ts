@@ -178,6 +178,12 @@ export const inboundJob = pgTable(
     reportId: uuid("report_id").references(() => report.id),
     leaseOwner: text("lease_owner"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    /**
+     * Bumped on every claim. A worker holds the fence it was issued and must present it to
+     * mutate the job, so one that stalled past its lease cannot write over the worker that
+     * legitimately took over: its fence is stale and the update matches no rows.
+     */
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(5),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
@@ -203,9 +209,10 @@ export const verdict = pgTable(
   "verdict",
   {
     id: id(),
+    // No cascade: a verdict is evidence. Deleting the report must not silently erase it.
     reportId: uuid("report_id")
       .notNull()
-      .references(() => report.id, { onDelete: "cascade" }),
+      .references(() => report.id, { onDelete: "restrict" }),
     outcome: verdictOutcome("outcome").notNull(),
     summary: text("summary").notNull(),
     /** Canary result, negative control, action log, artifact refs. */
@@ -229,7 +236,7 @@ export const approvalDecision = pgTable(
     id: id(),
     verdictId: uuid("verdict_id")
       .notNull()
-      .references(() => verdict.id, { onDelete: "cascade" }),
+      .references(() => verdict.id, { onDelete: "restrict" }),
     reviewer: text("reviewer").notNull(),
     decision: approvalOutcome("decision").notNull(),
     /** Must match verdict.contentHash, or the tool call is refused. */
@@ -237,7 +244,11 @@ export const approvalDecision = pgTable(
     note: text("note"),
     decidedAt: createdAt(),
   },
-  (t) => [index("approval_decision_verdict_idx").on(t.verdictId)],
+  (t) => [
+    // One decision per verdict revision. A reviewer who wants a different answer produces a
+    // new revision; they do not get to decide the same artifact twice.
+    uniqueIndex("approval_decision_verdict_key").on(t.verdictId),
+  ],
 );
 
 /**
@@ -250,15 +261,21 @@ export const outboundDelivery = pgTable(
     id: id(),
     reportId: uuid("report_id")
       .notNull()
-      .references(() => report.id, { onDelete: "cascade" }),
+      .references(() => report.id, { onDelete: "restrict" }),
     verdictId: uuid("verdict_id")
       .notNull()
-      .references(() => verdict.id, { onDelete: "cascade" }),
+      .references(() => verdict.id, { onDelete: "restrict" }),
     state: deliveryState("state").notNull().default("PENDING"),
     /** Stable marker embedded in the comment; makes a retry a no-op rather than a duplicate. */
     idempotencyKey: text("idempotency_key").notNull(),
     target: text("target").notNull(),
-    body: text("body").notNull(),
+    /**
+     * Deliberately no `body` column. The outgoing text is read from the immutable
+     * verdict.payload at send time and checked against this hash, which is copied from the
+     * approval. A second mutable copy of the body would be a way to have a human approve one
+     * thing and GitHub receive another.
+     */
+    approvedContentHash: text("approved_content_hash").notNull(),
     attempts: integer("attempts").notNull().default(0),
     lastError: text("last_error"),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
@@ -271,14 +288,41 @@ export const outboundDelivery = pgTable(
   ],
 );
 
+/**
+ * One row per delivery attempt, request and response. The counter on outbound_delivery says
+ * how many times we tried; this says what actually happened each time, which is what an
+ * incident review needs.
+ */
+export const deliveryAttempt = pgTable(
+  "delivery_attempt",
+  {
+    id: id(),
+    deliveryId: uuid("delivery_id")
+      .notNull()
+      .references(() => outboundDelivery.id, { onDelete: "restrict" }),
+    attempt: integer("attempt").notNull(),
+    /** HTTP status, or null when the request never got a response. */
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    error: text("error"),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("delivery_attempt_delivery_attempt_key").on(t.deliveryId, t.attempt),
+    index("delivery_attempt_delivery_idx").on(t.deliveryId),
+  ],
+);
+
 /** Append-only audit trail. The one writer that runs without approval. */
 export const sessionEvent = pgTable(
   "session_event",
   {
     id: id(),
+    // No cascade: deleting a report must not take its audit trail with it.
     reportId: uuid("report_id")
       .notNull()
-      .references(() => report.id, { onDelete: "cascade" }),
+      .references(() => report.id, { onDelete: "restrict" }),
     seq: integer("seq").notNull(),
     type: text("type").notNull(),
     data: jsonb("data").notNull().default(sql`'{}'::jsonb`),
