@@ -6,8 +6,8 @@ import test, { after, before } from "node:test";
  * SKIP LOCKED, the unique delivery constraint, compare-and-swap on the lease. A mock would
  * agree with a wrong implementation.
  *
- * Each run gets a disposable schema of its own. claim() is deliberately global — it takes the
- * oldest claimable job in the table — so sharing a schema would let one run's rows be handed
+ * Each run gets a disposable schema of its own. claim() is deliberately global, taking the
+ * oldest claimable job in the table, so sharing a schema would let one run's rows be handed
  * to another's workers, and a crashed run would poison the next one. The schema is created
  * here, the migrations are replayed into it, and it is dropped at the end.
  */
@@ -61,7 +61,7 @@ before(async () => {
         .replace(/"public"\./g, `"${SCHEMA}".`)
         .replace(/\bpublic\./g, `"${SCHEMA}".`)
         // The lockdown migration revokes across a whole schema. Scoping every "SCHEMA public"
-        // — ON as well as IN — keeps a test run from altering privileges outside itself.
+        // ON as well as IN, keeps a test run from altering privileges outside itself.
         .replace(/\bSCHEMA public\b/g, `SCHEMA "${SCHEMA}"`);
       await admin.unsafe(`set local search_path to "${SCHEMA}"; ${scoped}`);
     }
@@ -92,8 +92,8 @@ async function seed() {
 /**
  * Retire everything currently in the queue.
  *
- * claim() is deliberately global — it takes the oldest claimable job, not one belonging to
- * the caller — so a test that seeds a job and immediately claims would otherwise be handed
+ * claim() is deliberately global, taking the oldest claimable job rather than one belonging
+ * to the caller, so a test that seeds a job and immediately claims would otherwise be handed
  * whatever an earlier test left behind. Draining first makes "the job I just seeded" the only
  * thing claimable, which is what these assertions mean to talk about.
  */

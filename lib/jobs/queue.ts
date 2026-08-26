@@ -53,7 +53,7 @@ export type EnqueueResult = {
 
 /**
  * Record a delivery exactly once. Replays collide on (channel, delivery_id) and return the
- * existing row instead of starting a second run — the caller answers 202 either way, since
+ * existing row instead of starting a second run. The caller answers 202 either way, because
  * from the sender's point of view the delivery is accepted in both cases.
  */
 export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
