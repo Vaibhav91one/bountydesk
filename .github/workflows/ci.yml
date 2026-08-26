@@ -17,6 +17,27 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+
+    # The queue's guarantees are Postgres guarantees (FOR UPDATE SKIP LOCKED, unique
+    # constraints), so the tests run against a real server rather than a mock that would
+    # happily agree with a wrong implementation.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -29,6 +50,9 @@ jobs:
         run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Migrate
+        run: npm run db:migrate
+
       - name: Test
         run: npm run test --if-present
       - name: Build
