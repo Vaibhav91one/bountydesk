@@ -410,6 +410,28 @@ test("losing a lease stops the job without terminating the worker call", async (
   assert.equal((await job(jobId)).state, "RUNNING");
 });
 
+test("an analysis error after lease loss does not escape the worker call", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+
+  const processed = await worker.runOnce("worker-1", {
+    analysis: {
+      ...analysisDriver(),
+      run: async () => {
+        await dbm.db
+          .update(dbm.inboundJob)
+          .set({ leaseOwner: "worker-2", fence: dbm.sql`${dbm.inboundJob.fence} + 1` })
+          .where(dbm.eq(dbm.inboundJob.id, jobId));
+        throw new Error("analysis failed after takeover");
+      },
+    },
+  });
+
+  assert.equal(processed, jobId);
+  assert.equal((await job(jobId)).state, "RUNNING");
+});
+
 test("a report cannot be moved from a state it is no longer in", async () => {
   await drain();
   const repo = await connectedRepo();

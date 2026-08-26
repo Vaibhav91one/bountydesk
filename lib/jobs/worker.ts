@@ -216,12 +216,18 @@ export async function runOnce(
 
     const message = error instanceof Error ? error.message : String(error);
 
-    if (error instanceof UnprocessableDelivery) {
-      await abandon(lease, message);
-      return lease.id;
+    try {
+      if (error instanceof UnprocessableDelivery) {
+        await abandon(lease, message);
+      } else {
+        await fail(lease, message);
+      }
+    } catch (recoveryError) {
+      // The lease can change after the operation fails but before its recovery write. The
+      // new owner is then responsible for the job, just as if the operation had lost its fence.
+      if (!(recoveryError instanceof LeaseLostError)) throw recoveryError;
     }
 
-    await fail(lease, message);
     return lease.id;
   }
 }

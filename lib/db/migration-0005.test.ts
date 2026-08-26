@@ -54,10 +54,15 @@ async function replay() {
   }
 }
 
-async function insertProfile(name: string, digest: string): Promise<string> {
+async function insertProfile(
+  name: string,
+  digest: string,
+  snapshotId: string | null = null,
+): Promise<string> {
   const [row] = await query<{ id: string }>(
-    `insert into "${schema.name}".target_profile (name, image_digest) values ($1, $2) returning id`,
-    [name, digest],
+    `insert into "${schema.name}".target_profile (name, image_digest, snapshot_id)
+     values ($1, $2, $3) returning id`,
+    [name, digest, snapshotId],
   );
   return row.id;
 }
@@ -128,6 +133,24 @@ test("duplicates that pin different targets stop the migration", async () => {
   assert.equal(profiles[0].n, 2);
 });
 
+test("a missing snapshot and an empty snapshot are different targets", async () => {
+  await rewind();
+
+  const digest = `sha256:${"a".repeat(64)}`;
+  await insertProfile("juice-shop-v17.3.0", digest, null);
+  await insertProfile("juice-shop-v17.3.0", digest, "");
+
+  await assert.rejects(replay(), /pinned settings differ/);
+
+  const profiles = await query<{ snapshot_id: string | null }>(
+    `select snapshot_id from "${schema.name}".target_profile order by snapshot_id nulls first`,
+  );
+  assert.deepEqual(
+    profiles.map((profile) => profile.snapshot_id),
+    [null, ""],
+  );
+});
+
 test("a database with no duplicates migrates unchanged", async () => {
   await rewind();
 
@@ -142,7 +165,6 @@ test("a database with no duplicates migrates unchanged", async () => {
     [only],
   );
 
-  // And the index it exists to create is there.
   const indexes = await query<{ indexname: string }>(
     `select indexname from pg_indexes where schemaname = $1 and indexname = 'target_profile_name_key'`,
     [schema.name],

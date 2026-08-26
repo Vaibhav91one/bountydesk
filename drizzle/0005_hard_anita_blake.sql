@@ -25,7 +25,7 @@ BEGIN
       HAVING count(*) > 1
          AND count(DISTINCT (
                image_digest,
-               coalesce(snapshot_id, ''),
+               snapshot_id,
                config::text,
                scope_rules::text
              )) > 1
@@ -41,7 +41,7 @@ END
 $do$;
 --> statement-breakpoint
 
--- What is left is byte-identical duplicates, which are safe to collapse onto the oldest row.
+-- What is left has identical pinned settings, so it is safe to keep the oldest row.
 -- The mapping is recomputed in each statement rather than held in a temp table: drizzle runs
 -- a migration inside one transaction, but the test harness replays the statements one at a
 -- time, and a temp table declared ON COMMIT DROP would not survive that.
