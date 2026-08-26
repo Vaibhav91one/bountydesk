@@ -132,6 +132,11 @@ dismissal, wait for green checks, then `gh pr merge <n> --squash --delete-branch
 submits a formal review on its first pass and edits that same comment on later pushes, so the
 `qodo-reviewed` check accepts either signal and waits for it rather than failing on timing.
 
+Do not open a standalone PR for each trivial edit. Keep small, related changes on a scoped
+branch until they form one coherent, reviewable improvement, then open a single PR for that
+work. Do not bundle unrelated changes to make a PR look larger, and do not use this rule to
+push directly to `main`.
+
 The Qodo review trail has a few additional requirements:
 
 - If Qodo does not start automatically, comment `/agentic_review` on the PR.
@@ -161,7 +166,7 @@ promotional language, and process commentary that does not help a reviewer judge
 ## Description
 - Provide a brief summary of the changes and why they are needed.
 
-## Type of Change
+## Type of change
 - [ ] Bug fix (non-breaking change which fixes an issue)
 - [ ] New feature (non-breaking change which adds functionality)
 - [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected)
@@ -169,10 +174,10 @@ promotional language, and process commentary that does not help a reviewer judge
 - [ ] Refactoring (no functional changes, no api changes)
 - [ ] Documentation update
 
-## Related Tickets & Issues
+## Related tickets & issues
 - Fixes #[Issue Number] / JIRA-[ID]
 
-## How Has This Been Tested?
+## How has this been tested?
 - Describe the tests you ran to verify your changes.
 - Provide instructions so reviewers can reproduce.
 
