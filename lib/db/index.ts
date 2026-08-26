@@ -56,4 +56,4 @@ export { client };
 
 // Re-exported so tests and workers can build their own predicates without each reaching into
 // drizzle-orm separately.
-export { and, eq, sql } from "drizzle-orm";
+export { and, eq, inArray, isNull, sql } from "drizzle-orm";

@@ -11,9 +11,7 @@ import test, { after, before } from "node:test";
  * to another's workers, and a crashed run would poison the next one. The schema is created
  * here, the migrations are replayed into it, and it is dropped at the end.
  */
-const SCHEMA = `bd_test_${process.pid}_${Date.now().toString(36)}`;
-
-process.env.DATABASE_SCHEMA = SCHEMA;
+let schema: import("@/lib/db/testing").DisposableSchema;
 
 // Imported dynamically so DATABASE_SCHEMA is set before the pool is constructed.
 type QueueModule = typeof import("./queue");
@@ -21,51 +19,10 @@ type DbModule = typeof import("@/lib/db");
 
 let queue: QueueModule;
 let dbm: DbModule;
-let admin: import("postgres").Sql;
 
 before(async () => {
-  const fs = await import("node:fs");
-  const path = await import("node:path");
-  const postgres = (await import("postgres")).default;
-
-  const url = process.env.DIRECT_URL ?? process.env.DATABASE_URL;
-  if (!url) throw new Error("DIRECT_URL or DATABASE_URL must be set to run these tests");
-
-  const host = (() => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return "";
-    }
-  })();
-  const loopback = ["localhost", "127.0.0.1", "[::1]", "::1"].includes(host);
-
-  admin = postgres(url, { ssl: loopback ? false : "require", max: 1, onnotice: () => {} });
-  await admin.unsafe(`create schema "${SCHEMA}"`);
-
-  // Replay the committed migrations into the throwaway schema, so the tests exercise the
-  // same DDL that ships rather than a hand-maintained copy of it.
-  const dir = path.join(process.cwd(), "drizzle");
-  const journal = JSON.parse(
-    fs.readFileSync(path.join(dir, "meta", "_journal.json"), "utf8"),
-  ) as { entries: { tag: string }[] };
-
-  for (const entry of journal.entries) {
-    const sqlText = fs.readFileSync(path.join(dir, `${entry.tag}.sql`), "utf8");
-    for (const statement of sqlText.split("--> statement-breakpoint")) {
-      const trimmed = statement.trim();
-      if (!trimmed) continue;
-      const scoped = trimmed
-        // drizzle-kit hard-qualifies everything as "public", so search_path alone would not
-        // redirect it and the enums would collide with the real ones.
-        .replace(/"public"\./g, `"${SCHEMA}".`)
-        .replace(/\bpublic\./g, `"${SCHEMA}".`)
-        // The lockdown migration revokes across a whole schema. Scoping every "SCHEMA public"
-        // ON as well as IN, keeps a test run from altering privileges outside itself.
-        .replace(/\bSCHEMA public\b/g, `SCHEMA "${SCHEMA}"`);
-      await admin.unsafe(`set local search_path to "${SCHEMA}"; ${scoped}`);
-    }
-  }
+  const { createSchema } = await import("@/lib/db/testing");
+  schema = await createSchema("queue");
 
   dbm = await import("@/lib/db");
   queue = await import("./queue");
@@ -74,10 +31,7 @@ before(async () => {
 
 after(async () => {
   await dbm?.client.end({ timeout: 5 });
-  if (admin) {
-    await admin.unsafe(`drop schema if exists "${SCHEMA}" cascade`);
-    await admin.end({ timeout: 5 });
-  }
+  await schema?.drop();
 });
 
 let seq = 0;
@@ -144,8 +98,8 @@ test("SKIP LOCKED means a second claim does not block on a locked row", async ()
   await seed();
 
   // Hold the first claimable row locked inside an open transaction, and keep it open.
-  const holder = await admin.reserve();
-  await holder.unsafe(`set search_path to "${SCHEMA}"`);
+  const holder = await schema.admin.reserve();
+  await holder.unsafe(`set search_path to "${schema.name}"`);
   await holder.unsafe("begin");
   const [locked] = await holder.unsafe(
     `select id from inbound_job
