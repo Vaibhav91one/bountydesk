@@ -7,17 +7,17 @@ import {
   inArray,
   isNull,
   sql,
+  type Executor,
 } from "@/lib/db";
 
 /**
  * The App-lifecycle side of intake: who installed us, on which repositories, and whether
  * that access is still live.
  *
- * These handlers do not go through the jobs table. Every one of them is an upsert keyed on
- * an immutable GitHub id, so replaying a delivery lands on the same row with the same
- * values and a `(channel, delivery_id)` guard would buy nothing. They also have to take
- * effect the moment the request arrives: a suspended installation must stop intake and
- * delivery at once, not when a worker next picks up a queue row.
+ * These handlers do not go through the jobs table: a suspension has to take effect the
+ * moment the request arrives, not when a worker next picks up a queue row. They run inside
+ * the caller's transaction, alongside the `lifecycle_delivery` row that makes a redelivery
+ * a no-op, so a crash part-way through leaves neither the mutation nor the record of it.
  */
 
 /** The subset of GitHub's payloads we read. Anything not named here is ignored. */
@@ -55,6 +55,7 @@ export const LIFECYCLE_EVENTS = new Set([
  * event, a repository rename say, silently bring a deleted installation back to life.
  */
 async function upsertInstallation(
+  tx: Executor,
   installation: InstallationPayload,
   { reinstate }: { reinstate: boolean },
 ): Promise<string> {
@@ -65,7 +66,7 @@ async function upsertInstallation(
     suspendedAt: installation.suspended_at ? new Date(installation.suspended_at) : null,
   };
 
-  const [row] = await db
+  const [row] = await tx
     .insert(githubInstallation)
     .values(values)
     .onConflictDoUpdate({
@@ -84,12 +85,13 @@ async function upsertInstallation(
 
 /** Mark repositories as granted. A repo re-added after removal comes back active. */
 async function activateRepositories(
+  tx: Executor,
   installationRowId: string,
   repositories: RepositoryPayload[],
 ): Promise<void> {
   if (repositories.length === 0) return;
 
-  await db
+  await tx
     .insert(connectedRepository)
     .values(
       repositories.map((repo) => ({
@@ -110,35 +112,35 @@ async function activateRepositories(
 }
 
 /** Withdraw access to repositories, keeping the rows so their history survives. */
-async function deactivateRepositories(repoIds: number[]): Promise<void> {
+async function deactivateRepositories(tx: Executor, repoIds: number[]): Promise<void> {
   if (repoIds.length === 0) return;
 
-  await db
+  await tx
     .update(connectedRepository)
     .set({ active: false, updatedAt: new Date() })
     .where(inArray(connectedRepository.repoId, repoIds));
 }
 
-async function handleInstallation(payload: LifecyclePayload): Promise<void> {
+async function handleInstallation(tx: Executor, payload: LifecyclePayload): Promise<void> {
   const installation = payload.installation;
   if (!installation) return;
 
   switch (payload.action) {
     case "created":
     case "unsuspend": {
-      const rowId = await upsertInstallation(installation, { reinstate: true });
-      await activateRepositories(rowId, payload.repositories ?? []);
+      const rowId = await upsertInstallation(tx, installation, { reinstate: true });
+      await activateRepositories(tx, rowId, payload.repositories ?? []);
       return;
     }
 
     case "new_permissions_accepted":
-      await upsertInstallation(installation, { reinstate: false });
+      await upsertInstallation(tx, installation, { reinstate: false });
       return;
 
     case "suspend": {
       // GitHub sends suspended_at on this payload, but a clock we do not control decides a
       // security-relevant timestamp. Stamp it ourselves.
-      await db
+      await tx
         .update(githubInstallation)
         .set({ suspendedAt: new Date(), updatedAt: new Date() })
         .where(eq(githubInstallation.installationId, installation.id));
@@ -146,7 +148,7 @@ async function handleInstallation(payload: LifecyclePayload): Promise<void> {
     }
 
     case "deleted": {
-      await db
+      await tx
         .update(githubInstallation)
         .set({ deletedAt: new Date(), updatedAt: new Date() })
         .where(eq(githubInstallation.installationId, installation.id));
@@ -155,55 +157,71 @@ async function handleInstallation(payload: LifecyclePayload): Promise<void> {
   }
 }
 
-async function handleInstallationRepositories(payload: LifecyclePayload): Promise<void> {
+async function handleInstallationRepositories(
+  tx: Executor,
+  payload: LifecyclePayload,
+): Promise<void> {
   const installation = payload.installation;
   if (!installation) return;
 
-  const rowId = await upsertInstallation(installation, { reinstate: false });
+  const rowId = await upsertInstallation(tx, installation, { reinstate: false });
 
-  await activateRepositories(rowId, payload.repositories_added ?? []);
-  await deactivateRepositories((payload.repositories_removed ?? []).map((r) => r.id));
+  await activateRepositories(tx, rowId, payload.repositories_added ?? []);
+  await deactivateRepositories(tx, (payload.repositories_removed ?? []).map((r) => r.id));
 }
 
-async function handleRepository(payload: LifecyclePayload): Promise<void> {
+async function handleRepository(tx: Executor, payload: LifecyclePayload): Promise<void> {
   const repository = payload.repository;
   if (!repository) return;
 
   switch (payload.action) {
     case "renamed":
-    case "transferred":
-      await db
+      await tx
         .update(connectedRepository)
         .set({ fullName: repository.full_name, updatedAt: new Date() })
         .where(eq(connectedRepository.repoId, repository.id));
       return;
 
+    case "transferred":
+      // A transfer moves the repository to an owner our installation was never granted
+      // against. Record the new name, but stop acting on it until an
+      // installation_repositories.added says the new owner has connected it.
+      await tx
+        .update(connectedRepository)
+        .set({ fullName: repository.full_name, active: false, updatedAt: new Date() })
+        .where(eq(connectedRepository.repoId, repository.id));
+      return;
+
     case "archived":
     case "deleted":
-    case "privatized":
-      await deactivateRepositories([repository.id]);
+      await deactivateRepositories(tx, [repository.id]);
       return;
 
     case "unarchived":
-      await db
+      await tx
         .update(connectedRepository)
         .set({ active: true, updatedAt: new Date() })
         .where(eq(connectedRepository.repoId, repository.id));
       return;
   }
+
+  // Visibility changes (privatized, publicized) are deliberately not handled. A GitHub App
+  // installation stays granted across them, and treating "went private" as a revocation
+  // would strand exactly the repositories most likely to be filing security reports.
 }
 
 export async function applyLifecycle(
+  tx: Executor,
   event: string,
   payload: LifecyclePayload,
 ): Promise<void> {
   switch (event) {
     case "installation":
-      return handleInstallation(payload);
+      return handleInstallation(tx, payload);
     case "installation_repositories":
-      return handleInstallationRepositories(payload);
+      return handleInstallationRepositories(tx, payload);
     case "repository":
-      return handleRepository(payload);
+      return handleRepository(tx, payload);
   }
 }
 
@@ -220,14 +238,21 @@ export type ActiveRepository = {
  * posting a comment. Access ends the instant an installation is suspended or deleted or the
  * repository is dropped, and routing every caller through here is what makes that one
  * change rather than several.
+ *
+ * `lock` takes FOR SHARE on the installation and repository rows the answer rests on. A
+ * caller that acts on the result inside the same transaction needs it: without the lock a
+ * suspension can commit between the check and the write, and the work is admitted after
+ * access was withdrawn. The lifecycle handlers update those same rows, so they queue behind
+ * the lock instead of racing it.
  */
 export async function activeRepository(
   installationId: number | undefined,
   repoId: number | undefined,
+  { tx = db, lock = false }: { tx?: Executor; lock?: boolean } = {},
 ): Promise<ActiveRepository | null> {
   if (!installationId || !repoId) return null;
 
-  const [row] = await db
+  const query = tx
     .select({
       connectedRepositoryId: connectedRepository.id,
       fullName: connectedRepository.fullName,
@@ -248,6 +273,8 @@ export async function activeRepository(
       ),
     )
     .limit(1);
+
+  const [row] = await (lock ? query.for("share") : query);
 
   return row ?? null;
 }

@@ -202,6 +202,27 @@ export const inboundJob = pgTable(
 );
 
 /**
+ * Lifecycle webhook deliveries we have already applied.
+ *
+ * GitHub keeps the delivery id when a webhook is redelivered, by its own retries or by
+ * someone pressing Redeliver. Without this row, replaying an old `installation.created`
+ * after an uninstall would clear `deleted_at` and hand access back. Issue deliveries are
+ * not recorded here: they get their idempotency from the `inbound_job` row.
+ */
+export const lifecycleDelivery = pgTable(
+  "lifecycle_delivery",
+  {
+    id: id(),
+    /** X-GitHub-Delivery. */
+    deliveryId: text("delivery_id").notNull(),
+    event: text("event").notNull(),
+    action: text("action"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("lifecycle_delivery_delivery_id_key").on(t.deliveryId)],
+);
+
+/**
  * A verdict draft. `contentHash` is what the approval binds to: publish_verdict refuses any
  * payload whose hash differs from the one a human actually approved.
  */

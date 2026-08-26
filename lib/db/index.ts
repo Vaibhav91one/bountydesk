@@ -54,6 +54,13 @@ const client = postgres(url, {
 export const db = drizzle(client, { schema });
 export { client };
 
+/**
+ * Either the pool or an open transaction. Anything that has to be able to run inside a
+ * caller's transaction takes this instead of reaching for `db` directly, which is how the
+ * intake path gets its access check and its enqueue into one atomic unit.
+ */
+export type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 // Re-exported so tests and workers can build their own predicates without each reaching into
 // drizzle-orm separately.
 export { and, eq, inArray, isNull, sql } from "drizzle-orm";

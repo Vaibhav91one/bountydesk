@@ -24,3 +24,46 @@ export function verifySignature(
   if (received.length !== wanted.length) return false;
   return timingSafeEqual(received, wanted);
 }
+
+/**
+ * The largest webhook body we will buffer. GitHub does not deliver payloads above 25 MB and
+ * an issue payload is orders of magnitude smaller, so anything near this cap is not a real
+ * delivery.
+ */
+export const MAX_WEBHOOK_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Read the raw body, giving up once it exceeds `limit`.
+ *
+ * The signature cannot be checked until the bytes are in hand, so this runs before any
+ * authentication and an unauthenticated caller decides how much it sends. Content-Length is
+ * a hint from that same caller, so the cap is enforced against the bytes actually read as
+ * well. Returns null when the body is too large.
+ */
+export async function readBoundedBody(
+  request: Request,
+  limit = MAX_WEBHOOK_BYTES,
+): Promise<Buffer | null> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) return null;
+
+  if (!request.body) return Buffer.alloc(0);
+
+  const reader = request.body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    total += value.byteLength;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+
+  return Buffer.concat(chunks);
+}

@@ -37,7 +37,11 @@ after(async () => {
 
 let deliveries = 0;
 
-function request(event: string, payload: unknown, secret = SECRET): Request {
+function request(
+  event: string,
+  payload: unknown,
+  { secret = SECRET, deliveryId = `delivery-${deliveries++}` } = {},
+): Request {
   const body = JSON.stringify(payload);
   const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 
@@ -47,7 +51,7 @@ function request(event: string, payload: unknown, secret = SECRET): Request {
     headers: {
       "content-type": "application/json",
       "x-github-event": event,
-      "x-github-delivery": `delivery-${deliveries++}`,
+      "x-github-delivery": deliveryId,
       "x-hub-signature-256": signature,
     },
   });
@@ -63,15 +67,32 @@ function issueOpened(number: number): Request {
   });
 }
 
-function installationEvent(action: string): Request {
-  return request("installation", {
-    action,
-    installation: {
-      id: INSTALLATION_ID,
-      account: { login: "acme", id: 77 },
+function installationEvent(action: string, deliveryId?: string): Request {
+  return request(
+    "installation",
+    {
+      action,
+      installation: {
+        id: INSTALLATION_ID,
+        account: { login: "acme", id: 77 },
+      },
+      repositories: [{ id: REPO_ID, full_name: REPO_NAME }],
     },
-    repositories: [{ id: REPO_ID, full_name: REPO_NAME }],
+    deliveryId ? { deliveryId } : {},
+  );
+}
+
+function repositoryEvent(action: string, fullName = REPO_NAME): Request {
+  return request("repository", {
+    action,
+    repository: { id: REPO_ID, full_name: fullName },
+    installation: { id: INSTALLATION_ID },
   });
+}
+
+async function isConnected(): Promise<boolean> {
+  const { activeRepository } = await import("./lifecycle");
+  return (await activeRepository(INSTALLATION_ID, REPO_ID)) !== null;
 }
 
 async function jobCount(): Promise<number> {
@@ -82,7 +103,7 @@ async function jobCount(): Promise<number> {
 test("an unsigned delivery is rejected and writes nothing", async () => {
   const before = await jobCount();
 
-  const forged = request("issues", { action: "opened" }, "not-the-webhook-secret");
+  const forged = request("issues", { action: "opened" }, { secret: "not-the-webhook-secret" });
   const response = await POST(forged);
 
   assert.equal(response.status, 401);
@@ -114,7 +135,7 @@ test("an issue on an unknown repository is accepted but not queued", async () =>
 });
 
 test("installing the App connects the selected repositories", async () => {
-  await POST(installationEvent("created"));
+  await POST(installationEvent("created", "install-1"));
 
   const { activeRepository } = await import("./lifecycle");
   const repo = await activeRepository(INSTALLATION_ID, REPO_ID);
@@ -185,4 +206,45 @@ test("uninstalling the App stops intake even after the repository is re-added", 
   await POST(issueOpened(6));
 
   assert.equal(await jobCount(), before);
+});
+
+test("an oversized body is rejected before the signature is checked", async () => {
+  const { MAX_WEBHOOK_BYTES } = await import("./webhook");
+
+  const response = await POST(
+    new Request("https://bountydesk.test/api/intake/github", {
+      method: "POST",
+      body: "x".repeat(MAX_WEBHOOK_BYTES + 1),
+      headers: { "x-github-event": "issues", "x-github-delivery": "oversized" },
+    }),
+  );
+
+  assert.equal(response.status, 413);
+});
+
+test("redelivering the install event does not undo the uninstall", async () => {
+  // GitHub keeps the delivery id across a retry and across a human pressing Redeliver, so
+  // this is the same delivery that connected the repository in the first place.
+  const response = await POST(installationEvent("created", "install-1"));
+
+  assert.equal(await response.text(), "already applied");
+  assert.equal(await isConnected(), false);
+});
+
+test("a fresh install event after an uninstall reconnects", async () => {
+  await POST(installationEvent("created", "reinstall-1"));
+
+  assert.equal(await isConnected(), true);
+});
+
+test("going private leaves the repository connected", async () => {
+  await POST(repositoryEvent("privatized"));
+
+  assert.equal(await isConnected(), true);
+});
+
+test("a transferred repository stops being connected", async () => {
+  await POST(repositoryEvent("transferred", "newowner/security-reports"));
+
+  assert.equal(await isConnected(), false);
 });
