@@ -136,18 +136,22 @@ export const connectedRepository = pgTable(
  * What the sandbox is allowed to touch. Scope is bound here, at the capability boundary,
  * never taken from a string the agent produced.
  */
-export const targetProfile = pgTable("target_profile", {
-  id: id(),
-  name: text("name").notNull(),
-  imageDigest: text("image_digest").notNull(),
-  snapshotId: text("snapshot_id"),
-  /** Endpoints, scenarios, canary seeding config. */
-  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
-  /** Allowed hosts/paths; consulted by scope-guard. */
-  scopeRules: jsonb("scope_rules").notNull().default(sql`'[]'::jsonb`),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const targetProfile = pgTable(
+  "target_profile",
+  {
+    id: id(),
+    name: text("name").notNull(),
+    imageDigest: text("image_digest").notNull(),
+    snapshotId: text("snapshot_id"),
+    /** Endpoints, scenarios, canary seeding config. */
+    config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+    /** Allowed hosts/paths; consulted by scope-guard. */
+    scopeRules: jsonb("scope_rules").notNull().default(sql`'[]'::jsonb`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("target_profile_name_key").on(t.name)],
+);
 
 /** The human-facing report. Its state is the report lifecycle, never job execution. */
 export const report = pgTable(
@@ -155,7 +159,7 @@ export const report = pgTable(
   {
     id: id(),
     channel: intakeChannel("channel").notNull(),
-    /** Stable pointer back to the origin, e.g. "acme/security-reports#482". */
+    /** Stable pointer back to the origin, e.g. "github:123456:issue:482". */
     sourceRef: text("source_ref").notNull(),
     title: text("title").notNull(),
     body: text("body").notNull(),
@@ -361,11 +365,14 @@ export const sessionEvent = pgTable(
       .references(() => report.id, { onDelete: "restrict" }),
     seq: integer("seq").notNull(),
     type: text("type").notNull(),
+    /** Stable key for retryable worker events. Null for events that are intentionally repeatable. */
+    eventKey: text("event_key"),
     data: jsonb("data").notNull().default(sql`'{}'::jsonb`),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("session_event_report_seq_key").on(t.reportId, t.seq),
+    uniqueIndex("session_event_report_event_key_key").on(t.reportId, t.eventKey),
     index("session_event_report_idx").on(t.reportId),
   ],
 );

@@ -11,6 +11,7 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:drift": "drizzle-kit generate && git diff --quiet --exit-code drizzle",
+    "seed:target": "node --env-file-if-exists=.env.local --import tsx scripts/seed-target.ts",
     "test": "node --env-file-if-exists=.env.local --import tsx --test \"lib/**/*.test.ts\""
   },
   "dependencies": {
