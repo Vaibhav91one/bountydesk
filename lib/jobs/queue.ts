@@ -49,6 +49,8 @@ export type EnqueueResult = {
   state: JobExecutionState;
   /** False when this delivery had already been recorded, i.e. the webhook was replayed. */
   created: boolean;
+  /** Tells intake whether a replay is still active or is a terminal no-op. */
+  disposition: "CREATED" | "IN_FLIGHT" | "TERMINAL_REPLAY";
 };
 
 /**
@@ -70,7 +72,12 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
     .returning({ id: inboundJob.id, state: inboundJob.state });
 
   if (inserted.length > 0) {
-    return { jobId: inserted[0].id, state: inserted[0].state, created: true };
+    return {
+      jobId: inserted[0].id,
+      state: inserted[0].state,
+      created: true,
+      disposition: "CREATED",
+    };
   }
 
   const [existing] = await db
@@ -92,7 +99,12 @@ export async function enqueue(input: EnqueueInput): Promise<EnqueueResult> {
     );
   }
 
-  return { jobId: existing.id, state: existing.state, created: false };
+  return {
+    jobId: existing.id,
+    state: existing.state,
+    created: false,
+    disposition: isTerminal(existing.state) ? "TERMINAL_REPLAY" : "IN_FLIGHT",
+  };
 }
 
 /**
@@ -200,6 +212,7 @@ function heldBy(lease: Lease) {
     eq(inboundJob.id, lease.id),
     eq(inboundJob.leaseOwner, lease.owner),
     eq(inboundJob.fence, lease.fence),
+    sql`${inboundJob.leaseExpiresAt} > now()`,
   );
 }
 
@@ -233,6 +246,12 @@ export async function advance(
 
 /** Finish a job and drop the lease. Only the current lease holder may do this. */
 export async function complete(lease: Lease): Promise<void> {
+  if (!canTransition(lease.state, "DONE")) {
+    throw new Error(
+      `illegal job transition ${lease.state} -> DONE for job ${lease.id}`,
+    );
+  }
+
   const updated = await db
     .update(inboundJob)
     .set({
@@ -242,7 +261,7 @@ export async function complete(lease: Lease): Promise<void> {
       lastError: null,
       updatedAt: new Date(),
     })
-    .where(heldBy(lease))
+    .where(and(heldBy(lease), eq(inboundJob.state, lease.state)))
     .returning({ id: inboundJob.id });
 
   if (updated.length === 0) throw new LeaseLostError(lease.id);
@@ -273,6 +292,7 @@ export async function fail(lease: Lease, error: string): Promise<void> {
      where ${inboundJob.id}         = ${lease.id}
        and ${inboundJob.leaseOwner} = ${lease.owner}
        and ${inboundJob.fence}      = ${lease.fence}
+       and ${inboundJob.leaseExpiresAt} > now()
     returning ${inboundJob.id} as id
   `);
 

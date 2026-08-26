@@ -116,8 +116,29 @@ test("a replayed delivery does not create a second job", async () => {
   });
 
   assert.equal(first.created, true);
+  assert.equal(first.disposition, "CREATED");
   assert.equal(second.created, false, "a replay must not create a new job");
+  assert.equal(
+    second.disposition,
+    "IN_FLIGHT",
+    "a non-terminal replay must not be classified as completed work",
+  );
   assert.equal(second.jobId, first.jobId, "a replay must resolve to the same job");
+
+  const claimed = await queue.claim("worker-replay", 60);
+  assert.ok(claimed);
+  const running = await queue.advance(
+    await queue.advance(await queue.advance(claimed, "PARSED"), "SESSION_CREATED"),
+    "RUNNING",
+  );
+  await queue.complete(running);
+
+  const terminalReplay = await queue.enqueue({
+    channel: "github",
+    deliveryId: "replayed",
+    payload: { attempt: 3 },
+  });
+  assert.equal(terminalReplay.disposition, "TERMINAL_REPLAY");
 });
 
 test("SKIP LOCKED means a second claim does not block on a locked row", async () => {
@@ -206,12 +227,29 @@ test("an illegal transition is refused", async () => {
   assert.equal(queue.canTransition("DEAD_LETTER", "RECEIVED"), false);
 });
 
+test("a job cannot be completed before it reaches RUNNING", async () => {
+  await drain();
+  await seed();
+
+  const received = await queue.claim("worker-too-early", 60);
+  assert.ok(received);
+
+  await assert.rejects(
+    () => queue.complete(received),
+    /illegal job transition RECEIVED -> DONE/,
+  );
+});
+
 test("a worker that lost its lease cannot write over the one that took over", async () => {
   await drain();
   await seed();
 
-  const stale = await queue.claim("worker-stale", 60);
-  assert.ok(stale);
+  const claimed = await queue.claim("worker-stale", 60);
+  assert.ok(claimed);
+  const stale = await queue.advance(
+    await queue.advance(await queue.advance(claimed, "PARSED"), "SESSION_CREATED"),
+    "RUNNING",
+  );
 
   // Expire the lease, as if this worker had stalled past it.
   await dbm.db
@@ -225,16 +263,33 @@ test("a worker that lost its lease cannot write over the one that took over", as
   assert.ok(fresh.fence > stale.fence, "reclaiming must issue a newer fence");
 
   // The stale worker now comes back to life and tries to finish the job it thinks it owns.
-  await assert.rejects(
-    () => queue.advance(stale, "PARSED"),
-    queue.LeaseLostError,
-    "a stale lease must not be able to advance the job",
-  );
+  await assert.rejects(() => queue.advance(stale, "DONE"), queue.LeaseLostError);
   await assert.rejects(() => queue.complete(stale), queue.LeaseLostError);
   await assert.rejects(() => queue.fail(stale, "boom"), queue.LeaseLostError);
 
   // The rightful holder is unaffected.
-  await queue.advance(fresh, "PARSED");
+  await queue.complete(fresh);
+});
+
+test("an expired lease cannot mutate a job before another worker reclaims it", async () => {
+  await drain();
+  await seed();
+
+  const claimed = await queue.claim("worker-expired", 60);
+  assert.ok(claimed);
+  const expired = await queue.advance(
+    await queue.advance(await queue.advance(claimed, "PARSED"), "SESSION_CREATED"),
+    "RUNNING",
+  );
+
+  await dbm.db
+    .update(dbm.inboundJob)
+    .set({ leaseExpiresAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.inboundJob.id, expired.id));
+
+  await assert.rejects(() => queue.advance(expired, "DONE"), queue.LeaseLostError);
+  await assert.rejects(() => queue.complete(expired), queue.LeaseLostError);
+  await assert.rejects(() => queue.fail(expired, "too late"), queue.LeaseLostError);
 });
 
 test("a job is buried once it exhausts its attempts", async () => {
