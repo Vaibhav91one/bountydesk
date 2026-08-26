@@ -80,7 +80,13 @@ const createdAt = () =>
 const updatedAt = () =>
   timestamp("updated_at", { withTimezone: true }).notNull().defaultNow();
 
-/** A GitHub App installation. Suspension and deletion are recorded, never hard-deleted. */
+/**
+ * A GitHub App installation.
+ *
+ * `deletedAt` is a tombstone. GitHub issues a new installation id when an account installs
+ * the App again, so nothing legitimate ever needs this row brought back, and never clearing
+ * it means an out-of-order or redelivered `installation.created` cannot resurrect access.
+ */
 export const githubInstallation = pgTable(
   "github_installation",
   {
@@ -106,8 +112,17 @@ export const connectedRepository = pgTable(
       .references(() => githubInstallation.id, { onDelete: "cascade" }),
     repoId: bigint("repo_id", { mode: "number" }).notNull(),
     fullName: text("full_name").notNull(),
+    /**
+     * Which target the sandbox may touch for this repository. Null means the operator has
+     * not configured it, and intake refuses the repository until they do. Only an operator
+     * sets this; no webhook ever does, which is what keeps a stale delivery from restoring
+     * intake on its own.
+     */
     targetProfileId: uuid("target_profile_id").references(() => targetProfile.id),
+    /** The installation grant: did the account select this repository for the App? */
     active: boolean("active").notNull().default(true),
+    /** Repository archive state, tracked apart from the grant so neither overwrites the other. */
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
