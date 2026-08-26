@@ -344,3 +344,26 @@ export async function sweepExpiredLeases(): Promise<{
 
   return { released: released.length, deadLettered: buried.length };
 }
+
+/**
+ * Bury a job that cannot be processed, without burning the remaining attempts on it.
+ *
+ * fail() is for something that might work next time. This is for something that will not:
+ * a delivery whose repository is no longer connected, say. Retrying that five times on a
+ * backoff produces the same answer five times and delays nothing but the dead-letter row.
+ */
+export async function abandon(lease: Lease, reason: string): Promise<void> {
+  const updated = await db
+    .update(inboundJob)
+    .set({
+      state: "DEAD_LETTER",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: reason,
+      updatedAt: new Date(),
+    })
+    .where(and(heldBy(lease), eq(inboundJob.state, lease.state)))
+    .returning({ id: inboundJob.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
