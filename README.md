@@ -4,6 +4,9 @@ Automated bug-bounty triage. A submitted report is authenticated, scope-checked,
 
 Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs × TrueFoundry × Qodo Agent Harness Hackathon.
 
+> **Status: scaffold.** This repo currently holds the Phase 0 project scaffold (CI, contribution rules, Qodo review trail). The pipeline described below is the target MVP and is being built phase by phase — it is not yet implemented.
+
+
 ## Frozen MVP
 
 GitHub Issue intake → one pinned Juice Shop target → two frozen scenarios (search UNION SQLi, login auth-bypass) → human-approved GitHub comment. Everything else is roadmap.
