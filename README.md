@@ -4,7 +4,11 @@ Automated bug-bounty triage. A submitted report is authenticated, scope-checked,
 
 Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs × TrueFoundry × Qodo Agent Harness Hackathon.
 
-> **Status: scaffold.** This repo currently holds the Phase 0 project scaffold (CI, contribution rules, Qodo review trail). The pipeline described below is the target MVP and is being built phase by phase, and is not yet implemented.
+> **Status: building, phase by phase.** Done so far: the Postgres schema and the durable jobs
+> queue, signed GitHub App webhook intake with installation and repository lifecycle handling,
+> and GitHub OAuth login behind a reviewer allowlist. Not built yet: the sandbox and canary
+> oracle, the approval gate, comment delivery, and the operator UI. The pipeline described
+> below is the target MVP, not a description of what runs today.
 
 
 ## Frozen MVP
@@ -25,7 +29,9 @@ Open [http://localhost:3000](http://localhost:3000).
 Every substantive change lands through a GitHub pull request reviewed by [Qodo Merge](https://github.com/apps/qodo-merge-pro) before merge. Direct pushes to `main` are blocked by branch protection. For each PR, Qodo's automated review, our responses (fixes or reasoned dismissals), and any follow-up review are visible in the PR thread.
 
 Representative reviewed PRs:
-- [#1, Phase 0 scaffold: CI, contribution rules, Qodo evidence trail](https://github.com/Vaibhav91one/bountydesk/pull/1) (Qodo flagged README/CI-pinning; both addressed in-thread)
+
+- [#4, signed GitHub App webhook and installation lifecycle](https://github.com/Vaibhav91one/bountydesk/pull/4). Qodo's first pass found five issues in the intake path, two of them High. A redelivered `installation.created` could clear `deleted_at` and hand back access an uninstall had taken away, and the access check ran in a separate statement from the enqueue, so a suspension could commit between the two and the job was created anyway. Both are fixed: lifecycle deliveries are now deduplicated in the same transaction as the mutation they apply, and intake holds the access check and the enqueue in one transaction with a `FOR SHARE` lock on the rows it read. A follow-up review covered the fixes, and the two orderings are pinned by concurrent-connection tests.
+- [#1, Phase 0 scaffold: CI, contribution rules, Qodo evidence trail](https://github.com/Vaibhav91one/bountydesk/pull/1). Qodo flagged the README and unpinned CI actions; both addressed in-thread.
 
 Contribution rules: see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
