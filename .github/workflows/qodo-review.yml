@@ -1,0 +1,42 @@
+name: Qodo review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: qodo-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  qodo-reviewed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Require Qodo review of current head
+        shell: bash
+        run: |
+          reviews="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
+
+          if ! jq -e --arg head_sha "$HEAD_SHA" '
+            any(.[];
+              .user.login == "qodo-code-review[bot]" and
+              .commit_id == $head_sha and
+              .state != "DISMISSED"
+            )
+          ' <<<"$reviews" >/dev/null; then
+            echo "::error::Qodo has not reviewed the current PR head ${HEAD_SHA}."
+            echo "Request or rerun Qodo review after the latest push."
+            exit 1
+          fi

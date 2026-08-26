@@ -17,4 +17,7 @@ gh pr create                                 # Qodo auto-reviews; address; then 
 ```
 
 ## CI
-`.github/workflows/ci.yml` runs install + lint + build on every PR. Keep it green; tests are added per phase.
+`.github/workflows/ci.yml` runs install, lint, tests when a test script exists, and build on every PR.
+`.github/workflows/qodo-review.yml` verifies that Qodo reviewed the current PR head commit, not an
+older revision. Keep both `build` and `qodo-reviewed` green; once the Qodo workflow has landed and
+reported its first status, both contexts must be required by `main` branch protection.
