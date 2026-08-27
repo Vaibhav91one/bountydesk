@@ -1,0 +1,40 @@
+/**
+ * Runs the outbox drain by hand, for local dev and the live smoke test.
+ *
+ *   npm run worker:delivery -- [count]
+ *
+ * There is no production approval trigger yet (A4 provides the native TrueForge gate), so an
+ * `outbound_delivery` row only exists here if something inserted one by hand — see
+ * docs/smoke-test-github-walking-skeleton.md for how the live smoke test does that.
+ */
+import { randomUUID } from "node:crypto";
+
+import { deliverOnce } from "@/lib/delivery/worker";
+import { sweepExpiredLeases } from "@/lib/delivery/queue";
+
+async function main(): Promise<void> {
+  const count = Number(process.argv[2] ?? "1");
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error("usage: npm run worker:delivery -- [count]");
+  }
+
+  const { released } = await sweepExpiredLeases();
+  console.log(`swept: released=${released}`);
+
+  const owner = `local-delivery-${randomUUID()}`;
+  for (let i = 0; i < count; i++) {
+    const deliveryId = await deliverOnce(owner);
+    if (!deliveryId) {
+      console.log("nothing claimable");
+      break;
+    }
+    console.log(`processed delivery ${deliveryId}`);
+  }
+}
+
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exit(1);
+  });
