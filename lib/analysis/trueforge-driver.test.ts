@@ -231,6 +231,90 @@ test("ensureSession and run never change the report's lifecycle state", async ()
   assert.equal(reportRow.state, "TRIAGING", "run must not touch report state");
 });
 
+test("ensureSession recovers a retry after an earlier attempt committed the verdict but crashed before the session row", async () => {
+  const reportId = await seedReport("TRIAGING");
+
+  // Simulate the exact partial-failure window the fix closes: a first attempt's verdict
+  // committed (ensureInitialVerdict succeeded), but the process died before the agent_session
+  // insert. No production code path produces this on its own without a real crash, so it's
+  // seeded directly here.
+  // The driver always passes the same fixed summary/evidence/marker shape on every call, so a
+  // genuine retry never disagrees with itself on those fields, only the id and marker text
+  // that used to be re-randomized. Seed the fixture with those exact same fixed values, not an
+  // arbitrary placeholder, so this test simulates a real retry rather than two different
+  // callers legitimately disagreeing (which ensureInitialVerdict is supposed to keep refusing).
+  const { computeContentHash } = await import("@/lib/verdicts/hash");
+  const priorVerdictId = randomUUID();
+  const priorPayload = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.\n\n<!-- bountydesk-delivery:${priorVerdictId} -->`;
+  await dbm.db.insert(dbm.verdict).values({
+    id: priorVerdictId,
+    reportId,
+    outcome: "ANALYSIS_ONLY",
+    summary: "Analysis-only result: automated reproduction was not run.",
+    evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    payload: priorPayload,
+    contentHash: computeContentHash(priorPayload),
+    revision: 1,
+  });
+
+  const client = fakeClient();
+  // Must not throw VerdictIntegrityError: a naive retry that minted a fresh random id and a
+  // different payload would disagree with the row above and fail permanently.
+  await driver.createTrueforgeAnalysisDriver(client).ensureSession(context(reportId));
+
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(verdicts.length, 1, "the retry must not create a second verdict row");
+  assert.equal(verdicts[0].id, priorVerdictId);
+  assert.equal(verdicts[0].payload, priorPayload);
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.ok(session, "the retry must still create the agent_session row it failed to create before");
+});
+
+test("concurrent run() calls for the same report start exactly one turn", async () => {
+  const reportId = await seedReport("TRIAGING");
+  // A custom createTurn override replaces the fake's own counter entirely, so this test
+  // tracks calls itself rather than reading client.createTurnCalls.
+  let calls = 0;
+  let inFlight = 0;
+  let maxConcurrent = 0;
+  const client = fakeClient({
+    async createTurn() {
+      calls++;
+      inFlight++;
+      maxConcurrent = Math.max(maxConcurrent, inFlight);
+      // A real delay so two overlapping run() calls actually race inside the awaited call,
+      // not just in the microtask queue before either reaches it.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      inFlight--;
+      return { turnId: `trueturn-${randomUUID()}`, snapshot: { status: "running" } };
+    },
+  });
+  const d = driver.createTrueforgeAnalysisDriver(client);
+  await d.ensureSession(context(reportId));
+
+  await Promise.all([d.run(context(reportId)), d.run(context(reportId))]);
+
+  // The row lock serializes the two calls at the database level: the second one always finds
+  // the first one's committed turnId and returns without ever reaching createTurn, so the two
+  // calls never actually overlap inside it, whatever the scheduler's raw concurrency was.
+  assert.equal(maxConcurrent, 1, "createTurn must never run for two callers at once");
+  assert.equal(calls, 1, "only one turn may ever be created for one report");
+
+  const sessions = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessions.length, 1);
+  assert.ok(sessions[0].turnId);
+});
+
 test("an already-aborted signal makes ensureSession throw and touch nothing", async () => {
   const reportId = await seedReport("TRIAGING");
   const client = fakeClient();

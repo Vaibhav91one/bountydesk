@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { agentSession, db, eq, report } from "@/lib/db";
+import { agentSession, and, db, eq, report, verdict } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
@@ -53,8 +53,22 @@ export function createTrueforgeAnalysisDriver(
         .limit(1);
       if (existing) return;
 
-      const verdictId = randomUUID();
-      const payload = buildPayload(verdictId);
+      // A retry after this same function failed partway (session creation or the insert
+      // below threw, after the verdict already committed) must reuse that verdict's exact id
+      // and payload, not generate a fresh random one: ensureInitialVerdict treats a
+      // (reportId, revision) match with a disagreeing payload as a hard integrity error, since
+      // it has no way to tell "this is just a retry" from "two different callers disagree
+      // about what this report's verdict says." Without this lookup, every retry would mint a
+      // new id, embed a different marker, and permanently poison itself against the verdict
+      // the first attempt already committed.
+      const [existingVerdict] = await db
+        .select({ id: verdict.id, payload: verdict.payload })
+        .from(verdict)
+        .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+        .limit(1);
+
+      const verdictId = existingVerdict?.id ?? randomUUID();
+      const payload = existingVerdict?.payload ?? buildPayload(verdictId);
       await ensureInitialVerdict({
         id: verdictId,
         reportId,
@@ -84,26 +98,6 @@ export function createTrueforgeAnalysisDriver(
     async run({ reportId, signal }: AnalysisContext): Promise<void> {
       if (signal.aborted) throw signal.reason;
 
-      const [session] = await db
-        .select({
-          id: agentSession.id,
-          sessionId: agentSession.sessionId,
-          turnId: agentSession.turnId,
-          capabilityToken: agentSession.capabilityToken,
-        })
-        .from(agentSession)
-        .where(eq(agentSession.reportId, reportId))
-        .limit(1);
-      if (!session) {
-        throw new Error(
-          `trueforgeAnalysisDriver.run: no agent session for report ${reportId}; ensureSession must run first`,
-        );
-      }
-
-      // A turn was already started for this report by an earlier pass; the poller takes it
-      // from here regardless of how that turn is doing.
-      if (session.turnId) return;
-
       const [reportRow] = await db
         .select({ title: report.title, body: report.body })
         .from(report)
@@ -113,15 +107,60 @@ export function createTrueforgeAnalysisDriver(
         throw new Error(`trueforgeAnalysisDriver.run: report ${reportId} does not exist`);
       }
 
-      const content = buildTurnMessage(reportRow.title, reportRow.body, session.capabilityToken);
-      const { turnId } = await client.createTurn(session.sessionId, [
-        { type: "user.message", content },
-      ]);
+      // The row lock spans the createTurn call on purpose, unlike the delivery worker's GitHub
+      // calls: TrueForge is a loopback service this deployment always controls, not a slow or
+      // rate-limited external API, so holding one Postgres row lock for the length of one local
+      // call is a bounded, acceptable cost for what it buys. Without it, two concurrent run()
+      // attempts (or a stale worker still executing after its lease expired, racing a fresh
+      // retry) could both pass the "no turnId yet" check, both call createTurn, and both try to
+      // write: TrueForge chains a new turn onto the session's last turn by default, so a second
+      // concurrent createTurn call does not just waste an API call, it cancels the first turn
+      // outright. Serializing on this row means the second attempt always sees the first
+      // attempt's committed turnId and returns without ever calling createTurn.
+      //
+      // Residual, accepted gap: if a transaction crashes after TrueForge accepts a turn but
+      // before the write below commits, that turn is orphaned. The next retry creates a new
+      // one, which supersedes it via the same session-chaining behavior, at the cost of one
+      // wasted call. Same category as ensureSession's accepted orphaned-session cost above.
+      await db.transaction(async (tx) => {
+        const [session] = await tx
+          .select({
+            id: agentSession.id,
+            sessionId: agentSession.sessionId,
+            turnId: agentSession.turnId,
+            capabilityToken: agentSession.capabilityToken,
+          })
+          .from(agentSession)
+          .where(eq(agentSession.reportId, reportId))
+          .for("update");
 
-      await db
-        .update(agentSession)
-        .set({ turnId, turnStatus: "RUNNING", updatedAt: new Date() })
-        .where(eq(agentSession.id, session.id));
+        if (!session) {
+          throw new Error(
+            `trueforgeAnalysisDriver.run: no agent session for report ${reportId}; ensureSession must run first`,
+          );
+        }
+
+        // A turn was already started for this report, either by an earlier pass or by
+        // whichever concurrent caller won the lock first. The poller takes it from here
+        // regardless of how that turn is doing.
+        if (session.turnId) return;
+
+        if (signal.aborted) throw signal.reason;
+
+        const content = buildTurnMessage(
+          reportRow.title,
+          reportRow.body,
+          session.capabilityToken,
+        );
+        const { turnId } = await client.createTurn(session.sessionId, [
+          { type: "user.message", content },
+        ]);
+
+        await tx
+          .update(agentSession)
+          .set({ turnId, turnStatus: "RUNNING", updatedAt: new Date() })
+          .where(eq(agentSession.id, session.id));
+      });
 
       if (signal.aborted) throw signal.reason;
     },
