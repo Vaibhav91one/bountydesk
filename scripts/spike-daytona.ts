@@ -171,7 +171,11 @@ async function main(): Promise<void> {
     // So there are only two acceptable outcomes per probe: nothing came back at all, or what
     // came back is identifiably the interception proxy. Anything else means the destination
     // answered, whatever it said.
+    // Both halves are required. The body alone could in principle be echoed by something the
+    // sandbox reached, and the status alone says nothing, since a real destination answers 4xx
+    // perfectly well.
     const DENIAL = "Internet is restricted";
+    const DENIAL_STATUS = "403";
 
     // curl absent, a broken shell or a changed toolbox response would otherwise make every
     // probe "fail to connect" and hand back a clean bill of health.
@@ -183,8 +187,10 @@ async function main(): Promise<void> {
     const probes: { name: string; url: string; header?: string }[] = [
       // A public HTTPS host, by name.
       { name: "public_https_by_name", url: "https://example.com" },
-      // The same shape by literal IP, so a blocked DNS lookup cannot be mistaken for blocked egress.
-      { name: "public_ip_no_dns", url: "https://1.1.1.1" },
+      // The same shape by literal IP, so a blocked DNS lookup cannot be mistaken for blocked
+      // egress. Plain HTTP on purpose: over TLS a certificate that does not match a bare IP
+      // fails the request, and that failure would look exactly like the network refusing it.
+      { name: "public_ip_no_dns", url: "http://1.1.1.1" },
       // The endpoint that hands out cloud credentials, in both dialects.
       { name: "cloud_metadata_imds", url: "http://169.254.169.254/latest/meta-data/iam/security-credentials/" },
       { name: "cloud_metadata_gce", url: "http://169.254.169.254/computeMetadata/v1/", header: "Metadata-Flavor: Google" },
@@ -222,8 +228,8 @@ async function main(): Promise<void> {
       const err = /ERR (.*)/.exec(output)?.[1]?.trim() ?? "";
       step(`egress_${probe.name}`, { curlExit, status, body: body.slice(0, 120), err: err.slice(0, 120) });
 
-      if (curlExit !== 0 && status === null) continue;      // nothing came back at all
-      if (body.includes(DENIAL)) continue;                  // the interception proxy refused it
+      if (curlExit !== 0 && status === null) continue;                          // nothing came back
+      if (status === DENIAL_STATUS && body.includes(DENIAL)) continue;          // the proxy refused it
 
       // Everything else is the far end answering, including a 4xx it chose to send.
       reached.push(`${probe.name} (curl ${curlExit}, status ${status ?? "none"})`);

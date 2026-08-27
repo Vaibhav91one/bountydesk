@@ -5,6 +5,7 @@ process.env.DAYTONA_API_KEY = "dtn_test_key_not_a_real_one";
 
 import {
   DaytonaError,
+  MAX_EXEC_SECONDS,
   MAX_TTL_MINUTES,
   UnsafeSandboxSpec,
   assertSafeSpec,
@@ -114,7 +115,7 @@ test("the request blocks all network, names the resolved id, and carries no secr
   const stub = (async (input: unknown, init?: RequestInit) => {
     if (String(input).includes("/snapshots/")) return json(snapshot);
     sent.push(JSON.parse(init?.body as string));
-    return json({ id: "sb-1", state: "started" });
+    return json({ id: "sb-1", state: "started", public: false });
   }) as typeof fetch;
 
   await withFetch(stub, async () => {
@@ -320,6 +321,16 @@ test("a toolbox response with no exit status is a failure, not a success", async
     await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
   });
 
+  // The mirror image: a status with no result. Defaulting it to "" would show a truncated
+  // response to a probe that reads output as a command that ran and printed nothing.
+  await withFetch((async () => json({ exitCode: 0 })) as typeof fetch, async () => {
+    await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
+  });
+
+  await withFetch((async () => json({ exitCode: 1.5, result: "" })) as typeof fetch, async () => {
+    await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
+  });
+
   // A cast is a promise to the compiler, not a check.
   await withFetch((async () => json({ exitCode: 0, result: {} })) as typeof fetch, async () => {
     await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
@@ -340,6 +351,62 @@ test("a public sandbox that cannot be destroyed is reported as still running", a
   }) as typeof fetch;
 
   await withFetch(stub, async () => {
-    await assert.rejects(createSandbox(spec), /could not be destroyed[\s\S]*reachable until its TTL/);
+    await assert.rejects(createSandbox(spec), /could not be confirmed destroyed[\s\S]*may be reachable/);
   });
+});
+
+test("a delete the provider accepted is not proof the sandbox is gone", async () => {
+  // The DELETE succeeds and the sandbox is still there. Only assertSandboxGone catches that,
+  // which is why rejecting a sandbox does both.
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    if (init?.method === "DELETE") return new Response(null, { status: 204 });
+    if (String(input).includes("/sandbox/")) return json({ id: "sb-public", state: "started" });
+    return json({ id: "sb-public", state: "started", public: true });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), /could not be confirmed destroyed/);
+  });
+});
+
+test("a sandbox that does not say whether it is public is not assumed private", async () => {
+  // An omitted field is not a false. A provider that stops sending it would otherwise turn
+  // every sandbox into a private one by default.
+  let deleted = false;
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    if (init?.method === "DELETE") {
+      deleted = true;
+      return new Response(null, { status: 204 });
+    }
+    if (String(input).includes("/sandbox/")) return new Response("gone", { status: 404 });
+    return json({ id: "sb-unknown", state: "started" });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), /did not report whether it is public/);
+  });
+  assert.equal(deleted, true, "an ambiguous sandbox must not be left running");
+});
+
+test("provisioning without a sandbox id is unusable, not merely odd", async () => {
+  const stub = (async (input: unknown) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    return json({ state: "started", public: false });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), /no sandbox id/);
+  });
+});
+
+test("a command timeout must be whole seconds within our own ceiling", async () => {
+  const sandbox = { id: "sb-1", toolboxProxyUrl: "https://proxy.example" } as Parameters<typeof execute>[0];
+
+  // Zero is the dangerous one: it can leave the sandbox with no deadline of its own while the
+  // HTTP request still aborts, so the command keeps running with nothing watching it.
+  for (const seconds of [0, -1, 1.5, MAX_EXEC_SECONDS + 1, Number.NaN]) {
+    await assert.rejects(execute(sandbox, "echo ok", seconds), UnsafeSandboxSpec, String(seconds));
+  }
 });

@@ -29,6 +29,12 @@ export const PURPOSE = "reproduction";
  */
 export const MAX_TTL_MINUTES = 60;
 
+/**
+ * Our ceiling on a single command. Zero would hand the sandbox no deadline of its own while the
+ * HTTP request still aborts, which leaves the command running with nothing left watching it.
+ */
+export const MAX_EXEC_SECONDS = 300;
+
 export type SandboxSpec = {
   /**
    * Which snapshot to boot. The caller owns this value and it is never derived from report
@@ -195,22 +201,18 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
 
   const created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
 
+  // Without an id there is nothing to inspect, nothing to tear down, and nothing to reconcile
+  // later. A response that cannot answer "which sandbox?" is not usable at any price.
+  if (typeof created.id !== "string" || !created.id) {
+    throw new DaytonaError(`provisioning returned no sandbox id: ${JSON.stringify(created).slice(0, 200)}`);
+  }
+
   // Asked for and got are different things, and a publicly reachable sandbox running a target
-  // built from someone else's report is the one outcome there is no recovering from.
-  if (created.public) {
-    try {
-      await deleteSandbox(created.id);
-    } catch (error) {
-      // Saying "destroyed" when the delete failed would hide a reachable hostile sandbox
-      // behind a reassuring error message. The id goes in the message either way, because
-      // whoever handles this needs something to reconcile with.
-      throw new UnsafeSandboxSpec(
-        `sandbox ${created.id} came up public AND could not be destroyed (${
-          error instanceof Error ? error.message : String(error)
-        }); it is reachable until its TTL expires`,
-      );
-    }
-    throw new UnsafeSandboxSpec(`sandbox ${created.id} came up public; destroyed`);
+  // built from someone else's report is the one outcome there is no recovering from. So this
+  // wants an explicit false, not the absence of a true: a field the provider stopped sending
+  // would otherwise read as private.
+  if (created.public !== false) {
+    await destroyRejected(created.id, created.public === true ? "came up public" : "did not report whether it is public");
   }
 
   return created;
@@ -286,6 +288,30 @@ export async function assertSandboxGone(id: string): Promise<void> {
   }
 }
 
+/**
+ * Tear down a sandbox we have decided not to use, and refuse to say it is gone unless it is.
+ *
+ * A successful DELETE is a request the provider accepted, which is not the same as a sandbox
+ * that no longer exists. Reporting "destroyed" over a failed teardown would hide a reachable
+ * hostile sandbox behind a reassuring message, so both the delete and the confirmation have to
+ * hold, and the id travels in every message because whoever handles this needs something to
+ * reconcile with.
+ */
+async function destroyRejected(id: string, reason: string): Promise<never> {
+  try {
+    await deleteSandbox(id);
+    await assertSandboxGone(id);
+  } catch (error) {
+    throw new UnsafeSandboxSpec(
+      `sandbox ${id} ${reason} AND could not be confirmed destroyed (${
+        error instanceof Error ? error.message : String(error)
+      }); it may be reachable until its TTL expires`,
+    );
+  }
+
+  throw new UnsafeSandboxSpec(`sandbox ${id} ${reason}; destroyed and confirmed gone`);
+}
+
 export type ExecResult = { exitCode: number; result: string };
 
 /**
@@ -307,6 +333,12 @@ export async function execute(
     throw new DaytonaError(`sandbox ${sandbox.id} has no toolbox proxy url`);
   }
 
+  if (!Number.isInteger(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > MAX_EXEC_SECONDS) {
+    throw new UnsafeSandboxSpec(
+      `a command timeout must be a whole number of seconds between 1 and ${MAX_EXEC_SECONDS}`,
+    );
+  }
+
   const base = sandbox.toolboxProxyUrl.replace(/\/$/, "");
   const response = await fetch(`${base}/${encodeURIComponent(sandbox.id)}/process/execute`, {
     method: "POST",
@@ -325,12 +357,16 @@ export async function execute(
 
   const data = (await response.json()) as { exitCode?: unknown; code?: unknown; result?: unknown };
   const exitCode = data.exitCode ?? data.code;
-  const result = data.result ?? "";
+  const result = data.result;
 
   // A cast is a promise to the compiler, not a check. If the toolbox ever answers with a shape
   // other than this, the caller should learn about it here rather than three frames later when
-  // something calls .trim on an object. No exit status in particular must not become exit 0.
-  if (typeof exitCode !== "number" || typeof result !== "string") {
+  // something calls .trim on an object.
+  //
+  // Neither field gets a default. A missing exit status must not become 0, and a missing result
+  // must not become "": a probe that reads the output of a command would then see a truncated
+  // response as a command that ran and printed nothing.
+  if (typeof exitCode !== "number" || !Number.isInteger(exitCode) || typeof result !== "string") {
     throw new DaytonaError(
       `toolbox returned an unusable result for a command in ${sandbox.id}: ${JSON.stringify(data).slice(0, 200)}`,
     );
