@@ -24,19 +24,28 @@ expensive order to find out.
 | --- | --- |
 | requested snapshot | `dad882b3-a047-4715-8713-bddec50bb7ca` |
 | snapshot record | `daytona-small`, image `daytonaio/sandbox:0.9.0`, state `active`, cpu 1, mem 1, disk 3 |
-| sandbox id | `f8814fa2-536b-498b-bcde-4d45c4647997` |
+| sandbox id | `e58a583f-637d-4ffa-91c3-721ff63867bc` |
 | reached state | `started` |
 | observed snapshot | `daytona-small` |
 | **`networkBlockAll`** | **`true`** |
 | network allow list | `null` |
 | domain allow list | `null` |
 | sandbox class | `container` |
-| runner | `b5b7fc53-adc4-43b6-9cc2-1951ee2dad68` |
+| runner | `bf0e9939-c1f8-4979-bc5e-22e2863d6ca2` |
 | execute with org key | **HTTP 401** |
-| teardown | delete succeeded, second delete also succeeded, subsequent `GET` 404s |
+| teardown | delete succeeded, second delete also succeeded, `GET` then 404s |
+| label sweep after teardown | empty |
 
-Verified afterwards: **zero** sandboxes in the account carry a `bountydesk.*` label, so the
-spike leaked nothing.
+Every row above except the execute one is an assertion, not a printed value. The script throws
+if the booted snapshot is neither the id nor the name it asked for, if `networkBlockAll` comes
+back false, or if either egress allow list is non-empty, so exiting zero is the claim that
+those gates held. Teardown is confirmed by a 404 specifically: a timeout or a 401 means we do
+not know, and treating that as gone is how a leak gets recorded as a clean run.
+
+Afterwards the script lists every sandbox carrying its own labels and deletes what it finds.
+That covers the case a `finally` block cannot: a create the provider accepted but that failed
+on our side, leaving a sandbox whose id we never learned. It came back empty. **Zero** sandboxes
+in the account carry a `bountydesk.*` label, so the spike leaked nothing.
 
 `sandbox_class: container` is the shared-kernel container the threat model already describes,
 which is a confirmation rather than a surprise. It is not an adversarial boundary, and the
@@ -96,6 +105,18 @@ frozen scenarios against that image before calling it the demo target.
 npm run spike:daytona -- <snapshot-id-or-name>
 ```
 
-Creates one reproduction-class sandbox with no network and a ten-minute TTL, prints the
-evidence, and always attempts teardown. Every identifier comes from the argument or from the
-script; nothing is read from a report, and no platform secret enters the sandbox.
+Creates one reproduction-class sandbox with no network and a ten-minute TTL, asserts each gate,
+and always attempts teardown. Every identifier comes from the argument or from the script;
+nothing is read from a report, and no platform secret enters the sandbox.
+
+`lib/sandbox/daytona.ts` provisions reproduction sandboxes and nothing else. There is no build
+class, because a build sandbox needs a dependency egress allow list and the only trustworthy
+source of those hosts is a `TargetProfile` that does not exist yet. An allow-list argument with
+nowhere to get its value from reads as a control while being a hole, so the capability is
+absent rather than validated, and the file consequently has no argument anywhere that grants a
+sandbox network access. It comes back with the build tier, sourced from the profile.
+
+The create names the id the snapshot lookup returned, not the string the caller passed. A
+caller may pass a mutable display name, and one repointed between the lookup and the create
+would otherwise hand back a sandbox built from something other than the snapshot whose state
+and limits were just checked.

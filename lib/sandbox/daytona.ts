@@ -4,24 +4,32 @@ import { requireSecret } from "@/lib/env";
  * The smallest boundary BountyDesk needs against Daytona.
  *
  * Deliberately hand-rolled over the REST API rather than the official SDK, which pulls in the
- * AWS S3 client, socket.io, tar and busboy to do things we never do. What we need is four
- * calls, and four calls should not cost twenty dependencies.
+ * AWS S3 client, socket.io, tar and busboy to do things we never do. What we need is five
+ * calls, and five calls should not cost twenty dependencies.
  *
- * Every field here is server-controlled. Nothing in this module reads issue text, email
- * bodies, attachments or model output, and nothing accepts a snapshot, image, host or command
- * from a caller that got one of those. The profile decides; this module executes.
+ * This module provisions reproduction sandboxes and nothing else. There is no build class yet,
+ * because a build sandbox needs a dependency egress allow list, and the only place those hosts
+ * may come from is a server-held TargetProfile that does not exist yet. An allow-list argument
+ * with nowhere trustworthy to get its value from is worse than no argument: it looks like a
+ * control while being a hole. So the whole capability is absent, and consequently there is no
+ * argument anywhere in this file that grants a sandbox network access.
  */
 const API = "https://app.daytona.io/api";
 
 /** Long enough for a slow provision, short enough that a hung call cannot wedge a worker. */
 const TIMEOUT_MS = 30_000;
 
-export type SandboxPurpose = "build" | "reproduction";
+/** Stamped on everything this module creates, so an abandoned sandbox can be found again. */
+export const PURPOSE_LABEL = "bountydesk.purpose";
+export const PURPOSE = "reproduction";
 
 export type SandboxSpec = {
-  /** Snapshot id or name, taken from a server-held TargetProfile. Never from a payload. */
+  /**
+   * Which snapshot to boot. The caller owns this value and it is never derived from report
+   * text, an attachment or model output. Today the only caller is the spike script, where it
+   * is an operator argument; when the analysis driver lands it comes from the TargetProfile.
+   */
   snapshot: string;
-  purpose: SandboxPurpose;
   /**
    * The limits this run expects. Daytona refuses resource fields on a create-from-snapshot
    * ("Cannot specify Sandbox resources when using a snapshot"), because the snapshot carries
@@ -33,11 +41,6 @@ export type SandboxSpec = {
   diskGb: number;
   /** Wall-clock ceiling. Provisioning refuses a spec without one. */
   ttlMinutes: number;
-  /**
-   * Only a build may name hosts, and only these. A reproduction sandbox gets no network at
-   * all, which is enforced below rather than requested politely.
-   */
-  domainAllowList?: string[];
   labels?: Record<string, string>;
 };
 
@@ -81,18 +84,6 @@ export function assertSafeSpec(spec: SandboxSpec): void {
     throw new UnsafeSandboxSpec("snapshot must be a server-held identifier");
   }
 
-  if (spec.purpose === "reproduction" && spec.domainAllowList?.length) {
-    throw new UnsafeSandboxSpec(
-      "a reproduction sandbox gets no network, so it cannot carry a domain allow list",
-    );
-  }
-
-  if (spec.purpose === "build" && !spec.domainAllowList?.length) {
-    throw new UnsafeSandboxSpec(
-      "a build sandbox must name the hosts it may reach; an empty list would mean unrestricted",
-    );
-  }
-
   for (const n of [spec.cpu, spec.memoryGb, spec.diskGb, spec.ttlMinutes]) {
     if (!Number.isFinite(n) || n <= 0) {
       throw new UnsafeSandboxSpec("cpu, memory, disk and ttl must all be positive");
@@ -107,14 +98,24 @@ export function assertSafeSpec(spec: SandboxSpec): void {
 /**
  * Refuse a snapshot whose baked-in limits are not the ones this run expects.
  *
- * Recording a limit we never applied would make the evidence packet wrong, and "we capped it
- * at 2 GiB" is exactly the sort of claim that has to be true.
+ * A missing value counts as a mismatch, not as agreement. Since limits cannot be requested,
+ * the snapshot record is the only evidence there is, and a snapshot that declines to say what
+ * it allocates has not shown us anything. Recording a limit we never applied would make the
+ * evidence packet wrong, and "we capped it at 2 GiB" is exactly the sort of claim that has to
+ * be true.
  */
 export function assertSnapshotLimits(spec: SandboxSpec, snapshot: SnapshotInfo): void {
+  const compare = (label: string, declared: number | null, expected: number) =>
+    declared == null
+      ? `${label} not declared by the snapshot`
+      : declared !== expected
+        ? `${label} ${declared} != ${expected}`
+        : null;
+
   const mismatch = [
-    snapshot.cpu != null && snapshot.cpu !== spec.cpu ? `cpu ${snapshot.cpu} != ${spec.cpu}` : null,
-    snapshot.mem != null && snapshot.mem !== spec.memoryGb ? `memory ${snapshot.mem} != ${spec.memoryGb}` : null,
-    snapshot.disk != null && snapshot.disk !== spec.diskGb ? `disk ${snapshot.disk} != ${spec.diskGb}` : null,
+    compare("cpu", snapshot.cpu, spec.cpu),
+    compare("memory", snapshot.mem, spec.memoryGb),
+    compare("disk", snapshot.disk, spec.diskGb),
   ].filter(Boolean);
 
   if (mismatch.length) {
@@ -144,13 +145,17 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 /**
- * Provision one ephemeral sandbox.
+ * Provision one ephemeral reproduction sandbox.
  *
- * `networkBlockAll` is derived from the purpose rather than passed in, so a caller cannot ask
- * for a reproduction sandbox with network by supplying one more argument. `env` and `secrets`
- * are never sent: the hostile runtime holds no GitHub token, database URL, webhook secret,
- * model key or Daytona key, and the way to guarantee that is to have no code path that puts
- * one there.
+ * `networkBlockAll` is a constant here, not an argument, so no caller can ask for a sandbox
+ * with network by supplying one more field. `env` and `secrets` are never sent: the hostile
+ * runtime holds no GitHub token, database URL, webhook secret, model key or Daytona key, and
+ * the way to guarantee that is to have no code path that puts one there.
+ *
+ * The create names the resolved snapshot id rather than whatever string the caller passed.
+ * `spec.snapshot` may be a mutable display name, and a name that gets repointed between the
+ * lookup and the create would hand back a sandbox built from something other than the
+ * snapshot whose state and limits were just checked.
  */
 export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
   assertSafeSpec(spec);
@@ -161,23 +166,46 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
   if (snapshot.state !== "active") {
     throw new UnsafeSandboxSpec(`snapshot ${spec.snapshot} is ${snapshot.state}, not active`);
   }
+  if (!snapshot.id) {
+    throw new UnsafeSandboxSpec(`snapshot ${spec.snapshot} resolved without an immutable id`);
+  }
   assertSnapshotLimits(spec, snapshot);
 
-  const body: Record<string, unknown> = {
-    snapshot: spec.snapshot,
+  const body = {
+    snapshot: snapshot.id,
     ttlMinutes: spec.ttlMinutes,
-    networkBlockAll: spec.purpose === "reproduction",
+    networkBlockAll: true,
     autoDeleteInterval: 0,
-    labels: { ...spec.labels, "bountydesk.purpose": spec.purpose },
+    labels: { ...spec.labels, [PURPOSE_LABEL]: PURPOSE },
   };
-
-  if (spec.purpose === "build") body.domainAllowList = spec.domainAllowList!.join(",");
 
   return call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
 }
 
 export async function getSandbox(id: string): Promise<Sandbox> {
   return call<Sandbox>(`/sandbox/${encodeURIComponent(id)}?verbose=true`);
+}
+
+/**
+ * Everything carrying these labels. The basis of both teardown sweeps and reconciliation.
+ *
+ * The list is paginated and the caller wants all of it: a sweep that stops at the first page
+ * silently leaves the rest running.
+ */
+export async function listSandboxes(labels: Record<string, string>): Promise<Sandbox[]> {
+  const found: Sandbox[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const query = new URLSearchParams({ labels: JSON.stringify(labels) });
+    if (cursor) query.set("cursor", cursor);
+
+    const page: { items: Sandbox[]; nextCursor: string | null } = await call(`/sandbox?${query}`);
+    found.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+
+  return found;
 }
 
 /**
@@ -205,6 +233,22 @@ export async function deleteSandbox(id: string, attempts = 6): Promise<void> {
 
       await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
     }
+  }
+}
+
+/**
+ * Confirm a sandbox is really gone.
+ *
+ * Only a 404 proves absence. A timeout, a 401 or a provider outage all mean "we do not know",
+ * and treating those as success is how a leak gets recorded as a clean teardown.
+ */
+export async function assertSandboxGone(id: string): Promise<void> {
+  try {
+    const still = await getSandbox(id);
+    throw new DaytonaError(`sandbox ${id} still exists in state ${still.state}`);
+  } catch (error) {
+    if (error instanceof DaytonaError && error.status === 404) return;
+    throw error;
   }
 }
 
