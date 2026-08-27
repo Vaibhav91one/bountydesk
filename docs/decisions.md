@@ -379,8 +379,10 @@ while `lib/targets/configure.ts` hardcodes the official upstream Juice Shop dige
 an exact match on conflict. That digest
 does not establish provenance for an image built from the connected fork. A dynamic profile
 has no generated image digest until its build finishes, so the data model must either separate
-source identity from runtime artifact identity or record the built digest per run. Make that
-choice after the provisioning spike proves where Daytona exposes the immutable artifact.
+source identity from runtime artifact identity or record the built digest per run. The spike
+answered where Daytona exposes the immutable artifact: nowhere. So the data model has to
+separate the two, carrying source identity on the profile and recording the built artifact's
+digest per run, observed from inside the sandbox.
 
 #### Analysis driver gate
 
@@ -393,6 +395,36 @@ limits hold; that TTL and reconciliation destroy abandoned sandboxes; that the a
 only the provisioned target; and that the controller can seed and evaluate the oracle without
 exposing that channel to the PoC. A failure at any gate produces `ANALYSIS_ONLY` with an
 infrastructure reason, never `NOT_REPRODUCED`.
+
+#### Spike result, 2026-08-27
+
+The first gate is cleared. `lib/sandbox/daytona.ts` provisions from a named snapshot, reads
+back what booted, confirms `networkBlockAll` on a reproduction sandbox, and destroys it; a
+second delete is a no-op and the sandbox then 404s. Full evidence, including the sandbox and
+snapshot identifiers, is in [`spikes/2026-08-27-daytona-provisioning.md`](./spikes/2026-08-27-daytona-provisioning.md).
+
+Four provider facts change what the gates above can mean.
+
+Resource limits cannot be requested. Daytona rejects a create that carries cpu, memory or disk
+alongside a snapshot, so those are fixed when the snapshot is built. "Resource limits hold" is
+therefore verified against the snapshot record before provisioning, not asserted in the
+request.
+
+There is no resolved image digest in the API. Neither the snapshot nor the sandbox response
+carries one, and nothing digest-shaped exists in the OpenAPI document except Daytona's own
+build SHA. "The amd64 digest verifies" cannot be answered from the control plane. It has to be
+pinned into the snapshot's image reference at creation and re-checked from inside the sandbox,
+which is the stronger of the two anyway: it answers what booted rather than what was asked for.
+
+Teardown is not immediately available. A just-started sandbox answers `DELETE` with 409, and
+the first version of this spike leaked one exactly that way. `deleteSandbox` retries with
+backoff, which makes it best-effort rather than a guarantee, so the provider TTL and a
+reconciler are load-bearing rather than defence in depth.
+
+Command execution is unresolved. The toolbox proxy rejects the organisation API key with 401
+and the control-plane schemas expose no per-sandbox credential. Everything downstream of it
+(no runtime downloads, unreachable metadata, agent reaching only the target, oracle seeding)
+stays gated on that.
 
 Reasons recorded beside `ANALYSIS_ONLY`, none of which are report states: `NO_BOUND_TARGET`,
 `COULD_NOT_BUILD`, `COULD_NOT_DEPLOY`, `NO_APPROVED_ORACLE`, `TARGET_UNAVAILABLE`,
