@@ -31,6 +31,9 @@ tests reject invalid states, duplicate work and missing security configuration.
 - Verify raw-body `X-Hub-Signature-256` before parsing and persist the delivery before returning 202.
 - Process `issues`, `installation`, `installation_repositories` and `repository` lifecycle events.
 - Disable intake/delivery immediately on suspension, uninstall or repository removal.
+- Accept email and file-upload intake as channels in their own right. Neither depends on a
+  GitHub connection: both can create and triage a report with no repository connected.
+  Accepted and unbuilt; no route exists yet.
 
 **Exit:** install, selected-repository change, signed issue delivery, replay, suspension and uninstall
 tests pass. A forged webhook performs no write.
@@ -41,20 +44,42 @@ tests pass. A forged webhook performs no write.
 - Implement deterministic scope and evidence checks with explicit provenance and tool-error states.
 - Surface semantic duplicate candidates for human review; only exact delivery replays auto-no-op.
 - Produce the visibly distinct analysis-only packet without a verdict or severity.
+- Parse untrusted email and uploaded content in a disposable intake environment with no
+  external network and no platform secrets.
+- Support reports that have no target profile, and let a reviewer bind an authorised profile
+  afterwards. Record why a report is analysis-only as a reason beside the state:
+  `NO_BOUND_TARGET`, `COULD_NOT_BUILD`, `COULD_NOT_DEPLOY`, `NO_APPROVED_ORACLE`,
+  `TARGET_UNAVAILABLE`, `POLICY_REFUSED`, `INTAKE_PARSE_FAILED`. None of these is a report
+  state, and none needs a migration.
 
 **Exit:** out-of-scope targets cannot reach clone/deploy/egress capabilities, and fallback output makes
 no automated genuine/fake claim.
 
-## Phase 4 — Pinned reproduction and canary oracle
+## Phase 4 — Reproduction: pinned target, canary oracle, then dynamic builds
 
-- Provision the immutable Juice Shop v17.3.0 linux/amd64 snapshot and verify its configured digest.
+- Start with the provisioning spike. It gates everything else in this phase: prove that
+  BountyDesk can provision the environment, that a `TargetProfile` selects the exact snapshot,
+  that the built artifact corresponds to the connected commit, that the amd64 digest verifies,
+  that the target starts with no runtime downloads, that build egress is restricted and
+  reproduction egress blocked, that cloud metadata is unreachable, that resource limits hold,
+  and that TTL plus reconciliation destroy abandoned sandboxes. A failure at any gate produces
+  `ANALYSIS_ONLY` with an infrastructure reason, never `NOT_REPRODUCED`.
+- Build the connected fork at its pinned commit ahead of the live run and record the source
+  archive, build recipe, base image and generated image digests, then provision the immutable
+  snapshot and verify its configured digest.
 - Run the sandbox offline with one legal target and strict per-report budgets.
 - Seed an unpredictable canary through the trusted fixture, run the negative control first, execute
   the PoC, and evaluate the oracle outside the PoC environment.
 - Implement both frozen scenarios from Q18 and always tear down through provider TTL plus reconciler.
+- Add the dynamic tier only after the pinned connected-fork path works end to end: clone at a
+  server-resolved commit in the build sandbox, build, then reproduce against the immutable
+  output in a second sandbox with no network. Enforce the Q20 rule that a profile with no
+  fixture and oracle cannot emit `REPRODUCED`.
 
 **Exit:** both scenarios reproduce from fresh sandboxes; negative controls remain false; digest,
-egress and teardown failure tests fail closed.
+egress and teardown failure tests fail closed; a build that does not complete yields
+`COULD_NOT_BUILD` rather than `not-reproduced`; and a target without an approved fixture cannot
+emit `REPRODUCED` even when the PoC claims success.
 
 ## Phase 5 — Human approval and idempotent delivery
 
@@ -82,6 +107,8 @@ has all three backup paths prepared.
 ## Explicitly deferred
 
 - Reporter reply/resume (`AWAITING_REPORTER`).
-- Arbitrary-repository Dockerfile generation and live-target/black-box reproduction.
+- Live-target and black-box reproduction for scope that cannot be self-hosted.
+- Automatic outbound delivery on the email and upload channels. An approved packet on those
+  channels is sent by the operator, who confirms the send in the app.
 - Production multi-tenancy/RBAC, encrypted tenant secret storage and microVM isolation rollout.
 - Automatic semantic-duplicate closure, automated severity, or any verdict without human approval.

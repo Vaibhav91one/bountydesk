@@ -1,20 +1,38 @@
 # BountyDesk
 
-Automated bug-bounty triage. A submitted report is authenticated, scope-checked, reproduced against a pinned target inside an isolated sandbox with a defender-authored **canary oracle**, and shipped as a verdict **only after a human approves the exact outbound comment**.
+Automated bug-bounty triage. A submitted report is authenticated, scope-checked, reproduced against a target the server pins, inside an isolated sandbox with a defender-authored **canary oracle**, and shipped as a verdict **only after a human approves the exact outbound comment**.
 
 Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs × TrueFoundry × Qodo Agent Harness Hackathon.
 
-> **Status: in progress.** Built so far: the Postgres schema and durable jobs queue, signed
+> **Status: in progress.** Built today: the Postgres schema and durable jobs queue, signed
 > GitHub App webhook intake with installation and repository lifecycle handling, GitHub OAuth
-> login behind a reviewer allowlist, and the worker that turns an accepted delivery into a
-> durable report. Not built yet: the sandbox and canary oracle, the approval gate, comment
-> delivery, and the operator UI. The pipeline described below is the target, not a description
-> of what runs today.
+> login behind a reviewer allowlist, the worker that turns an accepted delivery into a durable
+> report, and the Channels settings screen. Designed and not built: the sandboxes, the canary
+> oracle, the approval gate, comment delivery, email and file-upload intake, and the dynamic
+> per-repository target tier. Nothing below describes behaviour that runs today unless this
+> paragraph says it does.
 
 
-## Frozen MVP
+## Scope
 
-GitHub Issue intake → one pinned Juice Shop target → two frozen scenarios (search UNION SQLi, login auth-bypass) → human-approved GitHub comment. Everything else is roadmap.
+**Intake and reproduction are separate.** A report enters through one of three independent
+channels — GitHub issues, email, or file upload — and email and upload need no GitHub
+connection. Reproduction is what requires a server-authorised target; a report without one is
+triaged and stops at an evidence packet for a human.
+
+**The demo target** is the owner's connected fork of Juice Shop at commit `1867b926`, the
+`v17.3.0` tag, with two frozen scenarios (search UNION SQLi, login auth-bypass) verified
+against it. The image is built ahead of the run, so the live reproduction starts an immutable
+snapshot with no network.
+
+**The dynamic tier** clones a connected repository at a server-resolved commit, builds it in a
+sandbox that gets narrow dependency egress and no platform secrets, and reproduces against the
+immutable output in a second sandbox with none. Accepted, unbuilt, and gated on a provisioning
+spike.
+
+**What never changes:** a target with no defender-authored fixture and oracle cannot return a
+reproduced verdict, whatever the proof-of-concept printed. It returns evidence and a human
+decides.
 
 ## Getting started
 
