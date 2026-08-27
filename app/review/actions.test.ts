@@ -261,12 +261,11 @@ test("a pinned hash that no longer matches the payload is refused before writing
 
 test("approving a verdict that is no longer the one pending is refused, not silently redirected", async () => {
   signIn(REVIEWER_ID);
-  const { reportId, agentSessionId } = await seedPendingReport();
+  const { reportId, verdictId, agentSessionId } = await seedPendingReport();
 
   // Simulate a new pending call replacing the one the reviewer's page rendered: a different
   // verdict now sits in agent_session.pending_verdict_id. The reviewer's stale page still
   // submits the *old* verdict id it was actually shown.
-  const staleVerdictId = randomUUID();
   const newVerdictId = randomUUID();
   const newPayload = `a newer analysis\n\n<!-- bountydesk-delivery:${newVerdictId} -->`;
   await dbm.db.insert(dbm.verdict).values({
@@ -285,9 +284,10 @@ test("approving a verdict that is no longer the one pending is refused, not sile
     .set({ pendingVerdictId: newVerdictId, pendingApprovedContentHash: computeContentHash(newPayload) })
     .where(dbm.eq(dbm.agentSession.id, agentSessionId));
 
-  const result = await actions.allowVerdict(reportId, staleVerdictId);
+  const result = await actions.allowVerdict(reportId, verdictId);
 
   assert.equal(result.ok, false);
+  assert.equal((await decisionsFor(verdictId)).length, 0);
   assert.equal((await decisionsFor(newVerdictId)).length, 0);
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
 });
