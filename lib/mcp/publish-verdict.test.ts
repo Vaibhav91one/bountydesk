@@ -40,6 +40,7 @@ async function seedFixture(
   opts: {
     approval?: "none" | "approved" | "denied" | "stale";
     tamperPayloadAfterDecision?: boolean;
+    channel?: "github" | "manual";
   } = {},
 ) {
   seq += 1;
@@ -48,8 +49,8 @@ async function seedFixture(
   const [r] = await dbm.db
     .insert(dbm.report)
     .values({
-      channel: "manual",
-      sourceRef: `manual:${n}`,
+      channel: opts.channel ?? "github",
+      sourceRef: opts.channel === "manual" ? `manual:${n}` : `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
       state: "AWAITING_APPROVAL",
@@ -201,6 +202,16 @@ test("the happy path enqueues delivery, moves the report to DELIVERING, and clea
   assert.equal(pending.pendingToolCallId, null);
   assert.equal(pending.pendingVerdictId, null);
   assert.equal(pending.pendingApprovedContentHash, null);
+});
+
+test("a non-GitHub report is not moved into the GitHub delivery queue", async () => {
+  const fixture = await seedFixture({ approval: "approved", channel: "manual" });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: false, reason: "unsupported delivery channel: manual" });
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
 });
 
 test("calling publishVerdict again after a successful call finds nothing pending", async () => {

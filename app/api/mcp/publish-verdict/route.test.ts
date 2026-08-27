@@ -36,8 +36,8 @@ async function seedPublishableFixture() {
   const [r] = await dbm.db
     .insert(dbm.report)
     .values({
-      channel: "manual",
-      sourceRef: `manual:${randomUUID()}`,
+      channel: "github",
+      sourceRef: `github:1:issue:${Math.floor(Math.random() * 1_000_000) + 1}`,
       title: "report",
       body: "body",
       state: "AWAITING_APPROVAL",

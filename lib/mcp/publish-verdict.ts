@@ -81,12 +81,18 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
     }
 
     const [reportRow] = await tx
-      .select({ sourceRef: report.sourceRef })
+      .select({ channel: report.channel, sourceRef: report.sourceRef })
       .from(report)
       .where(eq(report.id, verdictRow.reportId))
       .limit(1);
 
     if (!reportRow) return { ok: false, reason: "report not found" };
+    if (reportRow.channel !== "github") {
+      return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
+    }
+    if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid GitHub delivery target" };
+    }
 
     await enqueueDelivery(
       {
