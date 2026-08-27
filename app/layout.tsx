@@ -1,9 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Inter } from "next/font/google";
+import { Geist, Geist_Mono, Inter, Questrial } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 
 const inter = Inter({subsets:['latin'],variable:'--font-sans'});
+
+// The display face, mapped to --font-heading in globals.css. Questrial ships one weight,
+// so headings and the wordmark use it and anything that needs a bold stays on Inter.
+const questrial = Questrial({
+  weight: "400",
+  subsets: ["latin"],
+  variable: "--font-questrial",
+});
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,6 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         geistMono.variable,
         "font-sans",
         inter.variable,
+        questrial.variable,
       )}
     >
       <body className="min-h-full flex flex-col">{children}</body>
