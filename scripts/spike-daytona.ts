@@ -5,7 +5,12 @@
  * sandbox from a named snapshot, see what actually booted, run fixed harmless commands, show
  * from inside that the reproduction sandbox really has no egress, and destroy it again?
  *
- *   npm run spike:daytona -- <snapshot-id-or-name>
+ *   npm run spike:daytona -- <snapshot-id-or-name> [expected-image-ref]
+ *
+ * The image reference is optional and defaults to the snapshot's own declared `imageName`,
+ * which only proves the check runs, not that it can refuse. Pass the real expected reference
+ * (the one a TargetProfile would carry) to get the negative control below: a deliberately
+ * wrong reference must be refused before the correct one is ever tried.
  *
  * Exiting zero is the claim that those gates passed, so every gate is an assertion rather than
  * a printed value: a run that observes the wrong snapshot, or network where there should be
@@ -85,7 +90,7 @@ async function sweep(attempts = 1, ignore?: string): Promise<string[]> {
 
 async function main(): Promise<void> {
   const requested = process.argv[2];
-  if (!requested) throw new Error("usage: npm run spike:daytona -- <snapshot-id-or-name>");
+  if (!requested) throw new Error("usage: npm run spike:daytona -- <snapshot-id-or-name> [expected-image-ref]");
 
   console.log("\n1. REQUESTED");
   step("requested_snapshot", requested);
@@ -95,19 +100,41 @@ async function main(): Promise<void> {
     state: info.state, cpu: info.cpu, mem: info.mem, disk: info.disk,
   });
 
-  console.log("\n2. PROVISION (reproduction class: no network, short TTL)");
+  const imageRef = process.argv[3] ?? info.imageName ?? "";
+  step("expected_image_ref", imageRef);
+  if (process.argv[3] === undefined) {
+    step("expected_image_ref_note", "no expected-image-ref given; defaulted to the snapshot's own imageName, so this run only proves the check executes, not that it can refuse a wrong build");
+  }
+
+  const spec = {
+    snapshot: requested,
+    imageRef,
+    // Matched to the snapshot's own declared limits; the client refuses a mismatch or a
+    // snapshot that declares none, since limits cannot be requested from this provider.
+    cpu: info.cpu!,
+    memoryGb: info.mem!,
+    diskGb: info.disk!,
+    ttlMinutes: 10,
+    labels: { [SPIKE_LABEL]: SPIKE_RUN },
+  };
+
+  console.log("\n2. NEGATIVE CONTROL (a wrong image reference must be refused)");
+  const wrongImageRef = `ghcr.io/bountydesk-spike/does-not-exist@sha256:${"0".repeat(64)}`;
+  try {
+    await createSandbox({ ...spec, imageRef: wrongImageRef });
+    throw new Error("createSandbox accepted a snapshot against the wrong expected image");
+  } catch (error) {
+    if (error instanceof Error && /image .* != expected/.test(error.message)) {
+      step("negative_control_image_mismatch_refused", true);
+    } else {
+      throw error;
+    }
+  }
+
+  console.log("\n3. PROVISION (reproduction class: no network, short TTL)");
   let created: Sandbox;
   try {
-    created = await createSandbox({
-      snapshot: requested,
-      // Matched to the snapshot's own declared limits; the client refuses a mismatch or a
-      // snapshot that declares none, since limits cannot be requested from this provider.
-      cpu: info.cpu!,
-      memoryGb: info.mem!,
-      diskGb: info.disk!,
-      ttlMinutes: 10,
-      labels: { [SPIKE_LABEL]: SPIKE_RUN },
-    });
+    created = await createSandbox(spec);
   } catch (error) {
     // The create may have landed anyway. Nothing else knows its id, so sweep by label, and
     // keep asking: a sandbox the provider accepted can take a moment to appear in a listing,
@@ -126,7 +153,7 @@ async function main(): Promise<void> {
     const sandbox = await waitForState(created.id, ["started", "running"]);
     step("state", sandbox.state);
 
-    console.log("\n3. INSPECT (what actually booted, not what we asked for)");
+    console.log("\n4. INSPECT (what actually booted, not what we asked for)");
     step("observed_snapshot", sandbox.snapshot);
     step("network_block_all", sandbox.networkBlockAll);
     step("network_allow_list", sandbox.networkAllowList ?? null);
@@ -150,7 +177,7 @@ async function main(): Promise<void> {
     // leave the digest to an in-sandbox check. See the conclusion in the PR.
     step("digest_from_control_plane", "not exposed by the Daytona API");
 
-    console.log("\n4. EXECUTE (fixed commands, chosen here, never supplied by a report)");
+    console.log("\n5. EXECUTE (fixed commands, chosen here, never supplied by a report)");
     const hello = await execute(sandbox, "echo bountydesk-spike-ok");
     step("execute_exit_code", hello.exitCode);
     step("execute_stdout", hello.result.trim());
@@ -158,7 +185,7 @@ async function main(): Promise<void> {
       throw new Error(`the fixed command did not run: exit ${hello.exitCode}, output ${hello.result}`);
     }
 
-    console.log("\n5. EGRESS (the policy the control plane claims, checked from inside)");
+    console.log("\n6. EGRESS (the policy the control plane claims, checked from inside)");
     // networkBlockAll on the sandbox record says what was configured. Only a probe from inside
     // says what is enforced, and that is the claim the reproduction sandbox rests on.
     //
@@ -246,7 +273,7 @@ async function main(): Promise<void> {
     step("egress_mechanism", route.result.trim().slice(0, 400));
 
   } finally {
-    console.log("\n6. TEARDOWN");
+    console.log("\n7. TEARDOWN");
     await deleteSandbox(created.id);
     step("delete_called", true);
 

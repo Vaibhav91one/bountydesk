@@ -30,6 +30,24 @@ async function connectedRepo(repoId: number, fullName: string) {
   });
 }
 
+test("rotating a profile that does not exist yet is refused", async () => {
+  // Must run before anything else creates the shared "juice-shop-v17.3.0" row: every
+  // configure call in this file targets that one fixed name, so this is the only point at
+  // which the profile genuinely does not exist yet.
+  await connectedRepo(700_006, "acme/norotate");
+
+  await assert.rejects(
+    targets.rotateJuiceShopTarget({
+      repoId: 700_006,
+      imageDigest: `sha256:${"2".repeat(64)}`,
+      snapshotId: "snapshot-2",
+    }),
+    /nothing to rotate/,
+  );
+
+  assert.equal((await dbm.db.select().from(dbm.targetProfile)).length, 0);
+});
+
 test("configuring the same repository twice reuses the pinned target profile", async () => {
   await connectedRepo(700_001, "acme/reports");
   const input = {
@@ -46,6 +64,38 @@ test("configuring the same repository twice reuses the pinned target profile", a
     (await dbm.db.select().from(dbm.targetProfile)).length,
     1,
   );
+});
+
+test("rotating an existing profile updates it in place, keeping its id", async () => {
+  await connectedRepo(700_005, "acme/rotated");
+  const first = await targets.configureJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"1".repeat(64)}`,
+    snapshotId: "snapshot-1",
+  });
+
+  const rotated = await targets.rotateJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"9".repeat(64)}`,
+    snapshotId: "snapshot-9",
+  });
+
+  assert.equal(rotated.targetProfileId, first.targetProfileId, "the row is updated, not replaced");
+
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, first.targetProfileId));
+  assert.equal(row.imageDigest, `sha256:${"9".repeat(64)}`);
+  assert.equal(row.snapshotId, "snapshot-9");
+
+  // Restore the pinned values every later test in this file assumes, since rotation is a
+  // real mutation of the one shared row and not scoped to this test's own repository.
+  await targets.rotateJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"1".repeat(64)}`,
+    snapshotId: "snapshot-1",
+  });
 });
 
 test("an existing logical profile must match every pinned setting", async () => {
