@@ -1,3 +1,5 @@
+import { desc } from "drizzle-orm";
+
 import { db, eq, report, verdict } from "@/lib/db";
 import { transition } from "@/lib/reports/lifecycle";
 import {
@@ -76,10 +78,16 @@ async function handleVerifiedPendingCall(
       throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
     }
 
+    // Ordered and bounded explicitly rather than trusting an unordered first row: this
+    // driver only ever produces one verdict per report today, but "only one row exists" is
+    // not the same guarantee as "selected deterministically," and the latter is what a
+    // human approving a specific revision actually needs.
     const [verdictRow] = await tx
       .select({ id: verdict.id, reportId: verdict.reportId, contentHash: verdict.contentHash })
       .from(verdict)
-      .where(eq(verdict.reportId, lease.reportId));
+      .where(eq(verdict.reportId, lease.reportId))
+      .orderBy(desc(verdict.revision))
+      .limit(1);
 
     if (!verdictRow) {
       throw new Error(

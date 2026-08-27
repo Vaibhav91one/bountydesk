@@ -40,8 +40,12 @@ async function seedSubmission(
     decision?: "APPROVED" | "DENIED";
     note?: string;
     noPendingCall?: boolean;
+    badPayloadHash?: boolean;
+    /** Point the submission's agent_session at a different report than the decision's verdict. */
+    crossSession?: boolean;
   } = {},
 ) {
+  const { computeContentHash } = await import("@/lib/verdicts/hash");
   seq += 1;
   const n = seq;
 
@@ -55,14 +59,17 @@ async function seedSubmission(
     })
     .returning({ id: dbm.report.id });
 
+  const payload = `payload ${n}`;
+  const contentHash = computeContentHash(payload);
+
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
       reportId: r.id,
       outcome: "REPRODUCED",
       summary: "summary",
-      payload: `payload ${n}`,
-      contentHash: `hash-${n}`,
+      payload,
+      contentHash,
     })
     .returning({ id: dbm.verdict.id });
 
@@ -76,13 +83,38 @@ async function seedSubmission(
     })
     .returning({ id: dbm.agentSession.id });
 
+  let sessionId = session.id;
+  if (opts.crossSession) {
+    // A second, unrelated report/session; the submission below is deliberately wired to
+    // this one instead of the session the verdict's own report actually owns.
+    const [otherReport] = await dbm.db
+      .insert(dbm.report)
+      .values({
+        channel: "github",
+        sourceRef: `github:1:issue:${n}-other`,
+        title: `other report ${n}`,
+        body: "body",
+      })
+      .returning({ id: dbm.report.id });
+    const [otherSession] = await dbm.db
+      .insert(dbm.agentSession)
+      .values({
+        reportId: otherReport.id,
+        capabilityToken: `cap-${n}-other`,
+        sessionId: `session-${n}-other`,
+        turnId: `turn-${n}-other`,
+      })
+      .returning({ id: dbm.agentSession.id });
+    sessionId = otherSession.id;
+  }
+
   const [decision] = await dbm.db
     .insert(dbm.approvalDecision)
     .values({
       verdictId: v.id,
       reviewer: "test-reviewer",
       decision: opts.decision ?? "APPROVED",
-      payloadHash: `hash-${n}`,
+      payloadHash: opts.badPayloadHash ? `${contentHash}-stale` : contentHash,
       ...(opts.noPendingCall
         ? {}
         : { threadId: `thread-${n}`, toolCallId: `call-${n}` }),
@@ -93,12 +125,13 @@ async function seedSubmission(
   const [submission] = await dbm.db
     .insert(dbm.approvalSubmission)
     .values({
-      agentSessionId: session.id,
+      agentSessionId: sessionId,
       approvalDecisionId: decision.id,
     })
     .returning({ id: dbm.approvalSubmission.id });
 
   return {
+    agentSessionRowId: session.id,
     sessionId: `session-${n}`,
     approvalDecisionId: decision.id,
     submissionId: submission.id,
@@ -252,6 +285,72 @@ test("a createTurn failure retries with backoff and eventually reaches FAILED", 
   const row = await submissionRow(fixture.submissionId);
   assert.equal(row.state, "FAILED");
   assert.equal(row.attempts, queue.MAX_ATTEMPTS);
+});
+
+test("a successful submission hands the agent_session off to the new turn and clears the old pending call", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const { client } = makeFakeClient({ createTurn: async () => ({ turnId: "turn-handoff" }) });
+
+  // Simulate the poller having already parked pending markers on the old turn, the state
+  // the reviewer's decision was made against. All four pending_* columns must move together
+  // (a DB check constraint enforces it), so this seeds a placeholder verdict id/hash rather
+  // than leaving them null.
+  const [seededVerdict] = await dbm.db
+    .select({ id: dbm.verdict.id, contentHash: dbm.verdict.contentHash })
+    .from(dbm.verdict)
+    .innerJoin(dbm.agentSession, dbm.eq(dbm.agentSession.reportId, dbm.verdict.reportId))
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: fixture.threadId,
+      pendingToolCallId: fixture.toolCallId,
+      pendingVerdictId: seededVerdict.id,
+      pendingApprovedContentHash: seededVerdict.contentHash,
+    })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+
+  await worker.submitApprovalOnce("w-handoff", { client });
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+
+  // Without this, the poller would keep asking TrueForge about the old, already-answered
+  // turn forever and never discover what happened to the new chained one.
+  assert.equal(session.turnId, "turn-handoff", "agent_session must follow the new turn");
+  assert.equal(session.turnStatus, "RUNNING");
+  assert.equal(session.pendingThreadId, null);
+  assert.equal(session.pendingToolCallId, null);
+  assert.ok(session.nextPollAt.getTime() <= Date.now() + 1000, "must be pollable again soon");
+});
+
+test("a decision bound to a session for a different report is refused before contacting TrueForge", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED", crossSession: true });
+  const { client, calls } = makeFakeClient();
+
+  await worker.submitApprovalOnce("w-cross-session", { client });
+
+  assert.equal(calls.length, 0, "a mismatched decision/session pairing must never reach TrueForge");
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "PENDING");
+  assert.match(row.lastError ?? "", /is for report .* belongs to report/);
+});
+
+test("an approved decision whose verdict content no longer matches the approved hash is refused", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED", badPayloadHash: true });
+  const { client, calls } = makeFakeClient();
+
+  await worker.submitApprovalOnce("w-stale-hash", { client });
+
+  assert.equal(calls.length, 0, "a stale-hash approval must never reach TrueForge");
+  const row = await submissionRow(fixture.submissionId);
+  assert.match(row.lastError ?? "", /content hash no longer matches/);
 });
 
 test("a submission with no pending call to answer never calls TrueForge", async () => {
