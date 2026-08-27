@@ -14,7 +14,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ error?: string }>;
 }) {
-  if (await currentSession()) redirect("/connections");
+  if (await currentSession()) redirect("/settings/channels");
 
   const { error } = await searchParams;
 
