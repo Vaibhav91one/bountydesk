@@ -57,6 +57,20 @@
       "when": 1787824407279,
       "tag": "0007_overjoyed_namorita",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787828736924,
+      "tag": "0008_purple_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787836862715,
+      "tag": "0009_wild_war_machine",
+      "breakpoints": true
     }
   ]
 }

@@ -8,6 +8,7 @@ import {
   claim,
   complete,
   fail,
+  releaseUnstarted,
   renew,
   type Lease,
 } from "./queue";
@@ -56,8 +57,12 @@ async function runWithHeartbeat(
   reportId: string,
   lease: Lease,
   leaseSeconds: number,
+  outerSignal?: AbortSignal,
 ): Promise<void> {
   const controller = new AbortController();
+  const signal = outerSignal
+    ? AbortSignal.any([controller.signal, outerSignal])
+    : controller.signal;
   const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -66,6 +71,13 @@ async function runWithHeartbeat(
   const leaseLoss = new Promise<never>((_, reject) => {
     rejectLeaseLoss = reject;
   });
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
 
   const heartbeat = () => {
     renewal = renew(lease, leaseSeconds)
@@ -81,16 +93,18 @@ async function runWithHeartbeat(
   timer = setTimeout(heartbeat, intervalMs);
   try {
     await Promise.race([
-      operation({ reportId, lease, signal: controller.signal }),
+      operation({ reportId, lease, signal }),
       leaseLoss,
+      aborted,
     ]);
   } finally {
     stopped = true;
+    signal.removeEventListener("abort", onAbort);
     if (timer) clearTimeout(timer);
     await renewal.catch(() => undefined);
   }
 
-  if (controller.signal.aborted) throw controller.signal.reason;
+  if (signal.aborted) throw signal.reason;
 }
 
 export class UnprocessableDelivery extends Error {
@@ -176,15 +190,27 @@ export async function runOnce(
   {
     analysis,
     leaseSeconds = 60,
-  }: { analysis: AnalysisDriver; leaseSeconds?: number },
+    signal,
+  }: { analysis: AnalysisDriver; leaseSeconds?: number; signal?: AbortSignal },
 ): Promise<string | null> {
+  if (signal?.aborted) return null;
   const claimed = await claim(owner, leaseSeconds);
   if (!claimed) return null;
+
+  if (signal?.aborted) {
+    try {
+      await releaseUnstarted(claimed);
+    } catch (error) {
+      if (!(error instanceof LeaseLostError)) throw error;
+    }
+    return null;
+  }
 
   let lease = claimed;
 
   try {
     if (lease.state === "RECEIVED") lease = await parse(lease);
+    signal?.throwIfAborted();
     if (lease.state === "PARSED") {
       if (!lease.reportId) {
         throw new UnprocessableDelivery("job reached PARSED with no report attached");
@@ -194,17 +220,19 @@ export async function runOnce(
         lease.reportId,
         lease,
         leaseSeconds,
+        signal,
       );
       lease = await advance(lease, "SESSION_CREATED");
     }
     if (lease.state === "SESSION_CREATED") lease = await advance(lease, "RUNNING");
 
+    signal?.throwIfAborted();
     if (lease.state === "RUNNING") {
       if (!lease.reportId) {
         throw new UnprocessableDelivery("job reached RUNNING with no report attached");
       }
 
-      await runWithHeartbeat(analysis.run, lease.reportId, lease, leaseSeconds);
+      await runWithHeartbeat(analysis.run, lease.reportId, lease, leaseSeconds, signal);
       await complete(lease);
     }
 
