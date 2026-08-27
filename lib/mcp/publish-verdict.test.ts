@@ -214,6 +214,20 @@ test("a non-GitHub report is not moved into the GitHub delivery queue", async ()
   assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
 });
 
+test("a malformed GitHub source reference is refused before delivery is enqueued", async () => {
+  const fixture = await seedFixture({ approval: "approved" });
+  await dbm.db
+    .update(dbm.report)
+    .set({ sourceRef: "github:not-a-repository:issue:1" })
+    .where(dbm.eq(dbm.report.id, fixture.reportId));
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: false, reason: "invalid GitHub delivery target" });
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
+});
+
 test("calling publishVerdict again after a successful call finds nothing pending", async () => {
   const fixture = await seedFixture({ approval: "approved" });
 
