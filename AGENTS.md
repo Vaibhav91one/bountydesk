@@ -14,18 +14,36 @@ The verdict comes from the canary, not the model. A fresh, per-run, unpredictabl
 seeded through a trusted fixture, and the oracle is evaluated outside the sandbox. Run a
 negative control first. The model never narrates the verdict.
 
+No fixture, no `REPRODUCED`. A target profile without a defender-authored fixture, negative
+control and oracle adapter cannot produce a reproduced verdict, whatever the PoC printed and
+whatever the model read out of HTTP text, logs or status files. That run produces the
+analysis-only packet and a human decides.
+
+A sandbox status file reports target readiness only. It is sandbox-controlled evidence and can
+never determine reproduction, severity or outbound content. `READY` means the target started
+and answered its health check; `FAILED` means startup failed. Nothing else.
+
 The human gate is never skippable. `publish_verdict` is approval-gated, and the tool refuses
 any payload whose content hash differs from the approved one. Nothing is ever auto-closed:
 semantically similar reports go to a human as top-k candidates, and only exact delivery
 replays are automatic no-ops.
 
+Intake and reproduction are separate. A report enters through one of three independent
+channels: GitHub issues, email, or file upload. Email and upload need no GitHub connection to
+create and triage a report. Reproduction is what needs a server-authorised `TargetProfile`, and
+a report without one stops at `ANALYSIS_ONLY` with nothing cloned, built, deployed or probed.
+
 Connectivity is the GitHub App model, not manual webhooks. OAuth login is identity, the App
-install is repo access. Least privilege is Metadata read plus Issues read and write. The
-webhook secret belongs to the platform, and `installation_id → repo → TargetProfile` resolves
-server-side. Mint short-lived installation tokens per delivery and discard them. Keep access
-in sync from the `installation`, `installation_repositories`, and `repository` lifecycle
-webhooks: a suspended or deleted installation, or a removed repository, must stop intake and
-delivery at once.
+install is repo access. Least privilege is Metadata read plus Issues read and write. Cloning a
+connected repository does not widen that: a public repository clones anonymously, and Contents
+read would be needed only for a private one. The intended private-repository policy accepts and
+triages the signed issue, then refuses reproduction with `POLICY_REFUSED` until that permission
+is deliberately added and accepted. This is not built: current GitHub intake requires a bound
+target profile, and repository visibility is not stored. The webhook secret belongs to the
+platform, and `installation_id → repo → TargetProfile` resolves server-side. Mint short-lived
+installation tokens per delivery and discard them. Keep access in sync from the `installation`,
+`installation_repositories`, and `repository` lifecycle webhooks: a suspended or deleted
+installation, or a removed repository, must stop intake and delivery at once.
 
 Job execution and report lifecycle are separate enums. Job execution runs
 `RECEIVED → PARSED → SESSION_CREATED → RUNNING → DONE | DEAD_LETTER`. Leasing (`lease_owner`,
@@ -57,7 +75,14 @@ a real row lock. `drizzle-kit` handles migrations.
 
 The TrueForge harness runs on `http://localhost:8790` over loopback, with OpenAI as the
 first-class model provider. The scope-guard MCP server is ported from the Sentinel prototype.
-Daytona provides the sandbox, running a pinned Juice Shop v17.3.0 amd64 image.
+Daytona provides the sandboxes and BountyDesk provisions them directly; TrueForge exposes no
+image or snapshot field, so it stays the agent harness. A dynamic run uses two, a build sandbox
+with narrow dependency egress and a reproduction sandbox with none, and only the built artifact
+crosses between them. The build sandbox is not trusted: it runs the customer's code. The demo
+target is the connected fork `Vaibhav91one/juice-shop` at commit
+`1867b926c5f50e4e692dc9c8f61821413cebe0cd`, the `v17.3.0` tag. It must be built and verified
+ahead of the live run so reproduction can start an immutable snapshot offline. None of the
+sandbox work is built yet; see the implementation gates in `docs/decisions.md`.
 
 ## Env
 
@@ -247,7 +272,7 @@ approve one text while GitHub receives another.
 
 ## Design record
 
-The committed source of truth is [`docs/decisions.md`](docs/decisions.md) covering Q1 to Q19,
+The committed source of truth is [`docs/decisions.md`](docs/decisions.md) covering Q1 to Q21,
 [`docs/demo-runbook.md`](docs/demo-runbook.md), and [`docs/plan.md`](docs/plan.md). When this
 summary is ambiguous, defer to those records and ask rather than guess.
 

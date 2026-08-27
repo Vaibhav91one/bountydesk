@@ -11,12 +11,12 @@ One page. Follow top to bottom on demo day.
 
 ## Happy path (the live demo)
 
-**Target:** OWASP Juice Shop v17.3.0 (amd64), prebuilt image — repo, tag, amd64 digest, endpoint, payload, oracle and negative control all frozen and live-verified in `decisions.md` Q18.
+**Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. This proves the source revision, not the runtime image. Before the demo, build that fork into an immutable image, record its generated digest and snapshot ID, then rerun the Q18 scenarios against it. The current Q18 evidence was collected against the official upstream image.
 **Vuln class:** SQLi (single request, deterministic), confirmed by a **per-run canary**.
 
 1. **Intake** — a GitHub issue on the dedicated demo repo: `SQLi in /api/search`. The **installed BountyDesk GitHub App** delivers a **signed** webhook (`X-Hub-Signature-256`, platform-owned App secret); the receiver verifies it and resolves `installation_id → repo → TargetProfile` server-side → harness starts a TrueForge session.
 2. **Triage** — scope_check passes, dedupe_check clean, PoC extracted. (Text-only, seconds.)
-3. **Sandbox** — boot the prebuilt pinned image. No clone, no install, no network: the sandbox is offline.
+3. Sandbox: boot the prebuilt pinned image. No clone, no install, no network at reproduction time: the sandbox is offline. The build that produced it ran earlier, and that is the only step that ever needed the network.
 4. **Seed canary** — the trusted fixture seeds a fresh, unpredictable canary into the target. Run the **negative control** first: without the exploit, the oracle must not trip. The canary is *ours*, not the attacker's.
 5. **Run PoC** — execute the submitted PoC against sandbox-localhost.
 6. **Oracle (the money moment)** — the oracle runs **outside the PoC environment** and checks whether this run's canary reached the trusted sink. It did → `REPRODUCED`. Say out loud: **"the verdict comes from our canary, evaluated outside the sandbox — not from the PoC's own output. A researcher can't fake a 'reproduced.'"**
@@ -38,7 +38,7 @@ One page. Follow top to bottom on demo day.
 
 ## Pre-warm checklist (do 30 min before — this prevents most live-demo deaths)
 
-- [ ] Daytona sandbox **provisioned and warm**; target image **pre-pulled** (no cold-start on stage).
+- [ ] Connected fork **built at the pinned commit** and the snapshot id recorded; Daytona sandbox **provisioned and warm**; target image **pre-pulled** (no cold-start on stage).
 - [ ] **BountyDesk GitHub App** registered (Issues read/write + Metadata) and **installed on the one dedicated demo repo**. Subscribe to Issues + Repository events; handle the automatic Installation + Installation repositories events. Verify a signed test delivery, repository removal, suspension and uninstall; mint the approved-comment installation token server-side, post idempotently and discard it.
 - [ ] Both scenarios on the pinned target **confirmed green** this morning; canary seed + negative control verified on each.
 - [ ] One **full happy-path dry run** end to end, today, on the demo machine + demo network.
@@ -63,5 +63,6 @@ One page. Follow top to bottom on demo day.
 - Don't claim production-grade sandbox isolation on Daytona cloud — say it's the demo layer.
 - Don't let the model narrate the verdict — the canary does.
 - Don't type anything live you can paste.
-- Don't run the "any Git repo, auto-generate Dockerfile" tier live — it's a roadmap talking point, not a stage act.
+- Don't run the dynamic clone-and-build tier live unless the provisioning spike and a full rehearsal both went green today, on this network. This is a demo-risk decision, not a scope limit: the tier is designed and documented, and on stage it is a walkthrough of the two-sandbox diagram. The build is the one step that needs the network the rest of the demo brags about not having, and that is not a sentence to improvise.
+- Don't demo email or file-upload intake as live. They are designed channels; show the UI and say so.
 - Don't clone or install anything at runtime on stage. The image is prebuilt and the sandbox is offline; that's the point.
