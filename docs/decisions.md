@@ -205,10 +205,11 @@ Both scenarios run against the one pinned image; Scenario 2 is the live Backup C
 
 Amended 2026-08-27: the dynamic tier in Q20 downloads connected public repositories
 anonymously, with no source token, and the demo fork is public. Contents: read is required for
-private source. A signed issue from a private connected repository is still accepted and
-triaged, but reproduction yields `ANALYSIS_ONLY` with reason `POLICY_REFUSED`. Adding a
-permission asks each installation owner to approve it. Installations that do not approve
-continue with their old permissions, so existing issue intake does not stop.
+private source. The intended private-repository policy accepts and triages a signed issue, then
+refuses reproduction with `ANALYSIS_ONLY` and reason `POLICY_REFUSED`. That policy is designed,
+not built: current GitHub intake requires a bound target profile, and repository visibility is
+not stored. Adding a permission asks each installation owner to approve it. Installations that
+do not approve continue with their old permissions, so existing issue intake does not stop.
 
 **Token model — no stored PAT, no broad OAuth repo token.** To post a comment: authenticate the App → generate an installation access token (~1h TTL) → post the approved comment idempotently → discard the token. Nothing long-lived is persisted.
 
@@ -367,12 +368,15 @@ been verified. TrueForge's Daytona provider showing `ready` proves a provider is
 it proves nothing about image pinning, offline execution, snapshot selection, or that the
 BountyDesk target snapshot exists.
 
-Two known code gaps that this architecture collides with. `report.target_profile_id` is
-nullable, but `ensureReport()` currently requires a profile, so targetless email and upload
-intake needs a code change before it can exist. The current report state machine also rejects
-`ANALYSIS_ONLY → REPRODUCING`, so binding a target later needs a new transition and transition
-tests. `target_profile.image_digest` is `NOT NULL`, while `lib/targets/configure.ts` hardcodes
-the official upstream Juice Shop digest and asserts an exact match on conflict. That digest
+Known code gaps that this architecture collides with. `report.target_profile_id` is nullable,
+but `ensureReport()` and GitHub intake currently require a profile, so targetless intake needs
+a code change before it can exist. `connected_repository` does not retain trusted repository
+visibility, so the public-source policy cannot distinguish a private repository after intake.
+Persist visibility from authenticated GitHub lifecycle data rather than from report text. The
+current report state machine also rejects `ANALYSIS_ONLY → REPRODUCING`, so binding a target
+later needs a new transition and transition tests. `target_profile.image_digest` is `NOT NULL`,
+while `lib/targets/configure.ts` hardcodes the official upstream Juice Shop digest and asserts
+an exact match on conflict. That digest
 does not establish provenance for an image built from the connected fork. A dynamic profile
 has no generated image digest until its build finishes, so the data model must either separate
 source identity from runtime artifact identity or record the built digest per run. Make that

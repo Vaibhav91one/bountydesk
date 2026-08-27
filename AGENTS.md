@@ -36,14 +36,14 @@ a report without one stops at `ANALYSIS_ONLY` with nothing cloned, built, deploy
 Connectivity is the GitHub App model, not manual webhooks. OAuth login is identity, the App
 install is repo access. Least privilege is Metadata read plus Issues read and write. Cloning a
 connected repository does not widen that: a public repository clones anonymously, and Contents
-read would be needed only for a private one. A report from a private repository is still
-accepted and triaged; only reproduction is refused with `POLICY_REFUSED` until that permission
-is deliberately added and accepted. The webhook secret belongs to the platform, and
-`installation_id → repo → TargetProfile` resolves server-side. Mint short-lived installation
-tokens per delivery and discard them. Keep access in sync from the `installation`,
-`installation_repositories`, and `repository` lifecycle
-webhooks: a suspended or deleted installation, or a removed repository, must stop intake and
-delivery at once.
+read would be needed only for a private one. The intended private-repository policy accepts and
+triages the signed issue, then refuses reproduction with `POLICY_REFUSED` until that permission
+is deliberately added and accepted. This is not built: current GitHub intake requires a bound
+target profile, and repository visibility is not stored. The webhook secret belongs to the
+platform, and `installation_id → repo → TargetProfile` resolves server-side. Mint short-lived
+installation tokens per delivery and discard them. Keep access in sync from the `installation`,
+`installation_repositories`, and `repository` lifecycle webhooks: a suspended or deleted
+installation, or a removed repository, must stop intake and delivery at once.
 
 Job execution and report lifecycle are separate enums. Job execution runs
 `RECEIVED → PARSED → SESSION_CREATED → RUNNING → DONE | DEAD_LETTER`. Leasing (`lease_owner`,
