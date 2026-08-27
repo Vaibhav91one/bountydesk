@@ -162,10 +162,24 @@ async function main(): Promise<void> {
     // networkBlockAll on the sandbox record says what was configured. Only a probe from inside
     // says what is enforced, and that is the claim the reproduction sandbox rests on.
     //
-    // curl's exit status is the wrong test. Daytona intercepts egress with a proxy that answers
-    // 403 rather than dropping the packet, so a blocked request is a *successful* HTTP
-    // transaction and exits 0. What matters is whether the destination was reached, which means
-    // the status line: anything 2xx or 3xx is a real answer from the far end.
+    // Two ways a naive version of this passes without testing anything. Daytona intercepts
+    // egress with a proxy that answers 403 rather than dropping the packet, so a blocked
+    // request is a *successful* HTTP transaction and curl exits 0. And a real destination can
+    // itself answer 4xx, so status alone cannot tell refusal from a reachable service saying
+    // no. A metadata endpoint demanding a header is exactly that case.
+    //
+    // So there are only two acceptable outcomes per probe: nothing came back at all, or what
+    // came back is identifiably the interception proxy. Anything else means the destination
+    // answered, whatever it said.
+    const DENIAL = "Internet is restricted";
+
+    // curl absent, a broken shell or a changed toolbox response would otherwise make every
+    // probe "fail to connect" and hand back a clean bill of health.
+    const haveCurl = await execute(sandbox, "command -v curl >/dev/null && echo CURL_PRESENT", 15);
+    if (!haveCurl.result.includes("CURL_PRESENT")) {
+      throw new Error("curl is not available in the sandbox, so the egress probes prove nothing");
+    }
+
     const probes: { name: string; url: string; header?: string }[] = [
       // A public HTTPS host, by name.
       { name: "public_https_by_name", url: "https://example.com" },
@@ -183,26 +197,42 @@ async function main(): Promise<void> {
     const reached: string[] = [];
     for (const probe of probes) {
       const header = probe.header ? `-H '${probe.header}' ` : "";
-      const result = await execute(
-        sandbox,
-        `: > /tmp/probe.out; curl -sS --max-time 8 ${header}-o /tmp/probe.out -w '%{http_code}' '${probe.url}' 2>&1; echo " body=$(head -c 100 /tmp/probe.out | tr -d '\n')"`,
-        20,
-      );
+      const script = [
+        ": > /tmp/probe.body",
+        `curl -sS --max-time 8 ${header}-o /tmp/probe.body -w '%{http_code}' '${probe.url}' > /tmp/probe.status 2>/tmp/probe.err`,
+        "echo \"PROBE curl_exit=$? status=$(cat /tmp/probe.status)\"",
+        "echo \"BODY $(head -c 120 /tmp/probe.body | tr -d '\\n')\"",
+        "echo \"ERR $(head -c 120 /tmp/probe.err | tr -d '\\n')\"",
+      ].join("; ");
 
-      const output = result.result.trim();
-      const status = /^(\d{3})\b/.exec(output)?.[1] ?? null;
-      step(`egress_${probe.name}`, { status, output: output.slice(0, 160) });
+      const result = await execute(sandbox, script, 20);
+      const output = result.result;
+      const parsed = /PROBE curl_exit=(\d+) status=(\d*)/.exec(output);
 
-      // A transport failure means nothing got through. A 4xx or 5xx from the interception proxy
-      // is a refusal. A 2xx or 3xx is the destination answering, which is the thing that must
-      // not happen.
-      if (status && /^[23]/.test(status)) reached.push(`${probe.name} (${status})`);
+      // The probe not running is not the same as the probe passing.
+      if (result.exitCode !== 0 || !parsed) {
+        throw new Error(
+          `egress probe ${probe.name} did not run (exit ${result.exitCode}): ${output.slice(0, 200)}`,
+        );
+      }
+
+      const curlExit = Number(parsed[1]);
+      const status = parsed[2] === "" || parsed[2] === "000" ? null : parsed[2];
+      const body = /BODY (.*)/.exec(output)?.[1]?.trim() ?? "";
+      const err = /ERR (.*)/.exec(output)?.[1]?.trim() ?? "";
+      step(`egress_${probe.name}`, { curlExit, status, body: body.slice(0, 120), err: err.slice(0, 120) });
+
+      if (curlExit !== 0 && status === null) continue;      // nothing came back at all
+      if (body.includes(DENIAL)) continue;                  // the interception proxy refused it
+
+      // Everything else is the far end answering, including a 4xx it chose to send.
+      reached.push(`${probe.name} (curl ${curlExit}, status ${status ?? "none"})`);
     }
 
     if (reached.length) {
       throw new Error(`reproduction sandbox reached ${reached.join(", ")} despite networkBlockAll`);
     }
-    step("egress_conclusion", "no probe reached its destination: no external egress, no metadata");
+    step("egress_conclusion", "every probe was refused by transport failure or the interception proxy");
 
     // How it is enforced matters as much as that it is. Recorded because the answer turned out
     // to be an interception proxy rather than an absent route.

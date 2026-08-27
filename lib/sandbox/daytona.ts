@@ -198,7 +198,18 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
   // Asked for and got are different things, and a publicly reachable sandbox running a target
   // built from someone else's report is the one outcome there is no recovering from.
   if (created.public) {
-    await deleteSandbox(created.id).catch(() => {});
+    try {
+      await deleteSandbox(created.id);
+    } catch (error) {
+      // Saying "destroyed" when the delete failed would hide a reachable hostile sandbox
+      // behind a reassuring error message. The id goes in the message either way, because
+      // whoever handles this needs something to reconcile with.
+      throw new UnsafeSandboxSpec(
+        `sandbox ${created.id} came up public AND could not be destroyed (${
+          error instanceof Error ? error.message : String(error)
+        }); it is reachable until its TTL expires`,
+      );
+    }
     throw new UnsafeSandboxSpec(`sandbox ${created.id} came up public; destroyed`);
   }
 
@@ -313,7 +324,15 @@ export async function execute(
   }
 
   const data = (await response.json()) as { exitCode?: number; code?: number; result?: string };
-  return { exitCode: data.exitCode ?? data.code ?? 0, result: data.result ?? "" };
+  const exitCode = data.exitCode ?? data.code;
+
+  // No exit status means we do not know whether the command succeeded, and defaulting that to
+  // zero would report a changed or truncated toolbox response as a command that worked.
+  if (typeof exitCode !== "number") {
+    throw new DaytonaError(`toolbox returned no exit status for a command in ${sandbox.id}`);
+  }
+
+  return { exitCode, result: data.result ?? "" };
 }
 
 export type SnapshotInfo = {

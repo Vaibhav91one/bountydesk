@@ -310,3 +310,31 @@ test("a sandbox with no toolbox proxy cannot be asked to run anything", async ()
   const sandbox = { id: "sb-1", toolboxProxyUrl: null } as Parameters<typeof execute>[0];
   await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
 });
+
+test("a toolbox response with no exit status is a failure, not a success", async () => {
+  // Defaulting a missing status to zero would report a changed or truncated response as a
+  // command that worked, which is the wrong direction to guess in.
+  const sandbox = { id: "sb-1", toolboxProxyUrl: "https://proxy.example" } as Parameters<typeof execute>[0];
+
+  await withFetch((async () => json({ result: "output but no status" })) as typeof fetch, async () => {
+    await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
+  });
+
+  await withFetch((async () => json({ code: 3, result: "" })) as typeof fetch, async () => {
+    assert.equal((await execute(sandbox, "false")).exitCode, 3);
+  });
+});
+
+test("a public sandbox that cannot be destroyed is reported as still running", async () => {
+  // Saying "destroyed" after a failed delete would hide a reachable hostile sandbox behind a
+  // reassuring message.
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    if (init?.method === "DELETE") return new Response("nope", { status: 500 });
+    return json({ id: "sb-public", state: "started", public: true });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), /could not be destroyed[\s\S]*reachable until its TTL/);
+  });
+});

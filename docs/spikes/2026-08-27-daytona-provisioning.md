@@ -27,13 +27,13 @@ expensive order to find out.
 | --- | --- |
 | requested snapshot | `dad882b3-a047-4715-8713-bddec50bb7ca` |
 | snapshot record | `daytona-small`, image `daytonaio/sandbox:0.9.0`, state `active`, cpu 1, mem 1, disk 3 |
-| sandbox id | `589f669d-84f7-4b78-b73a-b3c29cbcf7dc` |
+| sandbox id | `89bc41ca-b7a8-42fa-b061-1720140d3777` |
 | reached state | `started` |
 | observed snapshot | `daytona-small` |
 | **`networkBlockAll`** | **`true`** |
 | network and domain allow lists | `null` |
 | sandbox class | `container` |
-| runner | `f6ffe6c0-faea-4339-b2cd-bcbf6f478221` |
+| runner | `2bd30165-78ca-47b0-87b7-4bd961313726` |
 | fixed command | exit `0`, stdout `bountydesk-spike-ok` |
 | teardown | delete succeeded, second delete also succeeded, `GET` then 404s, label sweep empty |
 
@@ -46,10 +46,17 @@ Egress, probed from inside the sandbox:
 | `169.254.169.254/latest/meta-data/iam/security-credentials/` | **403** `Internet is restricted on Tier 1 and Tier 2.` |
 | `169.254.169.254/computeMetadata/v1/` with `Metadata-Flavor: Google` | **403**, same |
 | `100.100.100.200` (Alibaba metadata) | **403**, same |
-| `https://app.daytona.io/api/health` | curl 28, DNS resolution timed out |
+| `https://app.daytona.io/api/health` | curl 6, could not resolve host |
 
 No probe reached its destination, and no credential material came back from any metadata
 address.
+
+Only two outcomes count as blocked: nothing came back at all, or what came back is identifiably
+the interception proxy. Status alone cannot tell refusal from a reachable service saying no,
+since a metadata endpoint that wants a header answers 4xx too, so a 4xx without the proxy's
+denial body counts as reached. The run also checks that `curl` exists before trusting any of
+this: a missing binary would make every probe "fail to connect" and hand back a clean bill of
+health.
 
 Six of the eight rows in the first table are assertions rather than observations: the run
 throws if the booted snapshot is neither the resolved id nor the name, if `networkBlockAll`
