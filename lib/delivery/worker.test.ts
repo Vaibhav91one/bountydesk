@@ -550,18 +550,24 @@ test("a second delivery of one verdict to the same target requires human review"
     .set({ state: "SENT", leaseOwner: null, leaseExpiresAt: null })
     .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
 
-  const duplicate = await queue.enqueueDelivery({
+  const duplicateKey = `duplicate-${randomUUID()}`;
+  const duplicateInput = {
     reportId: fixture.reportId,
     verdictId: fixture.verdictId,
-    idempotencyKey: `duplicate-${randomUUID()}`,
+    idempotencyKey: duplicateKey,
     target: fixture.sourceRef,
     approvedContentHash: fakeHash(fixture.payload),
-  });
+  };
+  const duplicate = await queue.enqueueDelivery(duplicateInput);
   const { deps, calls } = makeFakeDeps();
 
   const processed = await worker.deliverOnce("w-distinct-same-target", { deps });
 
   assert.equal(duplicate.disposition, "REVIEW_REQUIRED");
+  assert.equal(
+    (await queue.enqueueDelivery(duplicateInput)).disposition,
+    "REVIEW_REQUIRED",
+  );
   assert.equal(processed, null);
   assert.equal(calls.mintToken, 0);
   assert.equal(calls.postComment, 0);

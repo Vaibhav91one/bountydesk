@@ -63,19 +63,22 @@ async function seedDelivery(
     })
     .returning({ id: dbm.verdict.id });
 
+  const input = {
+    reportId: r.id,
+    verdictId: v.id,
+    idempotencyKey: `key-${n}`,
+    target: `github:1:issue:${n}`,
+    approvedContentHash: `hash-${n}`,
+  };
   const [d] = await dbm.db
     .insert(dbm.outboundDelivery)
     .values({
-      reportId: r.id,
-      verdictId: v.id,
-      idempotencyKey: `key-${n}`,
-      target: `github:1:issue:${n}`,
-      approvedContentHash: `hash-${n}`,
+      ...input,
       ...overrides,
     })
     .returning({ id: dbm.outboundDelivery.id });
 
-  return { reportId: r.id, verdictId: v.id, deliveryId: d.id };
+  return { reportId: r.id, verdictId: v.id, deliveryId: d.id, input };
 }
 
 /**
@@ -142,6 +145,38 @@ test("releasing an unstarted claim restores its attempt budget", async () => {
     .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
   assert.equal(row.attempts, 0);
   assert.equal(row.leaseOwner, null);
+});
+
+test("exact enqueue retries preserve the delivery state", async () => {
+  await drainOthers();
+  const seeded = await seedDelivery();
+
+  const pending = await queue.enqueueDelivery(seeded.input);
+  assert.equal(pending.disposition, "IN_FLIGHT");
+
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ state: "SENT" })
+    .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
+  const sent = await queue.enqueueDelivery(seeded.input);
+  assert.equal(sent.disposition, "TERMINAL_REPLAY");
+
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ state: "FAILED" })
+    .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
+  const failed = await queue.enqueueDelivery(seeded.input);
+  assert.equal(failed.disposition, "FAILED");
+});
+
+test("a reused idempotency key cannot change immutable delivery fields", async () => {
+  await drainOthers();
+  const seeded = await seedDelivery();
+
+  await assert.rejects(
+    queue.enqueueDelivery({ ...seeded.input, target: "github:99:issue:99" }),
+    queue.DeliveryIntegrityError,
+  );
 });
 
 test("a stale fence cannot mutate a delivery once another worker reclaims it", async () => {

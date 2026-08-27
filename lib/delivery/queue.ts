@@ -12,12 +12,73 @@ export type NewDelivery = {
   approvedContentHash: string;
 };
 
+type ExistingDelivery = NewDelivery & {
+  id: string;
+  state: DeliveryState;
+  requiresHumanReview: boolean;
+};
+
+export class DeliveryIntegrityError extends Error {
+  constructor(idempotencyKey: string, field: keyof NewDelivery) {
+    super(`delivery ${idempotencyKey} already exists and disagrees on ${field}`);
+    this.name = "DeliveryIntegrityError";
+  }
+}
+
+function dispositionFor(
+  existing: ExistingDelivery,
+  input: NewDelivery,
+): "IN_FLIGHT" | "TERMINAL_REPLAY" | "FAILED" | "REVIEW_REQUIRED" {
+  for (const field of [
+    "reportId",
+    "verdictId",
+    "idempotencyKey",
+    "target",
+    "approvedContentHash",
+  ] as const) {
+    if (existing[field] !== input[field]) {
+      throw new DeliveryIntegrityError(input.idempotencyKey, field);
+    }
+  }
+
+  if (existing.requiresHumanReview) return "REVIEW_REQUIRED";
+  if (existing.state === "SENT") return "TERMINAL_REPLAY";
+  if (existing.state === "FAILED") return "FAILED";
+  return "IN_FLIGHT";
+}
+
+async function deliveryByKey(
+  idempotencyKey: string,
+  tx: Executor,
+): Promise<ExistingDelivery | undefined> {
+  const [row] = await tx
+    .select({
+      id: outboundDelivery.id,
+      reportId: outboundDelivery.reportId,
+      verdictId: outboundDelivery.verdictId,
+      idempotencyKey: outboundDelivery.idempotencyKey,
+      target: outboundDelivery.target,
+      approvedContentHash: outboundDelivery.approvedContentHash,
+      state: outboundDelivery.state,
+      requiresHumanReview: outboundDelivery.requiresHumanReview,
+    })
+    .from(outboundDelivery)
+    .where(eq(outboundDelivery.idempotencyKey, idempotencyKey))
+    .limit(1);
+  return row;
+}
+
 export async function enqueueDelivery(
   input: NewDelivery,
   tx: Executor = db,
 ): Promise<{
   id: string;
-  disposition: "CREATED" | "REPLAY" | "REVIEW_REQUIRED";
+  disposition:
+    | "CREATED"
+    | "IN_FLIGHT"
+    | "TERMINAL_REPLAY"
+    | "FAILED"
+    | "REVIEW_REQUIRED";
 }> {
   const inserted = await tx
     .insert(outboundDelivery)
@@ -28,12 +89,10 @@ export async function enqueueDelivery(
     return { id: inserted[0].id, disposition: "CREATED" };
   }
 
-  const [replay] = await tx
-    .select({ id: outboundDelivery.id })
-    .from(outboundDelivery)
-    .where(eq(outboundDelivery.idempotencyKey, input.idempotencyKey))
-    .limit(1);
-  if (replay) return { id: replay.id, disposition: "REPLAY" };
+  const replay = await deliveryByKey(input.idempotencyKey, tx);
+  if (replay) {
+    return { id: replay.id, disposition: dispositionFor(replay, input) };
+  }
 
   const reviewReason = `another automatic delivery already owns verdict ${input.verdictId} for ${input.target}`;
   const reviewed = await tx
@@ -50,15 +109,14 @@ export async function enqueueDelivery(
     return { id: reviewed[0].id, disposition: "REVIEW_REQUIRED" };
   }
 
-  const [concurrentReplay] = await tx
-    .select({ id: outboundDelivery.id })
-    .from(outboundDelivery)
-    .where(eq(outboundDelivery.idempotencyKey, input.idempotencyKey))
-    .limit(1);
+  const concurrentReplay = await deliveryByKey(input.idempotencyKey, tx);
   if (!concurrentReplay) {
     throw new Error(`delivery ${input.idempotencyKey} conflicted but no row exists`);
   }
-  return { id: concurrentReplay.id, disposition: "REPLAY" };
+  return {
+    id: concurrentReplay.id,
+    disposition: dispositionFor(concurrentReplay, input),
+  };
 }
 
 /**
