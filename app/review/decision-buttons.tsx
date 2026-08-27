@@ -11,9 +11,9 @@ import { allowVerdict, denyVerdict, type ActionResult } from "./actions";
  * triggers delivery. The report stays in AWAITING_APPROVAL until TrueForge's own
  * publish_verdict tool handler genuinely invokes and moves it, which happens outside this UI.
  */
-export function AllowButton({ reportId }: { reportId: string }) {
+export function AllowButton({ reportId, verdictId }: { reportId: string; verdictId: string }) {
   const [result, action, pending] = useActionState<ActionResult | null, FormData>(
-    () => allowVerdict(reportId),
+    () => allowVerdict(reportId, verdictId),
     null,
   );
 
@@ -32,11 +32,11 @@ export function AllowButton({ reportId }: { reportId: string }) {
 }
 
 /** A denial is final on bounty-desk's side right away, so it moves the report to DENIED itself. */
-export function DenyButton({ reportId }: { reportId: string }) {
+export function DenyButton({ reportId, verdictId }: { reportId: string; verdictId: string }) {
   const [result, action, pending] = useActionState<ActionResult | null, FormData>(
     (_previous, formData) => {
       const note = String(formData.get("note") ?? "").trim();
-      return denyVerdict(reportId, note.length > 0 ? note : undefined);
+      return denyVerdict(reportId, verdictId, note.length > 0 ? note : undefined);
     },
     null,
   );

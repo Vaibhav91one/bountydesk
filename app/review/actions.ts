@@ -1,16 +1,15 @@
 "use server";
 
-import { desc } from "drizzle-orm";
-
 import { requireReviewer } from "@/lib/auth/dal";
 import {
   agentSession,
+  and,
   approvalDecision,
   approvalSubmission,
   db,
   eq,
+  report,
   verdict,
-  type Executor,
 } from "@/lib/db";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
@@ -25,48 +24,34 @@ export type ActionResult = { ok: boolean; error?: string };
  */
 class DecisionRefused extends Error {}
 
-type PendingCall = Pick<
-  typeof agentSession.$inferSelect,
-  "id" | "pendingThreadId" | "pendingToolCallId" | "pendingVerdictId" | "pendingApprovedContentHash"
->;
-
 /**
- * The verdict a decision answers.
+ * The shared body of allowVerdict and denyVerdict: load and lock the report and session,
+ * bind to the exact verdict the reviewer was shown, and decide whether this call is a fresh
+ * decision, a no-op replay of one already recorded, or a refusal.
  *
- * Normally that is the one named by agent_session.pending_verdict_id. But this function also
- * has to serve a second call for the exact same report after the first one already cleared
- * those columns (a double submit, a browser retry): there the pending row has nothing left
- * to point at, so the report's latest verdict is looked up directly. Whether that replay is
- * accepted comes down to what recordDecision finds already sitting on it, not this lookup.
- */
-async function verdictToDecide(tx: Executor, reportId: string, pendingVerdictId: string | null) {
-  if (pendingVerdictId) {
-    const [row] = await tx.select().from(verdict).where(eq(verdict.id, pendingVerdictId));
-    return row ?? null;
-  }
-
-  const [row] = await tx
-    .select()
-    .from(verdict)
-    .where(eq(verdict.reportId, reportId))
-    .orderBy(desc(verdict.revision))
-    .limit(1);
-  return row ?? null;
-}
-
-/**
- * The shared body of allowVerdict and denyVerdict: load and lock the session, resolve the
- * verdict it answers, and decide whether this call is a fresh decision, a no-op replay of one
- * already recorded, or a refusal.
+ * `verdictId` is not optional: the review page always renders one specific verdict, and the
+ * action always answers that exact one, never "whatever happens to be pending right now."
+ * Without pinning it, a verdict that changed between page render and the reviewer's click
+ * (a new pending call replacing the one shown) could be approved without the reviewer ever
+ * having seen it.
  */
 async function decide(
   reportId: string,
+  verdictId: string,
   outcome: "APPROVED" | "DENIED",
   reviewer: string,
   note: string | undefined,
 ): Promise<ActionResult> {
   try {
     return await db.transaction(async (tx) => {
+      const [reportRow] = await tx
+        .select({ state: report.state })
+        .from(report)
+        .where(eq(report.id, reportId))
+        .for("update");
+
+      if (!reportRow) return { ok: false, error: "report not found" };
+
       // Locks the row so a genuinely concurrent double-click serializes here rather than
       // both racing the insert below: the second call blocks until the first's transaction
       // commits, then sees its cleared pending columns and its already-recorded decision.
@@ -78,9 +63,14 @@ async function decide(
 
       if (!session) return { ok: false, error: "no pending approval for this report" };
 
-      const pending: PendingCall = session;
-      const v = await verdictToDecide(tx, reportId, pending.pendingVerdictId);
-      if (!v) return { ok: false, error: "no pending approval for this report" };
+      // Bound by both id and report_id: agent_session.report_id and pending_verdict_id are
+      // independent foreign keys, and the schema does not by itself guarantee they agree.
+      const [v] = await tx
+        .select()
+        .from(verdict)
+        .where(and(eq(verdict.id, verdictId), eq(verdict.reportId, reportId)));
+
+      if (!v) return { ok: false, error: "verdict not found for this report" };
 
       const [existing] = await tx
         .select({ decision: approvalDecision.decision })
@@ -96,17 +86,31 @@ async function decide(
           : { ok: false, error: "already decided differently" };
       }
 
-      // No decision exists yet, so this has to be the fresh path, which needs an actual
-      // pending call to answer, bound to this exact verdict.
+      // No decision exists yet, so this has to be the fresh path. A stale action call from a
+      // page rendered before the report left AWAITING_APPROVAL (cancelled, expired, or
+      // already decided and moved on by some other path) must be refused here explicitly:
+      // denial gets this for free from transition()'s own CAS below, but approval has no
+      // such check downstream, since DELIVERING only ever happens inside publish_verdict.
+      if (reportRow.state !== "AWAITING_APPROVAL") {
+        return {
+          ok: false,
+          error: `report is no longer awaiting approval (state: ${reportRow.state})`,
+        };
+      }
+
+      // The fresh path needs an actual pending call to answer, bound to this exact verdict:
+      // if the session's pending_verdict_id has moved on to a different verdict since the
+      // page rendered, this is not the call being answered.
       if (
-        !pending.pendingThreadId ||
-        !pending.pendingToolCallId ||
-        !pending.pendingVerdictId ||
-        !pending.pendingApprovedContentHash ||
-        pending.pendingVerdictId !== v.id
+        !session.pendingThreadId ||
+        !session.pendingToolCallId ||
+        !session.pendingVerdictId ||
+        !session.pendingApprovedContentHash ||
+        session.pendingVerdictId !== v.id
       ) {
         return { ok: false, error: "no pending approval for this report" };
       }
+      const pending = session;
 
       // Defense in depth: never act on a stored hash without recomputing it from the exact
       // bytes right before using it. This should never actually differ.
@@ -198,10 +202,13 @@ async function decide(
  * moves the report to DELIVERING itself: it only records the decision and queues it for the
  * approval-submission worker to relay. The actual delivery transition happens only inside the
  * real publish_verdict tool handler, once TrueForge genuinely invokes it.
+ *
+ * `verdictId` must be the exact id the review page rendered, not resolved fresh here: the
+ * reviewer approves what they saw, not whatever happens to be pending at click time.
  */
-export async function allowVerdict(reportId: string): Promise<ActionResult> {
+export async function allowVerdict(reportId: string, verdictId: string): Promise<ActionResult> {
   const session = await requireReviewer();
-  return decide(reportId, "APPROVED", session.login, undefined);
+  return decide(reportId, verdictId, "APPROVED", session.login, undefined);
 }
 
 /**
@@ -209,7 +216,11 @@ export async function allowVerdict(reportId: string): Promise<ActionResult> {
  * bounty-desk's side right away, so this transitions the report to DENIED directly rather than
  * waiting on anything TrueForge-side.
  */
-export async function denyVerdict(reportId: string, note?: string): Promise<ActionResult> {
+export async function denyVerdict(
+  reportId: string,
+  verdictId: string,
+  note?: string,
+): Promise<ActionResult> {
   const session = await requireReviewer();
-  return decide(reportId, "DENIED", session.login, note);
+  return decide(reportId, verdictId, "DENIED", session.login, note);
 }

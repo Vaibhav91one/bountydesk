@@ -134,7 +134,7 @@ test("allowVerdict records an approval but never moves the report itself", async
   signIn(REVIEWER_ID, "alice");
   const { reportId, verdictId, agentSessionId } = await seedPendingReport();
 
-  const result = await actions.allowVerdict(reportId);
+  const result = await actions.allowVerdict(reportId, verdictId);
   assert.equal(result.ok, true);
 
   const decisions = await decisionsFor(verdictId);
@@ -166,7 +166,7 @@ test("denyVerdict records a denial and moves the report to DENIED itself", async
   signIn(REVIEWER_ID, "bob");
   const { reportId, verdictId } = await seedPendingReport();
 
-  const result = await actions.denyVerdict(reportId, "not in scope");
+  const result = await actions.denyVerdict(reportId, verdictId, "not in scope");
   assert.equal(result.ok, true);
 
   const decisions = await decisionsFor(verdictId);
@@ -181,8 +181,8 @@ test("a double-click on allow is an idempotent no-op, not a second decision", as
   signIn(REVIEWER_ID);
   const { reportId, verdictId } = await seedPendingReport();
 
-  const first = await actions.allowVerdict(reportId);
-  const second = await actions.allowVerdict(reportId);
+  const first = await actions.allowVerdict(reportId, verdictId);
+  const second = await actions.allowVerdict(reportId, verdictId);
 
   assert.equal(first.ok, true);
   assert.equal(second.ok, true);
@@ -193,10 +193,10 @@ test("denying after an allow already ran is refused and does not overwrite it", 
   signIn(REVIEWER_ID);
   const { reportId, verdictId } = await seedPendingReport();
 
-  const allowed = await actions.allowVerdict(reportId);
+  const allowed = await actions.allowVerdict(reportId, verdictId);
   assert.equal(allowed.ok, true);
 
-  const denied = await actions.denyVerdict(reportId, "actually no");
+  const denied = await actions.denyVerdict(reportId, verdictId, "actually no");
   assert.equal(denied.ok, false);
 
   const decisions = await decisionsFor(verdictId);
@@ -228,9 +228,10 @@ test("acting on a report with no pending markers is refused and writes nothing",
     })
     .returning({ id: dbm.agentSession.id });
 
-  const allowed = await actions.allowVerdict(reportRow.id);
+  const noVerdictId = randomUUID();
+  const allowed = await actions.allowVerdict(reportRow.id, noVerdictId);
   assert.equal(allowed.ok, false);
-  const denied = await actions.denyVerdict(reportRow.id);
+  const denied = await actions.denyVerdict(reportRow.id, noVerdictId);
   assert.equal(denied.ok, false);
 
   assert.equal((await submissionsFor(sessionRow.id)).length, 0);
@@ -243,18 +244,82 @@ test("a pinned hash that no longer matches the payload is refused before writing
     pendingHash: computeContentHash("a payload this verdict never actually had"),
   });
 
-  const result = await actions.allowVerdict(reportId);
+  const result = await actions.allowVerdict(reportId, verdictId);
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /hash mismatch/);
   assert.equal((await decisionsFor(verdictId)).length, 0);
+});
+
+test("approving a verdict that is no longer the one pending is refused, not silently redirected", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, agentSessionId } = await seedPendingReport();
+
+  // Simulate a new pending call replacing the one the reviewer's page rendered: a different
+  // verdict now sits in agent_session.pending_verdict_id. The reviewer's stale page still
+  // submits the *old* verdict id it was actually shown.
+  const staleVerdictId = randomUUID();
+  const newVerdictId = randomUUID();
+  const newPayload = `a newer analysis\n\n<!-- bountydesk-delivery:${newVerdictId} -->`;
+  await dbm.db.insert(dbm.verdict).values({
+    id: newVerdictId,
+    reportId,
+    outcome: "ANALYSIS_ONLY",
+    summary: "summary",
+    payload: newPayload,
+    contentHash: computeContentHash(newPayload),
+    // seedPendingReport already inserted this report's revision 1; (report_id, revision) is
+    // unique, so the "newer" verdict standing in for a real revision needs its own number.
+    revision: 2,
+  });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ pendingVerdictId: newVerdictId, pendingApprovedContentHash: computeContentHash(newPayload) })
+    .where(dbm.eq(dbm.agentSession.id, agentSessionId));
+
+  const result = await actions.allowVerdict(reportId, staleVerdictId);
+
+  assert.equal(result.ok, false);
+  assert.equal((await decisionsFor(newVerdictId)).length, 0);
+  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});
+
+test("a report that left AWAITING_APPROVAL before the click is refused, not approved", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, verdictId } = await seedPendingReport();
+
+  // The report moved on (cancelled) between the page rendering and the reviewer's click.
+  await dbm.db
+    .update(dbm.report)
+    .set({ state: "CANCELLED" })
+    .where(dbm.eq(dbm.report.id, reportId));
+
+  const result = await actions.allowVerdict(reportId, verdictId);
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /no longer awaiting approval/);
+  assert.equal((await decisionsFor(verdictId)).length, 0);
+  assert.equal(await reportState(reportId), "CANCELLED", "must not be disturbed");
+});
+
+test("a verdict id that belongs to a different report is refused", async () => {
+  signIn(REVIEWER_ID);
+  const a = await seedPendingReport();
+  const b = await seedPendingReport();
+
+  const result = await actions.allowVerdict(a.reportId, b.verdictId);
+
+  assert.equal(result.ok, false);
+  assert.equal((await decisionsFor(b.verdictId)).length, 0);
+  assert.equal(await reportState(a.reportId), "AWAITING_APPROVAL");
+  assert.equal(await reportState(b.reportId), "AWAITING_APPROVAL");
 });
 
 test("a caller with no session never reaches the database", async () => {
   signOut();
   const { reportId, verdictId } = await seedPendingReport();
 
-  await assert.rejects(() => actions.allowVerdict(reportId), /NEXT_REDIRECT/);
-  await assert.rejects(() => actions.denyVerdict(reportId), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.allowVerdict(reportId, verdictId), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.denyVerdict(reportId, verdictId), /NEXT_REDIRECT/);
 
   assert.equal((await decisionsFor(verdictId)).length, 0);
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
@@ -264,7 +329,7 @@ test("a signed-in caller who is not on the reviewer allowlist never reaches the 
   signIn(999_999, "outsider");
   const { reportId, verdictId } = await seedPendingReport();
 
-  await assert.rejects(() => actions.allowVerdict(reportId), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.allowVerdict(reportId, verdictId), /NEXT_REDIRECT/);
 
   assert.equal((await decisionsFor(verdictId)).length, 0);
 });

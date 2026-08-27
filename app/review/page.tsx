@@ -16,6 +16,7 @@ export default async function ReviewPage() {
       title: report.title,
       sourceRef: report.sourceRef,
       channel: report.channel,
+      verdictId: verdict.id,
       payload: verdict.payload,
       contentHash: verdict.contentHash,
     })
@@ -58,8 +59,8 @@ export default async function ReviewPage() {
               content hash <code className="font-mono">{row.contentHash}</code>
             </p>
             <div className="flex flex-wrap gap-4">
-              <AllowButton reportId={row.reportId} />
-              <DenyButton reportId={row.reportId} />
+              <AllowButton reportId={row.reportId} verdictId={row.verdictId} />
+              <DenyButton reportId={row.reportId} verdictId={row.verdictId} />
             </div>
           </CardContent>
         </Card>
