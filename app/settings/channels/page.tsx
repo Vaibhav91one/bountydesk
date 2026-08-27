@@ -1,4 +1,5 @@
-import { CheckCircle2, CircleSlash, ExternalLink, PauseCircle, Plug, Settings2 } from "lucide-react";
+import { GitHubLight } from "developer-icons";
+import { CheckCircle2, CircleSlash, ExternalLink, PauseCircle, Settings2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 
@@ -72,7 +73,7 @@ export default async function ChannelsPage() {
               repositories; signing in only identifies you.
             </p>
             <Button size="sm" nativeButton={false} render={<a href={installUrl()} />}>
-              <Plug /> Install BountyDesk
+              <GitHubLight className="size-4" /> Install BountyDesk
             </Button>
           </CardContent>
         </Card>
@@ -83,7 +84,7 @@ export default async function ChannelsPage() {
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
               <CardTitle className="flex items-center gap-2">
-                <Plug className="size-4" /> {connection.accountLogin}
+                <GitHubLight className="size-4" /> {connection.accountLogin}
               </CardTitle>
               <Badge variant={connection.suspendedAt ? "destructive" : "default"}>
                 {connection.suspendedAt ? "Suspended" : "App installed"}
