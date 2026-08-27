@@ -23,6 +23,12 @@ const TIMEOUT_MS = 30_000;
 export const PURPOSE_LABEL = "bountydesk.purpose";
 export const PURPOSE = "reproduction";
 
+/**
+ * Our ceiling, not the provider's. Daytona is happy to keep a sandbox alive far longer than any
+ * reproduction needs, and a run that is still up tomorrow is a leak with a receipt.
+ */
+export const MAX_TTL_MINUTES = 60;
+
 export type SandboxSpec = {
   /**
    * Which snapshot to boot. The caller owns this value and it is never derived from report
@@ -39,7 +45,7 @@ export type SandboxSpec = {
   cpu: number;
   memoryGb: number;
   diskGb: number;
-  /** Wall-clock ceiling. Provisioning refuses a spec without one. */
+  /** Wall-clock ceiling, whole minutes, at most MAX_TTL_MINUTES. Refused without one. */
   ttlMinutes: number;
   labels?: Record<string, string>;
 };
@@ -54,6 +60,7 @@ export type Sandbox = {
   toolboxProxyUrl: string | null;
   runnerId: string | null;
   sandboxClass: string | null;
+  public: boolean;
 };
 
 export class DaytonaError extends Error {
@@ -88,6 +95,12 @@ export function assertSafeSpec(spec: SandboxSpec): void {
     if (!Number.isFinite(n) || n <= 0) {
       throw new UnsafeSandboxSpec("cpu, memory, disk and ttl must all be positive");
     }
+  }
+
+  // A fractional TTL is a typo the provider would round somewhere of its own choosing, and an
+  // enormous one is how a sandbox is still running next week.
+  if (!Number.isInteger(spec.ttlMinutes) || spec.ttlMinutes > MAX_TTL_MINUTES) {
+    throw new UnsafeSandboxSpec(`ttl must be a whole number of minutes, at most ${MAX_TTL_MINUTES}`);
   }
 
   // Daytona documents 1 GiB as the floor; asking for less is silently raised, which would make
@@ -175,11 +188,21 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
     snapshot: snapshot.id,
     ttlMinutes: spec.ttlMinutes,
     networkBlockAll: true,
+    public: false,
     autoDeleteInterval: 0,
     labels: { ...spec.labels, [PURPOSE_LABEL]: PURPOSE },
   };
 
-  return call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
+  const created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
+
+  // Asked for and got are different things, and a publicly reachable sandbox running a target
+  // built from someone else's report is the one outcome there is no recovering from.
+  if (created.public) {
+    await deleteSandbox(created.id).catch(() => {});
+    throw new UnsafeSandboxSpec(`sandbox ${created.id} came up public; destroyed`);
+  }
+
+  return created;
 }
 
 export async function getSandbox(id: string): Promise<Sandbox> {
@@ -220,7 +243,7 @@ export async function listSandboxes(labels: Record<string, string>): Promise<San
  * This is best-effort by design. The provider TTL is the real guarantee, and a reconciler
  * still has to sweep: a process that dies here never gets to retry.
  */
-export async function deleteSandbox(id: string, attempts = 6): Promise<void> {
+export async function deleteSandbox(id: string, attempts = 6, baseDelayMs = 2000): Promise<void> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       await call<void>(`/sandbox/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -231,7 +254,7 @@ export async function deleteSandbox(id: string, attempts = 6): Promise<void> {
       const inProgress = error instanceof DaytonaError && error.status === 409;
       if (!inProgress || attempt === attempts) throw error;
 
-      await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+      await new Promise((resolve) => setTimeout(resolve, baseDelayMs * attempt));
     }
   }
 }
@@ -250,6 +273,47 @@ export async function assertSandboxGone(id: string): Promise<void> {
     if (error instanceof DaytonaError && error.status === 404) return;
     throw error;
   }
+}
+
+export type ExecResult = { exitCode: number; result: string };
+
+/**
+ * Run one command inside a sandbox, through the toolbox proxy.
+ *
+ * The command is always chosen by the server. Nothing here parses it, and nothing upstream may
+ * build it from report text, an attachment or model output: this is the call that turns a
+ * string into execution, so it is the one place where that rule has to hold absolutely.
+ *
+ * The proxy takes the same organisation key as the control plane, with the sandbox id as a path
+ * segment: `<toolboxProxyUrl>/<id>/process/execute`.
+ */
+export async function execute(
+  sandbox: Sandbox,
+  command: string,
+  timeoutSeconds = 30,
+): Promise<ExecResult> {
+  if (!sandbox.toolboxProxyUrl) {
+    throw new DaytonaError(`sandbox ${sandbox.id} has no toolbox proxy url`);
+  }
+
+  const base = sandbox.toolboxProxyUrl.replace(/\/$/, "");
+  const response = await fetch(`${base}/${encodeURIComponent(sandbox.id)}/process/execute`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${requireSecret("DAYTONA_API_KEY")}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ command, timeout: timeoutSeconds }),
+    signal: AbortSignal.timeout((timeoutSeconds + 10) * 1000),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new DaytonaError(`execute -> ${response.status} ${body.slice(0, 300)}`, response.status);
+  }
+
+  const data = (await response.json()) as { exitCode?: number; code?: number; result?: string };
+  return { exitCode: data.exitCode ?? data.code ?? 0, result: data.result ?? "" };
 }
 
 export type SnapshotInfo = {

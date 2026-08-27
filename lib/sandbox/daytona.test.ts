@@ -4,10 +4,16 @@ import test from "node:test";
 process.env.DAYTONA_API_KEY = "dtn_test_key_not_a_real_one";
 
 import {
+  DaytonaError,
+  MAX_TTL_MINUTES,
   UnsafeSandboxSpec,
   assertSafeSpec,
+  assertSandboxGone,
   assertSnapshotLimits,
   createSandbox,
+  deleteSandbox,
+  execute,
+  listSandboxes,
   type SandboxSpec,
   type SnapshotInfo,
 } from "./daytona";
@@ -158,4 +164,149 @@ test("an inactive snapshot is refused before provisioning", async () => {
   await withFetch(stub, async () => {
     await assert.rejects(createSandbox(spec), UnsafeSandboxSpec);
   });
+});
+
+test("a sandbox is never asked for publicly, and one that comes up public is destroyed", async () => {
+  const sent: Record<string, unknown>[] = [];
+  let deleted: string | null = null;
+
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    if (url.includes("/snapshots/")) return json(snapshot);
+    if (init?.method === "DELETE") {
+      deleted = url.split("/sandbox/")[1];
+      return new Response(null, { status: 204 });
+    }
+    sent.push(JSON.parse(init?.body as string));
+    // The provider disagreeing with what we asked for is the case worth handling.
+    return json({ id: "sb-public", state: "started", public: true });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), UnsafeSandboxSpec);
+  });
+
+  assert.equal(sent[0].public, false, "provisioning must ask for a private sandbox");
+  assert.equal(deleted, "sb-public", "a sandbox that came up public must not be left running");
+});
+
+test("a time-to-live must be whole minutes and within our own ceiling", () => {
+  assert.throws(() => assertSafeSpec({ ...spec, ttlMinutes: 10.5 }), UnsafeSandboxSpec);
+  assert.throws(() => assertSafeSpec({ ...spec, ttlMinutes: MAX_TTL_MINUTES + 1 }), UnsafeSandboxSpec);
+  assert.doesNotThrow(() => assertSafeSpec({ ...spec, ttlMinutes: MAX_TTL_MINUTES }));
+});
+
+/**
+ * Teardown is the part that only misbehaves under conditions a live run rarely reproduces:
+ * a sandbox still settling, a sandbox already gone, a provider having a bad minute. Stubbing
+ * is the only way to see all three in the same second.
+ */
+test("teardown retries a 409 and stops as soon as one takes", async () => {
+  let calls = 0;
+  const stub = (async () => {
+    calls++;
+    return calls < 3
+      ? new Response("Sandbox state change in progress", { status: 409 })
+      : new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await deleteSandbox("sb-1", 6, 1);
+  });
+  assert.equal(calls, 3);
+});
+
+test("teardown treats an already-gone sandbox as success", async () => {
+  const stub = (async () => new Response("not found", { status: 404 })) as typeof fetch;
+  await withFetch(stub, async () => {
+    await deleteSandbox("sb-1", 6, 1);
+  });
+});
+
+test("teardown gives up loudly rather than pretending", async () => {
+  let calls = 0;
+  const stub = (async () => {
+    calls++;
+    return new Response("Sandbox state change in progress", { status: 409 });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(deleteSandbox("sb-1", 3, 1), DaytonaError);
+  });
+  assert.equal(calls, 3, "every attempt should be used before giving up");
+});
+
+test("teardown does not retry an error that is not a 409", async () => {
+  let calls = 0;
+  const stub = (async () => {
+    calls++;
+    return new Response("nope", { status: 401 });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(deleteSandbox("sb-1", 6, 1), DaytonaError);
+  });
+  assert.equal(calls, 1, "a 401 will not fix itself");
+});
+
+test("only a 404 proves a sandbox is gone", async () => {
+  // The whole point: "we could not reach the provider" must never be recorded as "destroyed".
+  await withFetch((async () => new Response("gone", { status: 404 })) as typeof fetch, async () => {
+    await assertSandboxGone("sb-1");
+  });
+
+  await withFetch((async () => json({ id: "sb-1", state: "started" })) as typeof fetch, async () => {
+    await assert.rejects(assertSandboxGone("sb-1"), /still exists/);
+  });
+
+  await withFetch((async () => new Response("boom", { status: 500 })) as typeof fetch, async () => {
+    await assert.rejects(assertSandboxGone("sb-1"), DaytonaError);
+  });
+
+  await withFetch((async () => { throw new TypeError("network down"); }) as typeof fetch, async () => {
+    await assert.rejects(assertSandboxGone("sb-1"), TypeError);
+  });
+});
+
+test("a labelled listing follows every page", async () => {
+  // A sweep that stops at page one leaves the rest running, which is the failure this exists
+  // to prevent rather than a tidiness concern.
+  const pages: Record<string, unknown> = {
+    "": { items: [{ id: "a" }], nextCursor: "p2" },
+    p2: { items: [{ id: "b" }], nextCursor: "p3" },
+    p3: { items: [{ id: "c" }], nextCursor: null },
+  };
+
+  const stub = (async (input: unknown) => {
+    const cursor = new URL(String(input)).searchParams.get("cursor") ?? "";
+    return json(pages[cursor]);
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    const found = await listSandboxes({ "bountydesk.purpose": "reproduction" });
+    assert.deepEqual(found.map((s) => s.id), ["a", "b", "c"]);
+  });
+});
+
+test("executing a command addresses the toolbox proxy by sandbox id", async () => {
+  let seen = "";
+  const stub = (async (input: unknown) => {
+    seen = String(input);
+    return json({ exitCode: 0, result: "ok\n" });
+  }) as typeof fetch;
+
+  const sandbox = { id: "sb-1", toolboxProxyUrl: "https://proxy.example/" } as Parameters<typeof execute>[0];
+
+  await withFetch(stub, async () => {
+    const result = await execute(sandbox, "echo ok");
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.result, "ok\n");
+  });
+
+  assert.equal(seen, "https://proxy.example/sb-1/process/execute");
+});
+
+test("a sandbox with no toolbox proxy cannot be asked to run anything", async () => {
+  const sandbox = { id: "sb-1", toolboxProxyUrl: null } as Parameters<typeof execute>[0];
+  await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
 });

@@ -2,8 +2,8 @@
  * Daytona provisioning spike. Disposable, and deliberately narrow.
  *
  * Answers one question the architecture rests on: can BountyDesk provision an ephemeral
- * sandbox from a named snapshot, see what actually booted, run one fixed harmless command,
- * confirm the reproduction network policy, and destroy it reliably?
+ * sandbox from a named snapshot, see what actually booted, run fixed harmless commands, show
+ * from inside that the reproduction sandbox really has no egress, and destroy it again?
  *
  *   npm run spike:daytona -- <snapshot-id-or-name>
  *
@@ -21,6 +21,7 @@ import {
   assertSandboxGone,
   createSandbox,
   deleteSandbox,
+  execute,
   getSandbox,
   getSnapshot,
   listSandboxes,
@@ -66,11 +67,13 @@ async function waitForState(id: string, wanted: string[], timeoutMs = 120_000): 
  * guards this script has no business carrying; the real system gets that, built on the same
  * client call.
  */
-async function sweep(attempts = 1): Promise<string[]> {
+async function sweep(attempts = 1, ignore?: string): Promise<string[]> {
   const labels = { [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE };
 
   for (let attempt = 1; ; attempt++) {
-    const stragglers = await listSandboxes(labels);
+    // The listing lags a delete, so the sandbox we already destroyed and confirmed gone can
+    // still appear here. Counting it as a straggler would report a leak that is not one.
+    const stragglers = (await listSandboxes(labels)).filter((s) => s.id !== ignore);
     for (const sandbox of stragglers) await deleteSandbox(sandbox.id);
     if (stragglers.length || attempt === attempts) return stragglers.map((s) => s.id);
 
@@ -108,8 +111,13 @@ async function main(): Promise<void> {
   } catch (error) {
     // The create may have landed anyway. Nothing else knows its id, so sweep by label, and
     // keep asking: a sandbox the provider accepted can take a moment to appear in a listing,
-    // and one immediate empty answer would let it run to its TTL.
-    step("create_failed_swept", await sweep(5));
+    // and one immediate empty answer would let it run to its TTL. The create error is what
+    // gets rethrown either way; a failed sweep is context, not the cause.
+    try {
+      step("create_failed_swept", await sweep(5));
+    } catch (sweepError) {
+      step("create_failed_sweep_also_failed", sweepError instanceof Error ? sweepError.message : String(sweepError));
+    }
     throw error;
   }
   step("sandbox_id", created.id);
@@ -142,36 +150,67 @@ async function main(): Promise<void> {
     // leave the digest to an in-sandbox check. See the conclusion in the PR.
     step("digest_from_control_plane", "not exposed by the Daytona API");
 
-    console.log("\n4. EXECUTE (one fixed command, chosen here, never supplied by a report)");
-    if (!sandbox.toolboxProxyUrl) {
-      step("execute", "no toolbox proxy url on the sandbox record");
-    } else {
-      step("toolbox_proxy_url_host", new URL(sandbox.toolboxProxyUrl).host);
-
-      // The org API key is not the toolbox credential. Recorded rather than worked around:
-      // guessing at an undocumented auth scheme is how a spike turns into a rewrite. This is
-      // the one gate that does not throw, because a failure here is the finding.
-      const base = sandbox.toolboxProxyUrl.replace(/\/$/, "");
-      const attempt = await fetch(`${base}/toolbox/${created.id}/toolbox/process/execute`, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${process.env.DAYTONA_API_KEY}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ command: "echo bountydesk-spike-ok" }),
-        signal: AbortSignal.timeout(20_000),
-      }).catch(() => null);
-
-      step("execute_with_org_key_status", attempt?.status ?? "network error");
-      step(
-        "execute_conclusion",
-        attempt?.status === 401
-          ? "GATE NOT PASSED: the toolbox rejects the organisation API key and needs a per-sandbox credential that the control-plane schemas do not expose"
-          : `unexpected status ${attempt?.status}; inspect before trusting`,
-      );
+    console.log("\n4. EXECUTE (fixed commands, chosen here, never supplied by a report)");
+    const hello = await execute(sandbox, "echo bountydesk-spike-ok");
+    step("execute_exit_code", hello.exitCode);
+    step("execute_stdout", hello.result.trim());
+    if (hello.exitCode !== 0 || !hello.result.includes("bountydesk-spike-ok")) {
+      throw new Error(`the fixed command did not run: exit ${hello.exitCode}, output ${hello.result}`);
     }
+
+    console.log("\n5. EGRESS (the policy the control plane claims, checked from inside)");
+    // networkBlockAll on the sandbox record says what was configured. Only a probe from inside
+    // says what is enforced, and that is the claim the reproduction sandbox rests on.
+    //
+    // curl's exit status is the wrong test. Daytona intercepts egress with a proxy that answers
+    // 403 rather than dropping the packet, so a blocked request is a *successful* HTTP
+    // transaction and exits 0. What matters is whether the destination was reached, which means
+    // the status line: anything 2xx or 3xx is a real answer from the far end.
+    const probes: { name: string; url: string; header?: string }[] = [
+      // A public HTTPS host, by name.
+      { name: "public_https_by_name", url: "https://example.com" },
+      // The same shape by literal IP, so a blocked DNS lookup cannot be mistaken for blocked egress.
+      { name: "public_ip_no_dns", url: "https://1.1.1.1" },
+      // The endpoint that hands out cloud credentials, in both dialects.
+      { name: "cloud_metadata_imds", url: "http://169.254.169.254/latest/meta-data/iam/security-credentials/" },
+      { name: "cloud_metadata_gce", url: "http://169.254.169.254/computeMetadata/v1/", header: "Metadata-Flavor: Google" },
+      // Alibaba's metadata address, since the runner's provider is not ours to assume.
+      { name: "cloud_metadata_alibaba", url: "http://100.100.100.200/" },
+      // The provider's own control plane, in case "no egress" quietly excludes it.
+      { name: "daytona_control_plane", url: "https://app.daytona.io/api/health" },
+    ];
+
+    const reached: string[] = [];
+    for (const probe of probes) {
+      const header = probe.header ? `-H '${probe.header}' ` : "";
+      const result = await execute(
+        sandbox,
+        `: > /tmp/probe.out; curl -sS --max-time 8 ${header}-o /tmp/probe.out -w '%{http_code}' '${probe.url}' 2>&1; echo " body=$(head -c 100 /tmp/probe.out | tr -d '\n')"`,
+        20,
+      );
+
+      const output = result.result.trim();
+      const status = /^(\d{3})\b/.exec(output)?.[1] ?? null;
+      step(`egress_${probe.name}`, { status, output: output.slice(0, 160) });
+
+      // A transport failure means nothing got through. A 4xx or 5xx from the interception proxy
+      // is a refusal. A 2xx or 3xx is the destination answering, which is the thing that must
+      // not happen.
+      if (status && /^[23]/.test(status)) reached.push(`${probe.name} (${status})`);
+    }
+
+    if (reached.length) {
+      throw new Error(`reproduction sandbox reached ${reached.join(", ")} despite networkBlockAll`);
+    }
+    step("egress_conclusion", "no probe reached its destination: no external egress, no metadata");
+
+    // How it is enforced matters as much as that it is. Recorded because the answer turned out
+    // to be an interception proxy rather than an absent route.
+    const route = await execute(sandbox, "ip route show; cat /etc/resolv.conf", 15);
+    step("egress_mechanism", route.result.trim().slice(0, 400));
+
   } finally {
-    console.log("\n5. TEARDOWN");
+    console.log("\n6. TEARDOWN");
     await deleteSandbox(created.id);
     step("delete_called", true);
 
@@ -183,7 +222,13 @@ async function main(): Promise<void> {
     await assertSandboxGone(created.id);
     step("confirmed_absent_by_404", true);
 
-    step("labelled_stragglers_swept", await sweep());
+    // A cleanup failure must not become the reported cause: whatever brought us here is more
+    // interesting than the sweep that then also failed.
+    try {
+      step("labelled_stragglers_swept", await sweep(1, created.id));
+    } catch (error) {
+      step("sweep_failed", error instanceof Error ? error.message : String(error));
+    }
   }
 
   console.log("\nEVIDENCE\n" + JSON.stringify(evidence, null, 2));
