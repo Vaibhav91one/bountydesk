@@ -8,7 +8,7 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { stubAnalysisDriver } from "@/lib/analysis/stub-driver";
+import { createTrueforgeAnalysisDriver } from "@/lib/analysis/trueforge-driver";
 import { sweepExpiredLeases } from "@/lib/jobs/queue";
 import { runOnce } from "@/lib/jobs/worker";
 
@@ -22,8 +22,9 @@ async function main(): Promise<void> {
   console.log(`swept: released=${released} deadLettered=${deadLettered}`);
 
   const owner = `local-jobs-${randomUUID()}`;
+  const analysisDriver = createTrueforgeAnalysisDriver();
   for (let i = 0; i < count; i++) {
-    const jobId = await runOnce(owner, { analysis: stubAnalysisDriver });
+    const jobId = await runOnce(owner, { analysis: analysisDriver });
     if (!jobId) {
       console.log("nothing claimable");
       break;

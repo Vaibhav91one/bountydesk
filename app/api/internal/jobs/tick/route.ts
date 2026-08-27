@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { stubAnalysisDriver } from "@/lib/analysis/stub-driver";
+import { createTrueforgeAnalysisDriver } from "@/lib/analysis/trueforge-driver";
 import { hasValidWorkerAuthorization } from "@/lib/internal/worker-auth";
 import { sweepExpiredLeases } from "@/lib/jobs/queue";
 import { runOnce } from "@/lib/jobs/worker";
@@ -24,12 +24,13 @@ export async function POST(request: Request): Promise<Response> {
 
   const signal = AbortSignal.timeout(MAX_TICK_MS);
   const owner = `jobs-tick-${randomUUID()}`;
+  const analysisDriver = createTrueforgeAnalysisDriver();
   let processed = 0;
 
   try {
     const swept = await raceAbort(sweepExpiredLeases(), signal);
     while (processed < MAX_JOBS_PER_TICK && !signal.aborted) {
-      const jobId = await runOnce(owner, { analysis: stubAnalysisDriver, signal });
+      const jobId = await runOnce(owner, { analysis: analysisDriver, signal });
       if (!jobId) break;
       processed += 1;
     }
