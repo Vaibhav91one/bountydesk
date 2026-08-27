@@ -323,16 +323,20 @@ export async function execute(
     throw new DaytonaError(`execute -> ${response.status} ${body.slice(0, 300)}`, response.status);
   }
 
-  const data = (await response.json()) as { exitCode?: number; code?: number; result?: string };
+  const data = (await response.json()) as { exitCode?: unknown; code?: unknown; result?: unknown };
   const exitCode = data.exitCode ?? data.code;
+  const result = data.result ?? "";
 
-  // No exit status means we do not know whether the command succeeded, and defaulting that to
-  // zero would report a changed or truncated toolbox response as a command that worked.
-  if (typeof exitCode !== "number") {
-    throw new DaytonaError(`toolbox returned no exit status for a command in ${sandbox.id}`);
+  // A cast is a promise to the compiler, not a check. If the toolbox ever answers with a shape
+  // other than this, the caller should learn about it here rather than three frames later when
+  // something calls .trim on an object. No exit status in particular must not become exit 0.
+  if (typeof exitCode !== "number" || typeof result !== "string") {
+    throw new DaytonaError(
+      `toolbox returned an unusable result for a command in ${sandbox.id}: ${JSON.stringify(data).slice(0, 200)}`,
+    );
   }
 
-  return { exitCode, result: data.result ?? "" };
+  return { exitCode, result };
 }
 
 export type SnapshotInfo = {

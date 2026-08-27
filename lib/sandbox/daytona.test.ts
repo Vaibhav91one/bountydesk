@@ -320,6 +320,11 @@ test("a toolbox response with no exit status is a failure, not a success", async
     await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
   });
 
+  // A cast is a promise to the compiler, not a check.
+  await withFetch((async () => json({ exitCode: 0, result: {} })) as typeof fetch, async () => {
+    await assert.rejects(execute(sandbox, "echo ok"), DaytonaError);
+  });
+
   await withFetch((async () => json({ code: 3, result: "" })) as typeof fetch, async () => {
     assert.equal((await execute(sandbox, "false")).exitCode, 3);
   });
