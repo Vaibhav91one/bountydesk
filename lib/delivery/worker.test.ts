@@ -3,11 +3,8 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
 /**
- * Real Postgres for the same reason as lib/delivery/queue.test.ts: activeRepository() is
- * real, unchanged code (lib/github/lifecycle.ts), and its refusal logic is exactly what one
- * of these tests exercises. The GitHub side (minting a token, listing/posting comments) is
- * faked, since lib/verdicts/hash, lib/github/app-auth and lib/github/comment live on sibling
- * branches and do not exist in this worktree yet; see the DeliveryDeps seam in worker.ts.
+ * Real Postgres is required for the lease and active-repository checks. The GitHub boundary
+ * stays fake so these tests can force network failures and crash windows deterministically.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
 
@@ -16,6 +13,7 @@ type DbModule = typeof import("@/lib/db");
 
 let worker: WorkerModule;
 let dbm: DbModule;
+let queue: typeof import("./queue");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -23,6 +21,7 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   worker = await import("./worker");
+  queue = await import("./queue");
   await dbm.db.execute("select 1");
 });
 
@@ -54,6 +53,11 @@ async function seedFixture(
   opts: {
     suspended?: boolean;
     noTargetProfile?: boolean;
+    noApproval?: boolean;
+    reportState?: "DELIVERING" | "AWAITING_APPROVAL";
+    targetOverride?: string;
+    verdictForOtherReport?: boolean;
+    withoutMarker?: boolean;
     maxAttempts?: number;
     wrongApprovedHash?: boolean;
   } = {},
@@ -101,25 +105,44 @@ async function seedFixture(
       sourceRef: `github:${repoId}:issue:${issueNumber}`,
       title: `report ${n}`,
       body: "body",
-      state: "DELIVERING",
+      state: opts.reportState ?? "DELIVERING",
       connectedRepositoryId: repo.id,
       targetProfileId,
     })
     .returning({ id: dbm.report.id });
+
+  let verdictReportId = r.id;
+  if (opts.verdictForOtherReport) {
+    const [otherReport] = await dbm.db
+      .insert(dbm.report)
+      .values({
+        channel: "github",
+        sourceRef: `github:${repoId}:issue:${issueNumber + 10_000}`,
+        title: `other report ${n}`,
+        body: "other body",
+        state: "DELIVERING",
+        connectedRepositoryId: repo.id,
+        targetProfileId,
+      })
+      .returning({ id: dbm.report.id });
+    verdictReportId = otherReport.id;
+  }
 
   // The id is minted in JS, not left to Postgres's default, because the marker embedded in
   // the payload has to name the verdict's id and verdict rows cannot be UPDATEd afterwards
   // (see AGENTS.md: verdict is one of the four append-only tables).
   const verdictId = randomUUID();
   const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
-  const payload = `Reproduced against target. See canary evidence.\n${marker}`;
+  const payload = opts.withoutMarker
+    ? "Reproduced against target. See canary evidence."
+    : `Reproduced against target. See canary evidence.\n${marker}`;
   const contentHash = fakeHash(payload);
 
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
       id: verdictId,
-      reportId: r.id,
+      reportId: verdictReportId,
       outcome: "REPRODUCED",
       summary: "summary",
       payload,
@@ -127,14 +150,25 @@ async function seedFixture(
     })
     .returning({ id: dbm.verdict.id });
 
+  if (!opts.noApproval) {
+    await dbm.db.insert(dbm.approvalDecision).values({
+      verdictId: v.id,
+      reviewer: "test-reviewer",
+      decision: "APPROVED",
+      payloadHash: contentHash,
+    });
+  }
+
   const [d] = await dbm.db
     .insert(dbm.outboundDelivery)
     .values({
       reportId: r.id,
       verdictId: v.id,
       idempotencyKey: `key-${n}`,
-      target: `github:${repoId}:issue:${issueNumber}`,
-      approvedContentHash: opts.wrongApprovedHash ? "tampered-hash-does-not-match" : contentHash,
+      target: opts.targetOverride ?? `github:${repoId}:issue:${issueNumber}`,
+      approvedContentHash: opts.wrongApprovedHash
+        ? "tampered-hash-does-not-match"
+        : contentHash,
       ...(opts.maxAttempts ? { maxAttempts: opts.maxAttempts } : {}),
     })
     .returning({ id: dbm.outboundDelivery.id });
@@ -157,16 +191,21 @@ async function drainOthers() {
     .set({ state: "SENT", leaseOwner: null, leaseExpiresAt: null });
 }
 
-function makeFakeDeps(opts: {
-  listComments?: string[];
-  postComment?: (call: number) => Promise<{ id: number }>;
-} = {}) {
+function makeFakeDeps(
+  opts: {
+    listComments?: string[];
+    postComment?: (call: number) => Promise<{ id: number }>;
+  } = {},
+) {
   const calls = { mintToken: 0, listComments: 0, postComment: 0 };
   const deps: import("./worker").DeliveryDeps = {
     hashContent: fakeHash,
     mintToken: async () => {
       calls.mintToken++;
-      return { token: FAKE_TOKEN, expiresAt: new Date(Date.now() + 600_000).toISOString() };
+      return {
+        token: FAKE_TOKEN,
+        expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      };
     },
     listComments: async () => {
       calls.listComments++;
@@ -183,7 +222,10 @@ function makeFakeDeps(opts: {
 
 async function deliveryRow(deliveryId: string) {
   const [row] = await dbm.db
-    .select({ state: dbm.outboundDelivery.state, lastError: dbm.outboundDelivery.lastError })
+    .select({
+      state: dbm.outboundDelivery.state,
+      lastError: dbm.outboundDelivery.lastError,
+    })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
   return row;
@@ -234,7 +276,8 @@ test("a transient postComment failure retries and succeeds on the next attempt",
   const { deps, calls } = makeFakeDeps({
     listComments: [],
     postComment: async (call) => {
-      if (call === 1) throw new Error("ECONNRESET: connection reset while posting comment");
+      if (call === 1)
+        throw new Error("ECONNRESET: connection reset while posting comment");
       return { id: 2 };
     },
   });
@@ -243,7 +286,11 @@ test("a transient postComment failure retries and succeeds on the next attempt",
   assert.equal(firstId, fixture.deliveryId);
 
   const afterFirst = await deliveryRow(fixture.deliveryId);
-  assert.equal(afterFirst.state, "PENDING", "a transient failure must stay retryable");
+  assert.equal(
+    afterFirst.state,
+    "PENDING",
+    "a transient failure must stay retryable",
+  );
   assert.match(afterFirst.lastError ?? "", /ECONNRESET/);
 
   const repAfterFirst = await reportRow(fixture.reportId);
@@ -265,7 +312,71 @@ test("a transient postComment failure retries and succeeds on the next attempt",
   const repAfterSecond = await reportRow(fixture.reportId);
   assert.equal(repAfterSecond.state, "DELIVERED");
 
-  assert.equal(calls.postComment, 2, "the second call must have actually retried the post");
+  assert.equal(
+    calls.postComment,
+    2,
+    "the second call must have actually retried the post",
+  );
+});
+
+test("a final-state failure records one attempt and releases the lease", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps } = makeFakeDeps({
+    listComments: [],
+    postComment: async () => {
+      await dbm.db
+        .update(dbm.report)
+        .set({ state: "CANCELLED" })
+        .where(dbm.eq(dbm.report.id, fixture.reportId));
+      return { id: 3 };
+    },
+  });
+
+  await worker.deliverOnce("w-final-state-failure", { deps });
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING");
+  assert.match(delivery.lastError ?? "", /DELIVERING/);
+  const attempts = await attemptsFor(fixture.deliveryId);
+  assert.equal(attempts.length, 1);
+  assert.match(attempts[0].error ?? "", /DELIVERING/);
+});
+
+test("a failure before the GitHub calls releases the claimed delivery", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps();
+  deps.hashContent = () => {
+    throw new Error("hash implementation unavailable");
+  };
+
+  await worker.deliverOnce("w-pre-send-failure", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING");
+  assert.match(delivery.lastError ?? "", /hash implementation unavailable/);
+  const attempts = await attemptsFor(fixture.deliveryId);
+  assert.equal(attempts.length, 1);
+});
+
+test("a slow GitHub lookup renews the lease before another worker can reclaim it", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps } = makeFakeDeps();
+  let competingClaim: Awaited<ReturnType<typeof queue.claim>> | undefined;
+  deps.listComments = async () => {
+    await new Promise((resolve) => setTimeout(resolve, 6_200));
+    competingClaim = await queue.claim("w-competing", 60);
+    return [];
+  };
+
+  await worker.deliverOnce("w-heartbeat", { deps, leaseSeconds: 5 });
+
+  assert.equal(competingClaim, null);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "SENT");
 });
 
 test("exhausting maxAttempts fails the delivery but leaves the report in DELIVERING", async () => {
@@ -306,7 +417,11 @@ test("a marker already on the issue is treated as delivered, without posting aga
 
   assert.equal(calls.mintToken, 1);
   assert.equal(calls.listComments, 1);
-  assert.equal(calls.postComment, 0, "crash recovery must never post a second comment");
+  assert.equal(
+    calls.postComment,
+    0,
+    "crash recovery must never post a second comment",
+  );
 
   const delivery = await deliveryRow(fixture.deliveryId);
   assert.equal(delivery.state, "SENT");
@@ -327,7 +442,11 @@ test("a suspended installation is refused permanently, before any token is minte
   const id = await worker.deliverOnce("w-refused", { deps });
   assert.equal(id, fixture.deliveryId);
 
-  assert.equal(calls.mintToken, 0, "a refused repository must never reach token minting");
+  assert.equal(
+    calls.mintToken,
+    0,
+    "a refused repository must never reach token minting",
+  );
   assert.equal(calls.listComments, 0);
   assert.equal(calls.postComment, 0);
 
@@ -350,7 +469,11 @@ test("a content-hash mismatch fails permanently without ever contacting GitHub",
   const id = await worker.deliverOnce("w-tampered", { deps });
   assert.equal(id, fixture.deliveryId);
 
-  assert.equal(calls.mintToken, 0, "stored corruption must be caught before minting a token");
+  assert.equal(
+    calls.mintToken,
+    0,
+    "stored corruption must be caught before minting a token",
+  );
   assert.equal(calls.listComments, 0);
   assert.equal(calls.postComment, 0);
 
@@ -365,18 +488,109 @@ test("a content-hash mismatch fails permanently without ever contacting GitHub",
   assert.match(attempts[0].error ?? "", /content hash mismatch/);
 });
 
+test("an outbox row without an approved decision is refused before token minting", async () => {
+  await drainOthers();
+  const fixture = await seedFixture({ noApproval: true });
+  const { deps, calls } = makeFakeDeps();
+
+  const id = await worker.deliverOnce("w-unapproved", { deps });
+  assert.equal(id, fixture.deliveryId);
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0);
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /approved decision/);
+});
+
+test("an approved outbox row is refused unless the report is DELIVERING", async () => {
+  await drainOthers();
+  const fixture = await seedFixture({ reportState: "AWAITING_APPROVAL" });
+  const { deps, calls } = makeFakeDeps();
+
+  await worker.deliverOnce("w-wrong-report-state", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /DELIVERING/);
+});
+
+test("an outbox target that differs from the report source is refused", async () => {
+  await drainOthers();
+  const fixture = await seedFixture({
+    targetOverride: "github:999999:issue:77",
+  });
+  const { deps, calls } = makeFakeDeps();
+
+  await worker.deliverOnce("w-wrong-target", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /target/);
+});
+
+test("a verdict belonging to another report is refused", async () => {
+  await drainOthers();
+  const fixture = await seedFixture({ verdictForOtherReport: true });
+  const { deps, calls } = makeFakeDeps();
+
+  await worker.deliverOnce("w-wrong-verdict-report", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /does not belong/);
+});
+
+test("an approved payload without its replay marker is refused", async () => {
+  await drainOthers();
+  const fixture = await seedFixture({ withoutMarker: true });
+  const { deps, calls } = makeFakeDeps();
+
+  await worker.deliverOnce("w-missing-marker", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /marker/);
+});
+
 test("no delivery_attempt row ever stores the installation token or app JWT", async () => {
   const rows = await dbm.db
-    .select({ responseBody: dbm.deliveryAttempt.responseBody, error: dbm.deliveryAttempt.error })
+    .select({
+      responseBody: dbm.deliveryAttempt.responseBody,
+      error: dbm.deliveryAttempt.error,
+    })
     .from(dbm.deliveryAttempt);
 
-  assert.ok(rows.length > 0, "the earlier tests should have left attempt rows to check");
+  assert.ok(
+    rows.length > 0,
+    "the earlier tests should have left attempt rows to check",
+  );
 
   for (const row of rows) {
     for (const field of [row.responseBody, row.error]) {
       if (!field) continue;
-      assert.ok(!field.includes(FAKE_TOKEN), `a stored field contained the fake token: ${field}`);
-      assert.doesNotMatch(field, /^ghs_/, "a token-shaped string leaked into a stored field");
+      assert.ok(
+        !field.includes(FAKE_TOKEN),
+        `a stored field contained the fake token: ${field}`,
+      );
+      assert.doesNotMatch(
+        field,
+        /^ghs_/,
+        "a token-shaped string leaked into a stored field",
+      );
     }
   }
 });

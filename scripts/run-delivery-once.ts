@@ -4,8 +4,8 @@
  *   npm run worker:delivery -- [count]
  *
  * There is no production approval trigger yet (A4 provides the native TrueForge gate), so an
- * `outbound_delivery` row only exists here if something inserted one by hand — see
- * docs/smoke-test-github-walking-skeleton.md for how the live smoke test does that.
+ * `outbound_delivery` row only exists here after an approved publisher inserts it. A4 adds
+ * that native TrueForge approval path.
  */
 import { randomUUID } from "node:crypto";
 
@@ -18,8 +18,8 @@ async function main(): Promise<void> {
     throw new Error("usage: npm run worker:delivery -- [count]");
   }
 
-  const { released } = await sweepExpiredLeases();
-  console.log(`swept: released=${released}`);
+  const { released, failed } = await sweepExpiredLeases();
+  console.log(`swept: released=${released} failed=${failed}`);
 
   const owner = `local-delivery-${randomUUID()}`;
   for (let i = 0; i < count; i++) {

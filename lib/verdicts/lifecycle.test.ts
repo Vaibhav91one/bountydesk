@@ -50,14 +50,14 @@ async function seedReport(): Promise<string> {
 
 test("ensureInitialVerdict is a no-op retry when called twice with identical input", async () => {
   const reportId = await seedReport();
-  const payload = "hello";
+  const id = randomUUID();
+  const payload = `hello\n<!-- bountydesk-delivery:${id} -->`;
   const input = {
-    id: randomUUID(),
+    id,
     reportId,
     outcome: "ANALYSIS_ONLY" as const,
     summary: "s",
     payload,
-    contentHash: hash.computeContentHash(payload),
   };
 
   const first = await lifecycle.ensureInitialVerdict(input);
@@ -74,29 +74,73 @@ test("ensureInitialVerdict is a no-op retry when called twice with identical inp
   assert.equal(rows.length, 1, "a retry must not insert a second row");
 });
 
+test("ensureInitialVerdict computes the content hash from the payload", async () => {
+  const reportId = await seedReport();
+  const id = randomUUID();
+  const payload = `server-owned hash\n<!-- bountydesk-delivery:${id} -->`;
+
+  const created = await lifecycle.ensureInitialVerdict({
+    id,
+    reportId,
+    outcome: "ANALYSIS_ONLY",
+    summary: "s",
+    payload,
+  });
+
+  assert.equal(created.contentHash, hash.computeContentHash(payload));
+});
+
 test("ensureInitialVerdict refuses a second write that disagrees with the one on record", async () => {
   const reportId = await seedReport();
-  const payload = "hello";
+  const id = randomUUID();
+  const payload = `hello\n<!-- bountydesk-delivery:${id} -->`;
   const input = {
-    id: randomUUID(),
+    id,
     reportId,
     outcome: "ANALYSIS_ONLY" as const,
     summary: "s",
     payload,
-    contentHash: hash.computeContentHash(payload),
   };
 
   await lifecycle.ensureInitialVerdict(input);
 
+  const conflictingId = randomUUID();
   const conflicting = {
     ...input,
-    id: randomUUID(),
-    payload: "goodbye",
-    contentHash: hash.computeContentHash("goodbye"),
+    id: conflictingId,
+    payload: `goodbye\n<!-- bountydesk-delivery:${conflictingId} -->`,
   };
 
   await assert.rejects(
     () => lifecycle.ensureInitialVerdict(conflicting),
     lifecycle.VerdictIntegrityError,
+  );
+});
+
+test("ensureInitialVerdict compares summary and evidence on a retry", async () => {
+  const reportId = await seedReport();
+  const id = randomUUID();
+  const input = {
+    id,
+    reportId,
+    outcome: "ANALYSIS_ONLY" as const,
+    summary: "original summary",
+    evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    payload: `analysis only\n<!-- bountydesk-delivery:${id} -->`,
+  };
+  await lifecycle.ensureInitialVerdict(input);
+
+  await assert.rejects(
+    () =>
+      lifecycle.ensureInitialVerdict({ ...input, summary: "changed summary" }),
+    /summary/,
+  );
+  await assert.rejects(
+    () =>
+      lifecycle.ensureInitialVerdict({
+        ...input,
+        evidence: { reason: "OTHER" },
+      }),
+    /evidence/,
   );
 });

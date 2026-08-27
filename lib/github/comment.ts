@@ -6,7 +6,15 @@
 
 const GITHUB_TIMEOUT_MS = 10_000;
 
-function requestHeaders(token: string, withContentType: boolean): Record<string, string> {
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(GITHUB_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+function requestHeaders(
+  token: string,
+  withContentType: boolean,
+): Record<string, string> {
   const headers: Record<string, string> = {
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
@@ -16,11 +24,24 @@ function requestHeaders(token: string, withContentType: boolean): Record<string,
   return headers;
 }
 
-async function throwForStatus(response: Response, action: string): Promise<never> {
+async function throwForStatus(
+  response: Response,
+  action: string,
+): Promise<never> {
   // The response body is GitHub's own error message, not one of ours, so it is safe to
   // include; the token used for the request never appears in it.
   const body = await response.text();
-  throw new Error(`GitHub ${action} request failed with ${response.status}: ${body}`);
+  throw new Error(
+    `GitHub ${action} request failed with ${response.status}: ${body}`,
+  );
+}
+
+function repositoryPath(fullName: string): string {
+  const parts = fullName.split("/");
+  if (parts.length !== 2 || parts.some((part) => part.length === 0)) {
+    throw new Error(`repository full name must be owner/repo, got ${fullName}`);
+  }
+  return `${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
 }
 
 export async function postIssueComment(opts: {
@@ -29,28 +50,46 @@ export async function postIssueComment(opts: {
   issueNumber: number;
   body: string;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 }): Promise<{ id: number }> {
-  const { token, fullName, issueNumber, body, fetchImpl } = opts;
+  const { token, fullName, issueNumber, body, fetchImpl, signal } = opts;
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    throw new Error(`issueNumber must be a positive integer, got ${issueNumber}`);
+    throw new Error(
+      `issueNumber must be a positive integer, got ${issueNumber}`,
+    );
   }
 
-  const [owner, repo] = fullName.split("/");
+  const path = repositoryPath(fullName);
   const doFetch = fetchImpl ?? fetch;
 
   const response = await doFetch(
-    `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    `https://api.github.com/repos/${path}/issues/${issueNumber}/comments`,
     {
       method: "POST",
       headers: requestHeaders(token, true),
       body: JSON.stringify({ body }),
-      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+      signal: requestSignal(signal),
     },
   );
 
   if (!response.ok) await throwForStatus(response, "issue comment");
 
-  const json = (await response.json()) as { id: number };
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    throw new Error("GitHub returned a malformed issue comment response");
+  }
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    !("id" in json) ||
+    typeof json.id !== "number" ||
+    !Number.isSafeInteger(json.id) ||
+    json.id <= 0
+  ) {
+    throw new Error("GitHub returned a malformed issue comment response");
+  }
   return { id: json.id };
 }
 
@@ -59,26 +98,48 @@ export async function listIssueComments(opts: {
   fullName: string;
   issueNumber: number;
   fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
 }): Promise<string[]> {
-  const { token, fullName, issueNumber, fetchImpl } = opts;
+  const { token, fullName, issueNumber, fetchImpl, signal } = opts;
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    throw new Error(`issueNumber must be a positive integer, got ${issueNumber}`);
+    throw new Error(
+      `issueNumber must be a positive integer, got ${issueNumber}`,
+    );
   }
 
-  const [owner, repo] = fullName.split("/");
+  const path = repositoryPath(fullName);
   const doFetch = fetchImpl ?? fetch;
   const PER_PAGE = 100;
   const bodies: string[] = [];
 
   for (let page = 1; ; page++) {
     const response = await doFetch(
-      `https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=${PER_PAGE}&page=${page}`,
-      { headers: requestHeaders(token, false), signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS) },
+      `https://api.github.com/repos/${path}/issues/${issueNumber}/comments?per_page=${PER_PAGE}&page=${page}`,
+      { headers: requestHeaders(token, false), signal: requestSignal(signal) },
     );
 
     if (!response.ok) await throwForStatus(response, "issue comments");
 
-    const items = (await response.json()) as { body?: string }[];
+    let json: unknown;
+    try {
+      json = await response.json();
+    } catch {
+      throw new Error("GitHub returned a malformed issue comments response");
+    }
+    if (
+      !Array.isArray(json) ||
+      json.some(
+        (item) =>
+          typeof item !== "object" ||
+          item === null ||
+          ("body" in item &&
+            item.body !== null &&
+            typeof item.body !== "string"),
+      )
+    ) {
+      throw new Error("GitHub returned a malformed issue comments response");
+    }
+    const items = json as Array<{ body?: string | null }>;
     for (const item of items) bodies.push(item.body ?? "");
 
     // A page under the requested size is the only signal GitHub gives that there is no next

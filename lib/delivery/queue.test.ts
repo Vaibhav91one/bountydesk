@@ -106,7 +106,10 @@ test("SKIP LOCKED means a second claim does not block on a locked row", async ()
     const claimed = await Promise.race([
       queue.claim("worker-b", 60),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("claim blocked on a locked row")), 4000),
+        setTimeout(
+          () => reject(new Error("claim blocked on a locked row")),
+          4000,
+        ),
       ),
     ]);
 
@@ -139,13 +142,20 @@ test("a stale fence cannot mutate a delivery once another worker reclaims it", a
 
   const fresh = await queue.claim("worker-fresh", 60);
   assert.ok(fresh);
-  assert.equal(fresh.id, stale.id, "the abandoned row should have been reclaimed");
+  assert.equal(
+    fresh.id,
+    stale.id,
+    "the abandoned row should have been reclaimed",
+  );
   assert.ok(fresh.fence > stale.fence, "reclaiming must issue a newer fence");
 
   // The stale worker comes back and tries to act on a lease it no longer holds.
   await assert.rejects(() => queue.markSent(stale), queue.LeaseLostError);
   await assert.rejects(() => queue.fail(stale, "boom"), queue.LeaseLostError);
-  await assert.rejects(() => queue.failPermanently(stale, "boom"), queue.LeaseLostError);
+  await assert.rejects(
+    () => queue.failPermanently(stale, "boom"),
+    queue.LeaseLostError,
+  );
   await assert.rejects(() => queue.renew(stale, 30), queue.LeaseLostError);
 
   // The rightful holder is unaffected.
@@ -166,11 +176,42 @@ test("an expired lease is reclaimed by sweepExpiredLeases", async () => {
     .where(dbm.eq(dbm.outboundDelivery.id, lease.id));
 
   const swept = await queue.sweepExpiredLeases();
-  assert.ok(swept.released >= 1, "an expired lease must be cleared for reclaiming");
+  assert.ok(
+    swept.released >= 1,
+    "an expired lease must be cleared for reclaiming",
+  );
 
   const reclaimed = await queue.claim("worker-after-sweep", 60);
   assert.ok(reclaimed);
   assert.equal(reclaimed.id, seeded.deliveryId);
+});
+
+test("an expired lease on the final attempt is moved to FAILED", async () => {
+  await drainOthers();
+  const seeded = await seedDelivery({ maxAttempts: 1 });
+
+  const lease = await queue.claim("worker-final-crash", 60);
+  assert.ok(lease);
+  assert.equal(lease.attempts, 1);
+
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ leaseExpiresAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.outboundDelivery.id, lease.id));
+
+  const swept = await queue.sweepExpiredLeases();
+  assert.equal(swept.failed, 1);
+
+  const [row] = await dbm.db
+    .select({
+      state: dbm.outboundDelivery.state,
+      lastError: dbm.outboundDelivery.lastError,
+    })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /final attempt/);
+  assert.equal(await queue.claim("worker-after-final-crash", 60), null);
 });
 
 test("fail() backs off and only reaches FAILED once maxAttempts is exhausted", async () => {
@@ -184,11 +225,18 @@ test("fail() backs off and only reaches FAILED once maxAttempts is exhausted", a
   await queue.fail(first, "first attempt: transient");
 
   const [afterFirst] = await dbm.db
-    .select({ state: dbm.outboundDelivery.state, nextAttemptAt: dbm.outboundDelivery.nextAttemptAt })
+    .select({
+      state: dbm.outboundDelivery.state,
+      nextAttemptAt: dbm.outboundDelivery.nextAttemptAt,
+    })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
 
-  assert.equal(afterFirst.state, "PENDING", "attempts remain, so the row stays retryable");
+  assert.equal(
+    afterFirst.state,
+    "PENDING",
+    "attempts remain, so the row stays retryable",
+  );
   assert.ok(
     afterFirst.nextAttemptAt.getTime() > Date.now(),
     "backoff must push the next attempt into the future",
@@ -207,7 +255,10 @@ test("fail() backs off and only reaches FAILED once maxAttempts is exhausted", a
   await queue.fail(second, "second attempt: still failing");
 
   const [afterSecond] = await dbm.db
-    .select({ state: dbm.outboundDelivery.state, lastError: dbm.outboundDelivery.lastError })
+    .select({
+      state: dbm.outboundDelivery.state,
+      lastError: dbm.outboundDelivery.lastError,
+    })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
 
@@ -226,10 +277,17 @@ test("failPermanently moves straight to FAILED regardless of attempts remaining"
   await queue.failPermanently(lease, "repository is no longer connected");
 
   const [row] = await dbm.db
-    .select({ state: dbm.outboundDelivery.state, lastError: dbm.outboundDelivery.lastError })
+    .select({
+      state: dbm.outboundDelivery.state,
+      lastError: dbm.outboundDelivery.lastError,
+    })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, seeded.deliveryId));
 
-  assert.equal(row.state, "FAILED", "a permanent refusal skips the retry budget entirely");
+  assert.equal(
+    row.state,
+    "FAILED",
+    "a permanent refusal skips the retry budget entirely",
+  );
   assert.equal(row.lastError, "repository is no longer connected");
 });

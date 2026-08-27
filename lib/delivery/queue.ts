@@ -1,4 +1,4 @@
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db, outboundDelivery, type Executor } from "@/lib/db";
 
@@ -112,7 +112,10 @@ function heldBy(lease: DeliveryLease) {
 }
 
 /** Extend a held lease without changing its owner or fence. */
-export async function renew(lease: DeliveryLease, leaseSeconds: number): Promise<void> {
+export async function renew(
+  lease: DeliveryLease,
+  leaseSeconds: number,
+): Promise<void> {
   if (!Number.isFinite(leaseSeconds) || leaseSeconds <= 0) {
     throw new Error("leaseSeconds must be greater than zero");
   }
@@ -131,7 +134,10 @@ export async function renew(lease: DeliveryLease, leaseSeconds: number): Promise
 
 /** Mark a delivery sent and drop the lease. Accepts a transaction so the caller can commit
  * this alongside the report's DELIVERING -> DELIVERED move as one unit. */
-export async function markSent(lease: DeliveryLease, tx: Executor = db): Promise<void> {
+export async function markSent(
+  lease: DeliveryLease,
+  tx: Executor = db,
+): Promise<void> {
   const updated = await tx
     .update(outboundDelivery)
     .set({
@@ -153,8 +159,12 @@ export async function markSent(lease: DeliveryLease, tx: Executor = db): Promise
  * Same exponential backoff formula as `lib/jobs/queue.ts`'s `fail`, for a transient error
  * that a retry might clear (a network blip, a 5xx from GitHub).
  */
-export async function fail(lease: DeliveryLease, error: string): Promise<void> {
-  const updated = await db.execute<{ id: string }>(sql`
+export async function fail(
+  lease: DeliveryLease,
+  error: string,
+  tx: Executor = db,
+): Promise<void> {
+  const updated = await tx.execute<{ id: string }>(sql`
     update ${outboundDelivery}
        set state = case
                      when ${outboundDelivery.attempts} >= ${outboundDelivery.maxAttempts}
@@ -183,8 +193,12 @@ export async function fail(lease: DeliveryLease, error: string): Promise<void> {
  * cannot fix: a content-hash mismatch is stored corruption, and a suspended installation or
  * removed repository needs an operator, not five more identical tries.
  */
-export async function failPermanently(lease: DeliveryLease, error: string): Promise<void> {
-  const updated = await db
+export async function failPermanently(
+  lease: DeliveryLease,
+  error: string,
+  tx: Executor = db,
+): Promise<void> {
+  const updated = await tx
     .update(outboundDelivery)
     .set({
       state: "FAILED",
@@ -200,16 +214,39 @@ export async function failPermanently(lease: DeliveryLease, error: string): Prom
 }
 
 /**
- * Reclaim rows whose worker died holding the lease, same idea as
- * `lib/jobs/queue.ts`'s `sweepExpiredLeases`: clearing the lease is enough, `claim`'s own
- * filters (state, attempts, backoff) decide whether the row is claimable again.
+ * Reclaim retryable rows whose worker died. A row that died on its final attempt becomes
+ * FAILED because claim() deliberately excludes exhausted rows.
  */
-export async function sweepExpiredLeases(): Promise<{ released: number }> {
-  const released = await db
-    .update(outboundDelivery)
-    .set({ leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() })
-    .where(and(eq(outboundDelivery.state, "PENDING"), lte(outboundDelivery.leaseExpiresAt, new Date())))
-    .returning({ id: outboundDelivery.id });
+export async function sweepExpiredLeases(): Promise<{
+  released: number;
+  failed: number;
+}> {
+  const failed = await db.execute<{ id: string }>(sql`
+    update ${outboundDelivery}
+       set state            = 'FAILED'::delivery_state,
+           lease_owner      = null,
+           lease_expires_at = null,
+           last_error       = coalesce(
+             ${outboundDelivery.lastError},
+             'delivery worker died on the final attempt'
+           ),
+           updated_at       = now()
+     where ${outboundDelivery.state} = 'PENDING'
+       and ${outboundDelivery.leaseExpiresAt} < now()
+       and ${outboundDelivery.attempts} >= ${outboundDelivery.maxAttempts}
+    returning ${outboundDelivery.id} as id
+  `);
 
-  return { released: released.length };
+  const released = await db.execute<{ id: string }>(sql`
+    update ${outboundDelivery}
+       set lease_owner = null,
+           lease_expires_at = null,
+           updated_at = now()
+     where ${outboundDelivery.state} = 'PENDING'
+       and ${outboundDelivery.leaseExpiresAt} < now()
+       and ${outboundDelivery.attempts} < ${outboundDelivery.maxAttempts}
+    returning ${outboundDelivery.id} as id
+  `);
+
+  return { released: released.length, failed: failed.length };
 }

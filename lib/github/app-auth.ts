@@ -13,6 +13,11 @@ import { githubAppId, githubAppPrivateKeyBase64 } from "@/lib/env";
 
 const GITHUB_TIMEOUT_MS = 10_000;
 
+function requestSignal(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(GITHUB_TIMEOUT_MS);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 /** GitHub allows drift up to a few minutes; backdating `iat` absorbs a slow clock on our side. */
 const CLOCK_SKEW_SECONDS = 60;
 
@@ -30,7 +35,9 @@ function base64url(input: string): string {
  * key pasted instead of its base64, or a value re-encoded twice) with a message that names it.
  */
 function decodedPrivateKey(): string {
-  const decoded = Buffer.from(githubAppPrivateKeyBase64(), "base64").toString("utf8");
+  const decoded = Buffer.from(githubAppPrivateKeyBase64(), "base64").toString(
+    "utf8",
+  );
   if (!/-----BEGIN (RSA )?PRIVATE KEY-----/.test(decoded)) {
     throw new Error(
       "GITHUB_APP_PRIVATE_KEY_BASE64 does not decode to a PEM private key block. It should be " +
@@ -42,16 +49,22 @@ function decodedPrivateKey(): string {
 }
 
 export function signAppJwt(now: Date = new Date()): string {
+  const appId = githubAppId();
+  if (!/^[1-9]\d*$/.test(appId)) {
+    throw new Error("GITHUB_APP_ID must be a positive integer");
+  }
   const iat = Math.floor(now.getTime() / 1000) - CLOCK_SKEW_SECONDS;
   const exp = iat + JWT_TTL_SECONDS;
 
   const header = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
-  const payload = base64url(JSON.stringify({ iat, exp, iss: githubAppId() }));
+  const payload = base64url(JSON.stringify({ iat, exp, iss: appId }));
   const signingInput = `${header}.${payload}`;
 
   // Validate the key before signing so a malformed secret fails with a clear message instead
   // of an opaque OpenSSL error, and fails before the signature (and thus the JWT) ever exists.
-  const signature = createSign("RSA-SHA256").update(signingInput).sign(decodedPrivateKey(), "base64url");
+  const signature = createSign("RSA-SHA256")
+    .update(signingInput)
+    .sign(decodedPrivateKey(), "base64url");
 
   return `${signingInput}.${signature}`;
 }
@@ -68,10 +81,12 @@ export type InstallationToken = { token: string; expiresAt: string };
 export async function mintInstallationToken(
   installationId: number,
   repoId: number,
-  opts?: { fetchImpl?: typeof fetch },
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
 ): Promise<InstallationToken> {
   if (!Number.isInteger(installationId) || installationId <= 0) {
-    throw new Error(`installationId must be a positive integer, got ${installationId}`);
+    throw new Error(
+      `installationId must be a positive integer, got ${installationId}`,
+    );
   }
   if (!Number.isInteger(repoId) || repoId <= 0) {
     throw new Error(`repoId must be a positive integer, got ${repoId}`);
@@ -89,7 +104,7 @@ export async function mintInstallationToken(
         "x-github-api-version": "2022-11-28",
       },
       body: JSON.stringify({ repository_ids: [repoId] }),
-      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+      signal: requestSignal(opts?.signal),
     },
   );
 
@@ -97,9 +112,30 @@ export async function mintInstallationToken(
     // GitHub's own error body is safe to surface; it never contains the Authorization header
     // we sent, only its own complaint about the request.
     const body = await response.text();
-    throw new Error(`GitHub installation token request failed with ${response.status}: ${body}`);
+    throw new Error(
+      `GitHub installation token request failed with ${response.status}: ${body}`,
+    );
   }
 
-  const json = (await response.json()) as { token: string; expires_at: string };
+  let json: unknown;
+  try {
+    json = await response.json();
+  } catch {
+    throw new Error("GitHub returned a malformed installation token response");
+  }
+
+  if (
+    typeof json !== "object" ||
+    json === null ||
+    !("token" in json) ||
+    typeof json.token !== "string" ||
+    json.token.length === 0 ||
+    !("expires_at" in json) ||
+    typeof json.expires_at !== "string" ||
+    !Number.isFinite(Date.parse(json.expires_at))
+  ) {
+    throw new Error("GitHub returned a malformed installation token response");
+  }
+
   return { token: json.token, expiresAt: json.expires_at };
 }

@@ -1,4 +1,7 @@
 import { db, sql, verdict, type Executor } from "@/lib/db";
+import { isDeepStrictEqual } from "node:util";
+
+import { computeContentHash } from "./hash";
 
 /**
  * Raised when a retried write disagrees with the verdict already on record.
@@ -10,7 +13,9 @@ import { db, sql, verdict, type Executor } from "@/lib/db";
  */
 export class VerdictIntegrityError extends Error {
   constructor(reportId: string, mismatch: string) {
-    super(`verdict for report ${reportId} already exists and disagrees on ${mismatch}`);
+    super(
+      `verdict for report ${reportId} already exists and disagrees on ${mismatch}`,
+    );
     this.name = "VerdictIntegrityError";
   }
 }
@@ -25,12 +30,13 @@ export type NewInitialVerdict = {
   summary: string;
   evidence?: Record<string, unknown>;
   payload: string;
-  contentHash: string;
 };
 
 export type Verdict = {
   id: string;
   outcome: string;
+  summary: string;
+  evidence: unknown;
   payload: string;
   contentHash: string;
 };
@@ -48,6 +54,13 @@ export async function ensureInitialVerdict(
   input: NewInitialVerdict,
   tx: Executor = db,
 ): Promise<Verdict> {
+  const marker = `<!-- bountydesk-delivery:${input.id} -->`;
+  if (input.payload.split(marker).length !== 2) {
+    throw new VerdictIntegrityError(input.reportId, "delivery marker");
+  }
+  const contentHash = computeContentHash(input.payload);
+  const evidence = input.evidence ?? {};
+
   const inserted = await tx
     .insert(verdict)
     .values({
@@ -55,15 +68,17 @@ export async function ensureInitialVerdict(
       reportId: input.reportId,
       outcome: input.outcome,
       summary: input.summary,
-      evidence: input.evidence ?? {},
+      evidence,
       payload: input.payload,
-      contentHash: input.contentHash,
+      contentHash,
       revision: 1,
     })
     .onConflictDoNothing({ target: [verdict.reportId, verdict.revision] })
     .returning({
       id: verdict.id,
       outcome: verdict.outcome,
+      summary: verdict.summary,
+      evidence: verdict.evidence,
       payload: verdict.payload,
       contentHash: verdict.contentHash,
     });
@@ -74,24 +89,36 @@ export async function ensureInitialVerdict(
     .select({
       id: verdict.id,
       outcome: verdict.outcome,
+      summary: verdict.summary,
+      evidence: verdict.evidence,
       payload: verdict.payload,
       contentHash: verdict.contentHash,
     })
     .from(verdict)
-    .where(sql`${verdict.reportId} = ${input.reportId} and ${verdict.revision} = 1`)
+    .where(
+      sql`${verdict.reportId} = ${input.reportId} and ${verdict.revision} = 1`,
+    )
     .limit(1);
 
   if (!existing) {
-    throw new Error(`ensureInitialVerdict: conflict on report ${input.reportId} but no row found`);
+    throw new Error(
+      `ensureInitialVerdict: conflict on report ${input.reportId} but no row found`,
+    );
   }
 
   if (existing.outcome !== input.outcome) {
     throw new VerdictIntegrityError(input.reportId, "outcome");
   }
+  if (existing.summary !== input.summary) {
+    throw new VerdictIntegrityError(input.reportId, "summary");
+  }
+  if (!isDeepStrictEqual(existing.evidence, evidence)) {
+    throw new VerdictIntegrityError(input.reportId, "evidence");
+  }
   if (existing.payload !== input.payload) {
     throw new VerdictIntegrityError(input.reportId, "payload");
   }
-  if (existing.contentHash !== input.contentHash) {
+  if (existing.contentHash !== contentHash) {
     throw new VerdictIntegrityError(input.reportId, "contentHash");
   }
 

@@ -4,8 +4,13 @@ import test from "node:test";
 import { listIssueComments, postIssueComment } from "./comment";
 
 function commentsPage(count: number, startIndex: number): Response {
-  const items = Array.from({ length: count }, (_, i) => ({ body: `comment-${startIndex + i}` }));
-  return new Response(JSON.stringify(items), { status: 200, headers: { "content-type": "application/json" } });
+  const items = Array.from({ length: count }, (_, i) => ({
+    body: `comment-${startIndex + i}`,
+  }));
+  return new Response(JSON.stringify(items), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 test("listIssueComments follows every page while it comes back full", async () => {
@@ -29,7 +34,10 @@ test("listIssueComments follows every page while it comes back full", async () =
   });
 
   assert.equal(seen.length, 3);
-  assert.deepEqual(seen.map((u) => u.searchParams.get("page")), ["1", "2", "3"]);
+  assert.deepEqual(
+    seen.map((u) => u.searchParams.get("page")),
+    ["1", "2", "3"],
+  );
   for (const url of seen) assert.equal(url.searchParams.get("per_page"), "100");
 
   assert.equal(bodies.length, 230);
@@ -55,6 +63,24 @@ test("a first page under 100 items stops the loop after one call", async () => {
   assert.equal(bodies.length, 3);
 });
 
+test("listIssueComments rejects malformed comment entries", async () => {
+  const stub = (async () =>
+    new Response(JSON.stringify([{ body: 42 }]), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  await assert.rejects(
+    listIssueComments({
+      token: "t",
+      fullName: "acme/widgets",
+      issueNumber: 7,
+      fetchImpl: stub,
+    }),
+    /malformed issue comments response/,
+  );
+});
+
 test("postIssueComment posts the right URL, body, and headers", async () => {
   let seenUrl = "";
   let seenInit: RequestInit | undefined;
@@ -76,7 +102,10 @@ test("postIssueComment posts the right URL, body, and headers", async () => {
     fetchImpl: stub,
   });
 
-  assert.equal(seenUrl, "https://api.github.com/repos/acme/widgets/issues/12/comments");
+  assert.equal(
+    seenUrl,
+    "https://api.github.com/repos/acme/widgets/issues/12/comments",
+  );
   assert.deepEqual(JSON.parse(seenInit?.body as string), { body: "hello" });
 
   const headers = seenInit?.headers as Record<string, string>;
@@ -86,8 +115,28 @@ test("postIssueComment posts the right URL, body, and headers", async () => {
   assert.deepEqual(result, { id: 555 });
 });
 
+test("postIssueComment rejects a malformed successful response", async () => {
+  const stub = (async () =>
+    new Response(JSON.stringify({ id: "not-a-number" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    })) as typeof fetch;
+
+  await assert.rejects(
+    postIssueComment({
+      token: "t",
+      fullName: "acme/widgets",
+      issueNumber: 12,
+      body: "hello",
+      fetchImpl: stub,
+    }),
+    /malformed issue comment response/,
+  );
+});
+
 test("a non-2xx response throws with the status and never echoes the token", async () => {
-  const stub = (async () => new Response("bad credentials", { status: 401 })) as typeof fetch;
+  const stub = (async () =>
+    new Response("bad credentials", { status: 401 })) as typeof fetch;
 
   await assert.rejects(
     postIssueComment({

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { stubAnalysisDriver } from "@/lib/analysis/stub-driver";
-import { workerInternalSecret } from "@/lib/env";
+import { hasValidWorkerAuthorization } from "@/lib/internal/worker-auth";
 import { sweepExpiredLeases } from "@/lib/jobs/queue";
 import { runOnce } from "@/lib/jobs/worker";
 
@@ -9,6 +9,7 @@ import { runOnce } from "@/lib/jobs/worker";
 export const runtime = "nodejs";
 
 const MAX_JOBS_PER_TICK = 25;
+const MAX_TICK_MS = 20_000;
 
 /**
  * Drives the inbound job queue. Nothing schedules this yet (no cron config exists in this
@@ -17,21 +18,21 @@ const MAX_JOBS_PER_TICK = 25;
  * in lease_owner if something needs debugging.
  */
 export async function POST(request: Request): Promise<Response> {
-  const auth = request.headers.get("authorization");
-  if (auth !== `Bearer ${workerInternalSecret()}`) {
+  if (!hasValidWorkerAuthorization(request.headers.get("authorization"))) {
     return new Response("unauthorized", { status: 401 });
   }
 
-  await sweepExpiredLeases();
+  const swept = await sweepExpiredLeases();
 
   const owner = `jobs-tick-${randomUUID()}`;
+  const deadline = Date.now() + MAX_TICK_MS;
   let processed = 0;
 
-  while (processed < MAX_JOBS_PER_TICK) {
+  while (processed < MAX_JOBS_PER_TICK && Date.now() < deadline) {
     const jobId = await runOnce(owner, { analysis: stubAnalysisDriver });
     if (!jobId) break;
     processed += 1;
   }
 
-  return Response.json({ processed });
+  return Response.json({ processed, swept });
 }

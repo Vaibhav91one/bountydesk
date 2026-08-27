@@ -32,7 +32,9 @@ after(async () => {
   await schema?.drop();
 });
 
-async function seedReport(state: "TRIAGING" | "REPRODUCING" = "TRIAGING"): Promise<string> {
+async function seedReport(
+  state: "TRIAGING" | "REPRODUCING" = "TRIAGING",
+): Promise<string> {
   const [row] = await dbm.db
     .insert(dbm.report)
     .values({
@@ -49,9 +51,28 @@ async function seedReport(state: "TRIAGING" | "REPRODUCING" = "TRIAGING"): Promi
   return row.id;
 }
 
-function context(reportId: string, signal: AbortSignal = new AbortController().signal) {
+function context(
+  reportId: string,
+  signal: AbortSignal = new AbortController().signal,
+) {
   return { reportId, lease: {} as never, signal };
 }
+
+test("ensureSession persists an explicitly labeled stub session identity", async () => {
+  const reportId = await seedReport("TRIAGING");
+
+  await driver.stubAnalysisDriver.ensureSession(context(reportId));
+
+  const [event] = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  assert.equal(event.type, "analysis.stub_session.created");
+  assert.deepEqual(event.data, {
+    provider: "stub",
+    sessionId: `stub:${reportId}`,
+  });
+});
 
 test("a fresh TRIAGING report ends in AWAITING_APPROVAL with an ANALYSIS_ONLY verdict", async () => {
   const reportId = await seedReport("TRIAGING");
@@ -69,7 +90,10 @@ test("a fresh TRIAGING report ends in AWAITING_APPROVAL with an ANALYSIS_ONLY ve
     verdictRow.payload.includes(`bountydesk-delivery:${verdictRow.id}`),
     "the marker must reference the verdict's own id",
   );
-  assert.equal(verdictRow.contentHash, hash.computeContentHash(verdictRow.payload));
+  assert.equal(
+    verdictRow.contentHash,
+    hash.computeContentHash(verdictRow.payload),
+  );
 
   const [reportRow] = await dbm.db
     .select({ state: dbm.report.state })

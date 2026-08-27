@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 
 import { db, eq, report, type Executor } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
-import { recordEvent, transition, type ReportState } from "@/lib/reports/lifecycle";
-import { computeContentHash } from "@/lib/verdicts/hash";
+import {
+  recordEvent,
+  transition,
+  type ReportState,
+} from "@/lib/reports/lifecycle";
 import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 
 const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.`;
@@ -12,7 +15,10 @@ function buildPayload(verdictId: string): string {
   return `${ANALYSIS_MESSAGE}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
 }
 
-const PRE_ANALYSIS_STATES: ReadonlySet<ReportState> = new Set(["TRIAGING", "REPRODUCING"]);
+const PRE_ANALYSIS_STATES: ReadonlySet<ReportState> = new Set([
+  "TRIAGING",
+  "REPRODUCING",
+]);
 
 /**
  * The deterministic stand-in for a real TrueForge-backed driver. It never opens a session
@@ -20,10 +26,16 @@ const PRE_ANALYSIS_STATES: ReadonlySet<ReportState> = new Set(["TRIAGING", "REPR
  * there is nothing to scope-check and nothing to reproduce.
  */
 export const stubAnalysisDriver: AnalysisDriver = {
-  // ponytail: nothing to set up. There is no real session behind this stub, so recording a
-  // session_event here would be an audit trail entry for something that never happened; that
-  // is A4's job once a real TrueForge session exists.
-  async ensureSession(): Promise<void> {},
+  async ensureSession({ reportId, signal }: AnalysisContext): Promise<void> {
+    if (signal.aborted) throw signal.reason;
+    await recordEvent(
+      reportId,
+      "analysis.stub_session.created",
+      { provider: "stub", sessionId: `stub:${reportId}` },
+      { idempotencyKey: `${reportId}:analysis.stub_session.created` },
+    );
+    if (signal.aborted) throw signal.reason;
+  },
 
   async run({ reportId, signal }: AnalysisContext): Promise<void> {
     if (signal.aborted) throw signal.reason;
@@ -38,7 +50,10 @@ export const stubAnalysisDriver: AnalysisDriver = {
         .where(eq(report.id, reportId))
         .for("update");
 
-      if (!row) throw new Error(`stubAnalysisDriver.run: report ${reportId} does not exist`);
+      if (!row)
+        throw new Error(
+          `stubAnalysisDriver.run: report ${reportId} does not exist`,
+        );
 
       // An earlier attempt at this same job already carried the report past analysis. That
       // makes this call a no-op, which is what lets the worker retry it freely under a lost
@@ -49,8 +64,6 @@ export const stubAnalysisDriver: AnalysisDriver = {
 
       const verdictId = randomUUID();
       const payload = buildPayload(verdictId);
-      const contentHash = computeContentHash(payload);
-
       await ensureInitialVerdict(
         {
           id: verdictId,
@@ -59,7 +72,6 @@ export const stubAnalysisDriver: AnalysisDriver = {
           summary: "Analysis-only result: automated reproduction was not run.",
           evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
           payload,
-          contentHash,
         },
         tx,
       );
