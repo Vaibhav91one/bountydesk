@@ -15,22 +15,24 @@ Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs
 
 ## Scope
 
-**Intake and reproduction are separate.** A report enters through one of three independent
-channels — GitHub issues, email, or file upload — and email and upload need no GitHub
+Intake and reproduction are separate. A report enters through one of three independent
+channels: GitHub issues, email, or file upload. Email and upload need no GitHub
 connection. Reproduction is what requires a server-authorised target; a report without one is
 triaged and stops at an evidence packet for a human.
 
-**The demo target** is the owner's connected fork of Juice Shop at commit `1867b926`, the
-`v17.3.0` tag, with two frozen scenarios (search UNION SQLi, login auth-bypass) verified
-against it. The image is built ahead of the run, so the live reproduction starts an immutable
-snapshot with no network.
+The demo target is the owner's connected fork of Juice Shop at commit `1867b926`, the
+`v17.3.0` tag. That source commit matches upstream. The existing scenarios were verified
+against the upstream v17.3.0 image; the connected-fork image and snapshot do not exist yet and
+must pass both scenarios before the demo can call them verified. The build happens ahead of
+the run so live reproduction starts an immutable snapshot with no network.
 
-**The dynamic tier** clones a connected repository at a server-resolved commit, builds it in a
-sandbox that gets narrow dependency egress and no platform secrets, and reproduces against the
-immutable output in a second sandbox with none. Accepted, unbuilt, and gated on a provisioning
-spike.
+The dynamic tier has the controller download a connected public repository at a
+server-resolved commit and stage the hashed archive in a build sandbox. That sandbox gets
+narrow dependency egress and no platform secrets. Reproduction uses the immutable output in a
+second sandbox with no external egress. The tier is accepted, unbuilt, and gated on a
+provisioning spike.
 
-**What never changes:** a target with no defender-authored fixture and oracle cannot return a
+What never changes: a target with no defender-authored fixture and oracle cannot return a
 reproduced verdict, whatever the proof-of-concept printed. It returns evidence and a human
 decides.
 

@@ -11,12 +11,12 @@ One page. Follow top to bottom on demo day.
 
 ## Happy path (the live demo)
 
-**Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's, so "this is my repository" and "this is the frozen version" are both provable on stage. Built into an immutable image **before** the demo. Endpoint, payload, oracle and negative control frozen and live-verified in `decisions.md` Q18.
+**Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. This proves the source revision, not the runtime image. Before the demo, build that fork into an immutable image, record its generated digest and snapshot ID, then rerun the Q18 scenarios against it. The current Q18 evidence was collected against the official upstream image.
 **Vuln class:** SQLi (single request, deterministic), confirmed by a **per-run canary**.
 
 1. **Intake** — a GitHub issue on the dedicated demo repo: `SQLi in /api/search`. The **installed BountyDesk GitHub App** delivers a **signed** webhook (`X-Hub-Signature-256`, platform-owned App secret); the receiver verifies it and resolves `installation_id → repo → TargetProfile` server-side → harness starts a TrueForge session.
 2. **Triage** — scope_check passes, dedupe_check clean, PoC extracted. (Text-only, seconds.)
-3. **Sandbox** — boot the prebuilt pinned image. No clone, no install, no network at reproduction time: the sandbox is offline. The build that produced it ran earlier, and that is the only step that ever needed the network.
+3. Sandbox: boot the prebuilt pinned image. No clone, no install, no network at reproduction time: the sandbox is offline. The build that produced it ran earlier, and that is the only step that ever needed the network.
 4. **Seed canary** — the trusted fixture seeds a fresh, unpredictable canary into the target. Run the **negative control** first: without the exploit, the oracle must not trip. The canary is *ours*, not the attacker's.
 5. **Run PoC** — execute the submitted PoC against sandbox-localhost.
 6. **Oracle (the money moment)** — the oracle runs **outside the PoC environment** and checks whether this run's canary reached the trusted sink. It did → `REPRODUCED`. Say out loud: **"the verdict comes from our canary, evaluated outside the sandbox — not from the PoC's own output. A researcher can't fake a 'reproduced.'"**

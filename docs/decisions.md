@@ -62,7 +62,7 @@ Caveat to keep on the record: "canary reached the trusted sink" is evidence, not
 Demo runs on Daytona cloud (shared-kernel container, benign inputs only). Production runs a Kata microVM (Cloud Hypervisor / Firecracker backend) or E2B self-hosted, with host-side egress hardening. OpenSandbox rejected. This split is documented on the Threat Model board page.
 
 ### Q6 — Demo happy path
-One pinned deliberately-vulnerable target (see Q18), SQLi confirmed by a per-run canary. **Amended 2026-08-27:** the target is the owner's connected fork `Vaibhav91one/juice-shop` (repository id 1347703889) at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and is the same commit as upstream's, so the provenance is checkable and the scenario tables below need no re-verification. The image is built from that commit **before** the live run, so the demonstration still starts an immutable snapshot. Flow: GitHub issue → boot the **prebuilt pinned image** (no runtime clone, no install, no network at reproduction time) → seed a fresh unpredictable canary through the trusted fixture → negative control → run PoC → the out-of-sandbox oracle confirms the canary reached the trusted sink → evidence packet → human approves.
+One pinned deliberately-vulnerable target (see Q18), SQLi confirmed by a per-run canary. **Amended 2026-08-27:** the planned target source is the owner's connected fork `Vaibhav91one/juice-shop` (repository id 1347703889) at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. That proves source equivalence, not runtime-artifact provenance. The existing scenario evidence came from the upstream image recorded in Q18. The connected-fork image must be built and both scenarios re-verified against its generated digest before the demo can call it frozen. Flow after that gate passes: GitHub issue → boot the **prebuilt pinned image** (no runtime clone, no install, no network at reproduction time) → seed a fresh unpredictable canary through the trusted fixture → negative control → run PoC → the out-of-sandbox oracle confirms the canary reached the trusted sink → evidence packet → human approves.
 
 ### Backup (demo resilience)
 Three layers: (A) analysis fallback live — demo it as a feature when reproduction can't run; (B) pre-recorded run for total network/Daytona failure; (C) **a second scenario inside the same pinned target** — never a second target or a second architecture. Plus pre-warm: provision the sandbox and pre-pull the image before presenting.
@@ -108,10 +108,10 @@ The append-only event log is the only writer that runs without approval. A Denie
 > **Webhook secret is platform-owned (Q13/Q14 note).** With the GitHub App model (see Q19) the App's webhook signing secret belongs to BountyDesk, not the customer — users never see or paste a secret. The `X-Hub-Signature-256` HMAC is verified against the platform-held App secret; users only install the App and pick repos.
 
 ### Q15 — Scope enforcement
-Enforce at the **capability boundary**, not by the agent choosing to call `scope_check`. Bind each report to a server-matched **TargetProfile** (pinned commit/image, allowed host, ports); the clone/deploy/egress tools take the target from that profile, not an agent-supplied string, and refuse anything else. `scope_check` stays only as an agent-facing early-exit for the common case. For the demo: one server-authorised profile, derived from the connected fork. **Amended 2026-08-27:** the architecture carries additional authorised profiles (Q20); what does not change is that issue text, email bodies, attachments, PoCs and model output can never create one.
+Enforce at the **capability boundary**, not by the agent choosing to call `scope_check`. Bind every reproduction attempt to a server-matched **TargetProfile** (pinned commit/image, allowed host, ports); the clone/deploy/egress tools take the target from that profile, not an agent-supplied string, and refuse anything else. A report may exist without a profile and remain analysis-only. `scope_check` stays only as an agent-facing early-exit for the common case. For the demo: one server-authorised profile, derived from the connected fork. **Amended 2026-08-27:** the architecture carries additional authorised profiles (Q20); what does not change is that issue text, email bodies, attachments, PoCs and model output can never create one.
 
 ### Q16 — Install vs runtime egress
-**Prebuilt pinned snapshot.** Bake the target + deps into an image in a separate trusted pipeline, so the hostile runtime sandbox needs zero network. The PoC runs against a fully offline target. "No egress" means no egress off the sandbox; loopback to the target is fine. Trusted build (target code) vs hostile execute (attacker PoC, offline) is the trust split — and it's what makes `npm ci --ignore-scripts` meaningful (it guards the build; the PoC is contained by the offline sandbox). Verify emptiness: from the locked sandbox, curl an external host and `169.254.169.254`, both must fail. Attribute egress attempts to a process; don't assume a blocked attempt means a malicious submission. Tier-2 arbitrary-repo can't be safely pre-baked, because building it runs its code.
+**Prebuilt pinned snapshot.** Bake the target + deps into an image in a separate trusted pipeline, so the hostile runtime sandbox needs zero network. The PoC runs against a fully offline target. "No egress" means no egress off the sandbox; loopback to the target is fine. Trusted build (target code) and hostile execution (attacker PoC, offline) form the trust split. That is what makes `npm ci --ignore-scripts` meaningful: it guards the build, while offline isolation contains the PoC. Verify emptiness: from the locked sandbox, curl an external host and `169.254.169.254`, both must fail. Attribute egress attempts to a process; don't assume a blocked attempt means a malicious submission. Tier-2 arbitrary-repo can't be safely pre-baked, because building it runs its code.
 
 **Amended 2026-08-27.** That is now a reason to give the build its own sandbox rather than a reason to defer it. A dynamic run uses two sandboxes with one artifact crossing between them: a build sandbox with narrow dependency egress, and a reproduction sandbox with none. The pinned demo path is unchanged and still boots a prebuilt image offline.
 
@@ -201,7 +201,14 @@ Both scenarios run against the one pinned image; Scenario 2 is the live Backup C
 
 **Flow:** Sign in with GitHub (identity) → Install BountyDesk App → choose org/account → choose repos → installation callback → store `installation_id` + repo IDs → a signed issue webhook arrives → verify / filter / process → human approves the exact verdict → a **short-lived installation token** posts the comment → discard the token.
 
-**Minimum permissions (MVP):** **Metadata: read** (auto) + **Issues: read & write**. Explicitly **NOT** contents / actions / deployments / secrets / workflows / admin. (**Amended 2026-08-27:** the dynamic tier in Q20 does clone connected repositories and the permission set still does not change. A public repository clones anonymously, with no token at all, and the demo fork is public. Contents: read would be needed only for a private repository, which this tier refuses at intake with reason `POLICY_REFUSED` rather than widening the App. Widening it is not free either: changing an App's permissions puts every existing installation into pending-acceptance until the account owner accepts.)
+**Minimum permissions (MVP):** **Metadata: read** (auto) + **Issues: read & write**. Explicitly **NOT** contents / actions / deployments / secrets / workflows / admin.
+
+Amended 2026-08-27: the dynamic tier in Q20 downloads connected public repositories
+anonymously, with no source token, and the demo fork is public. Contents: read is required for
+private source. A signed issue from a private connected repository is still accepted and
+triaged, but reproduction yields `ANALYSIS_ONLY` with reason `POLICY_REFUSED`. Adding a
+permission asks each installation owner to approve it. Installations that do not approve
+continue with their old permissions, so existing issue intake does not stop.
 
 **Token model — no stored PAT, no broad OAuth repo token.** To post a comment: authenticate the App → generate an installation access token (~1h TTL) → post the approved comment idempotently → discard the token. Nothing long-lived is persisted.
 
@@ -211,50 +218,58 @@ Both scenarios run against the one pinned image; Scenario 2 is the live Backup C
 
 **Two new durable tables** (see UML): **GitHubInstallation** (installation identity + permissions + suspension) and **ConnectedRepository** (per-repo enablement, intake policy, and its `target_profile_id` link). GitHubInstallation 1:N ConnectedRepository; ConnectedRepository → TargetProfile (0..n:1). Security-sensitive, stored as columns, not JSON.
 
-### Q20 — Sandbox topology and the dynamic target tier (2026-08-27)
+### Q20: Sandbox topology and the dynamic target tier (2026-08-27)
 
 Tier 2 from Q2 moves into scope. A connected repository can be its own reproduction target:
 the controller resolves an exact commit, downloads that commit, a build sandbox builds it, and
 the reproduction runs against the immutable output. Dynamic does not mean "run the latest
 code". Every reproduction uses an exact commit and an immutable build.
 
-**Build identity** is `repository id + commit SHA + source-archive digest + build-recipe digest
-+ base-image digest`. A matching successful build may be reused. Any changed input needs a new
-build and a new approval.
+#### Build identity
 
-**Six security domains.** The split matters more than the names, so each one is written as what
-it may reach rather than what it is for.
+Build identity is `repository id + commit SHA + source-archive digest + build-recipe digest +
+base-image digest`. A matching successful build may be reused. Any changed input needs a new
+build authorization.
 
-1. **Trusted controller.** Resolves target authority. Mints short-lived installation tokens,
-   downloads the server-selected source archive, and discards the token. Validates plans and
+#### Six security domains
+
+The split matters more than the names, so each one is written as what it may reach rather than
+what it is for.
+
+1. The trusted controller resolves target authority, anonymously downloads the server-selected
+   public source archive, and records its digest. It validates plans and
    capabilities, generates approval hashes, seeds the canary through the trusted fixture,
    evaluates the oracle, and owns teardown and reconciliation.
-2. **Disposable intake parser.** Opens email bodies, attachments and uploaded files. No
+2. The disposable intake parser opens email bodies, attachments and uploaded files. It has no
    external network, no platform secrets, and no ability to create a target capability.
-3. **Untrusted build sandbox.** Receives a source archive staged by the controller. Never
+3. The untrusted build sandbox receives a source archive staged by the controller. It never
    receives a GitHub installation token, database URL, webhook secret, model key or Daytona
    key. Narrow dependency egress enforced by network policy rather than by asking. CPU,
    memory, process, disk and time limits. Produces a content-addressed artifact and cannot
    publish or authorise it.
-4. **Isolated target runtime.** Runs the immutable build. No external egress. Exposes only the
+4. The isolated target runtime runs the immutable build. It has no external egress and exposes only the
    approved application port to the PoC runner. Holds the state the fixture and oracle need.
-5. **Isolated PoC runner.** Reaches only the target's approved endpoint. No access to target
+5. The isolated PoC runner reaches only the target's approved endpoint. It has no access to target
    files, target database, fixture credentials, canary storage or the oracle channel. No
    platform secrets. Strict resource and execution limits.
-6. **External oracle.** Runs under the controller. Never trusts PoC stdout, exit status, or any
+6. The external oracle runs under the controller. It never trusts PoC stdout, exit status, or any
    file written inside a sandbox. Evaluates the application-specific canary contract and
    produces the authoritative result.
 
 The demo puts target and PoC in one Daytona sandbox, so Q18's shared-filesystem caveat stands
 and is demo-only isolation. Do not describe that topology as production-grade.
 
-**Egress differs by phase, and saying so is the point.** The pinned demo builds ahead of time
+#### Egress by phase
+
+The pinned demo builds ahead of time
 and reproduces offline. A dynamic build gets narrow dependency access and cannot reach
 arbitrary destinations, cloud metadata, private infrastructure or platform services. Dynamic
 reproduction uses the immutable output, has no external egress, allows only the PoC-to-target
 path, and fails closed if egress isolation cannot be verified.
 
-**The rule that constrains this whole feature: no fixture, no `REPRODUCED`.** Q3 requires a
+#### Fixture requirement
+
+No fixture means no `REPRODUCED`. Q3 requires a
 defender-authored canary seeded through a trusted fixture. An arbitrary repository has none by
 default, because nobody has written its seeding step or named its trusted sink. A profile
 without an approved fixture, negative control and oracle adapter cannot produce a reproduced
@@ -265,20 +280,27 @@ Juice Shop profile got one. For another repository the agent may propose a start
 fixture, canary seed, negative control, PoC execution and oracle observation; the server
 validates the proposal against schema and policy, and a human approves it.
 
-**Two approvals, not one.** A reproduction-plan approval comes before any dynamic build or
-intrusive step, and its hash covers the profile id, repository id, commit SHA, source-archive
-digest, build recipe, base-image digest, dependency egress allowlist, build and reproduction
-limits, PoC artifact digest, target port, readiness contract, fixture, negative control,
-oracle adapter and teardown policy. Changing any of them invalidates the approval. The
-outbound-verdict approval comes after the oracle result and evidence packet exist, and stays
+#### Three approvals
+
+A build authorization comes before customer code executes. Its hash covers the profile id,
+repository id, commit SHA, source-archive digest, build recipe, base-image digest, dependency
+egress allowlist, build limits and teardown policy.
+
+A reproduction approval comes after the build. Its hash covers the generated image digest,
+snapshot id, build attestation, reproduction limits, PoC artifact digest, target port,
+readiness contract, fixture, negative control, oracle adapter and teardown policy. A changed
+artifact or plan invalidates the approval.
+
+The outbound-verdict approval comes after the oracle result and evidence packet exist. It stays
 content-hash bound as it already is.
 
-**The eight controls, and where each one actually stands.** "Designed" is not "built", and the
-difference is the only thing this table is for.
+#### Control status
+
+"Designed" is not "built", and the difference is the only thing this table is for.
 
 | Control | Enforced at | Status |
 | --- | --- | --- |
-| Opaque target capability | tools substitute profile values; no agent-supplied target | built for the pinned path (`activeRepository`), designed for dynamic |
+| Opaque target capability | tools substitute profile values; no agent-supplied target | repository-to-profile binding built; capability tools designed and unbuilt |
 | Separate build and reproduction sandboxes | two sandboxes per dynamic run, artifact crosses | designed |
 | Mandatory egress enforcement | provider network policy, verified per run from inside | designed; the demo relies on the image needing no network, which is not the same thing |
 | Server-validated agent proposals | schema and policy validation before human approval | designed |
@@ -287,7 +309,7 @@ difference is the only thing this table is for.
 | No secrets in the hostile runtime | neither sandbox receives any platform credential | designed |
 | Resource limits | CPU, memory, process, disk, wall clock, teardown by TTL plus reconciler | designed |
 
-### Q21 — Independent intake channels (2026-08-27)
+### Q21: Independent intake channels (2026-08-27)
 
 Intake and reproduction are separate concerns, and conflating them is what made the earlier
 docs read as GitHub-only. A report enters through a channel. Reproduction needs a
@@ -295,38 +317,43 @@ server-authorised target profile. Neither implies the other.
 
 Three channels, independent of one another:
 
-- **GitHub issues.** Verify the webhook signature, resolve installation and repository ids
+- GitHub issues: verify the webhook signature, resolve installation and repository ids
   server-side, attach the configured profile when one exists. A repository not configured for
   reproduction is handled by the documented channel policy, and a target is never inferred
   from issue text.
-- **Email.** Verify the provider's webhook signature. Sender, headers, body, links and
+- Email: verify the provider's webhook signature. Sender, headers, body, links and
   attachments are untrusted, and sender identity is never target authorisation. Needs no
   GitHub connection to create a report.
-- **File upload.** Requires an authenticated platform user. Filenames, MIME declarations,
+- File upload: require an authenticated platform user. Filenames, MIME declarations,
   archives, documents, source files and PoCs are untrusted. Needs no GitHub connection.
 
 A report with no bound profile is triaged and moves to `ANALYSIS_ONLY`. Nothing is cloned,
-built, deployed or probed. A reviewer can bind an authorised profile later, and reproduction
-becomes available then. An uploaded repository archive or a clone URL in a message is never an
-authorised target; promoting uploaded source into an executable target would be a separate
-onboarding workflow with human authorisation, immutable hashes, safe extraction, build
-isolation and a server-created profile.
+built, deployed or probed. Resuming reproduction after a reviewer later binds a profile needs
+a future `ANALYSIS_ONLY → REPRODUCING` transition and transition tests; the current state
+machine does not permit it. An uploaded repository archive or a clone URL in a message is
+never an authorised target. Promoting uploaded source into an executable target would be a
+separate onboarding workflow with human authorisation, immutable hashes, safe extraction,
+build isolation and a server-created profile.
 
 `manual` is the upload channel. The `intake_channel` enum already carries `github`, `email` and
 `manual`, so there is no migration; a dedicated `upload` value can come later if it earns
 itself.
 
-**Intake parsing controls: designed, not built.** No external network, no platform secrets,
+#### Intake parsing controls
+
+Designed, not built: no external network, no platform secrets,
 file-size limits, attachment-count limits, content-based MIME detection, archive-depth limits,
 maximum decompressed size, path traversal rejection, symlink rejection, parser timeouts, CPU
 and memory limits, process-count limits, sanitised rendering, immutable artifact hashes, and
 malware scanning where available.
 
-**Delivery.** Only GitHub has an outbound adapter. On email and upload the approved payload is
-sent by the operator, who confirms the send in the app; that writes the delivery attempt and
-moves the report to `DELIVERED`. The approval gate, the content-hash binding and the audit
-trail are identical, and only the transport is manual, so the frozen lifecycle is untouched
-and every report can still reach a terminal state.
+#### Delivery
+
+Only GitHub has a defined outbound adapter. Email and upload delivery remain undecided and
+unbuilt. An operator checkbox is not proof of external delivery and must not create a
+`DeliveryAttempt` or move a report to `DELIVERED`. A later channel contract must define a
+verifiable recipient and transport receipt. Until then, those reports may be denied, cancelled
+or expired through the existing lifecycle, but cannot claim delivery.
 
 ### Implementation gates (2026-08-27)
 
@@ -342,13 +369,18 @@ BountyDesk target snapshot exists.
 
 Two known code gaps that this architecture collides with. `report.target_profile_id` is
 nullable, but `ensureReport()` currently requires a profile, so targetless email and upload
-intake needs a code change before it can exist. And `target_profile.image_digest` is
-`NOT NULL` while `lib/targets/configure.ts` hardcodes one profile and asserts an exact match on
-conflict; a dynamic profile has no image digest until its build finishes, so either that column
-becomes nullable or a dynamic profile pins repository plus commit and records the built digest
-per run. That choice is the largest code consequence here and should be made deliberately.
+intake needs a code change before it can exist. The current report state machine also rejects
+`ANALYSIS_ONLY → REPRODUCING`, so binding a target later needs a new transition and transition
+tests. `target_profile.image_digest` is `NOT NULL`, while `lib/targets/configure.ts` hardcodes
+the official upstream Juice Shop digest and asserts an exact match on conflict. That digest
+does not establish provenance for an image built from the connected fork. A dynamic profile
+has no generated image digest until its build finishes, so the data model must either separate
+source identity from runtime artifact identity or record the built digest per run. Make that
+choice after the provisioning spike proves where Daytona exposes the immutable artifact.
 
-**Gate: no real `AnalysisDriver` until a provisioning spike passes.** The spike must prove that
+#### Analysis driver gate
+
+Do not add a real `AnalysisDriver` until a provisioning spike passes. The spike must prove that
 BountyDesk can provision the environment; that a `TargetProfile` selects the exact snapshot;
 that the connected commit corresponds to the built artifact; that the amd64 digest verifies;
 that the target starts with no runtime downloads; that build egress is restricted and

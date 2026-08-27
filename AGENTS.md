@@ -36,11 +36,12 @@ a report without one stops at `ANALYSIS_ONLY` with nothing cloned, built, deploy
 Connectivity is the GitHub App model, not manual webhooks. OAuth login is identity, the App
 install is repo access. Least privilege is Metadata read plus Issues read and write. Cloning a
 connected repository does not widen that: a public repository clones anonymously, and Contents
-read would be needed only for a private one, which this tier refuses at intake rather than
-answering with a permission bump. The
-webhook secret belongs to the platform, and `installation_id → repo → TargetProfile` resolves
-server-side. Mint short-lived installation tokens per delivery and discard them. Keep access
-in sync from the `installation`, `installation_repositories`, and `repository` lifecycle
+read would be needed only for a private one. A report from a private repository is still
+accepted and triaged; only reproduction is refused with `POLICY_REFUSED` until that permission
+is deliberately added and accepted. The webhook secret belongs to the platform, and
+`installation_id → repo → TargetProfile` resolves server-side. Mint short-lived installation
+tokens per delivery and discard them. Keep access in sync from the `installation`,
+`installation_repositories`, and `repository` lifecycle
 webhooks: a suspended or deleted installation, or a removed repository, must stop intake and
 delivery at once.
 
@@ -79,9 +80,9 @@ image or snapshot field, so it stays the agent harness. A dynamic run uses two, 
 with narrow dependency egress and a reproduction sandbox with none, and only the built artifact
 crosses between them. The build sandbox is not trusted: it runs the customer's code. The demo
 target is the connected fork `Vaibhav91one/juice-shop` at commit
-`1867b926c5f50e4e692dc9c8f61821413cebe0cd`, the `v17.3.0` tag, built ahead of the live run so
-reproduction starts an immutable snapshot offline. None of the sandbox work is built yet; see
-the implementation gates in `docs/decisions.md`.
+`1867b926c5f50e4e692dc9c8f61821413cebe0cd`, the `v17.3.0` tag. It must be built and verified
+ahead of the live run so reproduction can start an immutable snapshot offline. None of the
+sandbox work is built yet; see the implementation gates in `docs/decisions.md`.
 
 ## Env
 
