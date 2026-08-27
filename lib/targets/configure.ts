@@ -18,6 +18,44 @@ const CONFIG = {
 };
 const SCOPE_RULES = [{ allow: "localhost" }];
 
+/**
+ * The registry and image name the pinned target is built into. This is a fixed constant, not
+ * a stored field, because there is exactly one logical profile: the digest is what changes
+ * between builds, and target_profile.imageDigest already carries that. A code constant is
+ * also trusted configuration, which is what SandboxSpec's imageRef requires; it just does not
+ * need a column of its own to be that.
+ */
+export const IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop";
+
+const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
+/**
+ * Same character class createSandbox already accepts for a snapshot identifier. An env.example
+ * placeholder like "<immutable-daytona-snapshot-id>" fails this on its own, since angle
+ * brackets are not in it, so no separate placeholder blocklist is needed.
+ */
+const SNAPSHOT_ID_RE = /^[A-Za-z0-9._:@/-]{1,200}$/;
+
+export function isValidImageDigest(value: string): boolean {
+  return IMAGE_DIGEST_RE.test(value);
+}
+
+export function isValidSnapshotId(value: string): boolean {
+  return SNAPSHOT_ID_RE.test(value);
+}
+
+/**
+ * Compose the digest-pinned reference a SandboxSpec's imageRef expects, from the one piece
+ * that actually varies between builds. Throws rather than returning an unusable string: a
+ * caller with an invalid digest has a bug worth surfacing at the seam, not three frames later
+ * inside assertSafeSpec.
+ */
+export function imageRefFor(imageDigest: string): string {
+  if (!isValidImageDigest(imageDigest)) {
+    throw new Error(`not a valid image digest: ${imageDigest}`);
+  }
+  return `${IMAGE_NAME}@${imageDigest}`;
+}
+
 export type ConfigureJuiceShopTargetInput = {
   repoId: number;
   imageDigest: string;

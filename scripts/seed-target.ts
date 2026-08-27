@@ -1,4 +1,4 @@
-import { configureJuiceShopTarget } from "@/lib/targets/configure";
+import { configureJuiceShopTarget, isValidImageDigest, isValidSnapshotId } from "@/lib/targets/configure";
 
 /**
  * Bind a connected repository to the pinned Juice Shop target.
@@ -25,6 +25,11 @@ async function main(): Promise<void> {
   const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
   if (!imageDigest || !snapshotId) {
     throw new Error("DAYTONA_TARGET_IMAGE_DIGEST and DAYTONA_TARGET_SNAPSHOT_ID must both be set");
+  }
+  if (!isValidImageDigest(imageDigest) || !isValidSnapshotId(snapshotId)) {
+    throw new Error(
+      "DAYTONA_TARGET_IMAGE_DIGEST or DAYTONA_TARGET_SNAPSHOT_ID is still the env.example placeholder or malformed",
+    );
   }
 
   const configured = await configureJuiceShopTarget({ repoId, imageDigest, snapshotId });

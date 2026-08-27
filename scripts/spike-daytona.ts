@@ -5,12 +5,13 @@
  * sandbox from a named snapshot, see what actually booted, run fixed harmless commands, show
  * from inside that the reproduction sandbox really has no egress, and destroy it again?
  *
- *   npm run spike:daytona -- <snapshot-id-or-name> [expected-image-ref]
+ *   npm run spike:daytona -- <snapshot-id-or-name> <expected-image-ref>
  *
- * The image reference is optional and defaults to the snapshot's own declared `imageName`,
- * which only proves the check runs, not that it can refuse. Pass the real expected reference
- * (the one a TargetProfile would carry) to get the negative control below: a deliberately
- * wrong reference must be refused before the correct one is ever tried.
+ * Both arguments are required, and the image reference is never defaulted from the snapshot's
+ * own declared imageName: that would make the check compare a value against itself. Pass the
+ * real expected reference (the one a TargetProfile would carry) to get the negative control
+ * below: a mangled, deliberately wrong reference must be refused before the correct one is
+ * ever tried, and if it is not, the resulting sandbox is destroyed before this exits.
  *
  * Exiting zero is the claim that those gates passed, so every gate is an assertion rather than
  * a printed value: a run that observes the wrong snapshot, or network where there should be
@@ -90,21 +91,19 @@ async function sweep(attempts = 1, ignore?: string): Promise<string[]> {
 
 async function main(): Promise<void> {
   const requested = process.argv[2];
-  if (!requested) throw new Error("usage: npm run spike:daytona -- <snapshot-id-or-name> [expected-image-ref]");
+  const imageRef = process.argv[3];
+  if (!requested || !imageRef) {
+    throw new Error("usage: npm run spike:daytona -- <snapshot-id-or-name> <expected-image-ref>");
+  }
 
   console.log("\n1. REQUESTED");
   step("requested_snapshot", requested);
+  step("expected_image_ref", imageRef);
   const info = await getSnapshot(requested);
   step("snapshot_record", {
     id: info.id, name: info.name, imageName: info.imageName,
     state: info.state, cpu: info.cpu, mem: info.mem, disk: info.disk,
   });
-
-  const imageRef = process.argv[3] ?? info.imageName ?? "";
-  step("expected_image_ref", imageRef);
-  if (process.argv[3] === undefined) {
-    step("expected_image_ref_note", "no expected-image-ref given; defaulted to the snapshot's own imageName, so this run only proves the check executes, not that it can refuse a wrong build");
-  }
 
   const spec = {
     snapshot: requested,
@@ -119,16 +118,26 @@ async function main(): Promise<void> {
   };
 
   console.log("\n2. NEGATIVE CONTROL (a wrong image reference must be refused)");
-  const wrongImageRef = `ghcr.io/bountydesk-spike/does-not-exist@sha256:${"0".repeat(64)}`;
+  // Built by mangling the operator-supplied reference rather than a fixed string, so it cannot
+  // coincidentally equal the real one. If createSandbox ever accepts it anyway, the resulting
+  // sandbox is captured and destroyed here rather than assumed away: an assertion that the
+  // control failed is not itself proof nothing was left running.
+  const wrongImageRef = imageRef.replace(/[0-9a-f](?=[^0-9a-f]*$)/i, (c) => (c === "0" ? "1" : "0"));
+  if (wrongImageRef === imageRef) throw new Error("could not derive a wrong image reference to test against");
+  let leaked: Sandbox | undefined;
   try {
-    await createSandbox({ ...spec, imageRef: wrongImageRef });
-    throw new Error("createSandbox accepted a snapshot against the wrong expected image");
+    leaked = await createSandbox({ ...spec, imageRef: wrongImageRef });
   } catch (error) {
     if (error instanceof Error && /image .* != expected/.test(error.message)) {
       step("negative_control_image_mismatch_refused", true);
     } else {
       throw error;
     }
+  }
+  if (leaked) {
+    step("negative_control_unexpectedly_provisioned", leaked.id);
+    await deleteSandbox(leaked.id);
+    throw new Error(`createSandbox accepted a snapshot against the wrong expected image: ${leaked.id}`);
   }
 
   console.log("\n3. PROVISION (reproduction class: no network, short TTL)");

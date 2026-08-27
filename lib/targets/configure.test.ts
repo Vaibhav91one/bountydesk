@@ -30,6 +30,25 @@ async function connectedRepo(repoId: number, fullName: string) {
   });
 }
 
+test("a digest composes into an image reference, or is refused", async () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  assert.equal(targets.imageRefFor(digest), `${targets.IMAGE_NAME}@${digest}`);
+
+  for (const bad of ["", "sha256:short", `sha256:${"g".repeat(64)}`, "<sha256-of-connected-fork-build>", digest.toUpperCase()]) {
+    assert.equal(targets.isValidImageDigest(bad), false, bad);
+    assert.throws(() => targets.imageRefFor(bad), /not a valid image digest/);
+  }
+});
+
+test("a snapshot id placeholder is rejected by shape, not by name", async () => {
+  assert.equal(targets.isValidSnapshotId("snapshot-1"), true);
+  assert.equal(targets.isValidSnapshotId("0619bb9e-beb2-47aa-891d-bf5e2771111c"), true);
+
+  for (const bad of ["", "<immutable-daytona-snapshot-id>", "a b", "juice; rm -rf /"]) {
+    assert.equal(targets.isValidSnapshotId(bad), false, bad);
+  }
+});
+
 test("rotating a profile that does not exist yet is refused", async () => {
   // Must run before anything else creates the shared "juice-shop-v17.3.0" row: every
   // configure call in this file targets that one fixed name, so this is the only point at

@@ -4,11 +4,19 @@ import { useActionState } from "react";
 
 import { Button } from "@/components/ui/button";
 
-import { configureRepository, type ConfigureResult } from "./actions";
+import { configureRepository, rotateRepository, type ConfigureResult } from "./actions";
 
-export function ConfigureButton({ repoId, label }: { repoId: number; label: string }) {
+export function ConfigureButton({
+  repoId,
+  label,
+  configured,
+}: {
+  repoId: number;
+  label: string;
+  configured: boolean;
+}) {
   const [result, action, pending] = useActionState<ConfigureResult | null, FormData>(
-    configureRepository,
+    configured ? rotateRepository : configureRepository,
     null,
   );
 

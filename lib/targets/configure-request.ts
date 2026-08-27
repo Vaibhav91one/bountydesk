@@ -1,7 +1,7 @@
 import { isReviewer } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 
-import { configureJuiceShopTarget, rotateJuiceShopTarget } from "./configure";
+import { configureJuiceShopTarget, isValidImageDigest, isValidSnapshotId, rotateJuiceShopTarget } from "./configure";
 
 export type ConfigureResult = { ok: true } | { ok: false; error: string };
 
@@ -33,6 +33,16 @@ function authorizeTargetRequest(
   const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
   if (!imageDigest || !snapshotId) {
     return { ok: false, error: "The connected-fork target is not configured yet. Set DAYTONA_TARGET_IMAGE_DIGEST and DAYTONA_TARGET_SNAPSHOT_ID first." };
+  }
+
+  // A nonempty string is not a built artifact. env.example ships both names set to explicit
+  // placeholders precisely so a .env.local copied without editing them fails a shape check
+  // instead of quietly passing a truthiness one and binding real repositories to nothing.
+  if (!isValidImageDigest(imageDigest) || !isValidSnapshotId(snapshotId)) {
+    return {
+      ok: false,
+      error: "DAYTONA_TARGET_IMAGE_DIGEST or DAYTONA_TARGET_SNAPSHOT_ID is still a placeholder or malformed. DAYTONA_TARGET_IMAGE_DIGEST must be sha256: followed by 64 hex characters, and DAYTONA_TARGET_SNAPSHOT_ID must be a real Daytona snapshot identifier.",
+    };
   }
 
   return { ok: true, repoId, imageDigest, snapshotId };

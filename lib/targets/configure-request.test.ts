@@ -142,6 +142,21 @@ test("a missing image digest or snapshot id fails closed rather than falling bac
   }
 });
 
+test("the env.example placeholders are nonempty but still refused", async () => {
+  const repoId = await repo();
+  const digest = process.env.DAYTONA_TARGET_IMAGE_DIGEST;
+  const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
+
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = "<sha256-of-connected-fork-build>";
+  process.env.DAYTONA_TARGET_SNAPSHOT_ID = "<immutable-daytona-snapshot-id>";
+  const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = digest;
+  process.env.DAYTONA_TARGET_SNAPSHOT_ID = snapshotId;
+
+  assert.equal(result.ok, false, "a placeholder is nonempty but not a built artifact");
+  assert.equal(await boundTarget(repoId), null);
+});
+
 test("rotation requires a reviewer, same as configuring", async () => {
   const repoId = await repo();
   await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
