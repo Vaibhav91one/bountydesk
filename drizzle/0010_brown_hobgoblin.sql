@@ -25,7 +25,7 @@ CREATE TABLE "agent_session" (
 CREATE TABLE "approval_submission" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"agent_session_id" uuid NOT NULL,
-	"decision" "approval_outcome" NOT NULL,
+	"approval_decision_id" uuid NOT NULL,
 	"submitted_turn_id" text,
 	"state" text DEFAULT 'PENDING' NOT NULL,
 	"attempts" integer DEFAULT 0 NOT NULL,
@@ -40,11 +40,21 @@ CREATE TABLE "approval_submission" (
 --> statement-breakpoint
 ALTER TABLE "approval_decision" ADD COLUMN "thread_id" text;--> statement-breakpoint
 ALTER TABLE "approval_decision" ADD COLUMN "tool_call_id" text;--> statement-breakpoint
+ALTER TABLE "approval_decision" ADD CONSTRAINT "approval_decision_call_all_or_none" CHECK (("approval_decision"."thread_id" is null) = ("approval_decision"."tool_call_id" is null));--> statement-breakpoint
 ALTER TABLE "agent_session" ADD CONSTRAINT "agent_session_report_id_report_id_fk" FOREIGN KEY ("report_id") REFERENCES "public"."report"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "agent_session" ADD CONSTRAINT "agent_session_pending_verdict_id_verdict_id_fk" FOREIGN KEY ("pending_verdict_id") REFERENCES "public"."verdict"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "approval_submission" ADD CONSTRAINT "approval_submission_agent_session_id_agent_session_id_fk" FOREIGN KEY ("agent_session_id") REFERENCES "public"."agent_session"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "approval_submission" ADD CONSTRAINT "approval_submission_approval_decision_id_approval_decision_id_fk" FOREIGN KEY ("approval_decision_id") REFERENCES "public"."approval_decision"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_session_report_id_key" ON "agent_session" USING btree ("report_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "agent_session_capability_token_key" ON "agent_session" USING btree ("capability_token");--> statement-breakpoint
+CREATE UNIQUE INDEX "agent_session_session_id_key" ON "agent_session" USING btree ("session_id");--> statement-breakpoint
 CREATE INDEX "agent_session_poll_idx" ON "agent_session" USING btree ("turn_status","next_poll_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "approval_submission_agent_session_key" ON "approval_submission" USING btree ("agent_session_id");--> statement-breakpoint
+CREATE INDEX "agent_session_lease_idx" ON "agent_session" USING btree ("lease_expires_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "approval_submission_approval_decision_key" ON "approval_submission" USING btree ("approval_decision_id");--> statement-breakpoint
 CREATE INDEX "approval_submission_claim_idx" ON "approval_submission" USING btree ("state","next_attempt_at");
+--> statement-breakpoint
+CREATE INDEX "approval_submission_lease_idx" ON "approval_submission" USING btree ("lease_expires_at");
+--> statement-breakpoint
+ALTER TABLE "agent_session" ENABLE ROW LEVEL SECURITY;
+--> statement-breakpoint
+ALTER TABLE "approval_submission" ENABLE ROW LEVEL SECURITY;

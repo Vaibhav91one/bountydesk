@@ -310,6 +310,10 @@ export const approvalDecision = pgTable(
     // One decision per verdict revision. A reviewer who wants a different answer produces a
     // new revision; they do not get to decide the same artifact twice.
     uniqueIndex("approval_decision_verdict_key").on(t.verdictId),
+    check(
+      "approval_decision_call_all_or_none",
+      sql`(${t.threadId} is null) = (${t.toolCallId} is null)`,
+    ),
   ],
 );
 
@@ -457,7 +461,9 @@ export const agentSession = pgTable(
   (t) => [
     uniqueIndex("agent_session_report_id_key").on(t.reportId),
     uniqueIndex("agent_session_capability_token_key").on(t.capabilityToken),
+    uniqueIndex("agent_session_session_id_key").on(t.sessionId),
     index("agent_session_poll_idx").on(t.turnStatus, t.nextPollAt),
+    index("agent_session_lease_idx").on(t.leaseExpiresAt),
     // Every pending_* column is populated together or not at all; a partial pending state
     // would mean the poller and the publish handler could each see a different half of it.
     check(
@@ -482,7 +488,9 @@ export const approvalSubmission = pgTable(
     agentSessionId: uuid("agent_session_id")
       .notNull()
       .references(() => agentSession.id, { onDelete: "restrict" }),
-    decision: approvalOutcome("decision").notNull(),
+    approvalDecisionId: uuid("approval_decision_id")
+      .notNull()
+      .references(() => approvalDecision.id, { onDelete: "restrict" }),
     /** Set once TrueForge acknowledges the chained turn carrying this decision. */
     submittedTurnId: text("submitted_turn_id"),
     state: text("state").notNull().default("PENDING"), // PENDING | SUBMITTED | ACKNOWLEDGED | FAILED
@@ -496,7 +504,8 @@ export const approvalSubmission = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
-    uniqueIndex("approval_submission_agent_session_key").on(t.agentSessionId),
+    uniqueIndex("approval_submission_approval_decision_key").on(t.approvalDecisionId),
     index("approval_submission_claim_idx").on(t.state, t.nextAttemptAt),
+    index("approval_submission_lease_idx").on(t.leaseExpiresAt),
   ],
 );

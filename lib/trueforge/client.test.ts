@@ -10,7 +10,7 @@ import { createTrueForgeClient } from "./client";
  * Fixtures below are the SDK's actual over-the-wire (snake_case) shape, read directly from
  * `node_modules/@truefoundry/trueforge-sdk/dist/esm/serialization/**\/*.d.mts` (e.g.
  * `Turn.Raw`, `TurnStateDone.Raw`, `ToolApprovalRequiredEvent.Raw`, `ModelMessageEvent.Raw`),
- * not the deserialized camelCase TS types this module reads — those two are different
+ * not the deserialized camelCase TS types this module reads. Those two are different
  * spellings of the same data, and a fixture built from the wrong one silently passes without
  * exercising real deserialization. An earlier draft of these tests used camelCase fixtures and
  * still passed, only because the SDK's schema validator degrades to a lenient passthrough
@@ -28,13 +28,28 @@ function withFetch(stub: typeof fetch, run: () => Promise<void>): Promise<void> 
   });
 }
 
+async function withExpectedValidationWarning(run: () => Promise<void>): Promise<void> {
+  const real = console.warn;
+  const warnings: string[] = [];
+  console.warn = (...values: unknown[]) => warnings.push(values.map(String).join(" "));
+  try {
+    await run();
+  } finally {
+    console.warn = real;
+  }
+  assert.ok(
+    warnings.some((warning) => warning.includes("Failed to validate.")),
+    "the fixture must exercise the SDK's lenient invalid-response path",
+  );
+}
+
 test("createSession returns the session id from a real-shape GetSessionResponse", async () => {
   await withFetch(
     (async () =>
       json({
         data: {
           id: "sess_1",
-          agent: { type: "reference", name: "bountydesk" },
+          agent: { type: "reference", id: "agent_1", name: "bountydesk" },
           created_at: "2026-01-01T00:00:00Z",
           created_by: "svc",
           title: null,
@@ -125,6 +140,8 @@ test("getTurn resolves a pending publish_verdict call by correlating source_even
         id: "evt_turn_created",
         created_at: "2026-01-01T00:00:00Z",
         turn_id: "turn_1",
+        previous_turn_id: null,
+        thread_id: "main",
         state: { status: "running" },
       },
       {
@@ -169,6 +186,78 @@ test("getTurn resolves a pending publish_verdict call by correlating source_even
   });
 
   assert.ok(calls.some((u) => u.includes("/events")), "must resolve the pending call via listTurnEvents");
+});
+
+test("getTurn follows event pagination when the source event is on a later page", async () => {
+  const turnResponse = {
+    data: {
+      id: "turn_1",
+      session_id: "sess_1",
+      previous_turn_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      state: {
+        status: "done",
+        completed_at: "2026-01-01T00:00:01Z",
+        output: null,
+        required_actions: [
+          {
+            type: "tool.approval_required",
+            id: "evt_approval",
+            created_at: "2026-01-01T00:00:01Z",
+            thread_id: "main",
+            tool_calls: [{ id: "call_1", source_event_id: "evt_model_msg" }],
+          },
+        ],
+      },
+    },
+  };
+  const calls: string[] = [];
+  const stub: typeof fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    calls.push(url);
+    if (!url.includes("/events")) return json(turnResponse);
+    if (!url.includes("page_token=page-2")) {
+      return json({
+        data: [],
+        pagination: { limit: 100, next_page_token: "page-2", previous_page_token: null },
+      });
+    }
+    return json({
+      data: [
+        {
+          type: "model.message",
+          id: "evt_model_msg",
+          created_at: "2026-01-01T00:00:00.5Z",
+          thread_id: "main",
+          content: null,
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: {
+                name: "publish_verdict",
+                arguments: JSON.stringify({ capability: "cap_abc" }),
+              },
+              tool_info: {
+                type: "mcp",
+                name: "publish_verdict",
+                server_id: "srv_1",
+                server_name: "bountydesk",
+              },
+            },
+          ],
+        },
+      ],
+      pagination: { limit: 100, next_page_token: null, previous_page_token: "page-1" },
+    });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    const client = createTrueForgeClient();
+    const snapshot = await client.getTurn("sess_1", "turn_1");
+    assert.equal(snapshot.status, "awaiting_approval");
+  });
+  assert.ok(calls.some((url) => url.includes("page_token=page-2")));
 });
 
 test("getTurn refuses a pending call whose source event cannot be resolved", async () => {
@@ -246,6 +335,124 @@ test("getTurn maps error and cancelled states without inferring approval or deni
   );
 });
 
+test("getTurn refuses an unknown provider state", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: {
+          id: "turn_1",
+          session_id: "sess_1",
+          previous_turn_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          state: { status: "paused_by_provider" },
+        },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      await withExpectedValidationWarning(() =>
+        assert.rejects(
+          () => client.getTurn("sess_1", "turn_1"),
+          /unsupported TrueForge turn state paused_by_provider/,
+        ),
+      );
+    },
+  );
+});
+
+test("getTurn refuses a required action that the approval worker cannot handle", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: {
+          id: "turn_1",
+          session_id: "sess_1",
+          previous_turn_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          state: {
+            status: "done",
+            completed_at: "2026-01-01T00:00:01Z",
+            output: null,
+            required_actions: [
+              {
+                type: "mcp.auth_required",
+                id: "evt_auth",
+                created_at: "2026-01-01T00:00:01Z",
+                thread_id: "main",
+                mcp_servers: [],
+              },
+            ],
+          },
+        },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      await assert.rejects(
+        () => client.getTurn("sess_1", "turn_1"),
+        /unsupported TrueForge required action mcp.auth_required/,
+      );
+    },
+  );
+});
+
+test("getTurnInput refuses an input variant the reconciliation worker cannot interpret", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: {
+          id: "turn_1",
+          session_id: "sess_1",
+          previous_turn_id: null,
+          created_at: "2026-01-01T00:00:00Z",
+          state: { status: "running" },
+          input: [{ type: "provider.private_input", value: "opaque" }],
+        },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      await withExpectedValidationWarning(() =>
+        assert.rejects(
+          () => client.getTurnInput("sess_1", "turn_1"),
+          /unsupported TrueForge turn input provider.private_input/,
+        ),
+      );
+    },
+  );
+});
+
+test("getTurnInput normalizes the exact approval input used for reconciliation", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: {
+          id: "turn_approval",
+          session_id: "sess_1",
+          previous_turn_id: "turn_1",
+          created_at: "2026-01-01T00:00:02Z",
+          state: { status: "running" },
+          input: [
+            {
+              type: "user.tool_approval",
+              thread_id: "main",
+              tool_call_id: "call_1",
+              approval: { status: "allow" },
+            },
+          ],
+        },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      assert.deepEqual(await client.getTurnInput("sess_1", "turn_approval"), [
+        {
+          type: "user.tool_approval",
+          threadId: "main",
+          toolCallId: "call_1",
+          approval: { status: "allow" },
+        },
+      ]);
+    },
+  );
+});
+
 test("refuses a non-loopback TrueForge URL with no API key, before any network call", () => {
   process.env.TRUEFORGE_URL = "https://truforge.example.com";
   process.env.TRUEFORGE_API_KEY = "";
@@ -253,5 +460,18 @@ test("refuses a non-loopback TrueForge URL with no API key, before any network c
     assert.throws(() => createTrueForgeClient());
   } finally {
     process.env.TRUEFORGE_URL = "http://localhost:8790";
+  }
+});
+
+test("refuses a TrueForge API key that is also exposed to the browser", () => {
+  process.env.TRUEFORGE_URL = "https://trueforge.example.com";
+  process.env.TRUEFORGE_API_KEY = "remote-secret";
+  process.env.NEXT_PUBLIC_ACCIDENTAL_TRUEFORGE_KEY = "remote-secret";
+  try {
+    assert.throws(() => createTrueForgeClient(), /ships to the browser/);
+  } finally {
+    process.env.TRUEFORGE_URL = "http://localhost:8790";
+    process.env.TRUEFORGE_API_KEY = "";
+    delete process.env.NEXT_PUBLIC_ACCIDENTAL_TRUEFORGE_KEY;
   }
 });

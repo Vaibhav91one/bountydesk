@@ -155,6 +155,21 @@
           "method": "btree",
           "with": {}
         },
+        "agent_session_session_id_key": {
+          "name": "agent_session_session_id_key",
+          "columns": [
+            {
+              "expression": "session_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "agent_session_poll_idx": {
           "name": "agent_session_poll_idx",
           "columns": [
@@ -166,6 +181,21 @@
             },
             {
               "expression": "next_poll_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "agent_session_lease_idx": {
+          "name": "agent_session_lease_idx",
+          "columns": [
+            {
+              "expression": "lease_expires_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -313,7 +343,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "approval_decision_call_all_or_none": {
+          "name": "approval_decision_call_all_or_none",
+          "value": "(\"approval_decision\".\"thread_id\" is null) = (\"approval_decision\".\"tool_call_id\" is null)"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.approval_submission": {
@@ -333,10 +368,9 @@
           "primaryKey": false,
           "notNull": true
         },
-        "decision": {
-          "name": "decision",
-          "type": "approval_outcome",
-          "typeSchema": "public",
+        "approval_decision_id": {
+          "name": "approval_decision_id",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": true
         },
@@ -408,11 +442,11 @@
         }
       },
       "indexes": {
-        "approval_submission_agent_session_key": {
-          "name": "approval_submission_agent_session_key",
+        "approval_submission_approval_decision_key": {
+          "name": "approval_submission_approval_decision_key",
           "columns": [
             {
-              "expression": "agent_session_id",
+              "expression": "approval_decision_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -443,6 +477,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "approval_submission_lease_idx": {
+          "name": "approval_submission_lease_idx",
+          "columns": [
+            {
+              "expression": "lease_expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -452,6 +501,19 @@
           "tableTo": "agent_session",
           "columnsFrom": [
             "agent_session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "approval_submission_approval_decision_id_approval_decision_id_fk": {
+          "name": "approval_submission_approval_decision_id_approval_decision_id_fk",
+          "tableFrom": "approval_submission",
+          "tableTo": "approval_decision",
+          "columnsFrom": [
+            "approval_decision_id"
           ],
           "columnsTo": [
             "id"

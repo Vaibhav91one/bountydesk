@@ -105,7 +105,9 @@ export function trueforgeUrl(): string {
 
 /** Blank is legitimate for loopback local mode; only set when TrueForge sits behind auth. */
 export function trueforgeApiKey(): string {
-  return process.env.TRUEFORGE_API_KEY?.trim() ?? "";
+  return process.env.TRUEFORGE_API_KEY?.trim()
+    ? requireSecret("TRUEFORGE_API_KEY")
+    : "";
 }
 
 /**

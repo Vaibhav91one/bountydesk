@@ -1,4 +1,4 @@
-import { TrueForge } from "@truefoundry/trueforge-sdk";
+import { TrueForge, type TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
 
@@ -6,7 +6,7 @@ import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
  * The interface bounty-desk actually needs, not the raw SDK surface. Kept deliberately small
  * so tests inject a fake implementation directly rather than faking HTTP or an async event
  * stream: `TurnSnapshot` already resolves a pending tool call's name and arguments (the SDK's
- * `getTurn` does not return those directly — only a `toolCallId` plus the id of the
+ * `getTurn` does not return those directly. It returns only a `toolCallId` plus the id of the
  * `model.message` event that requested it, so the real implementation below correlates that
  * itself via `listTurnEvents`).
  */
@@ -14,7 +14,7 @@ export interface TrueForgeClient {
   createSession(): Promise<{ sessionId: string }>;
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
-   * it has already reached a pending approval — callers must poll `getTurn` to find out. */
+   * it has already reached a pending approval. Callers must poll `getTurn` to find out. */
   createTurn(sessionId: string, input: TurnInput[]): Promise<{ turnId: string; snapshot: TurnSnapshot }>;
   getTurn(sessionId: string, turnId: string): Promise<TurnSnapshot>;
   /** What was actually submitted for a turn, for reconciling a decision already sent. */
@@ -66,13 +66,13 @@ function isLoopback(url: string): boolean {
  * unresolvable pending call is a state the poller must surface loudly, not paper over.
  */
 async function resolvePending(
-  events: AsyncIterable<{ id: string; type: string; toolCalls?: RawToolCallLike[] }>,
+  events: AsyncIterable<TrueForgeApi.SessionEvent>,
   requiredActions: { type: string; threadId: string; toolCalls: { id: string; sourceEventId: string }[] }[],
 ): Promise<PendingToolCall[]> {
   const approvalActions = requiredActions.filter((a) => a.type === "tool.approval_required");
   if (approvalActions.length === 0) return [];
 
-  const byId = new Map<string, { id: string; type: string; toolCalls?: RawToolCallLike[] }>();
+  const byId = new Map<string, TrueForgeApi.SessionEvent>();
   for await (const event of events) byId.set(event.id, event);
 
   const pending: PendingToolCall[] = [];
@@ -97,12 +97,54 @@ async function resolvePending(
   return pending;
 }
 
-/** The slice of the SDK's `ToolCall` shape this module actually reads. */
-type RawToolCallLike = {
-  id: string;
-  function: { name: string; arguments: string };
-  toolInfo?: { type: string };
-};
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeTurnInput(value: unknown): TurnInput {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    throw new Error("malformed TrueForge turn input");
+  }
+  if (value.type === "user.message") {
+    if (typeof value.content !== "string") {
+      throw new Error("malformed TrueForge user.message input");
+    }
+    return { type: "user.message", content: value.content };
+  }
+  if (value.type === "user.tool_approval") {
+    if (
+      typeof value.threadId !== "string" ||
+      typeof value.toolCallId !== "string" ||
+      !isRecord(value.approval)
+    ) {
+      throw new Error("malformed TrueForge user.tool_approval input");
+    }
+    if (value.approval.status === "allow") {
+      return {
+        type: "user.tool_approval",
+        threadId: value.threadId,
+        toolCallId: value.toolCallId,
+        approval: { status: "allow" },
+      };
+    }
+    if (
+      value.approval.status === "deny" &&
+      (value.approval.reason === undefined || typeof value.approval.reason === "string")
+    ) {
+      return {
+        type: "user.tool_approval",
+        threadId: value.threadId,
+        toolCallId: value.toolCallId,
+        approval: {
+          status: "deny",
+          ...(value.approval.reason ? { reason: value.approval.reason } : {}),
+        },
+      };
+    }
+    throw new Error("malformed TrueForge user.tool_approval decision");
+  }
+  throw new Error(`unsupported TrueForge turn input ${value.type}`);
+}
 
 export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): TrueForgeClient {
   const baseUrl = trueforgeUrl();
@@ -129,7 +171,7 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
     async createTurn(sessionId, input) {
       // createTurn (not createTurnStream) is the non-streaming method: it returns immediately,
       // generally with state.status "running" while the harness keeps executing in the
-      // background. There is no "stream" flag on this request — the method itself is the
+      // background. There is no "stream" flag on this request. The method itself is the
       // choice between the two transports.
       const res = await client.sessions.createTurn(sessionId, { input: input as never });
       const turn = res.data;
@@ -144,7 +186,7 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
 
     async getTurnInput(sessionId, turnId) {
       const res = await client.sessions.getTurn(sessionId, turnId);
-      return (res.data.input ?? []) as unknown as TurnInput[];
+      return (res.data.input ?? []).map(normalizeTurnInput);
     },
   };
 }
@@ -159,8 +201,11 @@ async function snapshotFromTurn(
   if (state.status === "running") return { status: "running" };
   if (state.status === "error") return { status: "error", message: state.message ?? "unknown error" };
   if (state.status === "cancelled") return { status: "cancelled" };
+  if (state.status !== "done") {
+    throw new Error(`unsupported TrueForge turn state ${state.status}`);
+  }
 
-  // status === "done" — which, per the SDK, can still carry a pending approval in
+  // A done turn can still carry a pending approval in
   // requiredActions. "done" alone never means "finished"; requiredActions is what decides.
   const requiredActions = (state.requiredActions ?? []) as {
     type: string;
@@ -169,12 +214,15 @@ async function snapshotFromTurn(
   }[];
 
   if (requiredActions.length === 0) return { status: "done_no_action" };
+  const unsupportedAction = requiredActions.find(
+    (action) => action.type !== "tool.approval_required",
+  );
+  if (unsupportedAction) {
+    throw new Error(`unsupported TrueForge required action ${unsupportedAction.type}`);
+  }
 
-  const page = (await client.sessions.listTurnEvents(sessionId, turn.id)) as unknown as AsyncIterable<{
-    id: string;
-    type: string;
-    toolCalls?: RawToolCallLike[];
-  }>;
+  // The SDK Page is an AsyncIterable and follows its own continuation tokens.
+  const page = await client.sessions.listTurnEvents(sessionId, turn.id);
   const pending = await resolvePending(page, requiredActions);
   if (pending.length === 0) return { status: "done_no_action" };
   return { status: "awaiting_approval", pending };
