@@ -13,6 +13,8 @@
  * argument or from this file; nothing is read from a report, and no platform secret enters the
  * sandbox.
  */
+import { randomUUID } from "node:crypto";
+
 import {
   PURPOSE,
   PURPOSE_LABEL,
@@ -26,7 +28,12 @@ import {
 } from "@/lib/sandbox/daytona";
 
 const SPIKE_LABEL = "bountydesk.spike";
-const SPIKE_RUN = "provisioning";
+/**
+ * Unique per invocation, so the sweep below can only ever delete this run's own sandboxes.
+ * A shared label would let two concurrent runs tear each other's environments down and leave
+ * both with evidence describing a sandbox that something else destroyed.
+ */
+const SPIKE_RUN = `provisioning-${randomUUID()}`;
 
 const evidence: Record<string, unknown> = {};
 const step = (name: string, value: unknown) => {
@@ -51,12 +58,13 @@ async function waitForState(id: string, wanted: string[], timeoutMs = 120_000): 
 }
 
 /**
- * Delete everything this spike has ever labelled.
+ * Delete everything this run labelled.
  *
  * A create can be accepted by the provider and still fail on our side, to a timeout or an
- * unparseable response, leaving a sandbox whose id we never learned. The label is the only
- * handle on it. The real system needs this same sweep as a reconciler, which is why it lives
- * on the client rather than here.
+ * unparseable response, leaving a sandbox whose id we never learned. The run label is the only
+ * handle on it. Sweeping older runs too would be reconciliation, which needs age and state
+ * guards this script has no business carrying; the real system gets that, built on the same
+ * client call.
  */
 async function sweep(): Promise<string[]> {
   const stragglers = await listSandboxes({ [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE });

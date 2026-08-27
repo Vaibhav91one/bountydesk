@@ -40,7 +40,7 @@ const snapshot: SnapshotInfo = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-/** Swap fetch for the duration of one test, and always put the real one back. */
+// Restoring in a finally matters: a leaked stub makes the *next* test fail, somewhere else.
 async function withFetch(stub: typeof fetch, run: () => Promise<void>): Promise<void> {
   const real = globalThis.fetch;
   globalThis.fetch = stub;
