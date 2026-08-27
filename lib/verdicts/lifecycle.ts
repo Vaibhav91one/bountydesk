@@ -54,7 +54,7 @@ export async function ensureInitialVerdict(
   input: NewInitialVerdict,
   tx: Executor = db,
 ): Promise<Verdict> {
-  const marker = `<!-- bountydesk-delivery:verdict:${input.id} -->`;
+  const marker = `<!-- bountydesk-delivery:${input.id} -->`;
   if (input.payload.split(marker).length !== 2) {
     throw new VerdictIntegrityError(input.reportId, "delivery marker");
   }

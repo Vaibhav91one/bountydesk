@@ -87,7 +87,7 @@ test("a fresh TRIAGING report ends in AWAITING_APPROVAL with an ANALYSIS_ONLY ve
   assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
   assert.match(verdictRow.payload, /bountydesk-delivery:/);
   assert.ok(
-    verdictRow.payload.includes(`bountydesk-delivery:verdict:${verdictRow.id}`),
+    verdictRow.payload.includes(`bountydesk-delivery:${verdictRow.id}`),
     "the marker must reference the verdict's own id",
   );
   assert.equal(

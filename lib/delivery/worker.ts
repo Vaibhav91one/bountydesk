@@ -1,10 +1,12 @@
 import {
   approvalDecision,
+  and,
   connectedRepository,
   db,
   deliveryAttempt,
   eq,
   githubInstallation,
+  outboundDelivery,
   report,
   verdict,
   type Executor,
@@ -262,7 +264,25 @@ export async function deliverOnce(
       return lease.id;
     }
 
-    const marker = `<!-- bountydesk-delivery:${lease.idempotencyKey} -->`;
+    const [canonicalDelivery] = await db
+      .select({ id: outboundDelivery.id })
+      .from(outboundDelivery)
+      .where(
+        and(
+          eq(outboundDelivery.verdictId, lease.verdictId),
+          eq(outboundDelivery.target, lease.target),
+        ),
+      )
+      .orderBy(outboundDelivery.createdAt, outboundDelivery.id)
+      .limit(1);
+
+    if (canonicalDelivery?.id !== lease.id) {
+      const message = `delivery ${lease.id} duplicates verdict ${lease.verdictId} for the same target and requires human review`;
+      await refuseDelivery(lease, message);
+      return lease.id;
+    }
+
+    const marker = `<!-- bountydesk-delivery:${lease.verdictId} -->`;
     if (verdictRow.payload.split(marker).length !== 2) {
       const message = `verdict ${lease.verdictId} payload must contain its delivery marker exactly once`;
       await refuseDelivery(lease, message);

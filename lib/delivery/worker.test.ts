@@ -88,6 +88,7 @@ async function seedFixture(
   }
 
   const fullName = `acme/repo-${n}`;
+  const sourceRef = `github:${repoId}:issue:${issueNumber}`;
   const [repo] = await dbm.db
     .insert(dbm.connectedRepository)
     .values({
@@ -102,7 +103,7 @@ async function seedFixture(
     .insert(dbm.report)
     .values({
       channel: "github",
-      sourceRef: `github:${repoId}:issue:${issueNumber}`,
+      sourceRef,
       title: `report ${n}`,
       body: "body",
       state: opts.reportState ?? "DELIVERING",
@@ -132,7 +133,7 @@ async function seedFixture(
   // the payload has to name the verdict's id and verdict rows cannot be UPDATEd afterwards
   // (see AGENTS.md: verdict is one of the four append-only tables).
   const verdictId = randomUUID();
-  const marker = `<!-- bountydesk-delivery:verdict:${verdictId} -->`;
+  const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
   const payload = opts.withoutMarker
     ? "Reproduced against target. See canary evidence."
     : `Reproduced against target. See canary evidence.\n${marker}`;
@@ -165,7 +166,7 @@ async function seedFixture(
       reportId: r.id,
       verdictId: v.id,
       idempotencyKey: `verdict:${verdictId}`,
-      target: opts.targetOverride ?? `github:${repoId}:issue:${issueNumber}`,
+      target: opts.targetOverride ?? sourceRef,
       approvedContentHash: opts.wrongApprovedHash
         ? "tampered-hash-does-not-match"
         : contentHash,
@@ -181,6 +182,7 @@ async function seedFixture(
     marker,
     fullName,
     issueNumber,
+    sourceRef,
   };
 }
 
@@ -541,6 +543,35 @@ test("the database permits distinct deliveries for the same verdict", async () =
     .returning({ id: dbm.outboundDelivery.id });
 
   assert.equal(inserted.length, 1);
+});
+
+test("a second delivery of one verdict to the same target requires human review", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ state: "SENT", leaseOwner: null, leaseExpiresAt: null })
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+
+  const [duplicate] = await dbm.db
+    .insert(dbm.outboundDelivery)
+    .values({
+      reportId: fixture.reportId,
+      verdictId: fixture.verdictId,
+      idempotencyKey: `duplicate-${randomUUID()}`,
+      target: fixture.sourceRef,
+      approvedContentHash: fakeHash(fixture.payload),
+    })
+    .returning({ id: dbm.outboundDelivery.id });
+  const { deps, calls } = makeFakeDeps();
+
+  await worker.deliverOnce("w-distinct-same-target", { deps });
+
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(duplicate.id);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /requires human review/);
 });
 
 test("a suspended installation is refused permanently, before any token is minted", async () => {
