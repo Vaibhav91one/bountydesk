@@ -331,7 +331,19 @@ export const outboundDelivery = pgTable(
      */
     approvedContentHash: text("approved_content_hash").notNull(),
     attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(8),
     lastError: text("last_error"),
+    /**
+     * Leasing mirrors `inbound_job` exactly (same claim/fence/backoff shape in
+     * lib/delivery/queue.ts), because draining an outbox under concurrent workers is the same
+     * problem as draining the inbound queue.
+     */
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
     deliveredAt: timestamp("delivered_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -339,6 +351,8 @@ export const outboundDelivery = pgTable(
   (t) => [
     uniqueIndex("outbound_delivery_idempotency_key").on(t.idempotencyKey),
     index("outbound_delivery_state_idx").on(t.state),
+    index("outbound_delivery_claim_idx").on(t.state, t.nextAttemptAt),
+    index("outbound_delivery_lease_idx").on(t.leaseExpiresAt),
   ],
 );
 

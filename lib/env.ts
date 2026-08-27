@@ -61,3 +61,18 @@ export function requireEnv(name: string): string {
 export function githubWebhookSecret(): string {
   return requireSecret("GITHUB_APP_WEBHOOK_SECRET");
 }
+
+/** The GitHub App's numeric id. Not a secret: it is the `iss` claim of a public JWT. */
+export function githubAppId(): string {
+  return requireEnv("GITHUB_APP_ID");
+}
+
+/** The App's private key, base64-encoded. Signs the App JWT used to mint installation tokens. */
+export function githubAppPrivateKeyBase64(): string {
+  return requireSecret("GITHUB_APP_PRIVATE_KEY_BASE64");
+}
+
+/** Bearer secret for the internal worker-tick routes. Nothing public may call these. */
+export function workerInternalSecret(): string {
+  return requireSecret("WORKER_INTERNAL_SECRET");
+}
