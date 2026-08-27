@@ -379,8 +379,11 @@ while `lib/targets/configure.ts` hardcodes the official upstream Juice Shop dige
 an exact match on conflict. That digest
 does not establish provenance for an image built from the connected fork. A dynamic profile
 has no generated image digest until its build finishes, so the data model must either separate
-source identity from runtime artifact identity or record the built digest per run. Make that
-choice after the provisioning spike proves where Daytona exposes the immutable artifact.
+source identity from runtime artifact identity or record the built digest per run. The spike
+answered where Daytona exposes the immutable artifact: nowhere, and an unprivileged container
+cannot read it either. So the data model has to separate the two, carrying source identity on
+the profile and recording the digest observed by the build that produced the artifact, with the
+snapshot's digest-pinned `imageName` checked at provisioning time.
 
 #### Analysis driver gate
 
@@ -393,6 +396,45 @@ limits hold; that TTL and reconciliation destroy abandoned sandboxes; that the a
 only the provisioned target; and that the controller can seed and evaluate the oracle without
 exposing that channel to the PoC. A failure at any gate produces `ANALYSIS_ONLY` with an
 infrastructure reason, never `NOT_REPRODUCED`.
+
+#### Spike result, 2026-08-27
+
+The first gate is cleared. `lib/sandbox/daytona.ts` provisions from a named snapshot, reads
+back what booted, runs a fixed command inside it, shows from inside that the sandbox reaches
+nothing, and destroys it; a second delete is a no-op and the sandbox then 404s. Full evidence
+is in [`spikes/2026-08-27-daytona-provisioning.md`](./spikes/2026-08-27-daytona-provisioning.md).
+
+Four provider facts change what the gates above can mean.
+
+Resource limits cannot be requested. Daytona rejects a create that carries cpu, memory or disk
+alongside a snapshot, so those are fixed when the snapshot is built. "Resource limits hold" is
+therefore verified against the snapshot record before provisioning, not asserted in the
+request, and a snapshot that declares no limits is refused rather than trusted.
+
+Egress is blocked by an interception proxy rather than by an absent route. The sandbox has a
+default route and a resolver; requests leave and an Envoy answers 403. Nothing reached its
+destination and no metadata credentials came back, but the property belongs to Daytona's policy
+engine rather than to the shape of the network, so it is verified from inside on every run. A
+blocked request is a successful HTTP transaction, so the check reads the status line: a 2xx or
+3xx is the destination answering, which is the failure.
+
+There is no resolved image digest in the API. Neither the snapshot nor the sandbox response
+carries one, and nothing digest-shaped exists in the OpenAPI document except Daytona's own
+build SHA. Nor can an unprivileged container read the manifest digest the host runtime used, so
+the sandbox cannot establish its own provenance either. What replaces "the amd64 digest
+verifies" is a chain: build outside and record the generated digest there, create the snapshot
+from a digest-pinned `image@sha256:…` reference, require the snapshot record's `imageName` to
+equal that reference exactly at provisioning time, and verify a defender-authored build marker
+inside the running target. The marker proves the artifact came from our build, not that the
+manifest digest matched. That last step is residual trust in the provider and is documented as
+such rather than dressed up as verification.
+
+Teardown is not immediately available. A just-started sandbox answers `DELETE` with 409, and
+the first version of this spike leaked one exactly that way. `deleteSandbox` retries with
+backoff, which makes it best-effort rather than a guarantee, so the provider TTL and a
+reconciler are load-bearing rather than defence in depth. Neither the TTL expiring on its own
+nor the reconciler has been exercised, so "destroy reliably" is not yet a claim this evidence
+supports.
 
 Reasons recorded beside `ANALYSIS_ONLY`, none of which are report states: `NO_BOUND_TARGET`,
 `COULD_NOT_BUILD`, `COULD_NOT_DEPLOY`, `NO_APPROVED_ORACLE`, `TARGET_UNAVAILABLE`,
