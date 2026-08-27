@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -295,6 +296,13 @@ export const approvalDecision = pgTable(
     decision: approvalOutcome("decision").notNull(),
     /** Must match verdict.contentHash, or the tool call is refused. */
     payloadHash: text("payload_hash").notNull(),
+    /**
+     * Which pending TrueForge tool call this decision answers. `publish_verdict`'s handler
+     * refuses to act on an approval that doesn't name the exact call it was invoked for; a
+     * decision recorded for a stale or different pending call must never be reused.
+     */
+    threadId: text("thread_id"),
+    toolCallId: text("tool_call_id"),
     note: text("note"),
     decidedAt: createdAt(),
   },
@@ -302,6 +310,10 @@ export const approvalDecision = pgTable(
     // One decision per verdict revision. A reviewer who wants a different answer produces a
     // new revision; they do not get to decide the same artifact twice.
     uniqueIndex("approval_decision_verdict_key").on(t.verdictId),
+    check(
+      "approval_decision_call_all_or_none",
+      sql`(${t.threadId} is null) = (${t.toolCallId} is null)`,
+    ),
   ],
 );
 
@@ -408,5 +420,92 @@ export const sessionEvent = pgTable(
     uniqueIndex("session_event_report_seq_key").on(t.reportId, t.seq),
     uniqueIndex("session_event_report_event_key_key").on(t.reportId, t.eventKey),
     index("session_event_report_idx").on(t.reportId),
+  ],
+);
+
+/**
+ * The TrueForge side of one report: its session, its current turn, and, while one is open,
+ * the exact pending `publish_verdict` call awaiting a decision.
+ *
+ * `capabilityToken` is the only report identifier the model ever sees: it is passed into the
+ * turn's input and echoed back as the tool's sole argument, so a report is never selected by a
+ * caller-supplied id. Lease columns mirror `inbound_job`/`outbound_delivery` exactly, because
+ * both the poller and the approval-submission worker claim rows here the same way those
+ * workers claim theirs.
+ */
+export const agentSession = pgTable(
+  "agent_session",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    capabilityToken: text("capability_token").notNull(),
+    sessionId: text("session_id").notNull(),
+    turnId: text("turn_id"),
+    /** Local bookkeeping only, never a report state: RUNNING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
+    turnStatus: text("turn_status").notNull().default("RUNNING"),
+    pendingThreadId: text("pending_thread_id"),
+    pendingToolCallId: text("pending_tool_call_id"),
+    pendingVerdictId: uuid("pending_verdict_id").references(() => verdict.id),
+    pendingApprovedContentHash: text("pending_approved_content_hash"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    nextPollAt: timestamp("next_poll_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("agent_session_report_id_key").on(t.reportId),
+    uniqueIndex("agent_session_capability_token_key").on(t.capabilityToken),
+    uniqueIndex("agent_session_session_id_key").on(t.sessionId),
+    index("agent_session_poll_idx").on(t.turnStatus, t.nextPollAt),
+    index("agent_session_lease_idx").on(t.leaseExpiresAt),
+    // Every pending_* column is populated together or not at all; a partial pending state
+    // would mean the poller and the publish handler could each see a different half of it.
+    check(
+      "agent_session_pending_all_or_none",
+      sql`(${t.pendingThreadId} is null) = (${t.pendingToolCallId} is null)
+          and (${t.pendingToolCallId} is null) = (${t.pendingVerdictId} is null)
+          and (${t.pendingVerdictId} is null) = (${t.pendingApprovedContentHash} is null)`,
+    ),
+  ],
+);
+
+/**
+ * The durable, retryable act of telling TrueForge about a decision already recorded in
+ * `approval_decision`. Separate from the decision itself: a crash between "we decided" and
+ * "TrueForge knows" must always be recoverable by retrying this row, never ambiguous about
+ * whether the decision itself happened.
+ */
+export const approvalSubmission = pgTable(
+  "approval_submission",
+  {
+    id: id(),
+    agentSessionId: uuid("agent_session_id")
+      .notNull()
+      .references(() => agentSession.id, { onDelete: "restrict" }),
+    approvalDecisionId: uuid("approval_decision_id")
+      .notNull()
+      .references(() => approvalDecision.id, { onDelete: "restrict" }),
+    /** Set once TrueForge acknowledges the chained turn carrying this decision. */
+    submittedTurnId: text("submitted_turn_id"),
+    state: text("state").notNull().default("PENDING"), // PENDING | SUBMITTED | ACKNOWLEDGED | FAILED
+    attempts: integer("attempts").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("approval_submission_approval_decision_key").on(t.approvalDecisionId),
+    index("approval_submission_claim_idx").on(t.state, t.nextAttemptAt),
+    index("approval_submission_lease_idx").on(t.leaseExpiresAt),
   ],
 );
