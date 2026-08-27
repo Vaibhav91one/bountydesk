@@ -130,6 +130,29 @@ test("an existing logical profile must match every pinned setting", async () => 
   );
 });
 
+test("a row with no image name, from before that column existed, is a mismatch too", async () => {
+  // The digest and snapshot id here are exactly what the shared row already holds; only its
+  // image_name is wrong, the way a row written before that column existed would be.
+  await dbm.db
+    .update(dbm.targetProfile)
+    .set({ imageName: null })
+    .where(dbm.eq(dbm.targetProfile.name, "juice-shop-v17.3.0"));
+
+  await assert.rejects(
+    targets.configureJuiceShopTarget({
+      repoId: 700_001,
+      imageDigest: `sha256:${"1".repeat(64)}`,
+      snapshotId: "snapshot-1",
+    }),
+    /different pinned target settings/,
+  );
+
+  await dbm.db
+    .update(dbm.targetProfile)
+    .set({ imageName: targets.IMAGE_NAME })
+    .where(dbm.eq(dbm.targetProfile.name, "juice-shop-v17.3.0"));
+});
+
 test("repository ID selects one active repository even when names are reused", async () => {
   await connectedRepo(700_003, "acme/reused");
   await connectedRepo(700_004, "acme/reused");

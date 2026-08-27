@@ -1,0 +1,1 @@
+ALTER TABLE "target_profile" ADD COLUMN "image_name" text;

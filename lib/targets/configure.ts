@@ -19,11 +19,11 @@ const CONFIG = {
 const SCOPE_RULES = [{ allow: "localhost" }];
 
 /**
- * The registry and image name the pinned target is built into. This is a fixed constant, not
- * a stored field, because there is exactly one logical profile: the digest is what changes
- * between builds, and target_profile.imageDigest already carries that. A code constant is
- * also trusted configuration, which is what SandboxSpec's imageRef requires; it just does not
- * need a column of its own to be that.
+ * The registry and image name the pinned target is built into. A fixed constant, since there
+ * is exactly one logical profile and this half of the reference does not vary between builds,
+ * but still written to target_profile.imageName alongside the digest: a stored value that must
+ * match a code constant is a mismatch a caller can detect, where a value that exists only in
+ * code cannot be checked against what a row actually holds.
  */
 export const IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop";
 
@@ -77,6 +77,7 @@ export async function configureJuiceShopTarget(
       .insert(targetProfile)
       .values({
         name: PROFILE_NAME,
+        imageName: IMAGE_NAME,
         imageDigest: input.imageDigest,
         snapshotId: input.snapshotId,
         config: CONFIG,
@@ -96,6 +97,7 @@ export async function configureJuiceShopTarget(
 
     if (!target) throw new Error(`could not create or find ${PROFILE_NAME}`);
     if (
+      target.imageName !== IMAGE_NAME ||
       target.imageDigest !== input.imageDigest ||
       target.snapshotId !== input.snapshotId ||
       !isDeepStrictEqual(target.config, CONFIG) ||
@@ -167,6 +169,7 @@ export async function rotateJuiceShopTarget(
     const [target] = await tx
       .update(targetProfile)
       .set({
+        imageName: IMAGE_NAME,
         imageDigest: input.imageDigest,
         snapshotId: input.snapshotId,
         config: CONFIG,
