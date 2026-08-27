@@ -43,6 +43,13 @@
       "when": 1787762425593,
       "tag": "0005_hard_anita_blake",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787806327267,
+      "tag": "0006_installation_account_type",
+      "breakpoints": true
     }
   ]
 }

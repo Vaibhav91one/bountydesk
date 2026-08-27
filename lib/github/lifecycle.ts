@@ -37,7 +37,7 @@ import {
 /** The subset of GitHub's payloads we read. Anything not named here is ignored. */
 type InstallationPayload = {
   id: number;
-  account?: { login?: string; id?: number } | null;
+  account?: { login?: string; id?: number; type?: string } | null;
 };
 
 type RepositoryPayload = {
@@ -75,6 +75,12 @@ async function upsertInstallation(
     installationId: installation.id,
     accountLogin: installation.account?.login ?? "",
     accountId: installation.account?.id ?? 0,
+    // GitHub sends "User" or "Organization". Anything else, including absent, stays null:
+    // the settings link falls back rather than guessing a path that 404s.
+    accountType:
+      installation.account?.type === "User" || installation.account?.type === "Organization"
+        ? installation.account.type
+        : null,
   };
 
   const [row] = await tx
@@ -85,6 +91,9 @@ async function upsertInstallation(
       set: {
         accountLogin: values.accountLogin,
         accountId: values.accountId,
+        // Only overwrite with a value GitHub actually sent, so a payload without an account
+        // type does not erase one we already learned.
+        ...(values.accountType ? { accountType: values.accountType } : {}),
         updatedAt: new Date(),
       },
     })

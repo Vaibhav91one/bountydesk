@@ -1,0 +1,35 @@
+"use client";
+
+import { useActionState } from "react";
+
+import { Button } from "@/components/ui/button";
+
+import { configureRepository, type ConfigureResult } from "./actions";
+
+export function ConfigureButton({ repoId, label }: { repoId: number; label: string }) {
+  const [result, action, pending] = useActionState<ConfigureResult | null, FormData>(
+    configureRepository,
+    null,
+  );
+
+  return (
+    <form action={action} className="flex flex-col gap-2">
+      <input type="hidden" name="repoId" value={repoId} />
+      <div className="flex flex-wrap gap-2">
+        <Button type="submit" size="sm" disabled={pending}>
+          {pending ? "Configuring…" : label}
+        </Button>
+        {/* No unbind helper exists yet, and a wrong one either re-opens intake or wrongly
+            closes it. Disabled beats a button that lies about what it does. */}
+        <Button type="button" size="sm" variant="outline" disabled title="Not yet available">
+          Remove repository
+        </Button>
+      </div>
+      {result && !result.ok ? (
+        <p role="alert" className="text-sm text-destructive">
+          {result.error}
+        </p>
+      ) : null}
+    </form>
+  );
+}

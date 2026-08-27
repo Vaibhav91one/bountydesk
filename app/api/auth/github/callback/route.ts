@@ -51,7 +51,7 @@ export async function GET(request: Request): Promise<Response> {
 
   if (!isReviewer(user.id)) return fail("forbidden");
 
-  return redirect(`${appBaseUrl()}/connections`, [
+  return redirect(`${appBaseUrl()}/settings/channels`, [
     ...spent,
     setCookie(SESSION_COOKIE, seal(newSession(user.login, user.id)), {
       maxAge: SESSION_TTL_SECONDS,

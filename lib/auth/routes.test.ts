@@ -167,7 +167,7 @@ test("a stale callback is refused without spending a newer login's cookies", asy
     }),
   );
 
-  assert.equal(newer.headers.get("location"), "https://bountydesk.test/connections");
+  assert.equal(newer.headers.get("location"), "https://bountydesk.test/settings/channels");
   assert.ok(unseal(cookiesOf(newer).get(SESSION_COOKIE)));
 });
 
@@ -246,7 +246,7 @@ test("a reviewer gets a session and lands on the connections page", async () => 
   const jar = cookiesOf(response);
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "https://bountydesk.test/connections");
+  assert.equal(response.headers.get("location"), "https://bountydesk.test/settings/channels");
 
   const session = unseal(jar.get(SESSION_COOKIE));
   assert.equal(session?.login, REVIEWER.login);
