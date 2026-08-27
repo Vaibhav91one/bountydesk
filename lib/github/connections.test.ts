@@ -117,10 +117,10 @@ test("manage repositories points at the right GitHub settings page", () => {
     "https://github.com/organizations/acme-inc/settings/installations/156822754",
   );
 
-  // Rows written before the account type was recorded fall back rather than guess.
+  // Rows written before the account type was recorded do not guess a type-specific path.
   assert.equal(
     connections.manageRepositoriesUrl(156822754, { login: "octocat", type: null }),
-    "https://github.com/settings/installations/156822754",
+    null,
   );
 });
 

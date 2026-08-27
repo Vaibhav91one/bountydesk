@@ -113,16 +113,17 @@ test("an unusable repository id is refused before touching the database", async 
   assert.equal(result.ok, false);
 });
 
-test("an unexpected failure does not leak its message to the browser", async () => {
+test("a pinned target mismatch does not leak its digest to the browser", async () => {
   const repoId = await repo();
 
-  // A digest that disagrees with the stored profile is the one raise-path that is not a
-  // domain error, so it stands in for "something the operator should not be shown".
+  // The mismatch is actionable, but its raw error contains both image digests. The operator
+  // needs the reason without exposing deployment details in the browser.
   process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"b".repeat(64)}`;
   const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
   process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
 
   assert.equal(result.ok, false);
   const error = (result as { error: string }).error;
+  assert.match(error, /different pinned settings/);
   assert.equal(/sha256:/.test(error), false, "no digest is echoed back");
 });

@@ -158,16 +158,20 @@ export async function listConnections(): Promise<Connection[]> {
  *
  * An organization keeps its installation settings under /organizations/<login>/settings,
  * not the personal /settings path, so sending an org operator to the personal one is a 404.
- * An unknown account type falls back to the personal path: rows written before the type was
- * recorded have no answer, and a wrong guess for organizations is the more common mistake.
+ * Rows written before the type was recorded have no safe deep link. Returning null makes the
+ * caller offer the installation flow instead, which lets GitHub send the missing account type.
  */
 export function manageRepositoriesUrl(
   installationId: number,
   account: { login: string; type: string | null },
-): string {
+): string | null {
   if (account.type === "Organization") {
     return `https://github.com/organizations/${account.login}/settings/installations/${installationId}`;
   }
 
-  return `https://github.com/settings/installations/${installationId}`;
+  if (account.type === "User") {
+    return `https://github.com/settings/installations/${installationId}`;
+  }
+
+  return null;
 }

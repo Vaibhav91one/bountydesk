@@ -47,10 +47,10 @@ export async function configureRepositoryRequest(
 }
 
 /**
- * Only the two failures this code raises on purpose are shown verbatim; they tell an
- * operator what to do. Anything else is a database or driver error whose message can carry
- * schema names, connection strings or row contents, and the browser is the wrong place for
- * that. The full error still reaches the server log.
+ * The two expected domain failures are mapped to operator-facing messages. Anything else is
+ * a database or driver error whose message can carry schema names, connection strings or row
+ * contents, and the browser is the wrong place for that. The full error still reaches the
+ * server log.
  */
 function safeMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);

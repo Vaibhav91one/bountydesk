@@ -90,7 +90,13 @@ export default async function ChannelsPage() {
         </div>
       ) : null}
 
-      {connections.map((connection) => (
+      {connections.map((connection) => {
+        const managementUrl = manageRepositoriesUrl(connection.installationId, {
+          login: connection.accountLogin,
+          type: connection.accountType,
+        });
+
+        return (
         <section key={connection.installationRowId} className="flex flex-col gap-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-2">
@@ -121,27 +127,42 @@ export default async function ChannelsPage() {
                 </Row>
               </dl>
 
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  nativeButton={false}
-                  render={
-                    <a
-                      href={manageRepositoriesUrl(connection.installationId, {
-                        login: connection.accountLogin,
-                        type: connection.accountType,
-                      })}
-                    />
-                  }
-                >
-                  <Settings2 /> Manage repositories <ExternalLink className="size-3" />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                GitHub owns which repositories the App can see, so that button leaves for
-                GitHub. Changes come back on the installation_repositories webhook.
-              </p>
+              {managementUrl ? (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      nativeButton={false}
+                      render={<a href={managementUrl} />}
+                    >
+                      <Settings2 /> Manage repositories <ExternalLink className="size-3" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    GitHub owns which repositories the App can see, so that button leaves for
+                    GitHub. Changes come back on the installation_repositories webhook.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      nativeButton={false}
+                      render={<a href={installUrl()} />}
+                    >
+                      <GitHubLight className="size-4" /> Repair connection
+                      <ExternalLink className="size-3" />
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This connection predates account-type tracking. Select the account again on
+                    GitHub so BountyDesk can restore the correct repository settings link.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
 
@@ -186,7 +207,8 @@ export default async function ChannelsPage() {
             );
           })}
         </section>
-      ))}
+        );
+      })}
 
       <form action="/api/auth/logout" method="post">
         <Button type="submit" variant="ghost" size="sm">
