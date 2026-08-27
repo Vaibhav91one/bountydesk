@@ -1,12 +1,10 @@
 import {
   approvalDecision,
-  and,
   connectedRepository,
   db,
   deliveryAttempt,
   eq,
   githubInstallation,
-  outboundDelivery,
   report,
   verdict,
   type Executor,
@@ -260,24 +258,6 @@ export async function deliverOnce(
 
     if (verdictRow.reportId !== lease.reportId) {
       const message = `verdict ${lease.verdictId} does not belong to delivery report ${lease.reportId}`;
-      await refuseDelivery(lease, message);
-      return lease.id;
-    }
-
-    const [canonicalDelivery] = await db
-      .select({ id: outboundDelivery.id })
-      .from(outboundDelivery)
-      .where(
-        and(
-          eq(outboundDelivery.verdictId, lease.verdictId),
-          eq(outboundDelivery.target, lease.target),
-        ),
-      )
-      .orderBy(outboundDelivery.createdAt, outboundDelivery.id)
-      .limit(1);
-
-    if (canonicalDelivery?.id !== lease.id) {
-      const message = `delivery ${lease.id} duplicates verdict ${lease.verdictId} for the same target and requires human review`;
       await refuseDelivery(lease, message);
       return lease.id;
     }

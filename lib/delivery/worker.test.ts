@@ -531,18 +531,15 @@ test("the database permits distinct deliveries for the same verdict", async () =
   await drainOthers();
   const fixture = await seedFixture();
 
-  const inserted = await dbm.db
-    .insert(dbm.outboundDelivery)
-    .values({
-      reportId: fixture.reportId,
-      verdictId: fixture.verdictId,
-      idempotencyKey: `duplicate-${randomUUID()}`,
-      target: `github:1:issue:1`,
-      approvedContentHash: fakeHash(fixture.payload),
-    })
-    .returning({ id: dbm.outboundDelivery.id });
+  const inserted = await queue.enqueueDelivery({
+    reportId: fixture.reportId,
+    verdictId: fixture.verdictId,
+    idempotencyKey: `duplicate-${randomUUID()}`,
+    target: `github:1:issue:1`,
+    approvedContentHash: fakeHash(fixture.payload),
+  });
 
-  assert.equal(inserted.length, 1);
+  assert.equal(inserted.disposition, "CREATED");
 });
 
 test("a second delivery of one verdict to the same target requires human review", async () => {
@@ -553,25 +550,49 @@ test("a second delivery of one verdict to the same target requires human review"
     .set({ state: "SENT", leaseOwner: null, leaseExpiresAt: null })
     .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
 
-  const [duplicate] = await dbm.db
-    .insert(dbm.outboundDelivery)
-    .values({
-      reportId: fixture.reportId,
-      verdictId: fixture.verdictId,
-      idempotencyKey: `duplicate-${randomUUID()}`,
-      target: fixture.sourceRef,
-      approvedContentHash: fakeHash(fixture.payload),
-    })
-    .returning({ id: dbm.outboundDelivery.id });
+  const duplicate = await queue.enqueueDelivery({
+    reportId: fixture.reportId,
+    verdictId: fixture.verdictId,
+    idempotencyKey: `duplicate-${randomUUID()}`,
+    target: fixture.sourceRef,
+    approvedContentHash: fakeHash(fixture.payload),
+  });
   const { deps, calls } = makeFakeDeps();
 
-  await worker.deliverOnce("w-distinct-same-target", { deps });
+  const processed = await worker.deliverOnce("w-distinct-same-target", { deps });
 
+  assert.equal(duplicate.disposition, "REVIEW_REQUIRED");
+  assert.equal(processed, null);
   assert.equal(calls.mintToken, 0);
   assert.equal(calls.postComment, 0);
   const delivery = await deliveryRow(duplicate.id);
   assert.equal(delivery.state, "FAILED");
   assert.match(delivery.lastError ?? "", /requires human review/);
+});
+
+test("concurrent same-target inserts create one automatic delivery", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  await dbm.db
+    .delete(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+
+  const makeInput = (suffix: string) => ({
+    reportId: fixture.reportId,
+    verdictId: fixture.verdictId,
+    idempotencyKey: `concurrent-${suffix}-${randomUUID()}`,
+    target: fixture.sourceRef,
+    approvedContentHash: fakeHash(fixture.payload),
+  });
+  const outcomes = await Promise.all([
+    queue.enqueueDelivery(makeInput("a")),
+    queue.enqueueDelivery(makeInput("b")),
+  ]);
+
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.disposition).sort(),
+    ["CREATED", "REVIEW_REQUIRED"],
+  );
 });
 
 test("a suspended installation is refused permanently, before any token is minted", async () => {

@@ -1,0 +1,2 @@
+ALTER TABLE "outbound_delivery" ADD COLUMN "requires_human_review" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "outbound_delivery_automatic_target_key" ON "outbound_delivery" USING btree ("verdict_id","target") WHERE "outbound_delivery"."requires_human_review" = false;

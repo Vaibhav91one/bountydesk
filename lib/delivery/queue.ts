@@ -4,6 +4,63 @@ import { db, outboundDelivery, type Executor } from "@/lib/db";
 
 export type DeliveryState = (typeof outboundDelivery.state.enumValues)[number];
 
+export type NewDelivery = {
+  reportId: string;
+  verdictId: string;
+  idempotencyKey: string;
+  target: string;
+  approvedContentHash: string;
+};
+
+export async function enqueueDelivery(
+  input: NewDelivery,
+  tx: Executor = db,
+): Promise<{
+  id: string;
+  disposition: "CREATED" | "REPLAY" | "REVIEW_REQUIRED";
+}> {
+  const inserted = await tx
+    .insert(outboundDelivery)
+    .values(input)
+    .onConflictDoNothing()
+    .returning({ id: outboundDelivery.id });
+  if (inserted.length > 0) {
+    return { id: inserted[0].id, disposition: "CREATED" };
+  }
+
+  const [replay] = await tx
+    .select({ id: outboundDelivery.id })
+    .from(outboundDelivery)
+    .where(eq(outboundDelivery.idempotencyKey, input.idempotencyKey))
+    .limit(1);
+  if (replay) return { id: replay.id, disposition: "REPLAY" };
+
+  const reviewReason = `another automatic delivery already owns verdict ${input.verdictId} for ${input.target}`;
+  const reviewed = await tx
+    .insert(outboundDelivery)
+    .values({
+      ...input,
+      state: "FAILED",
+      requiresHumanReview: true,
+      lastError: `${reviewReason}; requires human review`,
+    })
+    .onConflictDoNothing()
+    .returning({ id: outboundDelivery.id });
+  if (reviewed.length > 0) {
+    return { id: reviewed[0].id, disposition: "REVIEW_REQUIRED" };
+  }
+
+  const [concurrentReplay] = await tx
+    .select({ id: outboundDelivery.id })
+    .from(outboundDelivery)
+    .where(eq(outboundDelivery.idempotencyKey, input.idempotencyKey))
+    .limit(1);
+  if (!concurrentReplay) {
+    throw new Error(`delivery ${input.idempotencyKey} conflicted but no row exists`);
+  }
+  return { id: concurrentReplay.id, disposition: "REPLAY" };
+}
+
 /**
  * A held outbox row. Carries everything the delivery worker needs (verdict id, the approved
  * hash to check against, the GitHub target) so it never has to re-query the row it just
@@ -56,6 +113,7 @@ export async function claim(
        select ${outboundDelivery.id}
          from ${outboundDelivery}
         where ${outboundDelivery.state} = 'PENDING'
+          and ${outboundDelivery.requiresHumanReview} = false
           and ${outboundDelivery.attempts} < ${outboundDelivery.maxAttempts}
           and ${outboundDelivery.nextAttemptAt} <= now()
           and (${outboundDelivery.leaseExpiresAt} is null or ${outboundDelivery.leaseExpiresAt} < now())

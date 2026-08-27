@@ -330,6 +330,9 @@ export const outboundDelivery = pgTable(
      * thing and GitHub receive another.
      */
     approvedContentHash: text("approved_content_hash").notNull(),
+    requiresHumanReview: boolean("requires_human_review")
+      .notNull()
+      .default(false),
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(8),
     lastError: text("last_error"),
@@ -350,6 +353,9 @@ export const outboundDelivery = pgTable(
   },
   (t) => [
     uniqueIndex("outbound_delivery_idempotency_key").on(t.idempotencyKey),
+    uniqueIndex("outbound_delivery_automatic_target_key")
+      .on(t.verdictId, t.target)
+      .where(sql`${t.requiresHumanReview} = false`),
     index("outbound_delivery_state_idx").on(t.state),
     index("outbound_delivery_claim_idx").on(t.state, t.nextAttemptAt),
     index("outbound_delivery_lease_idx").on(t.leaseExpiresAt),
