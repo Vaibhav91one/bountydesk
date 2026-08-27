@@ -1,11 +1,70 @@
-import { agentSession, approvalDecision, db, eq, verdict } from "@/lib/db";
+import { agentSession, and, approvalDecision, db, eq, verdict } from "@/lib/db";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { createTrueForgeClient, type TrueForgeClient, type TurnInput } from "@/lib/trueforge/client";
 
-import { claim, fail, LeaseLostError, markSubmitted, renew, type ApprovalSubmissionLease } from "./queue";
+import {
+  claim,
+  fail,
+  failPermanently,
+  LeaseLostError,
+  markSubmitted,
+  releaseUnstarted,
+  renew,
+  type ApprovalSubmissionLease,
+} from "./queue";
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+async function runWithHeartbeat<T>(
+  lease: ApprovalSubmissionLease,
+  leaseSeconds: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+  outerSignal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const signal = outerSignal
+    ? AbortSignal.any([controller.signal, outerSignal])
+    : controller.signal;
+  const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let renewal = Promise.resolve();
+  let rejectLeaseLoss!: (reason: unknown) => void;
+  const leaseLoss = new Promise<never>((_, reject) => {
+    rejectLeaseLoss = reject;
+  });
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+
+  const heartbeat = () => {
+    renewal = renew(lease, leaseSeconds)
+      .then(() => {
+        if (!stopped) timer = setTimeout(heartbeat, intervalMs);
+      })
+      .catch((error: unknown) => {
+        controller.abort(error);
+        rejectLeaseLoss(error);
+      });
+  };
+
+  timer = setTimeout(heartbeat, intervalMs);
+  try {
+    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    if (signal.aborted) throw signal.reason;
+    return result;
+  } finally {
+    stopped = true;
+    signal.removeEventListener("abort", onAbort);
+    if (timer) clearTimeout(timer);
+    await renewal.catch(() => undefined);
+  }
 }
 
 /**
@@ -16,8 +75,9 @@ function errorMessage(err: unknown): string {
  */
 export async function submitApprovalOnce(
   owner: string,
-  opts: { leaseSeconds?: number; client?: TrueForgeClient } = {},
+  opts: { leaseSeconds?: number; client?: TrueForgeClient; signal?: AbortSignal } = {},
 ): Promise<string | null> {
+  if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
@@ -40,16 +100,29 @@ export async function submitApprovalOnce(
       .where(eq(approvalDecision.id, lease.approvalDecisionId));
 
     if (!decision) {
-      throw new Error(`approval decision ${lease.approvalDecisionId} does not exist`);
+      await failPermanently(
+        lease,
+        `approval decision ${lease.approvalDecisionId} does not exist`,
+      );
+      return lease.id;
     }
 
     const [session] = await db
-      .select({ reportId: agentSession.reportId, sessionId: agentSession.sessionId })
+      .select({
+        reportId: agentSession.reportId,
+        sessionId: agentSession.sessionId,
+        turnId: agentSession.turnId,
+        pendingThreadId: agentSession.pendingThreadId,
+        pendingToolCallId: agentSession.pendingToolCallId,
+        pendingVerdictId: agentSession.pendingVerdictId,
+        pendingApprovedContentHash: agentSession.pendingApprovedContentHash,
+      })
       .from(agentSession)
       .where(eq(agentSession.id, lease.agentSessionId));
 
     if (!session) {
-      throw new Error(`agent session ${lease.agentSessionId} does not exist`);
+      await failPermanently(lease, `agent session ${lease.agentSessionId} does not exist`);
+      return lease.id;
     }
 
     // threadId/toolCallId are non-null by the time a submission exists in practice (the
@@ -57,12 +130,14 @@ export async function submitApprovalOnce(
     // a trust boundary between two independently-shipped features, so it is checked here
     // rather than assumed.
     if (!decision.threadId || !decision.toolCallId) {
-      await fail(
+      await failPermanently(
         lease,
         `approval decision ${lease.approvalDecisionId} has no pending call to answer (threadId/toolCallId missing)`,
       );
       return lease.id;
     }
+    const threadId = decision.threadId;
+    const toolCallId = decision.toolCallId;
 
     // approval_submission.agent_session_id and .approval_decision_id are independent foreign
     // keys, so nothing in the schema stops a submission from pairing a decision with a
@@ -74,32 +149,53 @@ export async function submitApprovalOnce(
       .where(eq(verdict.id, decision.verdictId));
 
     if (!verdictRow) {
-      throw new Error(`verdict ${decision.verdictId} does not exist`);
+      await failPermanently(lease, `verdict ${decision.verdictId} does not exist`);
+      return lease.id;
     }
     if (verdictRow.reportId !== session.reportId) {
-      throw new Error(
+      await failPermanently(
+        lease,
         `approval decision ${lease.approvalDecisionId} is for report ${verdictRow.reportId}, ` +
           `but agent session ${lease.agentSessionId} belongs to report ${session.reportId}`,
       );
+      return lease.id;
     }
 
-    // Submitting "allow" for a verdict whose stored content no longer matches what was
-    // approved would just have publish_verdict's own hash check refuse it downstream, after
-    // TrueForge has already unblocked the model to call it. Refuse it here instead, before
-    // telling TrueForge anything, for the APPROVED case where it matters (a denial carries no
-    // content commitment to verify).
-    if (decision.decision === "APPROVED" && computeContentHash(verdictRow.payload) !== decision.payloadHash) {
-      await fail(
+    // Both choices answer the exact payload the reviewer saw. Refuse a stale commitment before
+    // TrueForge receives either decision; a retry cannot repair an immutable verdict or decision.
+    if (computeContentHash(verdictRow.payload) !== decision.payloadHash) {
+      await failPermanently(
         lease,
         `verdict ${decision.verdictId} content hash no longer matches the approved decision`,
       );
       return lease.id;
     }
 
+    if (
+      session.pendingThreadId !== threadId ||
+      session.pendingToolCallId !== toolCallId ||
+      session.pendingVerdictId !== decision.verdictId ||
+      session.pendingApprovedContentHash !== decision.payloadHash
+    ) {
+      await failPermanently(
+        lease,
+        `approval decision ${lease.approvalDecisionId} does not match the session's pending approval`,
+      );
+      return lease.id;
+    }
+    if (!session.turnId) {
+      await failPermanently(
+        lease,
+        `agent session ${lease.agentSessionId} has no turn awaiting this approval`,
+      );
+      return lease.id;
+    }
+    const currentTurnId = session.turnId;
+
     const input: TurnInput = {
       type: "user.tool_approval",
-      threadId: decision.threadId,
-      toolCallId: decision.toolCallId,
+      threadId,
+      toolCallId,
       approval:
         decision.decision === "APPROVED"
           ? { status: "allow" }
@@ -109,12 +205,16 @@ export async function submitApprovalOnce(
     const client = opts.client ?? createTrueForgeClient();
 
     try {
-      // Push the lease's expiry back out to a full window immediately before the external
-      // call, rather than holding a heartbeat open for it: TrueForge is loopback and this is
-      // a single request, so one renewal ahead of time closes most of the "lease expires
-      // mid-call" window cheaply, without the machinery a genuine heartbeat would need.
       await renew(lease, leaseSeconds);
-      const result = await client.createTurn(session.sessionId, [input]);
+      const result = await runWithHeartbeat(
+        lease,
+        leaseSeconds,
+        async (signal) => {
+          const existing = await client.findTurnByInput?.(session.sessionId, [input], { signal });
+          return existing ?? client.createTurn(session.sessionId, [input], { signal });
+        },
+        opts.signal,
+      );
       await db.transaction(async (tx) => {
         await markSubmitted(lease, result.turnId, tx);
         // The old pending call this decision answered is now resolved; hand the session off
@@ -123,22 +223,50 @@ export async function submitApprovalOnce(
         // poller keeps polling the original turnId, sees the identical still-pending
         // publish_verdict call, and loops indefinitely rather than ever finding out how the
         // new turn (where the harness actually acts on the decision) turns out.
-        await tx
+        const updatedSession = await tx
           .update(agentSession)
           .set({
             turnId: result.turnId,
             turnStatus: "RUNNING",
-            pendingThreadId: null,
-            pendingToolCallId: null,
-            pendingVerdictId: null,
-            pendingApprovedContentHash: null,
+            ...(decision.decision === "DENIED"
+              ? {
+                  pendingThreadId: null,
+                  pendingToolCallId: null,
+                  pendingVerdictId: null,
+                  pendingApprovedContentHash: null,
+                }
+              : {}),
             nextPollAt: new Date(),
             updatedAt: new Date(),
           })
-          .where(eq(agentSession.id, lease.agentSessionId));
+          .where(
+            and(
+              eq(agentSession.id, lease.agentSessionId),
+              eq(agentSession.turnId, currentTurnId),
+              eq(agentSession.pendingThreadId, threadId),
+              eq(agentSession.pendingToolCallId, toolCallId),
+              eq(agentSession.pendingVerdictId, decision.verdictId),
+              eq(agentSession.pendingApprovedContentHash, decision.payloadHash),
+            ),
+          )
+          .returning({ id: agentSession.id });
+
+        if (updatedSession.length === 0) {
+          throw new Error(
+            `agent session ${lease.agentSessionId} changed while its approval was being submitted`,
+          );
+        }
       });
     } catch (err) {
       if (err instanceof LeaseLostError) return lease.id;
+      if (opts.signal?.aborted) {
+        try {
+          await releaseUnstarted(lease);
+        } catch (releaseError) {
+          if (!(releaseError instanceof LeaseLostError)) throw releaseError;
+        }
+        return lease.id;
+      }
       await fail(lease, errorMessage(err));
     }
 

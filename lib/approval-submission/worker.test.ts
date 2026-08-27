@@ -80,6 +80,11 @@ async function seedSubmission(
       capabilityToken: `cap-${n}`,
       sessionId: `session-${n}`,
       turnId: `turn-${n}`,
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: `thread-${n}`,
+      pendingToolCallId: `call-${n}`,
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: contentHash,
     })
     .returning({ id: dbm.agentSession.id });
 
@@ -147,7 +152,15 @@ async function drainOthers() {
     .set({ state: "SUBMITTED", leaseOwner: null, leaseExpiresAt: null });
 }
 
-function makeFakeClient(opts: { createTurn?: (sessionId: string, input: TurnInput[]) => Promise<{ turnId: string }> } = {}) {
+function makeFakeClient(
+  opts: {
+    createTurn?: (sessionId: string, input: TurnInput[]) => Promise<{ turnId: string }>;
+    findTurnByInput?: (
+      sessionId: string,
+      input: TurnInput[],
+    ) => Promise<{ turnId: string } | null>;
+  } = {},
+) {
   const calls: { sessionId: string; input: TurnInput[] }[] = [];
   const client: TrueForgeClient = {
     createSession: async () => {
@@ -167,6 +180,7 @@ function makeFakeClient(opts: { createTurn?: (sessionId: string, input: TurnInpu
     getTurnInput: async () => {
       throw new Error("not used by submitApprovalOnce");
     },
+    ...(opts.findTurnByInput ? { findTurnByInput: opts.findTurnByInput } : {}),
   };
   return { client, calls };
 }
@@ -287,7 +301,55 @@ test("a createTurn failure retries with backoff and eventually reaches FAILED", 
   assert.equal(row.attempts, queue.MAX_ATTEMPTS);
 });
 
-test("a successful submission hands the agent_session off to the new turn and clears the old pending call", async () => {
+test("a retry adopts an approval turn that TrueForge already accepted", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const { client, calls } = makeFakeClient({
+    findTurnByInput: async () => ({ turnId: "turn-from-ambiguous-first-attempt" }),
+  });
+
+  await worker.submitApprovalOnce("w-reconcile", { client });
+
+  assert.equal(calls.length, 0, "reconciliation must happen before creating another turn");
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "SUBMITTED");
+  assert.equal(row.submittedTurnId, "turn-from-ambiguous-first-attempt");
+});
+
+test("the approval lease stays held while TrueForge is accepting the new turn", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const { client } = makeFakeClient({
+    createTurn: async () => {
+      markStarted();
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      return { turnId: "turn-after-heartbeats" };
+    },
+  });
+
+  const submitting = worker.submitApprovalOnce("w-heartbeat", {
+    client,
+    leaseSeconds: 10,
+  });
+  const firstOutcome = await Promise.race([
+    started.then(() => "started"),
+    submitting.then((id) => `finished:${id}`),
+    new Promise<string>((resolve) => setTimeout(() => resolve("timed-out"), 30_000)),
+  ]);
+  assert.equal(firstOutcome, "started", "the seeded submission must reach TrueForge");
+  await new Promise((resolve) => setTimeout(resolve, 12_000));
+
+  const competingLease = await queue.claim("w-competing", 10);
+  assert.equal(competingLease, null, "another worker must not reclaim an in-flight submission");
+  assert.equal(await submitting, fixture.submissionId);
+  assert.equal((await submissionRow(fixture.submissionId)).state, "SUBMITTED");
+});
+
+test("an approved submission follows the new turn and preserves the binding for publish_verdict", async () => {
   await drainOthers();
   const fixture = await seedSubmission({ decision: "APPROVED" });
   const { client } = makeFakeClient({ createTurn: async () => ({ turnId: "turn-handoff" }) });
@@ -323,8 +385,10 @@ test("a successful submission hands the agent_session off to the new turn and cl
   // turn forever and never discover what happened to the new chained one.
   assert.equal(session.turnId, "turn-handoff", "agent_session must follow the new turn");
   assert.equal(session.turnStatus, "RUNNING");
-  assert.equal(session.pendingThreadId, null);
-  assert.equal(session.pendingToolCallId, null);
+  assert.equal(session.pendingThreadId, fixture.threadId);
+  assert.equal(session.pendingToolCallId, fixture.toolCallId);
+  assert.equal(session.pendingVerdictId, seededVerdict.id);
+  assert.equal(session.pendingApprovedContentHash, seededVerdict.contentHash);
   assert.ok(session.nextPollAt.getTime() <= Date.now() + 1000, "must be pollable again soon");
 });
 
@@ -337,7 +401,7 @@ test("a decision bound to a session for a different report is refused before con
 
   assert.equal(calls.length, 0, "a mismatched decision/session pairing must never reach TrueForge");
   const row = await submissionRow(fixture.submissionId);
-  assert.equal(row.state, "PENDING");
+  assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /is for report .* belongs to report/);
 });
 
@@ -350,7 +414,26 @@ test("an approved decision whose verdict content no longer matches the approved 
 
   assert.equal(calls.length, 0, "a stale-hash approval must never reach TrueForge");
   const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /content hash no longer matches/);
+});
+
+test("a decision that no longer matches the session's pending call is refused before contacting TrueForge", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ pendingToolCallId: "call-from-a-newer-turn" })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+  const { client, calls } = makeFakeClient();
+
+  await worker.submitApprovalOnce("w-stale-call", { client });
+
+  assert.equal(calls.length, 0, "a stale decision must never answer a newer pending call");
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "FAILED");
+  assert.equal(row.attempts, 1, "a permanent binding failure must not burn retry attempts");
+  assert.match(row.lastError ?? "", /does not match the session's pending approval/);
 });
 
 test("a submission with no pending call to answer never calls TrueForge", async () => {
@@ -363,6 +446,25 @@ test("a submission with no pending call to answer never calls TrueForge", async 
   assert.equal(calls.length, 0, "a malformed request must never reach TrueForge");
 
   const row = await submissionRow(fixture.submissionId);
-  assert.equal(row.state, "PENDING");
+  assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /threadId\/toolCallId missing/);
+});
+
+test("an expired tick signal does not claim a submission or burn an attempt", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const { client, calls } = makeFakeClient();
+  const controller = new AbortController();
+  controller.abort(new Error("tick deadline exceeded"));
+
+  const id = await worker.submitApprovalOnce("w-expired-tick", {
+    client,
+    signal: controller.signal,
+  });
+
+  assert.equal(id, null);
+  assert.equal(calls.length, 0);
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.attempts, 0);
+  assert.equal(row.state, "PENDING");
 });

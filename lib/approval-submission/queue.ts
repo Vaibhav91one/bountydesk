@@ -119,6 +119,22 @@ export async function renew(
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
+/** Return a deadline-aborted claim without consuming its attempt budget. */
+export async function releaseUnstarted(lease: ApprovalSubmissionLease): Promise<void> {
+  const updated = await db
+    .update(approvalSubmission)
+    .set({
+      attempts: sql`greatest(${approvalSubmission.attempts} - 1, 0)`,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: approvalSubmission.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 /** Mark a submission acknowledged by TrueForge and drop the lease. */
 export async function markSubmitted(
   lease: ApprovalSubmissionLease,
@@ -167,6 +183,27 @@ export async function fail(lease: ApprovalSubmissionLease, error: string): Promi
        and ${approvalSubmission.leaseExpiresAt} > now()
     returning ${approvalSubmission.id} as id
   `);
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
+/** Stop retrying an invariant failure that another attempt cannot repair. */
+export async function failPermanently(
+  lease: ApprovalSubmissionLease,
+  error: string,
+  tx: Executor = db,
+): Promise<void> {
+  const updated = await tx
+    .update(approvalSubmission)
+    .set({
+      state: "FAILED",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      lastError: error,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: approvalSubmission.id });
 
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }

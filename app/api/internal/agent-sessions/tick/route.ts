@@ -28,7 +28,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const swept = await raceAbort(sweepExpiredLeases(), signal);
     while (processed < MAX_SESSIONS_PER_TICK && !signal.aborted) {
-      const sessionId = await pollOnce(owner);
+      const sessionId = await pollOnce(owner, { signal });
       if (!sessionId) break;
       processed += 1;
     }

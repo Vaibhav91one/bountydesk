@@ -1,6 +1,4 @@
-import { desc } from "drizzle-orm";
-
-import { db, eq, report, verdict } from "@/lib/db";
+import { and, db, eq, report, verdict } from "@/lib/db";
 import { transition } from "@/lib/reports/lifecycle";
 import {
   createTrueForgeClient,
@@ -54,6 +52,28 @@ function extractCapability(argumentsJson: string): string | null {
   return typeof capability === "string" ? capability : null;
 }
 
+async function finishWithoutApproval(
+  lease: AgentSessionLease,
+  updates: { turnStatus: "DONE_NO_ACTION" | "ERROR" | "CANCELLED"; lastError?: string },
+): Promise<string> {
+  await db.transaction(async (tx) => {
+    const [reportRow] = await tx
+      .select({ state: report.state })
+      .from(report)
+      .where(eq(report.id, lease.reportId))
+      .for("update");
+
+    if (!reportRow) {
+      throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
+    }
+    if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
+      await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
+    }
+    await release(lease, updates, tx);
+  });
+  return lease.id;
+}
+
 /**
  * Handle a verified, genuine pending publish_verdict call: this is the only place in the
  * codebase that moves a report through ANALYSIS_ONLY into AWAITING_APPROVAL (see
@@ -78,15 +98,12 @@ async function handleVerifiedPendingCall(
       throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
     }
 
-    // Ordered and bounded explicitly rather than trusting an unordered first row: this
-    // driver only ever produces one verdict per report today, but "only one row exists" is
-    // not the same guarantee as "selected deterministically," and the latter is what a
-    // human approving a specific revision actually needs.
+    // The driver prepares revision 1 before it starts this turn. A later draft was not part
+    // of the turn and cannot silently replace the exact payload the pending call refers to.
     const [verdictRow] = await tx
       .select({ id: verdict.id, reportId: verdict.reportId, contentHash: verdict.contentHash })
       .from(verdict)
-      .where(eq(verdict.reportId, lease.reportId))
-      .orderBy(desc(verdict.revision))
+      .where(and(eq(verdict.reportId, lease.reportId), eq(verdict.revision, 1)))
       .limit(1);
 
     if (!verdictRow) {
@@ -107,10 +124,37 @@ async function handleVerifiedPendingCall(
       await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
     } else if (reportRow.state === "ANALYSIS_ONLY") {
       await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+    } else if (reportRow.state === "AWAITING_APPROVAL") {
+      if (
+        lease.pendingThreadId !== call.threadId ||
+        lease.pendingToolCallId !== call.toolCallId ||
+        lease.pendingVerdictId !== verdictRow.id ||
+        lease.pendingApprovedContentHash !== verdictRow.contentHash
+      ) {
+        await release(
+          lease,
+          {
+            turnStatus: "ERROR",
+            lastError:
+              "pending publish_verdict does not match the pending call already recorded for review",
+          },
+          tx,
+        );
+        return;
+      }
+    } else {
+      await release(
+        lease,
+        {
+          turnStatus: "ERROR",
+          lastError: `refusing pending publish_verdict because report is ${reportRow.state}`,
+        },
+        tx,
+      );
+      return;
     }
-    // Otherwise the report is already AWAITING_APPROVAL or further along: a retried poll
-    // landing here is the idempotent case (see AGENTS.md), not a conflict, so the transition
-    // is skipped and only the lease/pending fields below are written.
+    // A report already at AWAITING_APPROVAL is the idempotent retry case. Later lifecycle
+    // states are refused above, because a delayed harness result cannot reopen approval.
 
     await release(
       lease,
@@ -177,8 +221,9 @@ async function handleAwaitingApproval(
  */
 export async function pollOnce(
   owner: string,
-  opts: { leaseSeconds?: number; client?: TrueForgeClient } = {},
+  opts: { leaseSeconds?: number; client?: TrueForgeClient; signal?: AbortSignal } = {},
 ): Promise<string | null> {
+  if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
@@ -191,7 +236,7 @@ export async function pollOnce(
   }
 
   const client = opts.client ?? createTrueForgeClient();
-  const snapshot = await client.getTurn(lease.sessionId, lease.turnId);
+  const snapshot = await client.getTurn(lease.sessionId, lease.turnId, { signal: opts.signal });
 
   switch (snapshot.status) {
     case "running":
@@ -203,19 +248,19 @@ export async function pollOnce(
 
     case "error":
       // Never inferred as an approval or a denial: the turn errored, full stop.
-      await release(lease, { turnStatus: "ERROR", lastError: snapshot.message });
-      return lease.id;
+      return finishWithoutApproval(lease, {
+        turnStatus: "ERROR",
+        lastError: snapshot.message,
+      });
 
     case "cancelled":
-      await release(lease, { turnStatus: "CANCELLED" });
-      return lease.id;
+      return finishWithoutApproval(lease, { turnStatus: "CANCELLED" });
 
     case "done_no_action":
       // Expected, real terminal outcome for this narrow model turn: the model finished
       // without calling publish_verdict. Not an error, and there is no retry-prompting
       // logic in this PR's scope, so polling simply stops here.
-      await release(lease, { turnStatus: "DONE_NO_ACTION" });
-      return lease.id;
+      return finishWithoutApproval(lease, { turnStatus: "DONE_NO_ACTION" });
 
     case "awaiting_approval":
       return handleAwaitingApproval(lease, snapshot.pending);

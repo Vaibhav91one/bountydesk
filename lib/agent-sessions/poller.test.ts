@@ -36,7 +36,14 @@ after(async () => {
 let seq = 0;
 
 async function seedSession(
-  opts: { reportState?: "TRIAGING" | "REPRODUCING" | "ANALYSIS_ONLY" | "AWAITING_APPROVAL" } = {},
+  opts: {
+    reportState?:
+      | "TRIAGING"
+      | "REPRODUCING"
+      | "ANALYSIS_ONLY"
+      | "AWAITING_APPROVAL"
+      | "CANCELLED";
+  } = {},
 ) {
   seq += 1;
   const n = seq;
@@ -173,6 +180,32 @@ test("a valid single publish_verdict call moves the report and records the pendi
   assert.equal(row.leaseOwner, null);
 });
 
+test("the pending call stays bound to the verdict prepared before the turn started", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const [newer] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: fixture.reportId,
+      outcome: "ANALYSIS_ONLY",
+      summary: "later draft",
+      payload: "payload the model never saw",
+      contentHash: "hash-the-model-never-saw",
+      revision: 2,
+    })
+    .returning({ id: dbm.verdict.id });
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken)],
+  });
+
+  await poller.pollOnce("w-prepared-verdict", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.pendingVerdictId, fixture.verdictId);
+  assert.notEqual(row.pendingVerdictId, newer.id);
+});
+
 test("a wrong tool name is refused loudly and never touches report state", async () => {
   await drainOthers();
   const fixture = await seedSession();
@@ -262,7 +295,58 @@ test("a retried poll on a report already at AWAITING_APPROVAL is a safe no-op", 
   assert.equal(row.pendingVerdictId, fixture.verdictId);
 });
 
-test("an error snapshot sets ERROR and leaves the report state untouched", async () => {
+test("a different pending call cannot replace the call already shown for approval", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  await poller.pollOnce("w-original-call", {
+    client: fakeClient({
+      status: "awaiting_approval",
+      pending: [publishVerdictCall(fixture.capabilityToken)],
+    }),
+  });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ nextPollAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+
+  await poller.pollOnce("w-new-call", {
+    client: fakeClient({
+      status: "awaiting_approval",
+      pending: [
+        publishVerdictCall(fixture.capabilityToken, {
+          threadId: "thread-new",
+          toolCallId: "call-new",
+        }),
+      ],
+    }),
+  });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.equal(row.pendingThreadId, "thread-1");
+  assert.equal(row.pendingToolCallId, "call-1");
+  assert.match(row.lastError ?? "", /does not match the pending call already recorded/);
+});
+
+test("a pending call cannot attach approval state to a terminal report", async () => {
+  await drainOthers();
+  const fixture = await seedSession({ reportState: "CANCELLED" });
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken)],
+  });
+
+  await poller.pollOnce("w-terminal-report", { client });
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "CANCELLED");
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.equal(row.pendingThreadId, null);
+  assert.match(row.lastError ?? "", /report is CANCELLED/);
+});
+
+test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONLY", async () => {
   await drainOthers();
   const fixture = await seedSession();
   const client = fakeClient({ status: "error", message: "the model blew up" });
@@ -275,10 +359,10 @@ test("an error snapshot sets ERROR and leaves the report state untouched", async
   assert.equal(row.pendingThreadId, null);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
-test("a cancelled snapshot sets CANCELLED and leaves the report state untouched", async () => {
+test("a cancelled snapshot sets CANCELLED and moves unfinished analysis to ANALYSIS_ONLY", async () => {
   await drainOthers();
   const fixture = await seedSession();
   const client = fakeClient({ status: "cancelled" });
@@ -290,7 +374,7 @@ test("a cancelled snapshot sets CANCELLED and leaves the report state untouched"
   assert.equal(row.pendingThreadId, null);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a done_no_action snapshot is a real terminal outcome, not an error", async () => {
@@ -305,7 +389,7 @@ test("a done_no_action snapshot is a real terminal outcome, not an error", async
   assert.equal(row.pendingThreadId, null);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a fence lost between claim and release surfaces as LeaseLostError", async () => {

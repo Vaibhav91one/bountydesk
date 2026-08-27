@@ -15,10 +15,24 @@ export interface TrueForgeClient {
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
    * it has already reached a pending approval. Callers must poll `getTurn` to find out. */
-  createTurn(sessionId: string, input: TurnInput[]): Promise<{ turnId: string; snapshot: TurnSnapshot }>;
-  getTurn(sessionId: string, turnId: string): Promise<TurnSnapshot>;
+  createTurn(
+    sessionId: string,
+    input: TurnInput[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ turnId: string; snapshot: TurnSnapshot }>;
+  getTurn(sessionId: string, turnId: string, opts?: { signal?: AbortSignal }): Promise<TurnSnapshot>;
   /** What was actually submitted for a turn, for reconciling a decision already sent. */
-  getTurnInput(sessionId: string, turnId: string): Promise<TurnInput[]>;
+  getTurnInput(
+    sessionId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<TurnInput[]>;
+  /** Find an already-created turn carrying the exact input after an ambiguous retry. */
+  findTurnByInput?(
+    sessionId: string,
+    input: TurnInput[],
+    opts?: { signal?: AbortSignal },
+  ): Promise<{ turnId: string } | null>;
 }
 
 export type TurnInput =
@@ -146,6 +160,10 @@ function normalizeTurnInput(value: unknown): TurnInput {
   throw new Error(`unsupported TrueForge turn input ${value.type}`);
 }
 
+function sameTurnInput(left: TurnInput[], right: TurnInput[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): TrueForgeClient {
   const baseUrl = trueforgeUrl();
   const apiKey = trueforgeApiKey();
@@ -168,25 +186,44 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       return { sessionId: res.data.id };
     },
 
-    async createTurn(sessionId, input) {
+    async createTurn(sessionId, input, requestOpts) {
       // createTurn (not createTurnStream) is the non-streaming method: it returns immediately,
       // generally with state.status "running" while the harness keeps executing in the
       // background. There is no "stream" flag on this request. The method itself is the
       // choice between the two transports.
-      const res = await client.sessions.createTurn(sessionId, { input: input as never });
+      const res = await client.sessions.createTurn(
+        sessionId,
+        { input: input as never },
+        { abortSignal: requestOpts?.signal },
+      );
       const turn = res.data;
       const snapshot = await snapshotFromTurn(client, sessionId, turn);
       return { turnId: turn.id, snapshot };
     },
 
-    async getTurn(sessionId, turnId) {
-      const res = await client.sessions.getTurn(sessionId, turnId);
+    async getTurn(sessionId, turnId, requestOpts) {
+      const res = await client.sessions.getTurn(sessionId, turnId, {
+        abortSignal: requestOpts?.signal,
+      });
       return snapshotFromTurn(client, sessionId, res.data);
     },
 
-    async getTurnInput(sessionId, turnId) {
-      const res = await client.sessions.getTurn(sessionId, turnId);
+    async getTurnInput(sessionId, turnId, requestOpts) {
+      const res = await client.sessions.getTurn(sessionId, turnId, {
+        abortSignal: requestOpts?.signal,
+      });
       return (res.data.input ?? []).map(normalizeTurnInput);
+    },
+
+    async findTurnByInput(sessionId, input, requestOpts) {
+      const turns = await client.sessions.listTurns(sessionId, undefined, {
+        abortSignal: requestOpts?.signal,
+      });
+      for await (const turn of turns) {
+        const candidate = (turn.input ?? []).map(normalizeTurnInput);
+        if (sameTurnInput(candidate, input)) return { turnId: turn.id };
+      }
+      return null;
     },
   };
 }
