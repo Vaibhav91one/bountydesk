@@ -79,6 +79,17 @@ export default async function ChannelsPage() {
         </Card>
       ) : null}
 
+      {connections.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="outline" nativeButton={false} render={<a href={installUrl()} />}>
+            <GitHubLight className="size-4" /> Install on another account
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            One installation covers one account. Adding an organization means installing again.
+          </p>
+        </div>
+      ) : null}
+
       {connections.map((connection) => (
         <section key={connection.installationRowId} className="flex flex-col gap-4">
           <Card>
@@ -94,11 +105,15 @@ export default async function ChannelsPage() {
               <dl className="flex flex-col gap-2">
                 <Row label="Installed on">{connection.accountLogin}</Row>
                 <Row label="Repositories">
-                  {connection.repositories.length} granted
+                  {connection.grantedRepositoryCount} granted
+                  {connection.repositories.length > connection.grantedRepositoryCount
+                    ? ` · ${connection.repositories.length - connection.grantedRepositoryCount} withdrawn`
+                    : null}
                 </Row>
                 <Row label="Permissions">Issues read and write · Metadata read</Row>
-                {/* Not "last event": lifecycle_delivery has no installation key, so the time
-                    of the last webhook for this account is not in the schema. */}
+                {/* The latest write across the installation and its repositories. Not
+                    "last event": lifecycle_delivery has no installation key, so the time of
+                    the last webhook for this account is not in the schema. */}
                 <Row label="Last synced">
                   <time dateTime={connection.lastSyncedAt.toISOString()}>
                     {connection.lastSyncedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
@@ -111,7 +126,14 @@ export default async function ChannelsPage() {
                   size="sm"
                   variant="outline"
                   nativeButton={false}
-                  render={<a href={manageRepositoriesUrl(connection.installationId)} />}
+                  render={
+                    <a
+                      href={manageRepositoriesUrl(connection.installationId, {
+                        login: connection.accountLogin,
+                        type: connection.accountType,
+                      })}
+                    />
+                  }
                 >
                   <Settings2 /> Manage repositories <ExternalLink className="size-3" />
                 </Button>

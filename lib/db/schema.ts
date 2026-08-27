@@ -94,6 +94,13 @@ export const githubInstallation = pgTable(
     installationId: bigint("installation_id", { mode: "number" }).notNull(),
     accountLogin: text("account_login").notNull(),
     accountId: bigint("account_id", { mode: "number" }).notNull(),
+    /**
+     * "User" or "Organization". GitHub puts an organization's installation settings on a
+     * different path from a personal one, so a link built without this sends half of all
+     * operators to a 404. Nullable because rows written before this column existed have
+     * no answer, and guessing one would be worse than falling back.
+     */
+    accountType: text("account_type"),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),

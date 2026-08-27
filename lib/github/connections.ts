@@ -35,13 +35,19 @@ export type Connection = {
   installationRowId: string;
   installationId: number;
   accountLogin: string;
+  accountType: string | null;
   suspendedAt: Date | null;
   /**
-   * githubInstallation.updatedAt. Deliberately not called "last event": lifecycle_delivery
-   * has no installation key, so the time of the last webhook for this account is not in the
-   * schema. This is the last time we wrote the row, which is close but not the same thing.
+   * The most recent write across the installation row and its repositories. A rename,
+   * transfer, archive or removal touches only connected_repository, so reading the
+   * installation alone would report a stale time and call it synchronisation.
+   *
+   * Still not "last event": lifecycle_delivery has no installation key, so the time of the
+   * last webhook for this account is genuinely not in the schema.
    */
   lastSyncedAt: Date;
+  /** Repositories the installation currently grants. Excludes ones it has withdrawn. */
+  grantedRepositoryCount: number;
   repositories: ConnectionRepo[];
 };
 
@@ -76,8 +82,10 @@ export async function listConnections(): Promise<Connection[]> {
       installationRowId: githubInstallation.id,
       installationId: githubInstallation.installationId,
       accountLogin: githubInstallation.accountLogin,
+      accountType: githubInstallation.accountType,
       suspendedAt: githubInstallation.suspendedAt,
       updatedAt: githubInstallation.updatedAt,
+      repositoryUpdatedAt: connectedRepository.updatedAt,
       connectedRepositoryId: connectedRepository.id,
       repoId: connectedRepository.repoId,
       fullName: connectedRepository.fullName,
@@ -104,8 +112,10 @@ export async function listConnections(): Promise<Connection[]> {
         installationRowId: row.installationRowId,
         installationId: row.installationId,
         accountLogin: row.accountLogin,
+        accountType: row.accountType,
         suspendedAt: row.suspendedAt,
         lastSyncedAt: row.updatedAt,
+        grantedRepositoryCount: 0,
         repositories: [],
       };
       byInstallation.set(row.installationRowId, connection);
@@ -113,6 +123,14 @@ export async function listConnections(): Promise<Connection[]> {
 
     // The left join yields one null-filled row for an installation that granted nothing.
     if (!row.connectedRepositoryId || row.repoId === null || row.fullName === null) continue;
+
+    if (row.repositoryUpdatedAt && row.repositoryUpdatedAt > connection.lastSyncedAt) {
+      connection.lastSyncedAt = row.repositoryUpdatedAt;
+    }
+
+    // Counted from the grant itself, not from the display status: a suspended installation
+    // reports every repository as "suspended", which would hide whether the grant is intact.
+    if (row.active) connection.grantedRepositoryCount += 1;
 
     connection.repositories.push({
       connectedRepositoryId: row.connectedRepositoryId,
@@ -137,7 +155,19 @@ export async function listConnections(): Promise<Connection[]> {
  * A GitHub App cannot change its own repository selection through the API: GitHub owns that
  * screen, and we find out afterwards from installation_repositories. So this is a deep link
  * out, not a form. Vercel's "configure repositories" works the same way.
+ *
+ * An organization keeps its installation settings under /organizations/<login>/settings,
+ * not the personal /settings path, so sending an org operator to the personal one is a 404.
+ * An unknown account type falls back to the personal path: rows written before the type was
+ * recorded have no answer, and a wrong guess for organizations is the more common mistake.
  */
-export function manageRepositoriesUrl(installationId: number): string {
+export function manageRepositoriesUrl(
+  installationId: number,
+  account: { login: string; type: string | null },
+): string {
+  if (account.type === "Organization") {
+    return `https://github.com/organizations/${account.login}/settings/installations/${installationId}`;
+  }
+
   return `https://github.com/settings/installations/${installationId}`;
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "github_installation" ADD COLUMN "account_type" text;

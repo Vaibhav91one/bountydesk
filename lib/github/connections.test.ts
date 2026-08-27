@@ -33,7 +33,9 @@ after(async () => {
 
 let ids = 0;
 
-async function installation(opts: { suspended?: boolean; deleted?: boolean } = {}) {
+async function installation(
+  opts: { suspended?: boolean; deleted?: boolean; accountType?: string | null } = {},
+) {
   ids += 1;
   const [row] = await dbm.db
     .insert(dbm.githubInstallation)
@@ -41,6 +43,7 @@ async function installation(opts: { suspended?: boolean; deleted?: boolean } = {
       installationId: 700_000 + ids,
       accountLogin: `acct-${String(ids).padStart(3, "0")}`,
       accountId: 900 + ids,
+      accountType: opts.accountType ?? "User",
       suspendedAt: opts.suspended ? new Date() : null,
       deletedAt: opts.deleted ? new Date() : null,
     })
@@ -100,9 +103,23 @@ test("status reports the most severe reason first", () => {
   );
 });
 
-test("manage repositories points at GitHub, which owns repository selection", () => {
+test("manage repositories points at the right GitHub settings page", () => {
+  // A personal installation lives under /settings.
   assert.equal(
-    connections.manageRepositoriesUrl(156822754),
+    connections.manageRepositoriesUrl(156822754, { login: "octocat", type: "User" }),
+    "https://github.com/settings/installations/156822754",
+  );
+
+  // An organization keeps its installation settings somewhere else entirely, and sending an
+  // org operator to the personal path is a 404.
+  assert.equal(
+    connections.manageRepositoriesUrl(156822754, { login: "acme-inc", type: "Organization" }),
+    "https://github.com/organizations/acme-inc/settings/installations/156822754",
+  );
+
+  // Rows written before the account type was recorded fall back rather than guess.
+  assert.equal(
+    connections.manageRepositoriesUrl(156822754, { login: "octocat", type: null }),
     "https://github.com/settings/installations/156822754",
   );
 });
@@ -157,4 +174,53 @@ test("an installation that granted no repositories still appears", async () => {
   // The left join hands back one null-filled row here; it must not become a phantom repo.
   assert.ok(row, "the installation is listed");
   assert.deepEqual(row?.repositories, []);
+});
+
+test("the granted count follows the grant, not the display status", async () => {
+  const live = await installation();
+  await repo(live.id);                        // granted
+  await repo(live.id, { configured: false }); // granted, just unconfigured
+  await repo(live.id, { active: false });     // withdrawn
+
+  const all = await connections.listConnections();
+  const row = all.find((c) => c.installationRowId === live.id);
+
+  assert.equal(row?.repositories.length, 3, "all three are still listed");
+  assert.equal(row?.grantedRepositoryCount, 2, "only the two the installation still grants");
+});
+
+test("a suspended installation still reports its real grant count", async () => {
+  // Every repository here displays as "suspended", which would hide whether the grant is
+  // intact if the count were derived from the status.
+  const suspended = await installation({ suspended: true });
+  await repo(suspended.id);
+  await repo(suspended.id, { active: false });
+
+  const all = await connections.listConnections();
+  const row = all.find((c) => c.installationRowId === suspended.id);
+
+  assert.deepEqual(row?.repositories.map((r) => r.status), ["suspended", "suspended"]);
+  assert.equal(row?.grantedRepositoryCount, 1);
+});
+
+test("last synced follows repository changes, not just the installation row", async () => {
+  const live = await installation();
+  await repo(live.id);
+
+  const before = (await connections.listConnections())
+    .find((c) => c.installationRowId === live.id)!.lastSyncedAt;
+
+  // A rename or transfer touches only connected_repository. Reading the installation alone
+  // would report a stale time and call it synchronisation.
+  const later = new Date(Date.now() + 60_000);
+  await dbm.db
+    .update(dbm.connectedRepository)
+    .set({ updatedAt: later })
+    .where(dbm.eq(dbm.connectedRepository.installationId, live.id));
+
+  const after = (await connections.listConnections())
+    .find((c) => c.installationRowId === live.id)!.lastSyncedAt;
+
+  assert.ok(after > before, "the repository write moved it forward");
+  assert.equal(after.getTime(), later.getTime());
 });
