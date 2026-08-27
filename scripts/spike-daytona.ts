@@ -228,8 +228,8 @@ async function main(): Promise<void> {
       const err = /ERR (.*)/.exec(output)?.[1]?.trim() ?? "";
       step(`egress_${probe.name}`, { curlExit, status, body: body.slice(0, 120), err: err.slice(0, 120) });
 
-      if (curlExit !== 0 && status === null) continue;                          // nothing came back
-      if (status === DENIAL_STATUS && body.includes(DENIAL)) continue;          // the proxy refused it
+      if (curlExit !== 0 && status === null) continue;
+      if (status === DENIAL_STATUS && body.includes(DENIAL)) continue;
 
       // Everything else is the far end answering, including a 4xx it chose to send.
       reached.push(`${probe.name} (curl ${curlExit}, status ${status ?? "none"})`);
