@@ -12,10 +12,12 @@ let schema: import("@/lib/db/testing").DisposableSchema;
 
 type WorkerModule = typeof import("./worker");
 type QueueModule = typeof import("./queue");
+type AgentQueueModule = typeof import("../agent-sessions/queue");
 type DbModule = typeof import("@/lib/db");
 
 let worker: WorkerModule;
 let queue: QueueModule;
+let agentQueue: AgentQueueModule;
 let dbm: DbModule;
 
 before(async () => {
@@ -25,6 +27,7 @@ before(async () => {
   dbm = await import("@/lib/db");
   worker = await import("./worker");
   queue = await import("./queue");
+  agentQueue = await import("../agent-sessions/queue");
   await dbm.db.execute("select 1");
 });
 
@@ -390,6 +393,50 @@ test("an approved submission follows the new turn and preserves the binding for 
   assert.equal(session.pendingVerdictId, seededVerdict.id);
   assert.equal(session.pendingApprovedContentHash, seededVerdict.contentHash);
   assert.ok(session.nextPollAt.getTime() <= Date.now() + 1000, "must be pollable again soon");
+});
+
+test("turn handoff invalidates a poller lease that belongs to the old turn", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const [leasedSession] = await dbm.db
+    .update(dbm.agentSession)
+    .set({
+      leaseOwner: "stale-poller",
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      fence: dbm.sql`${dbm.agentSession.fence} + 1`,
+    })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId))
+    .returning();
+  const staleLease: import("../agent-sessions/queue").AgentSessionLease = {
+    id: leasedSession.id,
+    reportId: leasedSession.reportId,
+    capabilityToken: leasedSession.capabilityToken,
+    sessionId: leasedSession.sessionId,
+    turnId: leasedSession.turnId,
+    turnStatus: leasedSession.turnStatus,
+    pendingThreadId: leasedSession.pendingThreadId,
+    pendingToolCallId: leasedSession.pendingToolCallId,
+    pendingVerdictId: leasedSession.pendingVerdictId,
+    pendingApprovedContentHash: leasedSession.pendingApprovedContentHash,
+    fence: leasedSession.fence,
+    leaseOwner: "stale-poller",
+  };
+  const { client } = makeFakeClient({
+    createTurn: async () => ({ turnId: "turn-after-handoff" }),
+  });
+
+  await worker.submitApprovalOnce("w-handoff-fence", { client });
+
+  await assert.rejects(
+    agentQueue.release(staleLease, { turnStatus: "DONE_NO_ACTION" }),
+    agentQueue.LeaseLostError,
+  );
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+  assert.equal(session.turnId, "turn-after-handoff");
+  assert.equal(session.turnStatus, "RUNNING");
 });
 
 test("a decision bound to a session for a different report is refused before contacting TrueForge", async () => {

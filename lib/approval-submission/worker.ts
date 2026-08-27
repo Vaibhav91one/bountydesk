@@ -1,4 +1,4 @@
-import { agentSession, and, approvalDecision, db, eq, verdict } from "@/lib/db";
+import { agentSession, and, approvalDecision, db, eq, sql, verdict } from "@/lib/db";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { createTrueForgeClient, type TrueForgeClient, type TurnInput } from "@/lib/trueforge/client";
 
@@ -237,6 +237,9 @@ export async function submitApprovalOnce(
                 }
               : {}),
             nextPollAt: new Date(),
+            fence: sql`${agentSession.fence} + 1`,
+            leaseOwner: null,
+            leaseExpiresAt: null,
             updatedAt: new Date(),
           })
           .where(
