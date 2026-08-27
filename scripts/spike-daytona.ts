@@ -66,10 +66,18 @@ async function waitForState(id: string, wanted: string[], timeoutMs = 120_000): 
  * guards this script has no business carrying; the real system gets that, built on the same
  * client call.
  */
-async function sweep(): Promise<string[]> {
-  const stragglers = await listSandboxes({ [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE });
-  for (const sandbox of stragglers) await deleteSandbox(sandbox.id);
-  return stragglers.map((s) => s.id);
+async function sweep(attempts = 1): Promise<string[]> {
+  const labels = { [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE };
+
+  for (let attempt = 1; ; attempt++) {
+    const stragglers = await listSandboxes(labels);
+    for (const sandbox of stragglers) await deleteSandbox(sandbox.id);
+    if (stragglers.length || attempt === attempts) return stragglers.map((s) => s.id);
+
+    // Nothing yet, which after a lost create means either that no sandbox exists or that the
+    // provider has not indexed it. Those look identical from here, so wait and ask again.
+    await new Promise((r) => setTimeout(r, 3000 * attempt));
+  }
 }
 
 async function main(): Promise<void> {
@@ -98,8 +106,10 @@ async function main(): Promise<void> {
       labels: { [SPIKE_LABEL]: SPIKE_RUN },
     });
   } catch (error) {
-    // The create may have landed anyway. Nothing else knows its id, so sweep by label.
-    step("create_failed_swept", await sweep());
+    // The create may have landed anyway. Nothing else knows its id, so sweep by label, and
+    // keep asking: a sandbox the provider accepted can take a moment to appear in a listing,
+    // and one immediate empty answer would let it run to its TTL.
+    step("create_failed_swept", await sweep(5));
     throw error;
   }
   step("sandbox_id", created.id);
