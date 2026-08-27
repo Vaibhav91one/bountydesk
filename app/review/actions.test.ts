@@ -153,18 +153,18 @@ test("allowVerdict records an approval but never moves the report itself", async
     .select()
     .from(dbm.agentSession)
     .where(dbm.eq(dbm.agentSession.id, agentSessionId));
-  assert.equal(sessionRow.pendingThreadId, null);
-  assert.equal(sessionRow.pendingToolCallId, null);
-  assert.equal(sessionRow.pendingVerdictId, null);
-  assert.equal(sessionRow.pendingApprovedContentHash, null);
+  assert.equal(sessionRow.pendingThreadId, `thread-${seq}`);
+  assert.equal(sessionRow.pendingToolCallId, `call-${seq}`);
+  assert.equal(sessionRow.pendingVerdictId, verdictId);
+  assert.equal(sessionRow.pendingApprovedContentHash, decisions[0].payloadHash);
 
   // The load-bearing assertion: allow records a decision, it does not manufacture delivery.
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
 });
 
-test("denyVerdict records a denial and moves the report to DENIED itself", async () => {
+test("denyVerdict records a denial, preserves its pending binding, and moves the report to DENIED", async () => {
   signIn(REVIEWER_ID, "bob");
-  const { reportId, verdictId } = await seedPendingReport();
+  const { reportId, verdictId, agentSessionId } = await seedPendingReport();
 
   const result = await actions.denyVerdict(reportId, verdictId, "not in scope");
   assert.equal(result.ok, true);
@@ -173,6 +173,15 @@ test("denyVerdict records a denial and moves the report to DENIED itself", async
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].decision, "DENIED");
   assert.equal(decisions[0].note, "not in scope");
+
+  const [sessionRow] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, agentSessionId));
+  assert.equal(sessionRow.pendingThreadId, decisions[0].threadId);
+  assert.equal(sessionRow.pendingToolCallId, decisions[0].toolCallId);
+  assert.equal(sessionRow.pendingVerdictId, verdictId);
+  assert.equal(sessionRow.pendingApprovedContentHash, decisions[0].payloadHash);
 
   assert.equal(await reportState(reportId), "DENIED");
 });

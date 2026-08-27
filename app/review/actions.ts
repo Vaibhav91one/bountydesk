@@ -177,17 +177,9 @@ async function decide(
         }
       }
 
-      // The pending call has been decided from bounty-desk's side. TrueForge itself does not
-      // know yet; that is what the approval_submission row queued above is for.
-      await tx
-        .update(agentSession)
-        .set({
-          pendingThreadId: null,
-          pendingToolCallId: null,
-          pendingVerdictId: null,
-          pendingApprovedContentHash: null,
-        })
-        .where(eq(agentSession.id, pending.id));
+      // Keep the exact pending tuple until the submission worker has handed this decision to
+      // TrueForge. An approved call needs the same tuple again when publish_verdict executes;
+      // clearing it here would make the approved tool call refuse itself.
 
       return { ok: true };
     });
