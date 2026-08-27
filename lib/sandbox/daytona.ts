@@ -43,6 +43,13 @@ export type SandboxSpec = {
    */
   snapshot: string;
   /**
+   * The digest-pinned image this run expects the snapshot to be built from, as
+   * `registry/name@sha256:<64 hex>`. A mutable tag proves nothing: the whole point of pinning
+   * to a digest is that the reference cannot come to mean a different image later. Compared
+   * exactly against the snapshot's own `imageName`, never derived from it.
+   */
+  imageRef: string;
+  /**
    * The limits this run expects. Daytona refuses resource fields on a create-from-snapshot
    * ("Cannot specify Sandbox resources when using a snapshot"), because the snapshot carries
    * them. So these are not requested, they are checked against what the snapshot declares,
@@ -97,6 +104,12 @@ export function assertSafeSpec(spec: SandboxSpec): void {
     throw new UnsafeSandboxSpec("snapshot must be a server-held identifier");
   }
 
+  // Anchors the request to one immutable manifest. A mutable tag (":v17.3.0", ":latest") would
+  // pass this shape check while meaning a different image tomorrow than it means today.
+  if (!spec.imageRef || !/^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$/.test(spec.imageRef)) {
+    throw new UnsafeSandboxSpec("imageRef must be a digest-pinned reference (registry/name@sha256:<64 hex>)");
+  }
+
   for (const n of [spec.cpu, spec.memoryGb, spec.diskGb, spec.ttlMinutes]) {
     if (!Number.isFinite(n) || n <= 0) {
       throw new UnsafeSandboxSpec("cpu, memory, disk and ttl must all be positive");
@@ -140,6 +153,23 @@ export function assertSnapshotLimits(spec: SandboxSpec, snapshot: SnapshotInfo):
   if (mismatch.length) {
     throw new UnsafeSandboxSpec(
       `snapshot ${snapshot.name} declares limits this run did not choose: ${mismatch.join(", ")}`,
+    );
+  }
+}
+
+/**
+ * Refuse a snapshot that was not built from the image this run expects.
+ *
+ * This is the one check in this file that ties a sandbox back to a specific build. Everything
+ * else about a snapshot (its state, its limits) can be true of any number of images; the
+ * `imageName` the provider recorded when the snapshot was created is the only field that says
+ * which one. A missing `imageName` counts as a mismatch, the same way a missing limit does:
+ * a snapshot that declines to say what it was built from has not shown us anything.
+ */
+export function assertSnapshotImage(spec: SandboxSpec, snapshot: SnapshotInfo): void {
+  if (snapshot.imageName !== spec.imageRef) {
+    throw new UnsafeSandboxSpec(
+      `snapshot ${snapshot.name} image ${snapshot.imageName ?? "(not declared)"} != expected ${spec.imageRef}`,
     );
   }
 }
@@ -189,6 +219,7 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
     throw new UnsafeSandboxSpec(`snapshot ${spec.snapshot} resolved without an immutable id`);
   }
   assertSnapshotLimits(spec, snapshot);
+  assertSnapshotImage(spec, snapshot);
 
   const body = {
     snapshot: snapshot.id,

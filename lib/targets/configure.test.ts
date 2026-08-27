@@ -30,6 +30,43 @@ async function connectedRepo(repoId: number, fullName: string) {
   });
 }
 
+test("a digest composes into an image reference, or is refused", async () => {
+  const digest = `sha256:${"a".repeat(64)}`;
+  assert.equal(targets.imageRefFor(digest), `${targets.IMAGE_NAME}@${digest}`);
+
+  for (const bad of ["", "sha256:short", `sha256:${"g".repeat(64)}`, "<sha256-of-connected-fork-build>", digest.toUpperCase()]) {
+    assert.equal(targets.isValidImageDigest(bad), false, bad);
+    assert.throws(() => targets.imageRefFor(bad), /not a valid image digest/);
+  }
+});
+
+test("a snapshot id placeholder is rejected by shape, not by name", async () => {
+  assert.equal(targets.isValidSnapshotId("snapshot-1"), true);
+  assert.equal(targets.isValidSnapshotId("0619bb9e-beb2-47aa-891d-bf5e2771111c"), true);
+
+  for (const bad of ["", "<immutable-daytona-snapshot-id>", "a b", "juice; rm -rf /"]) {
+    assert.equal(targets.isValidSnapshotId(bad), false, bad);
+  }
+});
+
+test("rotating a profile that does not exist yet is refused", async () => {
+  // Must run before anything else creates the shared "juice-shop-v17.3.0" row: every
+  // configure call in this file targets that one fixed name, so this is the only point at
+  // which the profile genuinely does not exist yet.
+  await connectedRepo(700_006, "acme/norotate");
+
+  await assert.rejects(
+    targets.rotateJuiceShopTarget({
+      repoId: 700_006,
+      imageDigest: `sha256:${"2".repeat(64)}`,
+      snapshotId: "snapshot-2",
+    }),
+    /nothing to rotate/,
+  );
+
+  assert.equal((await dbm.db.select().from(dbm.targetProfile)).length, 0);
+});
+
 test("configuring the same repository twice reuses the pinned target profile", async () => {
   await connectedRepo(700_001, "acme/reports");
   const input = {
@@ -48,6 +85,38 @@ test("configuring the same repository twice reuses the pinned target profile", a
   );
 });
 
+test("rotating an existing profile updates it in place, keeping its id", async () => {
+  await connectedRepo(700_005, "acme/rotated");
+  const first = await targets.configureJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"1".repeat(64)}`,
+    snapshotId: "snapshot-1",
+  });
+
+  const rotated = await targets.rotateJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"9".repeat(64)}`,
+    snapshotId: "snapshot-9",
+  });
+
+  assert.equal(rotated.targetProfileId, first.targetProfileId, "the row is updated, not replaced");
+
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, first.targetProfileId));
+  assert.equal(row.imageDigest, `sha256:${"9".repeat(64)}`);
+  assert.equal(row.snapshotId, "snapshot-9");
+
+  // Restore the pinned values every later test in this file assumes, since rotation is a
+  // real mutation of the one shared row and not scoped to this test's own repository.
+  await targets.rotateJuiceShopTarget({
+    repoId: 700_005,
+    imageDigest: `sha256:${"1".repeat(64)}`,
+    snapshotId: "snapshot-1",
+  });
+});
+
 test("an existing logical profile must match every pinned setting", async () => {
   await connectedRepo(700_002, "acme/second");
 
@@ -59,6 +128,29 @@ test("an existing logical profile must match every pinned setting", async () => 
     }),
     /different pinned target settings/,
   );
+});
+
+test("a row with no image name, from before that column existed, is a mismatch too", async () => {
+  // The digest and snapshot id here are exactly what the shared row already holds; only its
+  // image_name is wrong, the way a row written before that column existed would be.
+  await dbm.db
+    .update(dbm.targetProfile)
+    .set({ imageName: null })
+    .where(dbm.eq(dbm.targetProfile.name, "juice-shop-v17.3.0"));
+
+  await assert.rejects(
+    targets.configureJuiceShopTarget({
+      repoId: 700_001,
+      imageDigest: `sha256:${"1".repeat(64)}`,
+      snapshotId: "snapshot-1",
+    }),
+    /different pinned target settings/,
+  );
+
+  await dbm.db
+    .update(dbm.targetProfile)
+    .set({ imageName: targets.IMAGE_NAME })
+    .where(dbm.eq(dbm.targetProfile.name, "juice-shop-v17.3.0"));
 });
 
 test("repository ID selects one active repository even when names are reused", async () => {

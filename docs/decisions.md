@@ -440,6 +440,33 @@ Reasons recorded beside `ANALYSIS_ONLY`, none of which are report states: `NO_BO
 `COULD_NOT_BUILD`, `COULD_NOT_DEPLOY`, `NO_APPROVED_ORACLE`, `TARGET_UNAVAILABLE`,
 `POLICY_REFUSED`, `INTAKE_PARSE_FAILED`.
 
+#### Digest check and rotation, 2026-08-27
+
+A review of the pre-existing target-configuration code (`lib/targets/configure.ts`,
+`configure-request.ts`, from the settings-screen work, not this spike) found the digest-pinned
+image chain above was written down but not enforced, and found two related gaps. All three are
+fixed now.
+
+`createSandbox` takes a new required `imageRef`, a `registry/name@sha256:<64 hex>` reference,
+and refuses both a spec whose reference is not digest-pinned and a snapshot whose `imageName`
+does not equal it exactly, before provisioning. A missing `imageName` counts as a mismatch, the
+same way a missing resource limit does. There is still no real digest-pinned image to check
+against: the connected fork has not been built yet, so this closes the gap in the client rather
+than in the deployed target.
+
+`configureJuiceShopTarget` refuses to bind a repository to a profile with different pinned
+settings than the one already stored, which is correct as a guard against accidental drift but
+gave no way to move to a verified new build on purpose. `rotateJuiceShopTarget` is the explicit
+path for that: it updates the existing row's digest, snapshot id, config and scope rules in
+place, keyed by the same fixed profile name, and refuses if no profile exists yet rather than
+creating one. `rotateRepositoryTargetRequest` wraps it behind the same reviewer allowlist and
+the same fail-closed environment read as configuring.
+
+`configureRepositoryRequest` and `scripts/seed-target.ts` both fell back to a bundled digest
+(`sha256:123acb…`, which `env.example` already flags as upstream's image, not the fork's) when
+`DAYTONA_TARGET_IMAGE_DIGEST` was unset. Both now fail closed instead: a missing digest or
+snapshot id refuses the request rather than silently pinning against an artifact nobody chose.
+
 ---
 
 ## Product-hardening batch (demo / production)

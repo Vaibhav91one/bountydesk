@@ -10,6 +10,7 @@ import {
   UnsafeSandboxSpec,
   assertSafeSpec,
   assertSandboxGone,
+  assertSnapshotImage,
   assertSnapshotLimits,
   createSandbox,
   deleteSandbox,
@@ -26,8 +27,11 @@ import {
  * correctly, right until a proof-of-concept uses it. So these assert that the unsafe spec
  * throws before any network call, rather than being corrected and logged.
  */
+const IMAGE_REF = `ghcr.io/example/juice-shop@sha256:${"a".repeat(64)}`;
+
 const spec: SandboxSpec = {
   snapshot: "juice-shop-v17.3.0",
+  imageRef: IMAGE_REF,
   cpu: 2,
   memoryGb: 2,
   diskGb: 10,
@@ -37,7 +41,7 @@ const spec: SandboxSpec = {
 const snapshot: SnapshotInfo = {
   id: "snap-1",
   name: "juice-shop-v17.3.0",
-  imageName: "ghcr.io/example/juice-shop@sha256:abc",
+  imageName: IMAGE_REF,
   state: "active",
   cpu: 2,
   mem: 2,
@@ -66,6 +70,32 @@ test("a snapshot identifier that did not come from a profile is refused", () => 
   for (const snapshot of ["", "  ", "a".repeat(201), "juice; rm -rf /", "$(whoami)", "a b"]) {
     assert.throws(() => assertSafeSpec({ ...spec, snapshot }), UnsafeSandboxSpec, snapshot);
   }
+});
+
+test("imageRef must be a digest-pinned reference, not a mutable tag", () => {
+  for (const imageRef of [
+    "",
+    "ghcr.io/example/juice-shop:v17.3.0",
+    "ghcr.io/example/juice-shop@sha256:" + "a".repeat(63),
+    "ghcr.io/example/juice-shop@sha256:" + "g".repeat(64),
+    "ghcr.io/example/juice-shop",
+  ]) {
+    assert.throws(() => assertSafeSpec({ ...spec, imageRef }), UnsafeSandboxSpec, imageRef);
+  }
+});
+
+test("a snapshot built from a different image is refused", () => {
+  assert.doesNotThrow(() => assertSnapshotImage(spec, snapshot));
+
+  assert.throws(
+    () => assertSnapshotImage(spec, { ...snapshot, imageName: `ghcr.io/example/juice-shop@sha256:${"b".repeat(64)}` }),
+    UnsafeSandboxSpec,
+  );
+  assert.throws(
+    () => assertSnapshotImage(spec, { ...snapshot, imageName: null }),
+    UnsafeSandboxSpec,
+    "a snapshot silent about its image has not shown us anything",
+  );
 });
 
 test("limits and a time-to-live are mandatory and positive", () => {
@@ -149,6 +179,21 @@ test("a snapshot whose limits differ from the run's is refused", async () => {
     // Same snapshot name, but it was rebuilt with more memory than this run asked for.
     if (String(input).includes("/snapshots/")) return json({ ...snapshot, mem: 8 });
     throw new Error("provisioning was attempted despite a limit mismatch");
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), UnsafeSandboxSpec);
+  });
+});
+
+test("provisioning refuses a snapshot built from a different image", async () => {
+  const stub = (async (input: unknown) => {
+    // Right name, right limits, wrong build. This is exactly the case a name-only check
+    // would miss.
+    if (String(input).includes("/snapshots/")) {
+      return json({ ...snapshot, imageName: `ghcr.io/example/juice-shop@sha256:${"c".repeat(64)}` });
+    }
+    throw new Error("provisioning was attempted against the wrong image");
   }) as typeof fetch;
 
   await withFetch(stub, async () => {

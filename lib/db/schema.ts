@@ -148,6 +148,13 @@ export const targetProfile = pgTable(
   {
     id: id(),
     name: text("name").notNull(),
+    /**
+     * Registry and repository, e.g. "ghcr.io/vaibhav91one/juice-shop". No tag, no digest.
+     * Nullable for now: staged this way so the migration does not depend on a data repair
+     * landing first. Application code refuses to write a profile with no image name; a later
+     * migration makes the column NOT NULL once no existing row can violate it.
+     */
+    imageName: text("image_name"),
     imageDigest: text("image_digest").notNull(),
     snapshotId: text("snapshot_id"),
     /** Endpoints, scenarios, canary seeding config. */

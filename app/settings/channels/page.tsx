@@ -221,5 +221,11 @@ export default async function ChannelsPage() {
 
 
 function ConfigureRepository({ repoId, configured }: { repoId: number; configured: boolean }) {
-  return <ConfigureButton repoId={repoId} label={configured ? "Reconfigure" : "Configure"} />;
+  return (
+    <ConfigureButton
+      repoId={repoId}
+      configured={configured}
+      label={configured ? "Reconfigure" : "Configure"}
+    />
+  );
 }

@@ -11,6 +11,7 @@ import test, { after, before } from "node:test";
 const REVIEWER_ID = 4242;
 process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
 process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
+process.env.DAYTONA_TARGET_SNAPSHOT_ID = "snapshot-test";
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
@@ -83,6 +84,16 @@ test("a signed-in user who is not a reviewer is denied and changes nothing", asy
   assert.equal(await boundTarget(repoId), null, "no binding was written");
 });
 
+test("rotating before anything is configured is refused", async () => {
+  // Must run before any configure call creates the shared target profile row.
+  const repoId = await repo();
+
+  const result = await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
+
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /no existing target profile/);
+});
+
 test("a reviewer can configure an active repository", async () => {
   const repoId = await repo();
 
@@ -111,6 +122,56 @@ test("an unusable repository id is refused before touching the database", async 
   // A well-formed id for a repository that simply does not exist is refused too.
   const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), 987_654_321);
   assert.equal(result.ok, false);
+});
+
+test("a missing image digest or snapshot id fails closed rather than falling back", async () => {
+  const repoId = await repo();
+  const digest = process.env.DAYTONA_TARGET_IMAGE_DIGEST;
+  const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
+
+  for (const [key, value] of [
+    ["DAYTONA_TARGET_IMAGE_DIGEST", digest],
+    ["DAYTONA_TARGET_SNAPSHOT_ID", snapshotId],
+  ] as const) {
+    delete process.env[key];
+    const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+    process.env[key] = value;
+
+    assert.equal(result.ok, false, key);
+    assert.equal(await boundTarget(repoId), null, `${key} missing must not bind a target`);
+  }
+});
+
+test("the env.example placeholders are nonempty but still refused", async () => {
+  const repoId = await repo();
+  const digest = process.env.DAYTONA_TARGET_IMAGE_DIGEST;
+  const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
+
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = "<sha256-of-connected-fork-build>";
+  process.env.DAYTONA_TARGET_SNAPSHOT_ID = "<immutable-daytona-snapshot-id>";
+  const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = digest;
+  process.env.DAYTONA_TARGET_SNAPSHOT_ID = snapshotId;
+
+  assert.equal(result.ok, false, "a placeholder is nonempty but not a built artifact");
+  assert.equal(await boundTarget(repoId), null);
+});
+
+test("rotation requires a reviewer, same as configuring", async () => {
+  const repoId = await repo();
+  await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+
+  const denied = await configure.rotateRepositoryTargetRequest(session(999_999), repoId);
+  assert.equal(denied.ok, false);
+
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"9".repeat(64)}`;
+  const allowed = await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
+  assert.equal(allowed.ok, true);
+
+  // Every later test in this file assumes the shared profile is pinned to the default
+  // digest set at the top of the file, since rotation is a real mutation of that one row.
+  await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
 });
 
 test("a pinned target mismatch does not leak its digest to the browser", async () => {

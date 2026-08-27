@@ -1,4 +1,4 @@
-import { configureJuiceShopTarget } from "@/lib/targets/configure";
+import { configureJuiceShopTarget, isValidImageDigest, isValidSnapshotId } from "@/lib/targets/configure";
 
 /**
  * Bind a connected repository to the pinned Juice Shop target.
@@ -9,13 +9,11 @@ import { configureJuiceShopTarget } from "@/lib/targets/configure";
  *
  *   npm run seed:target -- 123456789
  *
- * Q18 froze the target: Juice Shop v17.3.0 linux/amd64, at the digest below. Provisioning
- * rejects a snapshot whose resolved digest differs.
+ * Q18 froze the target: Juice Shop v17.3.0 linux/amd64. DAYTONA_TARGET_IMAGE_DIGEST and
+ * DAYTONA_TARGET_SNAPSHOT_ID must both be set by an operator who has actually built and
+ * verified the connected fork; there is no bundled fallback, because a fallback digest here
+ * would seed real installations against an artifact nobody chose.
  */
-const IMAGE_DIGEST =
-  process.env.DAYTONA_TARGET_IMAGE_DIGEST ??
-  "sha256:123acb31ed8bb05ebb06934a29be83d4e11a46cae937b9ed2bf2bda29d98130a";
-
 async function main(): Promise<void> {
   const rawRepoId = process.argv[2];
   const repoId = Number(rawRepoId);
@@ -23,11 +21,18 @@ async function main(): Promise<void> {
     throw new Error("usage: npm run seed:target -- <github-repository-id>");
   }
 
-  const configured = await configureJuiceShopTarget({
-    repoId,
-    imageDigest: IMAGE_DIGEST,
-    snapshotId: process.env.DAYTONA_TARGET_SNAPSHOT_ID ?? null,
-  });
+  const imageDigest = process.env.DAYTONA_TARGET_IMAGE_DIGEST;
+  const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
+  if (!imageDigest || !snapshotId) {
+    throw new Error("DAYTONA_TARGET_IMAGE_DIGEST and DAYTONA_TARGET_SNAPSHOT_ID must both be set");
+  }
+  if (!isValidImageDigest(imageDigest) || !isValidSnapshotId(snapshotId)) {
+    throw new Error(
+      "DAYTONA_TARGET_IMAGE_DIGEST or DAYTONA_TARGET_SNAPSHOT_ID is still the env.example placeholder or malformed",
+    );
+  }
+
+  const configured = await configureJuiceShopTarget({ repoId, imageDigest, snapshotId });
 
   console.log(
     `bound ${configured.repositoryFullName} (${repoId}) to ${configured.targetProfileName}`,
