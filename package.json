@@ -19,7 +19,7 @@
     "spike:daytona": "node --env-file-if-exists=.env.local --import tsx scripts/spike-daytona.ts",
     "worker:jobs": "node --env-file-if-exists=.env.local --import tsx scripts/run-worker-once.ts",
     "worker:delivery": "node --env-file-if-exists=.env.local --import tsx scripts/run-delivery-once.ts",
-    "test": "node --env-file-if-exists=.env.local --import tsx --test \"lib/**/*.test.ts\""
+    "test": "node --env-file-if-exists=.env.local --import tsx --experimental-test-module-mocks --test \"lib/**/*.test.ts\" \"app/**/*.test.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
