@@ -43,16 +43,6 @@ jobs:
             exit 1
           fi
 
-      # The default docker-container driver runs an isolated BuildKit instance that cannot see
-      # images the first build loads into the runner's Docker Engine, so the second build's
-      # "FROM local/juice-shop-installer:pinned" would try to resolve that name against a
-      # registry instead. The docker driver builds through the engine directly, which shares
-      # its local image store between both steps below.
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-        with:
-          driver: docker
-
       - name: Log in to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
@@ -60,6 +50,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Plain "docker build", not buildx: both this build and the next one run against the
+      # runner's own Docker Engine image store, so the second build's FROM can see this one's
+      # output with no cross-driver ambiguity about what is and is not visible between builds.
+      # ubuntu-24.04 runners are already linux/amd64, so this is a native build, not a
+      # cross-platform one, and needs no buildx/QEMU setup either way.
+      #
       # The fork's own final stage is gcr.io/distroless/nodejs20-debian12, which has no shell
       # and no curl. Daytona's toolbox needs to exec arbitrary commands against whatever a
       # sandbox boots from, and every example in Daytona's own docs uses a shell-bearing base,
@@ -68,15 +64,10 @@ jobs:
       # about what BountyDesk boots, not a change to the fork's application source, which stays
       # byte-identical to upstream's v17.3.0.
       - name: Build the installer stage (same app, has a shell)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: source
-          platforms: linux/amd64
-          target: installer
-          tags: local/juice-shop-installer:pinned
-          load: true
+        run: docker build --target installer -t local/juice-shop-installer:pinned source
 
-      - name: Add curl for the toolbox and the in-sandbox PoC
+      - name: Build and push the digest-pinned sandbox image
+        id: push
         run: |
           mkdir -p sandbox
           cat > sandbox/Dockerfile <<'EOF'
@@ -87,19 +78,19 @@ jobs:
           CMD ["node", "build/app.js"]
           EOF
 
-      - name: Build and push the digest-pinned sandbox image
-        id: push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: sandbox
-          file: sandbox/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.IMAGE }}:v17.3.0-bountydesk-sandbox
-          labels: |
-            org.bountydesk.source.repo=${{ env.SOURCE_REPO }}
-            org.bountydesk.source.commit=${{ env.SOURCE_COMMIT }}
-            org.bountydesk.build.workflow_run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          tag="${IMAGE}:v17.3.0-bountydesk-sandbox"
+          docker build \
+            --label "org.bountydesk.source.repo=${SOURCE_REPO}" \
+            --label "org.bountydesk.source.commit=${SOURCE_COMMIT}" \
+            --label "org.bountydesk.build.workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            -t "$tag" \
+            sandbox
+          docker push "$tag"
+
+          # docker updates an image's RepoDigests with the pushed manifest digest once the push
+          # completes, which is the only place this build learns what it actually published.
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$tag" | sed 's/^.*@//')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Record the digest-pinned reference
         run: |
