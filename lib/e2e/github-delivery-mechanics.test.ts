@@ -148,6 +148,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   let postedBody: string | undefined;
   const deliveryId = await deliverOnce("e2e-delivery", {
     deps: {
+      githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => ({ token: "fake-installation-token", expiresAt: new Date().toISOString() }),
       listComments: async () => [],
@@ -192,6 +193,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   // A retry finds nothing left to claim: the row is SENT, not PENDING.
   const secondAttempt = await deliverOnce("e2e-delivery-retry", {
     deps: {
+      githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => {
         throw new Error("should never be called: nothing is claimable");

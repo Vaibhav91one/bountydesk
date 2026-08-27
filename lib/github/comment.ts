@@ -99,7 +99,7 @@ export async function listIssueComments(opts: {
   issueNumber: number;
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
-}): Promise<string[]> {
+}): Promise<IssueComment[]> {
   const { token, fullName, issueNumber, fetchImpl, signal } = opts;
   if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
     throw new Error(
@@ -110,7 +110,7 @@ export async function listIssueComments(opts: {
   const path = repositoryPath(fullName);
   const doFetch = fetchImpl ?? fetch;
   const PER_PAGE = 100;
-  const bodies: string[] = [];
+  const comments: IssueComment[] = [];
 
   for (let page = 1; ; page++) {
     const response = await doFetch(
@@ -132,20 +132,44 @@ export async function listIssueComments(opts: {
         (item) =>
           typeof item !== "object" ||
           item === null ||
-          ("body" in item &&
-            item.body !== null &&
-            typeof item.body !== "string"),
+          typeof item.body !== "string" ||
+          typeof item.user !== "object" ||
+          item.user === null ||
+          typeof item.user.login !== "string" ||
+          typeof item.user.type !== "string" ||
+          (item.performed_via_github_app !== null &&
+            (typeof item.performed_via_github_app !== "object" ||
+              typeof item.performed_via_github_app.id !== "number" ||
+              !Number.isSafeInteger(item.performed_via_github_app.id))),
       )
     ) {
       throw new Error("GitHub returned a malformed issue comments response");
     }
-    const items = json as Array<{ body?: string | null }>;
-    for (const item of items) bodies.push(item.body ?? "");
+    const items = json as Array<{
+      body: string;
+      user: { login: string; type: string };
+      performed_via_github_app: { id: number } | null;
+    }>;
+    for (const item of items) {
+      comments.push({
+        body: item.body,
+        authorLogin: item.user.login,
+        authorType: item.user.type,
+        githubAppId: item.performed_via_github_app?.id ?? null,
+      });
+    }
 
     // A page under the requested size is the only signal GitHub gives that there is no next
     // one; a full page might still have more behind it, so only a short page stops the loop.
     if (items.length < PER_PAGE) break;
   }
 
-  return bodies;
+  return comments;
 }
+
+export type IssueComment = {
+  body: string;
+  authorLogin: string;
+  authorType: string;
+  githubAppId: number | null;
+};

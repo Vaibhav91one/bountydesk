@@ -193,12 +193,13 @@ async function drainOthers() {
 
 function makeFakeDeps(
   opts: {
-    listComments?: string[];
+    listComments?: import("@/lib/github/comment").IssueComment[];
     postComment?: (call: number) => Promise<{ id: number }>;
   } = {},
 ) {
   const calls = { mintToken: 0, listComments: 0, postComment: 0 };
   const deps: import("./worker").DeliveryDeps = {
+    githubAppId: 123456,
     hashContent: fakeHash,
     mintToken: async () => {
       calls.mintToken++;
@@ -225,6 +226,7 @@ async function deliveryRow(deliveryId: string) {
     .select({
       state: dbm.outboundDelivery.state,
       lastError: dbm.outboundDelivery.lastError,
+      leaseOwner: dbm.outboundDelivery.leaseOwner,
     })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
@@ -379,6 +381,28 @@ test("a slow GitHub lookup renews the lease before another worker can reclaim it
   assert.equal(delivery.state, "SENT");
 });
 
+test("an outer deadline aborts an in-flight GitHub lookup and releases the delivery", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps } = makeFakeDeps();
+  const controller = new AbortController();
+  deps.listComments = async ({ signal }) => {
+    controller.abort(new Error("tick deadline exceeded"));
+    await new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) reject(signal.reason);
+      else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    return [];
+  };
+
+  await worker.deliverOnce("w-deadline", { deps, signal: controller.signal });
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING");
+  assert.equal(delivery.leaseOwner, null);
+  assert.match(delivery.lastError ?? "", /tick deadline exceeded/);
+});
+
 test("exhausting maxAttempts fails the delivery but leaves the report in DELIVERING", async () => {
   await drainOthers();
   const fixture = await seedFixture({ maxAttempts: 2 });
@@ -410,7 +434,16 @@ test("exhausting maxAttempts fails the delivery but leaves the report in DELIVER
 test("a marker already on the issue is treated as delivered, without posting again", async () => {
   await drainOthers();
   const fixture = await seedFixture();
-  const { deps, calls } = makeFakeDeps({ listComments: [fixture.marker] });
+  const { deps, calls } = makeFakeDeps({
+    listComments: [
+      {
+        body: fixture.payload,
+        authorLogin: "bountydesk-triage[bot]",
+        authorType: "Bot",
+        githubAppId: 123456,
+      },
+    ],
+  });
 
   const id = await worker.deliverOnce("w-recovered", { deps });
   assert.equal(id, fixture.deliveryId);
@@ -432,6 +465,61 @@ test("a marker already on the issue is treated as delivered, without posting aga
   const attempts = await attemptsFor(fixture.deliveryId);
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0].responseStatus, null);
+});
+
+test("a matching marker from an issue participant cannot acknowledge delivery", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({
+    listComments: [
+      {
+        body: fixture.payload,
+        authorLogin: "reporter",
+        authorType: "User",
+        githubAppId: null,
+      },
+    ],
+  });
+
+  await worker.deliverOnce("w-forged-marker", { deps });
+
+  assert.equal(calls.postComment, 1);
+  assert.equal((await deliveryRow(fixture.deliveryId)).state, "SENT");
+});
+
+test("a marker from a different BountyDesk delivery cannot acknowledge this one", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({
+    listComments: [
+      {
+        body: fixture.payload.replace(fixture.verdictId, randomUUID()),
+        authorLogin: "bountydesk-triage[bot]",
+        authorType: "Bot",
+        githubAppId: 123456,
+      },
+    ],
+  });
+
+  await worker.deliverOnce("w-other-delivery", { deps });
+
+  assert.equal(calls.postComment, 1);
+  assert.equal((await deliveryRow(fixture.deliveryId)).state, "SENT");
+});
+
+test("the database permits only one outbound delivery for a verdict", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+
+  await assert.rejects(
+    dbm.db.insert(dbm.outboundDelivery).values({
+      reportId: fixture.reportId,
+      verdictId: fixture.verdictId,
+      idempotencyKey: `duplicate-${randomUUID()}`,
+      target: `github:1:issue:1`,
+      approvedContentHash: fakeHash(fixture.payload),
+    }),
+  );
 });
 
 test("a suspended installation is refused permanently, before any token is minted", async () => {

@@ -11,6 +11,7 @@ import {
 } from "@/lib/db";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { transition } from "@/lib/reports/lifecycle";
+import type { IssueComment } from "@/lib/github/comment";
 
 import {
   claim,
@@ -38,6 +39,7 @@ function errorMessage(err: unknown): string {
 
 /** The injectable boundary keeps GitHub calls deterministic in worker tests. */
 export type DeliveryDeps = {
+  githubAppId: number;
   hashContent: (payload: string) => string;
   mintToken: (
     installationId: number,
@@ -56,7 +58,7 @@ export type DeliveryDeps = {
     fullName: string;
     issueNumber: number;
     signal?: AbortSignal;
-  }) => Promise<string[]>;
+  }) => Promise<IssueComment[]>;
 };
 
 async function defaultDeps(): Promise<DeliveryDeps> {
@@ -67,6 +69,7 @@ async function defaultDeps(): Promise<DeliveryDeps> {
   ]);
 
   return {
+    githubAppId: Number((await import("@/lib/env")).githubAppId()),
     hashContent: hash.computeContentHash,
     mintToken: appAuth.mintInstallationToken,
     postComment: comment.postIssueComment,
@@ -78,8 +81,12 @@ async function runWithHeartbeat<T>(
   lease: DeliveryLease,
   leaseSeconds: number,
   operation: (signal: AbortSignal) => Promise<T>,
+  outerSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  const signal = outerSignal
+    ? AbortSignal.any([controller.signal, outerSignal])
+    : controller.signal;
   const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -88,6 +95,13 @@ async function runWithHeartbeat<T>(
   const leaseLoss = new Promise<never>((_, reject) => {
     rejectLeaseLoss = reject;
   });
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
 
   const heartbeat = () => {
     renewal = renew(lease, leaseSeconds)
@@ -103,13 +117,15 @@ async function runWithHeartbeat<T>(
   timer = setTimeout(heartbeat, intervalMs);
   try {
     const result = await Promise.race([
-      operation(controller.signal),
+      operation(signal),
       leaseLoss,
+      aborted,
     ]);
-    if (controller.signal.aborted) throw controller.signal.reason;
+    if (signal.aborted) throw signal.reason;
     return result;
   } finally {
     stopped = true;
+    signal.removeEventListener("abort", onAbort);
     if (timer) clearTimeout(timer);
     await renewal.catch(() => undefined);
   }
@@ -168,7 +184,8 @@ export async function deliverOnce(
   {
     leaseSeconds = 60,
     deps,
-  }: { leaseSeconds?: number; deps?: DeliveryDeps } = {},
+    signal,
+  }: { leaseSeconds?: number; deps?: DeliveryDeps; signal?: AbortSignal } = {},
 ): Promise<string | null> {
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
@@ -176,6 +193,7 @@ export async function deliverOnce(
   const startedAt = new Date();
 
   try {
+    signal?.throwIfAborted();
     const d = deps ?? (await defaultDeps());
 
     // The verdict is read-only evidence; the hash check happens before anything else touches
@@ -321,7 +339,14 @@ export async function deliverOnce(
           signal,
         });
 
-        if (comments.some((c) => c.includes(marker)))
+        if (
+          comments.some(
+            (comment) =>
+              comment.body === verdictRow.payload &&
+              comment.authorType === "Bot" &&
+              comment.githubAppId === d.githubAppId,
+          )
+        )
           return { kind: "replayed" } as const;
 
         const posted = await d.postComment({
@@ -333,6 +358,7 @@ export async function deliverOnce(
         });
         return { kind: "posted", posted } as const;
       },
+      signal,
     );
 
     if (result.kind === "replayed") {

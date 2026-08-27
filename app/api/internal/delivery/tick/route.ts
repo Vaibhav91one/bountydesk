@@ -19,17 +19,36 @@ export async function POST(request: Request): Promise<Response> {
     return new Response("unauthorized", { status: 401 });
   }
 
-  const swept = await sweepExpiredLeases();
-
+  const signal = AbortSignal.timeout(MAX_TICK_MS);
   const owner = `delivery-tick-${randomUUID()}`;
-  const deadline = Date.now() + MAX_TICK_MS;
   let processed = 0;
 
-  while (processed < MAX_DELIVERIES_PER_TICK && Date.now() < deadline) {
-    const deliveryId = await deliverOnce(owner);
-    if (!deliveryId) break;
-    processed += 1;
+  try {
+    const swept = await raceAbort(sweepExpiredLeases(), signal);
+    while (processed < MAX_DELIVERIES_PER_TICK && !signal.aborted) {
+      const deliveryId = await deliverOnce(owner, { signal });
+      if (!deliveryId) break;
+      processed += 1;
+    }
+    return Response.json({ processed, swept });
+  } catch (error) {
+    if (signal.aborted) {
+      return Response.json({ processed, error: "tick deadline exceeded" }, { status: 503 });
+    }
+    throw error;
   }
+}
 
-  return Response.json({ processed, swept });
+function raceAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+
+  return Promise.race([operation, aborted]).finally(() => {
+    signal.removeEventListener("abort", onAbort);
+  });
 }

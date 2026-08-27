@@ -384,6 +384,32 @@ test("analysis renews its lease before the initial deadline", async () => {
   assert.equal((await job(jobId)).state, "DONE");
 });
 
+test("an outer deadline aborts analysis and releases the job for retry", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+  const controller = new AbortController();
+
+  await worker.runOnce("worker-deadline", {
+    signal: controller.signal,
+    analysis: {
+      ...analysisDriver(),
+      run: async ({ signal }) => {
+        controller.abort(new Error("tick deadline exceeded"));
+        await new Promise<void>((resolve, reject) => {
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    },
+  });
+
+  const released = await job(jobId);
+  assert.equal(released.state, "RUNNING");
+  assert.equal(released.leaseOwner, null);
+  assert.match(released.lastError as string, /tick deadline exceeded/);
+});
+
 test("losing a lease stops the job without terminating the worker call", async () => {
   await drain();
   const repo = await connectedRepo();

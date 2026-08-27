@@ -6,6 +6,8 @@ import { listIssueComments, postIssueComment } from "./comment";
 function commentsPage(count: number, startIndex: number): Response {
   const items = Array.from({ length: count }, (_, i) => ({
     body: `comment-${startIndex + i}`,
+    user: { login: "bountydesk-triage[bot]", type: "Bot" },
+    performed_via_github_app: { id: 123456 },
   }));
   return new Response(JSON.stringify(items), {
     status: 200,
@@ -26,7 +28,7 @@ test("listIssueComments follows every page while it comes back full", async () =
     throw new Error(`unexpected page ${page}`);
   }) as typeof fetch;
 
-  const bodies = await listIssueComments({
+  const comments = await listIssueComments({
     token: "t",
     fullName: "acme/widgets",
     issueNumber: 7,
@@ -40,9 +42,14 @@ test("listIssueComments follows every page while it comes back full", async () =
   );
   for (const url of seen) assert.equal(url.searchParams.get("per_page"), "100");
 
-  assert.equal(bodies.length, 230);
-  assert.equal(bodies[0], "comment-0");
-  assert.equal(bodies[229], "comment-229");
+  assert.equal(comments.length, 230);
+  assert.deepEqual(comments[0], {
+    body: "comment-0",
+    authorLogin: "bountydesk-triage[bot]",
+    authorType: "Bot",
+    githubAppId: 123456,
+  });
+  assert.equal(comments[229].body, "comment-229");
 });
 
 test("a first page under 100 items stops the loop after one call", async () => {
@@ -52,7 +59,7 @@ test("a first page under 100 items stops the loop after one call", async () => {
     return commentsPage(3, 0);
   }) as typeof fetch;
 
-  const bodies = await listIssueComments({
+  const comments = await listIssueComments({
     token: "t",
     fullName: "acme/widgets",
     issueNumber: 7,
@@ -60,7 +67,7 @@ test("a first page under 100 items stops the loop after one call", async () => {
   });
 
   assert.equal(calls, 1);
-  assert.equal(bodies.length, 3);
+  assert.equal(comments.length, 3);
 });
 
 test("listIssueComments rejects malformed comment entries", async () => {
