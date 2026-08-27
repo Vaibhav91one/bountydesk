@@ -76,3 +76,44 @@ export function githubAppPrivateKeyBase64(): string {
 export function workerInternalSecret(): string {
   return requireSecret("WORKER_INTERNAL_SECRET");
 }
+
+function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  return ["localhost", "127.0.0.1", "::1"].includes(host);
+}
+
+/**
+ * The TrueForge harness URL. Its local mode has no auth of its own, so a non-loopback address
+ * with no API key would mean an unauthenticated agent harness sitting on the open network.
+ * Refuse that combination outright rather than connect to it.
+ */
+export function trueforgeUrl(): string {
+  const url = requireEnv("TRUEFORGE_URL");
+  if (!isLoopbackUrl(url) && !trueforgeApiKey()) {
+    throw new Error(
+      `TRUEFORGE_URL (${url}) is not loopback and TRUEFORGE_API_KEY is blank. A remote ` +
+        "TrueForge endpoint must be an authenticated private service or sit behind one.",
+    );
+  }
+  return url;
+}
+
+/** Blank is legitimate for loopback local mode; only set when TrueForge sits behind auth. */
+export function trueforgeApiKey(): string {
+  return process.env.TRUEFORGE_API_KEY?.trim() ?? "";
+}
+
+/**
+ * Bearer secret the `publish_verdict` MCP route requires on every call. This authenticates
+ * "is this really TrueForge calling," which is a separate concern from TrueForge's own
+ * approval gate: the gate is the human control, this secret is what stops a caller from
+ * skipping the gate and invoking the tool directly.
+ */
+export function mcpServerSecret(): string {
+  return requireSecret("MCP_SERVER_SECRET");
+}
