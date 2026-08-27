@@ -218,6 +218,42 @@ test("calling publishVerdict again after a successful call finds nothing pending
   assert.equal(await deliveryCount(fixture.verdictId), 1);
 });
 
+test("a pending verdict that belongs to a different report is refused, not published", async () => {
+  // Two independent fixtures, then splice all four of session A's pending markers to match
+  // report B's verdict and its already-approved decision exactly (same thread/tool-call
+  // binding too, so this reaches the report-ownership check rather than being caught earlier
+  // by the thread/tool-call staleness check). agent_session.report_id and pending_verdict_id
+  // are independent foreign keys, so nothing in the schema stops this splice on its own; the
+  // handler has to catch it.
+  const a = await seedFixture({ approval: "approved" });
+  const b = await seedFixture({ approval: "approved" });
+
+  const [bDecision] = await dbm.db
+    .select({ threadId: dbm.approvalDecision.threadId, toolCallId: dbm.approvalDecision.toolCallId })
+    .from(dbm.approvalDecision)
+    .where(dbm.eq(dbm.approvalDecision.verdictId, b.verdictId));
+
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({
+      pendingVerdictId: b.verdictId,
+      pendingApprovedContentHash: b.contentHash,
+      pendingThreadId: bDecision.threadId,
+      pendingToolCallId: bDecision.toolCallId,
+    })
+    .where(dbm.eq(dbm.agentSession.capabilityToken, a.capability));
+
+  const result = await publishVerdictModule.publishVerdict(a.capability);
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "verdict does not belong to this session's report",
+  });
+  assert.equal(await deliveryCount(a.verdictId), 0);
+  assert.equal(await deliveryCount(b.verdictId), 0);
+  assert.equal(await reportState(a.reportId), "AWAITING_APPROVAL");
+});
+
 test("an unknown capability is refused without touching any row", async () => {
   const result = await publishVerdictModule.publishVerdict(`unknown-${randomUUID()}`);
 

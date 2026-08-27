@@ -9,12 +9,10 @@ export type PublishVerdictResult = { ok: true } | { ok: false; reason: string };
  * The MCP tool handler for `publish_verdict`. Resolves everything from the opaque
  * `capability` token; the model never supplies a report or verdict id directly.
  *
- * This function never records an approval, it only checks that one already exists. An
- * earlier draft had this handler write the approval_decision row itself on the reasoning
- * that TrueForge only calls this tool after a human clicked Allow. That was rejected: the
- * bearer secret in front of this route is shared with TrueForge, so anyone who could reach
- * the route could claim the same thing. A separate reviewer-facing action writes the
- * approval_decision row first; this handler's whole job is to verify it, not create it.
+ * This handler never records an approval, it only verifies one already exists: a separate
+ * reviewer-facing action is the sole writer of `approval_decision`. The bearer secret in
+ * front of this route authenticates "is this really TrueForge calling," not "did a human
+ * approve this," so this function must never treat its own invocation as proof of consent.
  */
 export async function publishVerdict(capability: string): Promise<PublishVerdictResult> {
   return db.transaction(async (tx) => {
@@ -59,10 +57,19 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
 
     if (!verdictRow) return { ok: false, reason: "verdict not found" };
 
+    // The session's own report_id and the pending verdict's report_id are independent
+    // foreign keys; nothing in the schema stops them from disagreeing. Without this check a
+    // mismatched pending row would let one report's capability publish a different report's
+    // approved verdict.
+    if (verdictRow.reportId !== session.reportId) {
+      return { ok: false, reason: "verdict does not belong to this session's report" };
+    }
+
     const recomputedHash = computeContentHash(verdictRow.payload);
     if (
       recomputedHash !== session.pendingApprovedContentHash ||
-      recomputedHash !== decision.payloadHash
+      recomputedHash !== decision.payloadHash ||
+      recomputedHash !== verdictRow.contentHash
     ) {
       return { ok: false, reason: "content hash mismatch" };
     }
@@ -87,7 +94,11 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
         verdictId: verdictRow.id,
         idempotencyKey: `verdict:${verdictRow.id}`,
         target: reportRow.sourceRef,
-        approvedContentHash: verdictRow.contentHash,
+        // The hash this write commits to is the one just verified above, not a second,
+        // unverified read of the same column: a `verdict` row is immutable, so the two should
+        // always agree, but the outbox must never bind to a value this handler didn't itself
+        // check the moment before enqueueing.
+        approvedContentHash: recomputedHash,
       },
       tx,
     );
