@@ -132,6 +132,21 @@ export async function renew(
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
+export async function releaseUnstarted(lease: DeliveryLease): Promise<void> {
+  const updated = await db
+    .update(outboundDelivery)
+    .set({
+      attempts: sql`greatest(${outboundDelivery.attempts} - 1, 0)`,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: outboundDelivery.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 /** Mark a delivery sent and drop the lease. Accepts a transaction so the caller can commit
  * this alongside the report's DELIVERING -> DELIVERED move as one unit. */
 export async function markSent(

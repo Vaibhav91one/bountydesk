@@ -350,7 +350,6 @@ export const outboundDelivery = pgTable(
   },
   (t) => [
     uniqueIndex("outbound_delivery_idempotency_key").on(t.idempotencyKey),
-    uniqueIndex("outbound_delivery_verdict_key").on(t.verdictId),
     index("outbound_delivery_state_idx").on(t.state),
     index("outbound_delivery_claim_idx").on(t.state, t.nextAttemptAt),
     index("outbound_delivery_lease_idx").on(t.leaseExpiresAt),

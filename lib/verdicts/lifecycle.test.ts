@@ -51,7 +51,7 @@ async function seedReport(): Promise<string> {
 test("ensureInitialVerdict is a no-op retry when called twice with identical input", async () => {
   const reportId = await seedReport();
   const id = randomUUID();
-  const payload = `hello\n<!-- bountydesk-delivery:${id} -->`;
+  const payload = `hello\n<!-- bountydesk-delivery:verdict:${id} -->`;
   const input = {
     id,
     reportId,
@@ -77,7 +77,7 @@ test("ensureInitialVerdict is a no-op retry when called twice with identical inp
 test("ensureInitialVerdict computes the content hash from the payload", async () => {
   const reportId = await seedReport();
   const id = randomUUID();
-  const payload = `server-owned hash\n<!-- bountydesk-delivery:${id} -->`;
+  const payload = `server-owned hash\n<!-- bountydesk-delivery:verdict:${id} -->`;
 
   const created = await lifecycle.ensureInitialVerdict({
     id,
@@ -93,7 +93,7 @@ test("ensureInitialVerdict computes the content hash from the payload", async ()
 test("ensureInitialVerdict refuses a second write that disagrees with the one on record", async () => {
   const reportId = await seedReport();
   const id = randomUUID();
-  const payload = `hello\n<!-- bountydesk-delivery:${id} -->`;
+  const payload = `hello\n<!-- bountydesk-delivery:verdict:${id} -->`;
   const input = {
     id,
     reportId,
@@ -108,7 +108,7 @@ test("ensureInitialVerdict refuses a second write that disagrees with the one on
   const conflicting = {
     ...input,
     id: conflictingId,
-    payload: `goodbye\n<!-- bountydesk-delivery:${conflictingId} -->`,
+    payload: `goodbye\n<!-- bountydesk-delivery:verdict:${conflictingId} -->`,
   };
 
   await assert.rejects(
@@ -126,7 +126,7 @@ test("ensureInitialVerdict compares summary and evidence on a retry", async () =
     outcome: "ANALYSIS_ONLY" as const,
     summary: "original summary",
     evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
-    payload: `analysis only\n<!-- bountydesk-delivery:${id} -->`,
+    payload: `analysis only\n<!-- bountydesk-delivery:verdict:${id} -->`,
   };
   await lifecycle.ensureInitialVerdict(input);
 

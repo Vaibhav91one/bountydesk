@@ -8,6 +8,7 @@ import {
   claim,
   complete,
   fail,
+  releaseUnstarted,
   renew,
   type Lease,
 } from "./queue";
@@ -192,13 +193,22 @@ export async function runOnce(
     signal,
   }: { analysis: AnalysisDriver; leaseSeconds?: number; signal?: AbortSignal },
 ): Promise<string | null> {
+  if (signal?.aborted) return null;
   const claimed = await claim(owner, leaseSeconds);
   if (!claimed) return null;
+
+  if (signal?.aborted) {
+    try {
+      await releaseUnstarted(claimed);
+    } catch (error) {
+      if (!(error instanceof LeaseLostError)) throw error;
+    }
+    return null;
+  }
 
   let lease = claimed;
 
   try {
-    signal?.throwIfAborted();
     if (lease.state === "RECEIVED") lease = await parse(lease);
     signal?.throwIfAborted();
     if (lease.state === "PARSED") {

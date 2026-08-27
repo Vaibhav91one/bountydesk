@@ -88,6 +88,36 @@ test("listIssueComments rejects malformed comment entries", async () => {
   );
 });
 
+test("listIssueComments accepts comments whose deleted author is null", async () => {
+  const stub = (async () =>
+    new Response(
+      JSON.stringify([
+        {
+          body: "left by a deleted account",
+          user: null,
+          performed_via_github_app: null,
+        },
+      ]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )) as typeof fetch;
+
+  const comments = await listIssueComments({
+    token: "t",
+    fullName: "acme/widgets",
+    issueNumber: 7,
+    fetchImpl: stub,
+  });
+
+  assert.deepEqual(comments, [
+    {
+      body: "left by a deleted account",
+      authorLogin: null,
+      authorType: null,
+      githubAppId: null,
+    },
+  ]);
+});
+
 test("postIssueComment posts the right URL, body, and headers", async () => {
   let seenUrl = "";
   let seenInit: RequestInit | undefined;

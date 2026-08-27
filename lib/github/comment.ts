@@ -133,10 +133,10 @@ export async function listIssueComments(opts: {
           typeof item !== "object" ||
           item === null ||
           typeof item.body !== "string" ||
-          typeof item.user !== "object" ||
-          item.user === null ||
-          typeof item.user.login !== "string" ||
-          typeof item.user.type !== "string" ||
+          (item.user !== null &&
+            (typeof item.user !== "object" ||
+              typeof item.user.login !== "string" ||
+              typeof item.user.type !== "string")) ||
           (item.performed_via_github_app !== null &&
             (typeof item.performed_via_github_app !== "object" ||
               typeof item.performed_via_github_app.id !== "number" ||
@@ -147,14 +147,14 @@ export async function listIssueComments(opts: {
     }
     const items = json as Array<{
       body: string;
-      user: { login: string; type: string };
+      user: { login: string; type: string } | null;
       performed_via_github_app: { id: number } | null;
     }>;
     for (const item of items) {
       comments.push({
         body: item.body,
-        authorLogin: item.user.login,
-        authorType: item.user.type,
+        authorLogin: item.user?.login ?? null,
+        authorType: item.user?.type ?? null,
         githubAppId: item.performed_via_github_app?.id ?? null,
       });
     }
@@ -169,7 +169,7 @@ export async function listIssueComments(opts: {
 
 export type IssueComment = {
   body: string;
-  authorLogin: string;
-  authorType: string;
+  authorLogin: string | null;
+  authorType: string | null;
   githubAppId: number | null;
 };

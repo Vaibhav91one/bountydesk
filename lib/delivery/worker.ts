@@ -19,6 +19,7 @@ import {
   failPermanently,
   LeaseLostError,
   markSent,
+  releaseUnstarted,
   renew,
   type DeliveryLease,
 } from "./queue";
@@ -187,13 +188,22 @@ export async function deliverOnce(
     signal,
   }: { leaseSeconds?: number; deps?: DeliveryDeps; signal?: AbortSignal } = {},
 ): Promise<string | null> {
+  if (signal?.aborted) return null;
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
+
+  if (signal?.aborted) {
+    try {
+      await releaseUnstarted(lease);
+    } catch (error) {
+      if (!(error instanceof LeaseLostError)) throw error;
+    }
+    return null;
+  }
 
   const startedAt = new Date();
 
   try {
-    signal?.throwIfAborted();
     const d = deps ?? (await defaultDeps());
 
     // The verdict is read-only evidence; the hash check happens before anything else touches
@@ -252,7 +262,7 @@ export async function deliverOnce(
       return lease.id;
     }
 
-    const marker = `<!-- bountydesk-delivery:${lease.verdictId} -->`;
+    const marker = `<!-- bountydesk-delivery:${lease.idempotencyKey} -->`;
     if (verdictRow.payload.split(marker).length !== 2) {
       const message = `verdict ${lease.verdictId} payload must contain its delivery marker exactly once`;
       await refuseDelivery(lease, message);

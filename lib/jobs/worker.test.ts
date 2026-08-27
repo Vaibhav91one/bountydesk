@@ -410,6 +410,24 @@ test("an outer deadline aborts analysis and releases the job for retry", async (
   assert.match(released.lastError as string, /tick deadline exceeded/);
 });
 
+test("an expired deadline does not claim or consume a job attempt", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueIssue(repo);
+  const controller = new AbortController();
+  controller.abort(new Error("tick deadline exceeded"));
+
+  const result = await worker.runOnce("worker-expired", {
+    analysis: analysisDriver(),
+    signal: controller.signal,
+  });
+
+  assert.equal(result, null);
+  const untouched = await job(jobId);
+  assert.equal(untouched.attempts, 0);
+  assert.equal(untouched.leaseOwner, null);
+});
+
 test("losing a lease stops the job without terminating the worker call", async () => {
   await drain();
   const repo = await connectedRepo();

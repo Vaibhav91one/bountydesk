@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX "outbound_delivery_verdict_key" ON "outbound_delivery" USING btree ("verdict_id");

@@ -121,7 +121,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
   assert.match(verdictRow.payload, /not (?:been )?(?:performed|attempted|run)/i);
   assert.doesNotMatch(verdictRow.payload.toLowerCase(), /\b(?:is|was) reproduced\b/);
-  assert.ok(verdictRow.payload.includes(`bountydesk-delivery:${verdictRow.id}`));
+  assert.ok(verdictRow.payload.includes(`bountydesk-delivery:verdict:${verdictRow.id}`));
   assert.equal(verdictRow.contentHash, computeContentHash(verdictRow.payload));
 
   // Step 3: stand in for the human approval that A4's native TrueForge gate will provide.

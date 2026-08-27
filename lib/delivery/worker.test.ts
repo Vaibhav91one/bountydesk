@@ -132,7 +132,7 @@ async function seedFixture(
   // the payload has to name the verdict's id and verdict rows cannot be UPDATEd afterwards
   // (see AGENTS.md: verdict is one of the four append-only tables).
   const verdictId = randomUUID();
-  const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
+  const marker = `<!-- bountydesk-delivery:verdict:${verdictId} -->`;
   const payload = opts.withoutMarker
     ? "Reproduced against target. See canary evidence."
     : `Reproduced against target. See canary evidence.\n${marker}`;
@@ -164,7 +164,7 @@ async function seedFixture(
     .values({
       reportId: r.id,
       verdictId: v.id,
-      idempotencyKey: `key-${n}`,
+      idempotencyKey: `verdict:${verdictId}`,
       target: opts.targetOverride ?? `github:${repoId}:issue:${issueNumber}`,
       approvedContentHash: opts.wrongApprovedHash
         ? "tampered-hash-does-not-match"
@@ -227,6 +227,7 @@ async function deliveryRow(deliveryId: string) {
       state: dbm.outboundDelivery.state,
       lastError: dbm.outboundDelivery.lastError,
       leaseOwner: dbm.outboundDelivery.leaseOwner,
+      attempts: dbm.outboundDelivery.attempts,
     })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
@@ -403,6 +404,23 @@ test("an outer deadline aborts an in-flight GitHub lookup and releases the deliv
   assert.match(delivery.lastError ?? "", /tick deadline exceeded/);
 });
 
+test("an expired deadline does not claim or consume a delivery attempt", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const controller = new AbortController();
+  controller.abort(new Error("tick deadline exceeded"));
+
+  const result = await worker.deliverOnce("w-expired", {
+    deps: makeFakeDeps().deps,
+    signal: controller.signal,
+  });
+
+  assert.equal(result, null);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.attempts, 0);
+  assert.equal(delivery.leaseOwner, null);
+});
+
 test("exhausting maxAttempts fails the delivery but leaves the report in DELIVERING", async () => {
   await drainOthers();
   const fixture = await seedFixture({ maxAttempts: 2 });
@@ -507,19 +525,22 @@ test("a marker from a different BountyDesk delivery cannot acknowledge this one"
   assert.equal((await deliveryRow(fixture.deliveryId)).state, "SENT");
 });
 
-test("the database permits only one outbound delivery for a verdict", async () => {
+test("the database permits distinct deliveries for the same verdict", async () => {
   await drainOthers();
   const fixture = await seedFixture();
 
-  await assert.rejects(
-    dbm.db.insert(dbm.outboundDelivery).values({
+  const inserted = await dbm.db
+    .insert(dbm.outboundDelivery)
+    .values({
       reportId: fixture.reportId,
       verdictId: fixture.verdictId,
       idempotencyKey: `duplicate-${randomUUID()}`,
       target: `github:1:issue:1`,
       approvedContentHash: fakeHash(fixture.payload),
-    }),
-  );
+    })
+    .returning({ id: dbm.outboundDelivery.id });
+
+  assert.equal(inserted.length, 1);
 });
 
 test("a suspended installation is refused permanently, before any token is minted", async () => {

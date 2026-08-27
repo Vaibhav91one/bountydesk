@@ -236,6 +236,21 @@ export async function renew(lease: Lease, leaseSeconds: number): Promise<void> {
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
+export async function releaseUnstarted(lease: Lease): Promise<void> {
+  const updated = await db
+    .update(inboundJob)
+    .set({
+      attempts: sql`greatest(${inboundJob.attempts} - 1, 0)`,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: inboundJob.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 /**
  * Move a held job to its next state, keeping the lease.
  *

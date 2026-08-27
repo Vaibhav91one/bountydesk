@@ -157,6 +157,25 @@ test("claiming takes ownership without moving the job through the lifecycle", as
   assert.equal(row.leaseOwner, null, "completing must release the lease");
 });
 
+test("releasing an unstarted claim restores its attempt budget", async () => {
+  await drain();
+  const seeded = await seed();
+  const lease = await queue.claim("worker-deadline", 60);
+  assert.ok(lease);
+
+  await queue.releaseUnstarted(lease);
+
+  const [row] = await dbm.db
+    .select({
+      attempts: dbm.inboundJob.attempts,
+      leaseOwner: dbm.inboundJob.leaseOwner,
+    })
+    .from(dbm.inboundJob)
+    .where(dbm.eq(dbm.inboundJob.id, seeded.jobId));
+  assert.equal(row.attempts, 0);
+  assert.equal(row.leaseOwner, null);
+});
+
 test("an illegal transition is refused", async () => {
   await drain();
   await seed();
