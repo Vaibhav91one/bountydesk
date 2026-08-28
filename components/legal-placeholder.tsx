@@ -18,13 +18,13 @@ export function LegalPlaceholder({
     <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col justify-center gap-6 p-6">
       <Link href="/login" className="flex w-fit items-center gap-2">
         <Image src="/trix.svg" alt="" width={32} height={32} />
-        <span className="font-heading text-xl text-foreground">BountyDesk</span>
+        <span className="text-heading text-foreground">BountyDesk</span>
       </Link>
-      <h1 className="font-heading text-[32px] text-foreground">{title}</h1>
-      <p className="text-sm leading-6 text-muted-foreground">{children}</p>
+      <h1 className="text-title text-foreground">{title}</h1>
+      <p className="text-lead text-muted-foreground">{children}</p>
       <Link
         href="/login"
-        className="w-fit text-sm text-foreground underline underline-offset-4"
+        className="w-fit text-body text-foreground underline underline-offset-4"
       >
         Back to sign in
       </Link>
