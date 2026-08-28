@@ -89,7 +89,7 @@ emit `REPRODUCED` even when the PoC claims success.
 
 ## Phase 5: Human approval and idempotent delivery
 
-**Status:** complete for the worker components. Scheduling is not built.
+**Status:** complete for the worker components. The persistent deployment runner is not built.
 
 - Draft and freeze the outbound payload before the native TrueForge `@write` approval gate.
 - Bind approval to the exact content hash, `threadId` and `toolCallId`; serialize turns per report.
@@ -110,8 +110,10 @@ call nor named `publish_verdict`), the poller resolving the pending call, a revi
 the submission worker relaying it to TrueForge, and the harness's real invocation of
 `publish_verdict` moving the report to `DELIVERING`. The run stopped there rather than posting
 a live GitHub comment, the same boundary the Phase-5-foundation smoke test already drew.
-The four internal tick routes still need an external scheduler, so this status does not claim
-that a deployed report advances without an operator or scheduler invoking them.
+The four internal tick routes still need an operator locally. The planned Zerops deployment does
+not add an external scheduler: one long-running Node process imports the four queue processors and
+drives them directly. That runner is not built, so this status does not claim that a deployed report
+advances unattended. See [`deployment.md`](deployment.md).
 
 ## Phase 6: Product UI, resilience and demo release
 
