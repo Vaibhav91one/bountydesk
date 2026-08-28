@@ -251,19 +251,39 @@ export async function releaseUnstarted(lease: Lease): Promise<void> {
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
+const DEADLINE_GRACE_PREFIX = "tick deadline grace used: ";
+
 /**
- * Release work interrupted by the tick deadline without consuming the report's final attempt.
- * The state stays at its last durable boundary, and the normal retry backoff prevents a short
- * scheduler interval from immediately starting the same expensive operation again.
+ * Release work interrupted by the tick deadline. Earlier deadlines consume their attempts and
+ * increase backoff normally. The final attempt gets one marked grace retry so a scheduler cutoff
+ * alone does not bury useful work, but a second final deadline dead-letters the job.
  */
 export async function releaseAfterDeadline(lease: Lease, error: string): Promise<void> {
+  const gracePattern = `${DEADLINE_GRACE_PREFIX}%`;
+  const graceError = `${DEADLINE_GRACE_PREFIX}${error}`;
   const updated = await db
     .update(inboundJob)
     .set({
-      attempts: sql`greatest(${inboundJob.attempts} - 1, 0)`,
+      state: sql`case
+        when ${inboundJob.attempts} >= ${inboundJob.maxAttempts}
+         and coalesce(${inboundJob.lastError} like ${gracePattern}, false)
+        then 'DEAD_LETTER'::job_execution_state
+        else ${inboundJob.state}
+      end`,
+      attempts: sql`case
+        when ${inboundJob.attempts} >= ${inboundJob.maxAttempts}
+         and not coalesce(${inboundJob.lastError} like ${gracePattern}, false)
+        then greatest(${inboundJob.attempts} - 1, 0)
+        else ${inboundJob.attempts}
+      end`,
       leaseOwner: null,
       leaseExpiresAt: null,
-      lastError: error,
+      lastError: sql`case
+        when ${inboundJob.attempts} >= ${inboundJob.maxAttempts}
+         and not coalesce(${inboundJob.lastError} like ${gracePattern}, false)
+        then ${graceError}
+        else ${error}
+      end`,
       nextAttemptAt: sql`now() + make_interval(
         secs => least(power(2, ${inboundJob.attempts})::int, 300)
       )`,

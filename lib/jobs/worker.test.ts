@@ -418,6 +418,34 @@ test("an outer deadline aborts analysis and releases the job for retry", async (
   assert.equal(released.attempts, 4, "a worker deadline must not consume the final attempt");
   assert.equal(released.leaseOwner, null);
   assert.match(released.lastError as string, /tick deadline exceeded/);
+
+  await dbm.db
+    .update(dbm.inboundJob)
+    .set({ nextAttemptAt: new Date(0) })
+    .where(dbm.eq(dbm.inboundJob.id, jobId));
+  const finalController = new AbortController();
+  const finalReason = new Error("tick deadline exceeded again");
+  await assert.rejects(
+    () =>
+      worker.runOnce("worker-deadline-final", {
+        signal: finalController.signal,
+        analysis: {
+          ...analysisDriver(),
+          run: async ({ signal }) => {
+            finalController.abort(finalReason);
+            await new Promise<void>((resolve, reject) => {
+              if (signal.aborted) reject(signal.reason);
+              else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          },
+        },
+      }),
+    (error: unknown) => error === finalReason,
+  );
+
+  const exhausted = await job(jobId);
+  assert.equal(exhausted.state, "DEAD_LETTER");
+  assert.equal(exhausted.attempts, 5);
 });
 
 test("an expired deadline does not claim or consume a job attempt", async () => {
