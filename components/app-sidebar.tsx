@@ -37,6 +37,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
 
 /**
@@ -59,6 +60,12 @@ export const NAV = [
 
 export function AppSidebar({ reviewer }: { reviewer: string }) {
   const pathname = usePathname();
+  const { isMobile, setOpenMobile } = useSidebar();
+  // The sidebar provider persists across navigation, so a mobile tap that doesn't clear
+  // openMobile leaves the sheet and backdrop covering the destination page.
+  const closeMobileSheet = () => {
+    if (isMobile) setOpenMobile(false);
+  };
 
   return (
     <Sidebar collapsible="icon">
@@ -101,7 +108,7 @@ export function AppSidebar({ reviewer }: { reviewer: string }) {
                     isActive={active}
                     disabled={item.soon}
                     tooltip={item.soon ? `${item.label} (not built yet)` : item.label}
-                    render={item.soon ? undefined : <Link href={item.href} />}
+                    render={item.soon ? undefined : <Link href={item.href} onClick={closeMobileSheet} />}
                   >
                     <RollingIcon
                       icon={item.icon}

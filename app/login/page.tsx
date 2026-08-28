@@ -100,15 +100,15 @@ export default async function LoginPage({
           </div>
 
           <p className={`text-center ${FINE_PRINT}`}>
-            By continuing you agree to the{" "}
+            BountyDesk is a demonstration right now. See the placeholder{" "}
             <a href="/terms" className="text-foreground underline underline-offset-2">
               Terms
             </a>{" "}
             &{" "}
             <a href="/privacy" className="text-foreground underline underline-offset-2">
               Privacy Policy
-            </a>
-            .
+            </a>{" "}
+            for what that means today.
           </p>
         </div>
       </section>
