@@ -10,5 +10,5 @@ export const runtime = "nodejs";
  * browser redirect and its query string is whatever the browser was handed.
  */
 export async function GET(): Promise<Response> {
-  return Response.redirect(`${appBaseUrl()}/settings/channels?installed=1`, 302);
+  return Response.redirect(`${appBaseUrl()}/settings/integrations?installed=1`, 302);
 }

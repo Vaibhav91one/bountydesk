@@ -24,8 +24,8 @@ export function ConfigureButton({
     <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="repoId" value={repoId} />
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" size="sm" disabled={pending}>
-          {pending ? "Configuring…" : label}
+        <Button type="submit" size="sm" loading={pending}>
+          {label}
         </Button>
         {/* No unbind helper exists yet, and a wrong one either re-opens intake or wrongly
             closes it. Disabled beats a button that lies about what it does. */}

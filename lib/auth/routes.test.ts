@@ -167,7 +167,7 @@ test("a stale callback is refused without spending a newer login's cookies", asy
     }),
   );
 
-  assert.equal(newer.headers.get("location"), "https://bountydesk.test/settings/channels");
+  assert.equal(newer.headers.get("location"), "https://bountydesk.test/home");
   assert.ok(unseal(cookiesOf(newer).get(SESSION_COOKIE)));
 });
 
@@ -239,14 +239,14 @@ test("a GitHub account that is not on the reviewer list gets no session", async 
   assertFlowSpent(response);
 });
 
-test("a reviewer gets a session and lands on the connections page", async () => {
+test("a reviewer gets a session and lands on the console home", async () => {
   stubGitHub({ body: { access_token: "t" } }, { body: REVIEWER });
 
   const response = await callback(goodRequest());
   const jar = cookiesOf(response);
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "https://bountydesk.test/settings/channels");
+  assert.equal(response.headers.get("location"), "https://bountydesk.test/home");
 
   const session = unseal(jar.get(SESSION_COOKIE));
   assert.equal(session?.login, REVIEWER.login);
