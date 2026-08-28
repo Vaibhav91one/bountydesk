@@ -89,6 +89,8 @@ emit `REPRODUCED` even when the PoC claims success.
 
 ## Phase 5: Human approval and idempotent delivery
 
+**Status:** complete.
+
 - Draft and freeze the outbound payload before the native TrueForge `@write` approval gate.
 - Bind approval to the exact content hash, `threadId` and `toolCallId`; serialize turns per report.
 - In one DB transaction persist the final verdict and outbox intent.
@@ -97,6 +99,17 @@ emit `REPRODUCED` even when the PoC claims success.
 
 **Exit:** changed payloads, stale approvals and concurrent turns are rejected; retries never duplicate
 the GitHub comment; denied reports produce no downstream effect.
+
+Confirmed 2026-08-28 with `createTrueforgeAnalysisDriver` wired into the jobs tick and local
+worker in place of the stub driver, a permanent end-to-end test covering intake through
+delivery, and a live run against the local TrueForge harness: a real session and turn, the
+model calling `publish_verdict` directly (the agent manifest sets `preload: true` on the
+`bountydesk` MCP server so the tool is exposed upfront rather than through TrueForge's
+`call_tool` dispatcher, which the poller correctly refuses since it's neither an `mcp`-type
+call nor named `publish_verdict`), the poller resolving the pending call, a reviewer's Allow,
+the submission worker relaying it to TrueForge, and the harness's real invocation of
+`publish_verdict` moving the report to `DELIVERING`. The run stopped there rather than posting
+a live GitHub comment, the same boundary the Phase-5-foundation smoke test already drew.
 
 ## Phase 6: Product UI, resilience and demo release
 

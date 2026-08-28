@@ -475,3 +475,29 @@ test("refuses a TrueForge API key that is also exposed to the browser", () => {
     delete process.env.NEXT_PUBLIC_ACCIDENTAL_TRUEFORGE_KEY;
   }
 });
+
+test("getTurn aborts the underlying request when the caller's signal aborts", async () => {
+  // makeRequest.mjs combines the caller's AbortSignal into its own via anySignal(), so the
+  // signal fetch actually receives is never the exact same object; asserting on .aborted
+  // (and that abort propagates) is what proves the cancellation reached the request layer,
+  // not just that the option was accepted and ignored.
+  const controller = new AbortController();
+  const stub: typeof fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+        return;
+      }
+      signal?.addEventListener("abort", () => {
+        reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+      });
+    })) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    const client = createTrueForgeClient();
+    const pending = client.getTurn("sess_1", "turn_1", { signal: controller.signal });
+    controller.abort();
+    await assert.rejects(() => pending);
+  });
+});
