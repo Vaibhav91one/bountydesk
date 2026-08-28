@@ -81,7 +81,7 @@ export function createTrueforgeAnalysisDriver(
       // Opaque handle the model echoes back as publish_verdict's sole argument; the only
       // report identifier it ever sees.
       const capabilityToken = randomBytes(32).toString("base64url");
-      const { sessionId } = await client.createSession();
+      const { sessionId } = await client.createSession({ signal });
 
       // onConflictDoNothing: if a concurrent call already inserted this report's session
       // first, the session just opened above is simply unused. Same accepted at-least-once
@@ -152,9 +152,11 @@ export function createTrueforgeAnalysisDriver(
           reportRow.body,
           session.capabilityToken,
         );
-        const { turnId } = await client.createTurn(session.sessionId, [
-          { type: "user.message", content },
-        ]);
+        const { turnId } = await client.createTurn(
+          session.sessionId,
+          [{ type: "user.message", content }],
+          { signal },
+        );
 
         await tx
           .update(agentSession)

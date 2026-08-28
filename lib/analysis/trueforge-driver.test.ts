@@ -343,6 +343,38 @@ test("an already-aborted signal makes ensureSession throw and touch nothing", as
   assert.equal(verdicts.length, 0);
 });
 
+test("ensureSession cancels an in-flight TrueForge session request and does not persist it", async () => {
+  const reportId = await seedReport("TRIAGING");
+  const controller = new AbortController();
+  const reason = new Error("tick deadline exceeded");
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const client = fakeClient({
+    async createSession(opts) {
+      markStarted();
+      assert.ok(opts?.signal, "the driver must pass its cancellation signal to TrueForge");
+      return new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener("abort", () => reject(opts.signal?.reason), { once: true });
+      });
+    },
+  });
+
+  const pending = driver
+    .createTrueforgeAnalysisDriver(client)
+    .ensureSession(context(reportId, controller.signal));
+  await started;
+  controller.abort(reason);
+
+  await assert.rejects(() => pending, (error: unknown) => error === reason);
+  const sessions = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessions.length, 0);
+});
+
 test("an already-aborted signal makes run throw and touch nothing", async () => {
   const reportId = await seedReport("TRIAGING");
   const client = fakeClient();
@@ -358,6 +390,38 @@ test("an already-aborted signal makes run throw and touch nothing", async () => 
   );
 
   assert.equal(client.createTurnCalls, 0);
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.turnId, null);
+});
+
+test("run cancels an in-flight TrueForge turn request and does not persist its id", async () => {
+  const reportId = await seedReport("TRIAGING");
+  const controller = new AbortController();
+  const reason = new Error("tick deadline exceeded");
+  let markStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve;
+  });
+  const client = fakeClient({
+    async createTurn(_sessionId, _input, opts) {
+      markStarted();
+      assert.ok(opts?.signal, "the driver must pass its cancellation signal to TrueForge");
+      return new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener("abort", () => reject(opts.signal?.reason), { once: true });
+      });
+    },
+  });
+  const analysis = driver.createTrueforgeAnalysisDriver(client);
+  await analysis.ensureSession(context(reportId));
+
+  const pending = analysis.run(context(reportId, controller.signal));
+  await started;
+  controller.abort(reason);
+
+  await assert.rejects(() => pending, (error: unknown) => error === reason);
   const [session] = await dbm.db
     .select()
     .from(dbm.agentSession)

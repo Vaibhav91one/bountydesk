@@ -8,6 +8,7 @@ import {
   claim,
   complete,
   fail,
+  releaseAfterDeadline,
   releaseUnstarted,
   renew,
   type Lease,
@@ -240,13 +241,18 @@ export async function runOnce(
   } catch (error) {
     // A lost lease means another worker owns this job now. Writing anything about it would
     // be writing over that worker, which is the exact thing the fence exists to prevent.
-    if (error instanceof LeaseLostError) return lease.id;
+    if (error instanceof LeaseLostError) {
+      if (signal?.aborted) throw signal.reason;
+      return lease.id;
+    }
 
     const message = error instanceof Error ? error.message : String(error);
 
     try {
       if (error instanceof UnprocessableDelivery) {
         await abandon(lease, message);
+      } else if (signal?.aborted) {
+        await releaseAfterDeadline(lease, message);
       } else {
         await fail(lease, message);
       }
@@ -255,6 +261,10 @@ export async function runOnce(
       // new owner is then responsible for the job, just as if the operation had lost its fence.
       if (!(recoveryError instanceof LeaseLostError)) throw recoveryError;
     }
+
+    // The deadline-specific release above leaves the job retryable. The route still needs the
+    // error itself so it can return 503 instead of claiming that the tick completed.
+    if (signal?.aborted) throw signal.reason;
 
     return lease.id;
   }

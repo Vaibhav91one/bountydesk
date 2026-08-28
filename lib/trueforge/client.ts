@@ -11,7 +11,7 @@ import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
  * itself via `listTurnEvents`).
  */
 export interface TrueForgeClient {
-  createSession(): Promise<{ sessionId: string }>;
+  createSession(opts?: { signal?: AbortSignal }): Promise<{ sessionId: string }>;
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
    * it has already reached a pending approval. Callers must poll `getTurn` to find out. */
@@ -181,8 +181,11 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
   });
 
   return {
-    async createSession() {
-      const res = await client.sessions.create({ agent: { name: "bountydesk" } });
+    async createSession(requestOpts) {
+      const res = await client.sessions.create(
+        { agent: { name: "bountydesk" } },
+        { abortSignal: requestOpts?.signal },
+      );
       return { sessionId: res.data.id };
     },
 
@@ -197,7 +200,7 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
         { abortSignal: requestOpts?.signal },
       );
       const turn = res.data;
-      const snapshot = await snapshotFromTurn(client, sessionId, turn);
+      const snapshot = await snapshotFromTurn(client, sessionId, turn, requestOpts);
       return { turnId: turn.id, snapshot };
     },
 
@@ -205,7 +208,7 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       const res = await client.sessions.getTurn(sessionId, turnId, {
         abortSignal: requestOpts?.signal,
       });
-      return snapshotFromTurn(client, sessionId, res.data);
+      return snapshotFromTurn(client, sessionId, res.data, requestOpts);
     },
 
     async getTurnInput(sessionId, turnId, requestOpts) {
@@ -232,6 +235,7 @@ async function snapshotFromTurn(
   client: TrueForge,
   sessionId: string,
   turn: { id: string; state: { status: string; requiredActions?: unknown[]; message?: string } },
+  requestOpts?: { signal?: AbortSignal },
 ): Promise<TurnSnapshot> {
   const state = turn.state;
 
@@ -259,7 +263,9 @@ async function snapshotFromTurn(
   }
 
   // The SDK Page is an AsyncIterable and follows its own continuation tokens.
-  const page = await client.sessions.listTurnEvents(sessionId, turn.id);
+  const page = await client.sessions.listTurnEvents(sessionId, turn.id, undefined, {
+    abortSignal: requestOpts?.signal,
+  });
   const pending = await resolvePending(page, requiredActions);
   if (pending.length === 0) return { status: "done_no_action" };
   return { status: "awaiting_approval", pending };
