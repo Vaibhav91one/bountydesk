@@ -21,15 +21,19 @@ Postgres stores reports, jobs, leases, sessions, approvals, immutable verdicts a
 A Zerops project holds the persistent tier:
 
 - A private BountyDesk worker service claims rows from Supabase and drives the four existing queues.
-- A private TrueForge service runs in standalone mode with SQLite on Zerops Local Storage.
+- A private TrueForge service runs in standalone mode with SQLite on Zerops Local Storage. An
+  authenticated private proxy in front of its unauthenticated listener checks the bearer token from
+  `TRUEFORGE_API_KEY` before forwarding requests.
 - The scope-guard MCP service joins the same private network when Track C ships.
-- Only outbound connections are allowed from these services. No worker, TrueForge or scope-guard
-  port is exposed publicly.
+- No worker, TrueForge or scope-guard port is exposed publicly. Private ingress is limited to the
+  required callers and service ports: the worker may reach the TrueForge proxy, and TrueForge may
+  reach scope-guard after Track C ships. The services may make only the outbound calls listed below.
 
-The worker calls TrueForge over the Zerops private network. It calls Daytona directly for sandbox
-provisioning and teardown, and GitHub for approved delivery. TrueForge calls the model provider and
-the authenticated MCP route on Vercel. Vercel never calls TrueForge directly; Supabase is the
-coordination boundary.
+The worker calls the authenticated TrueForge proxy over the Zerops private network and sends
+`TRUEFORGE_API_KEY` as its bearer token. The proxy forwards to TrueForge on loopback. The worker
+calls Daytona directly for sandbox provisioning and teardown, and GitHub for approved delivery.
+TrueForge calls the model provider and the authenticated MCP route on Vercel. Vercel never calls
+TrueForge directly; Supabase is the coordination boundary.
 
 Email and file upload remain independent of GitHub. A report without a server-bound TargetProfile
 may receive static analysis but stops at `ANALYSIS_ONLY`. Intake content cannot select a repository,
@@ -58,7 +62,8 @@ Do not describe the Zerops topology as live or production-ready until all of the
 3. `sqlite3 .backup` produces a restorable copy while the service is running.
 4. Worker shutdown, restart and expired-lease recovery do not lose or duplicate work.
 5. TrueForge and the worker have useful liveness and readiness checks.
-6. Neither service has public access, and the private service names resolve only inside the project.
+6. Neither service has public access, private service names resolve only inside the project, and the
+   TrueForge proxy rejects a request without the configured bearer token.
 7. Resource ceilings and billing alerts are set before the services remain online.
 8. One real report completes the Track A approval path through the deployed worker.
 
