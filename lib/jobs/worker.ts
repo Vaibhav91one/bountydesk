@@ -8,6 +8,7 @@ import {
   claim,
   complete,
   fail,
+  releaseAfterDeadline,
   releaseUnstarted,
   renew,
   type Lease,
@@ -250,6 +251,8 @@ export async function runOnce(
     try {
       if (error instanceof UnprocessableDelivery) {
         await abandon(lease, message);
+      } else if (signal?.aborted) {
+        await releaseAfterDeadline(lease, message);
       } else {
         await fail(lease, message);
       }
@@ -259,8 +262,8 @@ export async function runOnce(
       if (!(recoveryError instanceof LeaseLostError)) throw recoveryError;
     }
 
-    // The queue write above leaves the job in a retryable state. The route still needs the
-    // deadline error itself so it can return 503 instead of claiming that the tick completed.
+    // The deadline-specific release above leaves the job retryable. The route still needs the
+    // error itself so it can return 503 instead of claiming that the tick completed.
     if (signal?.aborted) throw signal.reason;
 
     return lease.id;

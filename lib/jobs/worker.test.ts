@@ -388,6 +388,10 @@ test("an outer deadline aborts analysis and releases the job for retry", async (
   await drain();
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo);
+  await dbm.db
+    .update(dbm.inboundJob)
+    .set({ attempts: 4, maxAttempts: 5 })
+    .where(dbm.eq(dbm.inboundJob.id, jobId));
   const controller = new AbortController();
   const reason = new Error("tick deadline exceeded");
 
@@ -411,6 +415,7 @@ test("an outer deadline aborts analysis and releases the job for retry", async (
 
   const released = await job(jobId);
   assert.equal(released.state, "RUNNING");
+  assert.equal(released.attempts, 4, "a worker deadline must not consume the final attempt");
   assert.equal(released.leaseOwner, null);
   assert.match(released.lastError as string, /tick deadline exceeded/);
 });
