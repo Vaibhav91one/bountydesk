@@ -501,3 +501,71 @@ test("getTurn aborts the underlying request when the caller's signal aborts", as
     await assert.rejects(() => pending);
   });
 });
+
+test("createSession aborts the underlying request when the caller's signal aborts", async () => {
+  const controller = new AbortController();
+  const stub: typeof fetch = ((_input: RequestInfo | URL, init?: RequestInit) =>
+    new Promise((_resolve, reject) => {
+      const signal = init?.signal;
+      if (signal?.aborted) {
+        reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+        return;
+      }
+      signal?.addEventListener("abort", () => {
+        reject(signal.reason ?? new DOMException("aborted", "AbortError"));
+      });
+    })) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    const client = createTrueForgeClient();
+    const pending = client.createSession({ signal: controller.signal });
+    controller.abort();
+    await assert.rejects(() => pending);
+  });
+});
+
+test("getTurn aborts pending-call event resolution with the caller's signal", async () => {
+  const controller = new AbortController();
+  let markEventRequestStarted!: () => void;
+  const eventRequestStarted = new Promise<void>((resolve) => {
+    markEventRequestStarted = resolve;
+  });
+  const turnResponse = {
+    data: {
+      id: "turn_1",
+      session_id: "sess_1",
+      previous_turn_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      state: {
+        status: "done",
+        completed_at: "2026-01-01T00:00:01Z",
+        output: null,
+        required_actions: [
+          {
+            type: "tool.approval_required",
+            id: "evt_approval",
+            created_at: "2026-01-01T00:00:01Z",
+            thread_id: "main",
+            tool_calls: [{ id: "call_1", source_event_id: "evt_model_msg" }],
+          },
+        ],
+      },
+    },
+  };
+  const stub: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).includes("/events")) return Promise.resolve(json(turnResponse));
+    markEventRequestStarted();
+    assert.ok(init?.signal, "event pagination must receive the caller's cancellation signal");
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    const client = createTrueForgeClient();
+    const pending = client.getTurn("sess_1", "turn_1", { signal: controller.signal });
+    await eventRequestStarted;
+    controller.abort(new Error("tick deadline exceeded"));
+    await assert.rejects(() => pending, /aborted a request/i);
+  });
+});

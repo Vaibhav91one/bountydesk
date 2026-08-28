@@ -389,20 +389,25 @@ test("an outer deadline aborts analysis and releases the job for retry", async (
   const repo = await connectedRepo();
   const { jobId } = await enqueueIssue(repo);
   const controller = new AbortController();
+  const reason = new Error("tick deadline exceeded");
 
-  await worker.runOnce("worker-deadline", {
-    signal: controller.signal,
-    analysis: {
-      ...analysisDriver(),
-      run: async ({ signal }) => {
-        controller.abort(new Error("tick deadline exceeded"));
-        await new Promise<void>((resolve, reject) => {
-          if (signal.aborted) reject(signal.reason);
-          else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-        });
-      },
-    },
-  });
+  await assert.rejects(
+    () =>
+      worker.runOnce("worker-deadline", {
+        signal: controller.signal,
+        analysis: {
+          ...analysisDriver(),
+          run: async ({ signal }) => {
+            controller.abort(reason);
+            await new Promise<void>((resolve, reject) => {
+              if (signal.aborted) reject(signal.reason);
+              else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+            });
+          },
+        },
+      }),
+    (error: unknown) => error === reason,
+  );
 
   const released = await job(jobId);
   assert.equal(released.state, "RUNNING");

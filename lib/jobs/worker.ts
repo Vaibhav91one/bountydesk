@@ -240,7 +240,10 @@ export async function runOnce(
   } catch (error) {
     // A lost lease means another worker owns this job now. Writing anything about it would
     // be writing over that worker, which is the exact thing the fence exists to prevent.
-    if (error instanceof LeaseLostError) return lease.id;
+    if (error instanceof LeaseLostError) {
+      if (signal?.aborted) throw signal.reason;
+      return lease.id;
+    }
 
     const message = error instanceof Error ? error.message : String(error);
 
@@ -255,6 +258,10 @@ export async function runOnce(
       // new owner is then responsible for the job, just as if the operation had lost its fence.
       if (!(recoveryError instanceof LeaseLostError)) throw recoveryError;
     }
+
+    // The queue write above leaves the job in a retryable state. The route still needs the
+    // deadline error itself so it can return 503 instead of claiming that the tick completed.
+    if (signal?.aborted) throw signal.reason;
 
     return lease.id;
   }

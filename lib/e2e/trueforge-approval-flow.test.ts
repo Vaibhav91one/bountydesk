@@ -243,6 +243,7 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
     .where(dbm.eq(dbm.agentSession.reportId, reportRow.id))
     .limit(1);
   assert.ok(session);
+  assert.equal(session.turnId, "trueturn-1");
 
   // The poller: the fake already captured the turn's capability during createTurn above, so
   // this first poll goes straight to awaiting_approval. Confirms the atomic
@@ -300,7 +301,8 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
     .from(dbm.agentSession)
     .where(dbm.eq(dbm.agentSession.reportId, reportRow.id))
     .limit(1);
-  assert.notEqual(afterSubmit.turnId, session.sessionId);
+  assert.equal(afterSubmit.turnId, "trueturn-2");
+  assert.notEqual(afterSubmit.turnId, session.turnId);
   // Approved: the pending markers survive the submission, since publish_verdict's own
   // handler (invoked next, simulating TrueForge acting on the now-approved turn) still needs
   // them to verify the call.

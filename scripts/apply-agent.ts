@@ -14,6 +14,7 @@ import { TrueForge, TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { appBaseUrl } from "@/lib/auth/oauth";
 import { mcpServerSecret, trueforgeApiKey, trueforgeUrl } from "@/lib/env";
+import { buildMcpServerManifest } from "@/lib/trueforge/agent-config";
 
 async function main(): Promise<void> {
   const client = new TrueForge({
@@ -21,15 +22,10 @@ async function main(): Promise<void> {
     ...(trueforgeApiKey() ? { token: trueforgeApiKey() } : { auth: false as const }),
   });
 
-  const mcpUrl = `${appBaseUrl()}/api/mcp/publish-verdict`;
+  const baseUrl = appBaseUrl();
+  const mcpUrl = `${baseUrl}/api/mcp/publish-verdict`;
   await client.settings.mcpServers.createOrUpdate({
-    manifest: {
-      name: "bountydesk",
-      description: "BountyDesk's publish_verdict approval gate",
-      type: "remote",
-      url: mcpUrl,
-      auth: { type: "header", headers: { Authorization: `Bearer ${mcpServerSecret()}` } },
-    },
+    manifest: buildMcpServerManifest(baseUrl, mcpServerSecret()),
   });
   console.log(`MCP connector "bountydesk" registered at ${mcpUrl}`);
 
