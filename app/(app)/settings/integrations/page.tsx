@@ -1,11 +1,7 @@
 import { GitHubLight } from "developer-icons";
-import { CheckCircle2, CircleSlash, ExternalLink, PauseCircle, Settings2 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
-
-import { ConfigureButton } from "./configure-button";
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import {
@@ -14,218 +10,110 @@ import {
   type RepoStatus,
 } from "@/lib/github/connections";
 
+import { IntegrationList, type IntegrationRow } from "./integration-list";
+
+export const metadata = { title: "Integrations · BountyDesk" };
+
 /** What each status means to the person reading it, not what it means to the database. */
-const STATUS: Record<RepoStatus, { label: string; hint: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  admissible: {
-    label: "Connected",
-    hint: "Reports opened here are accepted.",
-    variant: "default",
-  },
-  "not-configured": {
-    label: "Not configured",
-    hint: "Granted by the installation, but no reproduction target is bound, so reports are refused.",
-    variant: "outline",
-  },
-  archived: {
-    label: "Archived",
-    hint: "The repository is archived on GitHub. Intake stays closed until it is unarchived.",
-    variant: "secondary",
-  },
-  disconnected: {
-    label: "Disconnected",
-    hint: "The installation no longer grants this repository. Re-add it on GitHub to restore it.",
-    variant: "secondary",
-  },
-  suspended: {
-    label: "Suspended",
-    hint: "The whole installation is suspended, so nothing under it is accepted.",
-    variant: "destructive",
-  },
+const STATUS: Record<RepoStatus, string> = {
+  admissible: "Connected. Reports opened here are accepted.",
+  "not-configured": "No reproduction target is bound, so reports are refused.",
+  archived: "Archived on GitHub. Intake stays closed until it is unarchived.",
+  disconnected: "The installation no longer grants this repository.",
+  suspended: "The installation is suspended, so nothing under it is accepted.",
 };
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-1 sm:flex-row sm:gap-4">
-      <dt className="w-44 shrink-0 text-sm text-muted-foreground">{label}</dt>
-      <dd className="text-sm">{children}</dd>
-    </div>
-  );
-}
+/**
+ * The channels that have a design but no route yet, and one that is not in the product at all.
+ *
+ * They are listed so the page says what exists rather than implying GitHub is the only thing
+ * anyone ever considered. Their button is disabled because nothing is behind it.
+ */
+const UNBUILT: IntegrationRow[] = [
+  {
+    id: "email",
+    name: "Email",
+    detail: "Report intake by email. Designed, not built.",
+    icon: "gmail",
+    installed: false,
+    action: { kind: "none", label: "Unavailable" },
+  },
+  {
+    id: "upload",
+    name: "File upload",
+    detail: "Report intake by upload. Designed, not built.",
+    icon: "folder",
+    installed: false,
+    action: { kind: "none", label: "Unavailable" },
+  },
+  {
+    id: "drive",
+    name: "Drive",
+    detail: "Not planned for this version.",
+    icon: "onedrive",
+    installed: false,
+    action: { kind: "none", label: "Unavailable" },
+  },
+];
 
-export default async function ChannelsPage() {
+export default async function IntegrationsPage() {
   const session = await requireReviewer();
   const connections = await listConnections();
 
+  const rows: IntegrationRow[] = [];
+  for (const connection of connections) {
+    const managementUrl = manageRepositoriesUrl(connection.installationId, {
+      login: connection.accountLogin,
+      type: connection.accountType,
+    });
+
+    rows.push({
+      id: `installation-${connection.installationRowId}`,
+      name: connection.accountLogin,
+      detail: connection.suspendedAt
+        ? "GitHub App suspended. Nothing under it is accepted."
+        : `GitHub App · ${connection.grantedRepositoryCount} repositor${connection.grantedRepositoryCount === 1 ? "y" : "ies"} · Issues read and write, Metadata read`,
+      icon: "github",
+      installed: true,
+      // GitHub owns which repositories the App can see, so Manage leaves for GitHub. A
+      // connection made before account-type tracking has no such link, and re-selecting the
+      // account on GitHub is what restores it.
+      action: managementUrl
+        ? { kind: "link", href: managementUrl, label: "Manage" }
+        : { kind: "link", href: installUrl(), label: "Repair" },
+    });
+
+    for (const repo of connection.repositories) {
+      rows.push({
+        id: `repo-${repo.connectedRepositoryId}`,
+        name: repo.fullName,
+        detail: `${STATUS[repo.status]} Target: ${repo.targetProfileName ?? "none bound"}.`,
+        icon: "github",
+        installed: true,
+        action: { kind: "configure", repoId: repo.repoId, configured: repo.targetProfileName !== null },
+      });
+    }
+  }
+  rows.push(...UNBUILT);
+
   return (
-    <main className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Channels</h1>
-        <p className="text-sm text-muted-foreground">
-          Inbound report sources. GitHub only in the MVP. Signed in as {session.login}.
-        </p>
-      </header>
-
-      {connections.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-start gap-4 pt-6">
-            <p className="text-sm text-muted-foreground">
-              No GitHub account is connected yet. Installing the App is what grants access to
-              repositories; signing in only identifies you.
-            </p>
-            <Button size="sm" nativeButton={false} render={<a href={installUrl()} />}>
-              <GitHubLight className="size-4" /> Install BountyDesk
-            </Button>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {connections.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="outline" nativeButton={false} render={<a href={installUrl()} />}>
-            <GitHubLight className="size-4" /> Install on another account
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            One installation covers one account. Adding an organization means installing again.
+    <main className="flex flex-1 flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b px-8 py-7">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-title text-foreground">Integrations</h1>
+          <p className="text-meta text-muted-foreground">
+            Where reports come from. Signed in as {session.login}.
           </p>
         </div>
-      ) : null}
-
-      {connections.map((connection) => {
-        const managementUrl = manageRepositoriesUrl(connection.installationId, {
-          login: connection.accountLogin,
-          type: connection.accountType,
-        });
-
-        return (
-        <section key={connection.installationRowId} className="flex flex-col gap-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-2">
-              <CardTitle className="flex items-center gap-2">
-                <GitHubLight className="size-4" /> {connection.accountLogin}
-              </CardTitle>
-              <Badge variant={connection.suspendedAt ? "destructive" : "default"}>
-                {connection.suspendedAt ? "Suspended" : "App installed"}
-              </Badge>
-            </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <dl className="flex flex-col gap-2">
-                <Row label="Installed on">{connection.accountLogin}</Row>
-                <Row label="Repositories">
-                  {connection.grantedRepositoryCount} granted
-                  {connection.repositories.length > connection.grantedRepositoryCount
-                    ? ` · ${connection.repositories.length - connection.grantedRepositoryCount} withdrawn`
-                    : null}
-                </Row>
-                <Row label="Permissions">Issues read and write · Metadata read</Row>
-                {/* The latest write across the installation and its repositories. Not
-                    "last event": lifecycle_delivery has no installation key, so the time of
-                    the last webhook for this account is not in the schema. */}
-                <Row label="Last synced">
-                  <time dateTime={connection.lastSyncedAt.toISOString()}>
-                    {connection.lastSyncedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-                  </time>
-                </Row>
-              </dl>
-
-              {managementUrl ? (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      nativeButton={false}
-                      render={<a href={managementUrl} />}
-                    >
-                      <Settings2 /> Manage repositories <ExternalLink className="size-3" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    GitHub owns which repositories the App can see, so that button leaves for
-                    GitHub. Changes come back on the installation_repositories webhook.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      nativeButton={false}
-                      render={<a href={installUrl()} />}
-                    >
-                      <GitHubLight className="size-4" /> Repair connection
-                      <ExternalLink className="size-3" />
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    This connection predates account-type tracking. Select the account again on
-                    GitHub so BountyDesk can restore the correct repository settings link.
-                  </p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {connection.repositories.map((repo) => {
-            const status = STATUS[repo.status];
-            return (
-              <Card key={repo.connectedRepositoryId} className="ml-0 sm:ml-6">
-                <CardHeader className="flex flex-row items-center justify-between gap-2">
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    {repo.status === "admissible" ? (
-                      <CheckCircle2 className="size-4" />
-                    ) : repo.status === "suspended" ? (
-                      <PauseCircle className="size-4" />
-                    ) : (
-                      <CircleSlash className="size-4" />
-                    )}
-                    {repo.fullName}
-                  </CardTitle>
-                  <Badge variant={status.variant}>{status.label}</Badge>
-                </CardHeader>
-                <CardContent className="flex flex-col gap-4">
-                  <dl className="flex flex-col gap-2">
-                    <Row label="Intake repository">{repo.fullName}</Row>
-                    <Row label="Reproduction target">
-                      {repo.targetProfileName ?? (
-                        <span className="text-muted-foreground">none bound</span>
-                      )}
-                    </Row>
-                    <Row label="Verdict destination">
-                      Reply to the originating issue, after a human approves it
-                    </Row>
-                  </dl>
-
-                  <p className="text-xs text-muted-foreground">{status.hint}</p>
-
-                  <ConfigureRepository
-                    repoId={repo.repoId}
-                    configured={repo.targetProfileName !== null}
-                  />
-                </CardContent>
-              </Card>
-            );
-          })}
-        </section>
-        );
-      })}
-
-      <form action="/api/auth/logout" method="post">
-        <Button type="submit" variant="ghost" size="sm">
-          Sign out
+        <Button size="sm" nativeButton={false} render={<a href={installUrl()} />}>
+          <RollingIcon icon={GitHubLight} className="size-4" />
+          {connections.length === 0 ? "Install BountyDesk" : "Add installation"}
         </Button>
-      </form>
+      </header>
+
+      <div className="p-8">
+        <IntegrationList rows={rows} />
+      </div>
     </main>
-  );
-}
-
-
-function ConfigureRepository({ repoId, configured }: { repoId: number; configured: boolean }) {
-  return (
-    <ConfigureButton
-      repoId={repoId}
-      configured={configured}
-      label={configured ? "Reconfigure" : "Configure"}
-    />
   );
 }

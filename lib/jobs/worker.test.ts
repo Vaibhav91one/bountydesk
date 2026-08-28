@@ -58,7 +58,7 @@ after(async () => {
 
 let ids = 0;
 
-/** A connected, configured repository: what the Channels screen will set up. */
+/** A connected, configured repository: what the Integrations screen will set up. */
 async function connectedRepo({ configured = true, granted = true } = {}) {
   ids += 1;
   const installationId = 500_000 + ids;

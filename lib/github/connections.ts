@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 
 /**
- * The read model behind the Channels screen.
+ * The read model behind the Integrations screen.
  *
  * Kept apart from lifecycle.ts, which owns applying webhooks and the activeRepository gate.
  * This is display only. `admissible` here is a label for an operator, never an authorization
