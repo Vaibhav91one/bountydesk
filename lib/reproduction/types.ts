@@ -11,9 +11,9 @@
  * this design extends to sandbox-exec stdout in general.
  */
 
-/** A JSON value, so a recipe's request body is provably serializable at compile time instead of
- * by runtime convention: `unknown` would let a bigint, a function, or a cyclic object satisfy
- * the type and then fail (or silently change meaning) when the orchestrator serializes it. */
+/** A JSON-compatible request body shape. This excludes functions, bigint, symbols and cycles
+ * at the type boundary. Recipe authors still need ordinary finite numbers because TypeScript's
+ * `number` also includes NaN and infinities. */
 export type JsonValue =
   | string
   | number
@@ -22,19 +22,30 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export type ReproductionRequest = {
-  method: "GET" | "POST";
-  path: string;
-  headers?: Record<string, string>;
-  /** May contain the literal string "{{canary}}", substituted by the orchestrator with a
-   * freshly generated value before the request is sent. */
-  body?: JsonValue;
-};
+export type ReproductionRequest =
+  | {
+      method: "GET";
+      path: string;
+      headers?: Record<string, string>;
+      body?: never;
+    }
+  | {
+      method: "POST";
+      path: string;
+      headers?: Record<string, string>;
+      /** May contain the literal string "{{canary}}", substituted by the orchestrator with a
+       * freshly generated value before the request is sent. */
+      body?: JsonValue;
+    };
 
 export type ReproductionProbeResult = {
   status: number;
   body: string;
 };
+
+export type RequestBodyEvidence =
+  | { dispatched: false; sha256: null }
+  | { dispatched: true; sha256: string | null };
 
 /**
  * One frozen reproduction scenario against a bound TargetProfile. Recipes are code, not data:
@@ -86,13 +97,12 @@ export type ReproductionEvidence = {
   exploit: { ranToCompletion: boolean; canaryFound: boolean; at: string };
   /** sha256 hex of the raw canary value. Never the value itself. */
   canaryHash: string;
-  /** sha256 hex of each request body that referenced the canary, or null if that request was
-   * never actually sent. Populated as soon as the request is dispatched, independent of whether
-   * the oracle check that follows succeeds, throws, or is never reached. */
+  /** sha256 hex of each dispatched request body, or null when a dispatched request had no body.
+   * `dispatched` is the distinction between a skipped request and a bodyless request. */
   requestBodyHashes: {
-    fixture: string | null;
-    negativeControl: string | null;
-    exploit: string | null;
+    fixture: RequestBodyEvidence;
+    negativeControl: RequestBodyEvidence;
+    exploit: RequestBodyEvidence;
   };
 };
 
@@ -126,14 +136,16 @@ export type ReproductionOutcome =
  * the real implementations together; until then each side can mock against these types.
  *
  * Every field of `input` must be resolved by trusted server code from a bound `TargetProfile`
- * row (imageDigest, snapshotId) and a server-selected recipe, exactly as `activeRepository()`
- * resolves a GitHub repository's target today: never a value an agent chose, and never a value
- * that arrived on the report itself. `targetProfileId` is carried through so the caller can bind
- * evidence and audit records back to the exact profile that authorized this run.
+ * row (imageName, imageDigest, snapshotId) and a server-selected recipe, exactly as
+ * `activeRepository()` resolves a GitHub repository's target today: never a value an agent
+ * chose, and never a value that arrived on the report itself. `targetProfileId` is carried
+ * through so the caller can bind evidence and audit records back to the exact profile that
+ * authorized this run.
  */
 export type ReproduceFn = (
   input: {
     targetProfileId: string;
+    imageName: string;
     imageDigest: string;
     snapshotId: string | null;
     recipe: ReproductionRecipe;

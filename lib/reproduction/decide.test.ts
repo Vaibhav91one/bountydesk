@@ -2,6 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { decideOutcome, type ReproductionRun } from "./decide";
+import type { ReproductionRequest } from "./types";
+
+const validGetRequest: ReproductionRequest = { method: "GET", path: "/ok" };
+const validPostRequest: ReproductionRequest = {
+  method: "POST",
+  path: "/ok",
+  body: { search: "x" },
+};
+// @ts-expect-error Fetch rejects GET bodies before dispatch.
+const invalidGetWithBody: ReproductionRequest = {
+  method: "GET",
+  path: "/bad",
+  body: { search: "x" },
+};
+
+void validGetRequest;
+void validPostRequest;
+void invalidGetWithBody;
 
 const clean: ReproductionRun = {
   fixtureCompleted: true,
