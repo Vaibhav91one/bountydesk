@@ -127,6 +127,27 @@ test("request_intrusive_approval mints a grant that verify_grant consumes exactl
   assert.equal(second.reason, "grant already used");
 });
 
+test("osv_query surfaces a non-2xx OSV response as an error instead of a clean-result shape", async () => {
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response("rate limited", { status: 429 })) as typeof fetch;
+
+  try {
+    const result = await callTool("osv_query", { name: "left-pad", ecosystem: "npm" });
+    assert.equal(result.error, "HTTP 429");
+    assert.equal(result.count, undefined, "a failed lookup must not look like {count: 0, vulns: []}");
+    assert.equal(result.vulns, undefined);
+
+    const audit = await callTool("audit_read", { limit: 1 });
+    const entries = audit.entries as { action: string; verdict: string; reason: string }[];
+    assert.equal(entries[0].action, "osv_query");
+    assert.equal(entries[0].verdict, "denied");
+    assert.match(entries[0].reason, /HTTP 429/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("policy_get reports the current allowlist size", async () => {
   const before = await callTool("scope_list", {});
   const policy = await callTool("policy_get", {});

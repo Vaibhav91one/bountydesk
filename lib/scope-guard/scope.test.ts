@@ -147,3 +147,19 @@ test("persisted scope state is sanitized on load (quarantine bypass entries)", (
   assert.deepEqual(reSanitized.allow.sort(), state.allow.sort());
   assert.equal(reRejected.length, 0);
 });
+
+test("a present but empty allow array stays empty - scope_remove-ing the last entry must not resurrect the defaults", () => {
+  const { state } = sanitizeScopeState({ allow: [], temporary: [] });
+  assert.deepEqual(state.allow, []);
+});
+
+test("an allow array where every entry gets quarantined also stays empty, not defaults", () => {
+  const { state, rejected } = sanitizeScopeState({ allow: ["169.254.1.1", "not a real entry!!"] });
+  assert.deepEqual(state.allow, []);
+  assert.equal(rejected.length, 2);
+});
+
+test("a genuinely missing allow field (nothing ever persisted) gets the default localhost entries", () => {
+  const { state } = sanitizeScopeState({});
+  assert.deepEqual(state.allow.sort(), ["localhost", "127.0.0.1", "::1"].sort());
+});

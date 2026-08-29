@@ -103,7 +103,13 @@ export function sanitizeScopeState(raw: {
   temporary?: unknown;
   updatedAt?: unknown;
 }): { state: ScopeState; rejected: string[] } {
-  const allowInput = Array.isArray(raw.allow) ? raw.allow.map(String) : [];
+  // Whether raw.allow was an array at all - even an empty one - is the only signal that tells
+  // "nothing has ever been persisted" (apply the defaults) apart from "someone removed every
+  // entry on purpose" (leave it empty). Once the array is present, collapsing it to `[]` below
+  // (every entry invalid, or genuinely zero entries) must not be reinterpreted as "uninitialized".
+  const rawAllow = raw.allow;
+  const allowProvided = Array.isArray(rawAllow);
+  const allowInput = allowProvided ? rawAllow.map(String) : [];
   const valid: string[] = [];
   const rejected: string[] = [];
   for (const entry of allowInput) {
@@ -128,7 +134,10 @@ export function sanitizeScopeState(raw: {
   }
   return {
     state: {
-      allow: valid.length > 0 ? valid : [...DEFAULT_ALLOW],
+      // A present-but-empty allow array (scope_remove-ed down to nothing, or an array that
+      // quarantined every entry) stays empty. Defaults are only for the case where the caller
+      // never had an allow array to begin with.
+      allow: valid.length > 0 ? valid : allowProvided ? [] : [...DEFAULT_ALLOW],
       temporary,
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
     },
@@ -573,8 +582,10 @@ function classify(hostPort: string): TargetClass {
 }
 
 /**
- * Loopback targets (localhost, 127.0.0.0/8, ::1) are the only hosts eligible for lab-mode
- * multi-use grants elsewhere in this package - everything else keeps single-use posture.
+ * Whether a target classifies as loopback (localhost, 127.0.0.0/8, ::1). Every grant is
+ * single-use regardless of target; this only feeds an audit-log flag (see
+ * request_intrusive_approval in the MCP route) so a reviewer can tell a loopback grant from
+ * one against a real host at a glance.
  */
 export function isLoopbackTarget(target: string): boolean {
   return classify(normalizeTargetValue(target) ?? target) === "loopback";

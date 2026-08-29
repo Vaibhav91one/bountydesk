@@ -40,7 +40,7 @@ test("the first append starts the chain at seq 0 with GENESIS as its previous ha
   const entry = await auditModule.append(baseInput());
   assert.equal(entry.seq, 0);
   assert.equal(entry.prevHash, "GENESIS");
-  assert.equal(entry.hash.length, 64); // sha256 hex
+  assert.equal(entry.hash.length, 64);
 });
 
 test("each append advances seq by exactly one and chains to the previous hash", async () => {

@@ -3,26 +3,17 @@ import { createHash } from "node:crypto";
 import { db, scopeGuardAudit, sql, type Executor } from "@/lib/db";
 
 /**
- * The scope-guard audit log: a Postgres-backed, hash-chained, append-only trail. Ported from
- * Sentinel's `mcp/scope-guard/src/audit.ts`, which wrote a JSONL file and had two bugs this
- * version fixes rather than carries over.
+ * The scope-guard audit log: a Postgres-backed, hash-chained, append-only trail.
  *
- * Bug 1: `nextSeq()` cached `maxSeq + 1` on the first call, then returned `cachedValue + 1`
- * on every later call without ever advancing the cache - so every append after the second was
- * stamped with the same duplicate `seq`.
- *
- * Bug 2: nothing serialized concurrent `append()` calls, so two racing writers could both read
- * the same tail hash and each produce an entry with that same `prev`, forking the chain.
- *
- * Both are fixed by moving `seq`/`prev_hash` assignment into the same transaction as the
- * insert, serialized by a Postgres advisory lock. A plain `SELECT ... FOR UPDATE` on "the
- * latest row" does not work here the way it does for lib/agent-sessions/poller.ts's report
- * row: that pattern locks and then *updates* the same row, so a second transaction blocked on
- * the lock sees the first transaction's change once it is released. An audit append never
- * updates the previous row, it inserts a new one - so a second transaction, unblocked, would
- * still see the same "latest row" the first transaction saw and compute the same next seq. An
- * advisory lock has no row to be stale about: it just serializes the read-compute-insert
- * critical section itself, which is exactly what an append-only chain needs.
+ * `seq`/`prev_hash` assignment happens in the same transaction as the insert, serialized by a
+ * Postgres advisory lock. A plain `SELECT ... FOR UPDATE` on "the latest row" doesn't work here
+ * the way it does for lib/agent-sessions/poller.ts's report row: that pattern locks and then
+ * *updates* the same row, so a second transaction blocked on the lock sees the first
+ * transaction's change once it's released. An audit append never updates the previous row, it
+ * inserts a new one - so a second transaction, unblocked, would still see the same "latest row"
+ * the first transaction saw and compute the same next seq. An advisory lock has no row to be
+ * stale about: it just serializes the read-compute-insert critical section itself, which is
+ * exactly what an append-only chain needs.
  */
 
 export interface AuditEntry {

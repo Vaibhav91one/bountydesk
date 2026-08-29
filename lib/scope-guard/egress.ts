@@ -118,6 +118,16 @@ export async function httpProbe(scope: Scope, input: HttpProbeInput): Promise<Ht
   const method = (input.method ?? "GET").toUpperCase();
   const started = Date.now();
 
+  // The outbound request's authority must come from the URL the scope check just validated,
+  // never from a caller-supplied header: a Host override would let a request that's pinned to
+  // an allowed IP still be routed, at the virtual-host layer, to whatever out-of-scope name the
+  // caller puts in that header - the same class of gap connectAddress-pinning closes at the
+  // socket layer. Strip it case-insensitively before merging in the rest of the caller's headers.
+  const callerHeaders = Object.fromEntries(
+    Object.entries(input.headers ?? {}).filter(([key]) => key.toLowerCase() !== "host"),
+  );
+  const hostHeader = port === defaultPort(scheme) ? parsed.hostname : `${parsed.hostname}:${port}`;
+
   return new Promise<HttpProbeResult>((resolve) => {
     // Dial the address the scope check pinned, not a fresh lookup of parsed.hostname. The two
     // branches exist (rather than one call through a shared function reference) because
@@ -130,7 +140,8 @@ export async function httpProbe(scope: Scope, input: HttpProbeInput): Promise<Ht
       path: `${parsed.pathname}${parsed.search}`,
       method,
       timeout: (input.timeoutSeconds ?? 15) * 1000,
-      headers: { "user-agent": "BountyDesk-ScopeGuard/1.0", host: parsed.hostname, ...(input.headers ?? {}) },
+      // host last: nothing after it in this object literal can re-override the authority.
+      headers: { "user-agent": "BountyDesk-ScopeGuard/1.0", ...callerHeaders, host: hostHeader },
     };
     const onResponse = (res: IncomingMessage): void => {
       const chunks: Buffer[] = [];
@@ -200,7 +211,11 @@ export interface TcpProbeResult {
  * write, capped read, then close - a connect+send+recv primitive, not a port scanner.
  */
 export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpProbeResult> {
-  const target = `${input.host}:${input.port}`;
+  // A bare IPv6 host needs brackets before ":port" is appended, or the result ("::1:6379") is
+  // ambiguous between "host ::1:6379" and "host ::1, port 6379" - scope.check() parses this
+  // string as a URL, and an unbracketed IPv6-with-port URL authority doesn't parse at all.
+  const isBareIPv6 = input.host.includes(":") && !input.host.startsWith("[");
+  const target = `${isBareIPv6 ? `[${input.host}]` : input.host}:${input.port}`;
   const auth = await authorizeConnect(scope, target, input.grantToken);
   if (!auth.ok) return { probed: false, error: auth.reason };
 
@@ -212,6 +227,7 @@ export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpP
     let total = 0;
     const CAP = 32_768;
     let settled = false;
+    let connected = false;
     const finish = (ok: boolean, extra: Partial<TcpProbeResult> = {}) => {
       if (settled) return;
       settled = true;
@@ -231,6 +247,7 @@ export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpP
     // it does for HTTP's Host header / TLS SNI, so nothing else needs it past this point.
     const sock = tcpConnect({ host: auth.connectAddress, port: input.port, timeout: timeoutMs });
     sock.on("connect", () => {
+      connected = true;
       if (input.dataBase64) {
         try {
           sock.write(Buffer.from(input.dataBase64, "base64"));
@@ -246,7 +263,14 @@ export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpP
     });
     sock.on("timeout", () => {
       sock.destroy();
-      finish(true, { note: "read timeout reached (this is the normal end for a probe with no explicit close)" });
+      // A timeout before 'connect' ever fired means the handshake itself never completed
+      // (unreachable host, firewalled port) - that's a failed probe, not a successful one that
+      // happened to idle out waiting for a reply.
+      if (connected) {
+        finish(true, { note: "read timeout reached (this is the normal end for a probe with no explicit close)" });
+      } else {
+        finish(false, { error: "connection timed out before the TCP handshake completed" });
+      }
     });
     sock.on("close", () => finish(true));
     sock.on("error", (err) => finish(false, { error: err.message }));

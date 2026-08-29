@@ -1,5 +1,5 @@
 import type { Executor } from "@/lib/db";
-import { db, eq, targetProfile } from "@/lib/db";
+import { and, db, eq, sql, targetProfile } from "@/lib/db";
 
 import { sanitizeScopeState, Scope, type ScopeState } from "./scope";
 
@@ -45,16 +45,17 @@ export function serializeScopeState(state: ScopeState): RawRule[] {
   ];
 }
 
-interface ResolvedProfile {
+export interface ResolvedProfile {
   id: string;
   scopeRules: unknown;
+  updatedAt: Date;
 }
 
 async function resolveProfile(executor: Executor, forUpdate: boolean): Promise<ResolvedProfile> {
   const wantedName = process.env.SCOPE_GUARD_TARGET_PROFILE?.trim();
 
   let query = executor
-    .select({ id: targetProfile.id, scopeRules: targetProfile.scopeRules })
+    .select({ id: targetProfile.id, scopeRules: targetProfile.scopeRules, updatedAt: targetProfile.updatedAt })
     .from(targetProfile)
     .$dynamic();
   if (wantedName) query = query.where(eq(targetProfile.name, wantedName));
@@ -76,12 +77,49 @@ async function resolveProfile(executor: Executor, forUpdate: boolean): Promise<R
 }
 
 function stateFromRaw(scopeRules: unknown): ScopeState {
-  // sanitizeScopeState already falls back to DEFAULT_ALLOW when nothing valid survives (an
-  // empty scope_rules column, or one that quarantines everything), so there is nothing left
-  // to default here.
+  // parseScopeRules always returns an array for `allow` (empty when scope_rules holds none),
+  // so sanitizeScopeState always sees a present array here and never applies its own defaults -
+  // an emptied or all-quarantined column stays empty rather than resurrecting localhost.
   const { allow, temporary } = parseScopeRules(scopeRules);
   const { state } = sanitizeScopeState({ allow, temporary, updatedAt: new Date().toISOString() });
   return state;
+}
+
+/**
+ * Builds the persist callback a Scope writes back through. The `WHERE ... AND updatedAt =
+ * <the row's updatedAt at read time>` clause is optimistic concurrency: it makes a write a
+ * no-op (0 rows affected) if the row changed since `profile` was read, instead of overwriting
+ * whatever landed in between. That matters most for the read-only path below, where
+ * Scope.pruneTemporary() fires a write with nobody awaiting it - without this guard, a stale
+ * prune triggered before a concurrent, properly-locked scope_add/scope_remove/
+ * scope_add_temporary call could still land after it and erase that mutation.
+ *
+ * The comparison is truncated to millisecond precision on both sides rather than compared raw:
+ * `updated_at` is `timestamptz`, which Postgres stores at microsecond precision, but a row
+ * whose timestamp came from the column's own `default now()` (every freshly-provisioned
+ * profile) carries microseconds a round trip through JS `Date` can't preserve - a raw equality
+ * check would then never match and every write would look "stale" and silently no-op. Every
+ * write this module makes sets `updatedAt` from JS `Date`, so collapsing both sides to
+ * millisecond resolution costs nothing on the writes we control while fixing the reads we
+ * don't.
+ *
+ * ponytail: this makes two writes racing inside the same millisecond indistinguishable from
+ * each other, which a dedicated version/sequence column would not. Scope-guard has one target
+ * profile, mutated only through a human-approval-gated MCP call, so that window isn't a
+ * realistic concern here; revisit with a real version column if that ever stops being true.
+ */
+export function makePersist(executor: Executor, profile: ResolvedProfile): (state: ScopeState) => Promise<void> {
+  return async (state) => {
+    await executor
+      .update(targetProfile)
+      .set({ scopeRules: serializeScopeState(state), updatedAt: new Date() })
+      .where(
+        and(
+          eq(targetProfile.id, profile.id),
+          sql`date_trunc('milliseconds', ${targetProfile.updatedAt}) = date_trunc('milliseconds', ${profile.updatedAt.toISOString()}::timestamptz)`,
+        ),
+      );
+  };
 }
 
 /**
@@ -91,7 +129,8 @@ function stateFromRaw(scopeRules: unknown): ScopeState {
  * scope_remove/scope_add_temporary calls cannot both read the same allowlist and each write
  * back a version missing the other's change. Read-only calls (scope_check, scope_list, ...)
  * pass `mutate: false` and run outside a transaction; a best-effort write can still happen if
- * check() prunes an expired temporary entry, but nothing there needs the lock.
+ * check() prunes an expired temporary entry, guarded by the same optimistic version check
+ * makePersist applies to the locked path.
  */
 export async function withScope<T>(
   mutate: boolean,
@@ -99,23 +138,13 @@ export async function withScope<T>(
 ): Promise<T> {
   if (!mutate) {
     const profile = await resolveProfile(db, false);
-    const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, async (state) => {
-      await db
-        .update(targetProfile)
-        .set({ scopeRules: serializeScopeState(state), updatedAt: new Date() })
-        .where(eq(targetProfile.id, profile.id));
-    });
+    const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, makePersist(db, profile));
     return fn(scope);
   }
 
   return db.transaction(async (tx) => {
     const profile = await resolveProfile(tx, true);
-    const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, async (state) => {
-      await tx
-        .update(targetProfile)
-        .set({ scopeRules: serializeScopeState(state), updatedAt: new Date() })
-        .where(eq(targetProfile.id, profile.id));
-    });
+    const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, makePersist(tx, profile));
     return fn(scope);
   });
 }

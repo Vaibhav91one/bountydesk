@@ -333,6 +333,20 @@ function buildServer(): McpServer {
           body: JSON.stringify(body),
           signal: AbortSignal.timeout(20000),
         });
+        if (!res.ok) {
+          // Not res.ok must never fall through to the success shape below: {count: 0, vulns:
+          // []} reads identically to "genuinely no known vulnerabilities", and an agent (or a
+          // human skimming the audit log) can't tell OSV.dev being down from a clean result.
+          await audit.append({
+            actor: "agent",
+            auth: AUTH_MODE,
+            action: "osv_query",
+            args: { name, ecosystem, version },
+            verdict: "denied",
+            reason: `osv query failed: HTTP ${res.status}`,
+          });
+          return text({ error: `HTTP ${res.status}` });
+        }
         const d = (await res.json()) as { vulns?: unknown[] };
         await audit.append({
           actor: "agent",
