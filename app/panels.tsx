@@ -45,12 +45,8 @@ function Panel({
     >
       {header ? (
         <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2.5">
-          <span className="text-label text-muted-foreground uppercase">
-            {label}
-          </span>
-          <span className="text-label text-muted-foreground/60 uppercase">
-            Example
-          </span>
+          <span className="text-meta text-muted-foreground">{label}</span>
+          <span className="text-meta text-muted-foreground/60">Example</span>
         </div>
       ) : null}
       {children}

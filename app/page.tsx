@@ -1,17 +1,16 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Check, Circle, Detective, Folder, Sparkle } from "@phosphor-icons/react/ssr";
+import { Check, Circle, Folder, Sparkle } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
-import { MascotMarquee } from "@/components/mascot-marquee";
 import { SiteHeader } from "@/components/site-header";
+import { MarqueeAlongSvgPath } from "@/components/ui/marquee-along-svg-path";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { mascotStates } from "@/lib/mascot/states";
 
 import { INTEGRATIONS, type IntegrationIcon } from "./(app)/integrations/catalog";
 import { Faq } from "./faq";
@@ -24,6 +23,13 @@ export const metadata = {
 };
 
 const SOURCE = "https://github.com/Vaibhav91one/bountydesk";
+
+/** Every state the splitter writes, in pipeline order. Kept as names, fetched as files. */
+const MASCOTS = [
+  "idle", "ingest", "scanning", "reproducing", "canary-found", "awaiting-approval",
+  "delivered", "celebrating", "denied", "out-of-scope", "infra-hiccup", "greeting",
+  "chilling", "cowboy",
+] as const;
 
 const CHANNEL_ICONS: Record<IntegrationIcon, React.ComponentType<{ className?: string }>> = {
   github: GitHubLight,
@@ -143,7 +149,7 @@ export default function LandingPage() {
 
         {/* Intake channels. The reference puts a logo wall here; ours is the four ways a report
             can arrive, three of which are honestly unavailable. */}
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-20">
+        <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-20">
           <h2 className="text-title text-foreground">Reports arrive from where they arrive</h2>
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {INTEGRATIONS.map((channel) => {
@@ -205,20 +211,46 @@ export default function LandingPage() {
         {/* Agent Bounty, introduced once. The carousel is the existing marquee, which is pure
             CSS: it duplicates the list and translates the track, so there is no client JS and
             nothing to hydrate. Full bleed on purpose, outside the page's max width. */}
-        <section className="flex flex-col items-center gap-12 py-24">
-          {/* w-full because the section centres its children, which otherwise shrink-wraps
-              the track to its own 3584px content width: the edge mask then lands far outside
-              the viewport and the fade never shows. */}
-          <MascotMarquee
-            states={mascotStates()}
-            direction="horizontal"
-            size={128}
-            className="w-full"
-          />
+        <section className="flex flex-col items-center gap-2 py-24">
+          {/* Along a path rather than a straight line. The mascots are <img>, not inlined
+              markup: this marquee repeats every child, and the fourteen animated exports are
+              1.4MB, so three copies each would be four megabytes of HTML. As files they are
+              fetched once, cached, and kept out of the document.
+
+              The path is authored in pixels because CSS offset-path uses the container's own
+              coordinates, not the viewBox. Masked at both ends so items arrive and leave
+              rather than popping. */}
+          <div className="no-scrollbar w-full overflow-hidden [mask-image:linear-gradient(to_right,transparent,black_18%,black_82%,transparent)]">
+            <MarqueeAlongSvgPath
+              path="M 0,290 A 4100,4100 0 0 1 2200,290"
+              viewBox="0 0 2200 280"
+              width={2200}
+              height={280}
+              baseVelocity={2.4}
+              repeat={1}
+              slowdownOnHover
+              draggable
+              grabCursor
+              className="relative left-1/2 w-[2200px] -translate-x-1/2"
+            >
+              {MASCOTS.map((state) => (
+                // next/image cannot optimise SVG without dangerouslyAllowSVG, so it would add
+                // a wrapper and a loader for no gain. These are 30 to 100KB local files.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={state}
+                  src={`/mascot/${state}.svg`}
+                  alt=""
+                  width={96}
+                  height={96}
+                  className="size-28 max-w-none -translate-x-1/2 -translate-y-1/2"
+                />
+              ))}
+            </MarqueeAlongSvgPath>
+          </div>
 
           <div className="flex max-w-2xl flex-col items-center gap-4 px-6 text-center">
-            <h2 className="flex flex-wrap items-center justify-center gap-3 text-4xl font-normal tracking-[-0.02em] text-brand-soft sm:text-5xl">
-              <Detective weight="fill" aria-hidden="true" className="size-9 sm:size-11" />
+            <h2 className="text-4xl font-normal tracking-[-0.02em] text-foreground sm:text-5xl">
               Meet Agent Bounty
             </h2>
             <p className="text-lead text-muted-foreground">
@@ -235,11 +267,26 @@ export default function LandingPage() {
           body="A dynamic run builds in one sandbox with narrow dependency egress and reproduces in a second with none, and only the built artifact crosses between them. A fresh canary is seeded through a trusted fixture, a negative control runs first, and the oracle that decides runs outside the sandbox it is judging."
           visual={
             <>
-              {/* The diagram sets touch-none across a 460px band, which on a phone is a place
-                  a scrolling finger gets stuck. The list says the same thing and scrolls. */}
-              <div className="hidden md:block">
-                <SandboxDiagram targetName="juice-shop-v17.3.0" status={{}} />
+              {/* Seated on a photograph, the way a product shot sits on a backdrop. The image
+                  is decorative and carries an empty alt; the panel above it says everything. */}
+              <div className="relative hidden overflow-hidden rounded-2xl p-6 md:block lg:p-8">
+                <Image
+                  src="/backdrop/panel.webp"
+                  alt=""
+                  fill
+                  sizes="(min-width: 1024px) 50vw, 100vw"
+                  className="object-cover object-center"
+                />
+                <div aria-hidden="true" className="absolute inset-0 bg-background/35" />
+
+                {/* The diagram sets touch-none across a 460px band, which on a phone is a
+                    place a scrolling finger gets stuck. The list below says the same thing
+                    and scrolls, which is why this half starts at md. */}
+                <div className="relative overflow-hidden rounded-xl shadow-[0_24px_48px_rgba(0,0,0,0.55)]">
+                  <SandboxDiagram targetName="juice-shop-v17.3.0" status={{}} />
+                </div>
               </div>
+
               <div className="md:hidden">
                 <SandboxList />
               </div>
@@ -264,9 +311,9 @@ export default function LandingPage() {
 
         {/* The lifecycle, where the reference puts a demo video. There is no video, and this is
             the one thing a screenshot could not show anyway. */}
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-24">
+        <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-24">
           <div className="flex flex-col gap-3">
-            <span className="text-label text-brand-soft uppercase">Lifecycle</span>
+            <span className="font-mono text-body text-brand-soft pb-2">Lifecycle</span>
             <h2 className="text-title text-foreground">Ten states, and five of them are the end</h2>
             <p className="max-w-2xl text-lead text-muted-foreground">
               The report lifecycle is frozen and separate from job execution, so a failed delivery
@@ -283,10 +330,10 @@ export default function LandingPage() {
         </section>
 
         {/* What runs today */}
-        <section id="status" className="mx-auto w-full max-w-6xl scroll-mt-20 px-6 py-24">
+        <section id="status" className="mx-auto w-full max-w-7xl scroll-mt-20 px-6 py-24">
           <div className="flex flex-col gap-8 rounded-xl border border-border/50 bg-card p-8">
             <div className="flex flex-col gap-3">
-              <span className="text-label text-brand-soft uppercase">Status</span>
+              <span className="font-mono text-body text-brand-soft pb-2">Status</span>
               <h2 className="text-title text-foreground">What runs today</h2>
               <p className="max-w-2xl text-lead text-muted-foreground">
                 This product refuses to post a comment nobody read. It would be a poor front door
@@ -332,7 +379,7 @@ export default function LandingPage() {
         {/* FAQ */}
         <section
           id="faq"
-          className="mx-auto grid w-full max-w-6xl scroll-mt-20 gap-10 px-6 py-24 lg:grid-cols-[320px_1fr]"
+          className="mx-auto grid w-full max-w-7xl scroll-mt-20 gap-10 px-6 py-24 lg:grid-cols-[320px_1fr]"
         >
           <div className="flex flex-col gap-3">
             <h2 className="text-title text-foreground">
@@ -372,11 +419,15 @@ function Feature({
   reverse?: boolean;
 }) {
   return (
-    <section className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
-      <div className={`flex min-w-0 flex-col items-start gap-4 ${reverse ? "lg:order-2" : ""}`}>
-        <span className="text-label text-brand-soft uppercase">{eyebrow}</span>
-        <h2 className="text-title text-foreground">{title}</h2>
-        <p className="max-w-[560px] text-lead text-muted-foreground">{body}</p>
+    <section className="mx-auto grid w-full max-w-7xl items-center gap-10 px-6 py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
+      <div className={`flex min-w-0 flex-col items-start ${reverse ? "lg:order-2" : ""}`}>
+        {/* Mono and sentence case, in the accent, with a little air under it so it reads as a
+            label above the heading rather than the first line of it. */}
+        <span className="font-mono text-body text-brand-soft pb-2">{eyebrow}</span>
+        <h2 className="text-3xl leading-[1.15] font-normal tracking-[-0.02em] text-foreground sm:text-4xl">
+          {title}
+        </h2>
+        <p className="mt-7 max-w-[560px] text-lead text-muted-foreground">{body}</p>
       </div>
       <div className={`min-w-0 ${reverse ? "lg:order-1" : ""}`}>{visual}</div>
     </section>

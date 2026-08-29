@@ -32,11 +32,11 @@ const COLUMNS: { title: string; links: { label: string; href: string; out?: bool
 export function SiteFooter() {
   return (
     <footer className="mt-24 border-t border-border/50">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-6 py-14">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-6 py-14">
         <div className="grid gap-10 sm:grid-cols-3">
           {COLUMNS.map((column) => (
             <div key={column.title} className="flex flex-col gap-3">
-              <h2 className="text-label text-muted-foreground uppercase">{column.title}</h2>
+              <h2 className="text-meta text-foreground">{column.title}</h2>
               <ul className="flex flex-col gap-2.5">
                 {column.links.map((link) => (
                   <li key={link.label}>
