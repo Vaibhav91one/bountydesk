@@ -184,6 +184,9 @@ function RowBody({
   return row.onSelect ? (
     <button
       type="button"
+      // Named so a caller can tell a row apart from the chips and the search field above it.
+      // The landing page's previews use it to swallow the click without losing either.
+      data-row=""
       onClick={row.onSelect}
       style={{ gridTemplateColumns: template }}
       className={cn(

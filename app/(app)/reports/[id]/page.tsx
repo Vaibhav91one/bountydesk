@@ -93,9 +93,8 @@ const EVENT_PHASE: Record<string, string> = {
  * Which mascot stands for a lifecycle row.
  *
  * Keyed to the row and to what the record says happened in it, so a reproduction that never
- * ran and one that is running do not draw the same picture. Two rows borrow a neighbouring
- * state's artwork because no mascot exists for them yet: drafting a verdict uses scanning, and
- * a signed approval uses canary-found.
+ * ran and one that is running do not draw the same picture, and no two rows in the list carry
+ * the same one. Drafting a verdict borrows scanning, because no mascot exists for it yet.
  */
 function stepMascot(
   key: string,
@@ -104,7 +103,9 @@ function stepMascot(
 ): Parameters<typeof mascotState>[0] {
   if (key === "intake") return "ingest";
   if (key === "reproduction") {
-    return state === "current" ? "reproducing" : state === "skipped" ? "infra-hiccup" : "scanning";
+    // idle when it has not been reached: scanning belongs to the verdict row below, and two
+    // rows carrying the same picture is what made this list read as one repeated step.
+    return state === "current" ? "reproducing" : state === "skipped" ? "infra-hiccup" : "idle";
   }
   if (key === "verdict") return "scanning";
   if (key === "approval") {

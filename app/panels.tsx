@@ -2,9 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Prohibit, Signature } from "@phosphor-icons/react/ssr";
 
-import { PhaseBadge, PhaseDot, PhaseSpinner } from "@/components/phase-dot";
+import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { mascotState } from "@/lib/mascot/states";
 
@@ -217,7 +216,10 @@ export function SandboxList() {
  */
 export function Framed({ src, children }: { src: string; children: React.ReactNode }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl md:p-6 lg:p-8">
+    // One height for every frame on the page, so the three sections keep the same rhythm
+    // however tall the thing inside them happens to be, and the content sits in the middle
+    // rather than at the top of a box it does not fill.
+    <div className="relative flex items-center justify-center overflow-hidden rounded-2xl md:min-h-[524px] md:p-8">
       <Image
         src={src}
         alt=""
@@ -226,155 +228,13 @@ export function Framed({ src, children }: { src: string; children: React.ReactNo
         className="hidden object-cover object-center md:block"
       />
       <div aria-hidden="true" className="absolute inset-0 hidden bg-background/40 md:block" />
-      <div className="relative overflow-hidden rounded-xl md:shadow-[0_24px_48px_rgba(0,0,0,0.55)]">
+      <div className="relative w-full overflow-hidden rounded-xl md:shadow-[0_24px_48px_rgba(0,0,0,0.55)]">
         {children}
       </div>
     </div>
   );
 }
 
-const QUEUE: {
-  column: string;
-  phase: string;
-  title: string;
-  meta: string;
-  running?: boolean;
-  mascot?: string;
-  needsYou?: boolean;
-}[] = [
-  {
-    column: "Reproducing",
-    phase: "reproducing",
-    title: "SQL injection in /rest/products/search",
-    meta: "#175152 · juice-shop-v17.3.0",
-    running: true,
-    mascot: "reproducing",
-  },
-  {
-    column: "Awaiting approval",
-    phase: "awaiting-approval",
-    title: "Auth bypass via SQL injection on login",
-    meta: "#175156 · analysis only",
-    needsYou: true,
-    mascot: "awaiting-approval",
-  },
-  {
-    column: "Delivered",
-    phase: "delivered",
-    title: "Directory traversal in the file upload handler",
-    meta: "#175154 · posted to the issue",
-    mascot: "celebrating",
-  },
-];
 
-/**
- * The review queue as it actually moves: a card mid-run spins, the one waiting on a person
- * says so, and Agent Bounty is doing the thing each column names.
- *
- * The whole panel is a link. A board that looked live and did nothing when pressed would be
- * the one dishonest thing on the page, so pressing it goes where the real board lives.
- */
-export function QueuePanel() {
-  return (
-    <Link
-      href="/login"
-      className="flex min-w-0 flex-col gap-2.5 rounded-xl border border-border/50 bg-card p-4 transition-colors hover:border-border"
-    >
-      {QUEUE.map((card, index) => (
-        <div
-          key={card.title}
-          className="flex min-w-0 items-center gap-3 rounded-lg border border-border/50 bg-background p-3"
-        >
-          {card.mascot ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`/mascot/${card.mascot}.svg`}
-              alt=""
-              width={44}
-              height={44}
-              style={{ animationDelay: `${index * 420}ms`, ["--float-y" as string]: "5px" }}
-              className="animate-mascot-float size-11 shrink-0 motion-reduce:animate-none"
-            />
-          ) : null}
 
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="truncate text-body font-medium text-foreground">{card.title}</span>
-            <span className="flex min-w-0 items-center gap-2">
-              {card.running ? (
-                <PhaseSpinner phase={card.phase} />
-              ) : (
-                <PhaseDot phase={card.phase} />
-              )}
-              <span className="truncate text-meta text-muted-foreground">
-                {card.column} · {card.meta}
-              </span>
-            </span>
-          </span>
 
-          {card.needsYou ? (
-            <Badge variant="outline" className="shrink-0 text-phase-approval">
-              <Signature weight="fill" /> You
-            </Badge>
-          ) : null}
-        </div>
-      ))}
-    </Link>
-  );
-}
-
-const ROWS: { title: string; source: string; phase: string; state: string; when: string }[] = [
-  {
-    title: "Auth bypass via SQL injection on login",
-    source: "#175156",
-    phase: "awaiting-approval",
-    state: "Awaiting approval",
-    when: "14:23",
-  },
-  {
-    title: "Directory traversal in the file upload handler",
-    source: "#175154",
-    phase: "delivered",
-    state: "Delivered",
-    when: "14:23",
-  },
-  {
-    title: "Weak JWT signing key on the login endpoint",
-    source: "#175153",
-    phase: "analysis-only",
-    state: "Analysis only",
-    when: "14:23",
-  },
-  {
-    title: "Missing security headers on the marketing site",
-    source: "#175155",
-    phase: "closed",
-    state: "Out of scope",
-    when: "14:23",
-  },
-];
-
-/** Every report, closed ones included, the way the index lists them. */
-export function ReportsPanel() {
-  return (
-    <Link
-      href="/login"
-      className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-card transition-colors hover:border-border"
-    >
-      {ROWS.map((row) => (
-        <span
-          key={row.source}
-          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/50 px-4 py-3 last:border-b-0"
-        >
-          <PhaseDot phase={row.phase} />
-          <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
-            {row.title}
-          </span>
-          <PhaseBadge phase={row.phase} className="shrink-0">
-            {row.state}
-          </PhaseBadge>
-          <span className="shrink-0 font-mono text-meta text-muted-foreground">{row.when}</span>
-        </span>
-      ))}
-    </Link>
-  );
-}

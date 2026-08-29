@@ -69,14 +69,14 @@ export function mascotState(key: (typeof MASCOT_STATES)[number]): MascotState {
  * a report's state, and two tables would be two chances for the same report to be doing
  * different things depending on which page you were looking at.
  *
- * ANALYSIS_ONLY gets infra-hiccup because that is what it means: reproduction could not run,
- * so a human decides. Cancelled and expired get idle, because nothing happened to them and
- * nothing is going to.
+ * ANALYSIS_ONLY gets scanning: the report was read and weighed, which is the part that did
+ * happen, and infra-hiccup is left for the lifecycle row where reproduction was skipped.
+ * Cancelled and expired get idle, because nothing happened to them and nothing is going to.
  */
 export const MASCOT_FOR_STATE: Record<string, (typeof MASCOT_STATES)[number]> = {
   TRIAGING: "ingest",
   REPRODUCING: "reproducing",
-  ANALYSIS_ONLY: "infra-hiccup",
+  ANALYSIS_ONLY: "scanning",
   AWAITING_APPROVAL: "awaiting-approval",
   DELIVERING: "delivered",
   DELIVERED: "celebrating",

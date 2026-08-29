@@ -4,22 +4,24 @@ import { Folder, Sparkle } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { RollingIcon } from "@/components/rolling-icon";
+import { MASCOT_ON_CARD } from "@/components/queue-board";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { MarqueeAlongSvgPath } from "@/components/ui/marquee-along-svg-path";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MASCOT_FOR_STATE, mascotState } from "@/lib/mascot/states";
 
-import { INTEGRATIONS, type IntegrationIcon } from "./(app)/integrations/catalog";
-import { Faq } from "./faq";
 import {
-  ApprovalPanel,
-  Framed,
-  QueuePanel,
-  ReportsPanel,
-  SandboxList,
-} from "./panels";
+  INTEGRATIONS,
+  type IntegrationIcon,
+} from "./(app)/integrations/catalog";
+import { Faq } from "./faq";
+import { Inert } from "./queue-demo";
+import { QueuePreview } from "./queue-preview";
+import { ReportsTable } from "./(app)/reports/reports-table";
+import { ApprovalPanel, Framed, SandboxList } from "./panels";
 
 export const metadata = {
   title: "BountyDesk",
@@ -29,14 +31,251 @@ export const metadata = {
 
 const SOURCE = "https://github.com/Vaibhav91one/bountydesk";
 
+/**
+ * Example rows for the two real components below.
+ *
+ * The interface is the product's own, not a drawing of it, so it needs the shape the product
+ * feeds it. These are the seeded demo reports, and nothing here claims a canary was observed:
+ * the one that ran is reproducing, and the rest carry the outcomes the enum allows.
+ */
+const AT = new Date("2026-08-29T14:23:00Z");
+
+/**
+ * The width the previews lay their interface out at before it is scaled down.
+ *
+ * Narrower than a real desktop, because the frame is taller than it is wide and a 1280px
+ * layout scaled to fit that width would leave most of the height empty.
+ */
+const DESIGN_WIDTH = 700;
+
+/** The height every preview fills, which is the frame's content box at desktop. */
+const PREVIEW_HEIGHT = 460;
+
+const QUEUE_COLUMNS = [
+  {
+    key: "triaging",
+    label: "Triaging",
+    total: 2,
+    cards: [
+      {
+        id: "t1",
+        title: "Stored XSS in the product review field",
+        sourceLabel: "#175151",
+        targetName: "juice-shop-v17.3.0",
+        state: "TRIAGING",
+        outcome: null,
+        eventCount: 1,
+        updatedAt: AT,
+        awaitingVerdictId: null,
+      },
+      {
+        id: "t2",
+        title: "Reflected XSS in the search results page",
+        sourceLabel: "#175157",
+        targetName: "juice-shop-v17.3.0",
+        state: "TRIAGING",
+        outcome: null,
+        eventCount: 1,
+        updatedAt: AT,
+        awaitingVerdictId: null,
+      },
+    ],
+  },
+  {
+    key: "reproducing",
+    label: "Reproducing",
+    total: 2,
+    cards: [
+      {
+        id: "r1",
+        title: "SQL injection in /rest/products/search",
+        sourceLabel: "#175152",
+        targetName: "juice-shop-v17.3.0",
+        state: "REPRODUCING",
+        outcome: null,
+        eventCount: 2,
+        updatedAt: AT,
+        awaitingVerdictId: null,
+      },
+      {
+        id: "r2c",
+        title: "Unrestricted file type on the complaint upload",
+        sourceLabel: "#175158",
+        targetName: "juice-shop-v17.3.0",
+        state: "REPRODUCING",
+        outcome: null,
+        eventCount: 2,
+        updatedAt: AT,
+        awaitingVerdictId: null,
+      },
+    ],
+  },
+  {
+    key: "awaiting-approval",
+    label: "Awaiting approval",
+    total: 2,
+    cards: [
+      {
+        id: "a1",
+        title: "Auth bypass via SQL injection on login",
+        sourceLabel: "#175156",
+        targetName: "juice-shop-v17.3.0",
+        state: "AWAITING_APPROVAL",
+        outcome: "ANALYSIS_ONLY",
+        eventCount: 3,
+        updatedAt: AT,
+        awaitingVerdictId: "v1",
+      },
+      {
+        id: "a2",
+        title: "IDOR on the basket endpoint",
+        sourceLabel: "#175159",
+        targetName: "juice-shop-v17.3.0",
+        state: "AWAITING_APPROVAL",
+        outcome: "REPRODUCED",
+        eventCount: 4,
+        updatedAt: AT,
+        awaitingVerdictId: "v2",
+      },
+    ],
+  },
+] as unknown as Parameters<typeof QueuePreview>[0]["columns"];
+
+/** The one card that moves, shown in whichever of the first two columns currently holds it. */
+const TRAVELLER = {
+  id: "moving",
+  title: "Weak JWT signing key on the login endpoint",
+  sourceLabel: "#175153",
+  targetName: "juice-shop-v17.3.0",
+  outcome: null,
+  eventCount: 2,
+  updatedAt: AT,
+  awaitingVerdictId: null,
+} as const;
+
+const REPORT_ROWS = [
+  {
+    id: "r1",
+    title: "Auth bypass via SQL injection on login",
+    sourceLabel: "#175156",
+    targetName: "juice-shop-v17.3.0",
+    state: "AWAITING_APPROVAL" as const,
+    outcome: "ANALYSIS_ONLY" as const,
+    eventCount: 3,
+    awaitingVerdictId: "v1",
+    origin: "Vaibhav91one/juice-shop",
+    phase: "awaiting-approval",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r2",
+    title: "Directory traversal in the file upload handler",
+    sourceLabel: "#175154",
+    targetName: "juice-shop-v17.3.0",
+    state: "DELIVERED" as const,
+    outcome: "REPRODUCED" as const,
+    eventCount: 3,
+    awaitingVerdictId: null,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "delivered",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r3",
+    title: "Weak JWT signing key on the login endpoint",
+    sourceLabel: "#175153",
+    targetName: null,
+    state: "ANALYSIS_ONLY" as const,
+    outcome: "ANALYSIS_ONLY" as const,
+    eventCount: 3,
+    awaitingVerdictId: null,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "analysis-only",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r4",
+    title: "Missing security headers on the marketing site",
+    sourceLabel: "#175155",
+    targetName: "juice-shop-v17.3.0",
+    state: "OUT_OF_SCOPE" as const,
+    outcome: null,
+    eventCount: 1,
+    awaitingVerdictId: null,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "closed",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r5",
+    title: "IDOR on the basket endpoint",
+    sourceLabel: "#175159",
+    targetName: "juice-shop-v17.3.0",
+    state: "AWAITING_APPROVAL" as const,
+    outcome: "REPRODUCED" as const,
+    eventCount: 4,
+    awaitingVerdictId: "v2",
+    origin: "Vaibhav91one/juice-shop",
+    phase: "awaiting-approval",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r6",
+    title: "Unrestricted file type on the complaint upload",
+    sourceLabel: "#175158",
+    targetName: "juice-shop-v17.3.0",
+    state: "REPRODUCING" as const,
+    outcome: null,
+    eventCount: 2,
+    awaitingVerdictId: null,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "reproducing",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r7",
+    title: "Reflected XSS in the search results page",
+    sourceLabel: "#175157",
+    targetName: "juice-shop-v17.3.0",
+    state: "TRIAGING" as const,
+    outcome: null,
+    eventCount: 1,
+    awaitingVerdictId: null,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "triaging",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+];
+
 /** Every state the splitter writes, in pipeline order. Kept as names, fetched as files. */
 const MASCOTS = [
-  "idle", "ingest", "scanning", "reproducing", "canary-found", "awaiting-approval",
-  "delivered", "celebrating", "denied", "out-of-scope", "infra-hiccup", "greeting",
-  "chilling", "cowboy",
+  "idle",
+  "ingest",
+  "scanning",
+  "reproducing",
+  "canary-found",
+  "awaiting-approval",
+  "delivered",
+  "celebrating",
+  "denied",
+  "out-of-scope",
+  "infra-hiccup",
+  "greeting",
+  "chilling",
+  "cowboy",
 ] as const;
 
-const CHANNEL_ICONS: Record<IntegrationIcon, React.ComponentType<{ className?: string }>> = {
+const CHANNEL_ICONS: Record<
+  IntegrationIcon,
+  React.ComponentType<{ className?: string }>
+> = {
   github: GitHubLight,
   gmail: Gmail,
   onedrive: OneDrive,
@@ -55,6 +294,32 @@ const CHANNEL_ICONS: Record<IntegrationIcon, React.ComponentType<{ className?: s
  * contradicting its own argument. The labels are the product working.
  */
 export default function LandingPage() {
+  // One mascot per state and one drift index per card, both built the way the board builds
+  // them, so the preview and the real thing stagger identically. The traveller is counted
+  // because it carries a mascot too.
+  const queueStates = [
+    ...new Set([
+      ...QUEUE_COLUMNS.flatMap((column) =>
+        column.cards.map((card) => card.state),
+      ),
+      "TRIAGING",
+      "REPRODUCING",
+    ]),
+  ];
+  const queueMascots = new Map(
+    queueStates
+      .filter((state) => MASCOT_ON_CARD.has(state))
+      .map((state) => [state, mascotState(MASCOT_FOR_STATE[state])] as const),
+  );
+
+  const queueDrift = new Map<string, number>([["moving", 0]]);
+  for (const column of QUEUE_COLUMNS) {
+    for (const card of column.cards) {
+      if (queueMascots.has(card.state))
+        queueDrift.set(card.id, queueDrift.size);
+    }
+  }
+
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <SiteHeader />
@@ -75,7 +340,8 @@ export default function LandingPage() {
           </h1>
 
           <p className="max-w-[760px] text-lead text-muted-foreground">
-            Every report authenticated and scope-checked. No verdict ships until you sign it.
+            Every report authenticated and scope-checked. No verdict ships until
+            you sign it.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -85,16 +351,20 @@ export default function LandingPage() {
               render={<Link href="/login" />}
               className="rounded-full px-6"
             >
-              <RollingIcon icon={Sparkle} weight="fill" className="size-4" /> Get started
+              <RollingIcon icon={Sparkle} weight="fill" className="size-4" />{" "}
+              Get started
             </Button>
             <Button
               size="lg"
               variant="outline"
               nativeButton={false}
-              render={<a href={SOURCE} target="_blank" rel="noreferrer noopener" />}
+              render={
+                <a href={SOURCE} target="_blank" rel="noreferrer noopener" />
+              }
               className="rounded-full px-6"
             >
-              <RollingIcon icon={GitHubLight} className="size-4" /> Star on GitHub
+              <RollingIcon icon={GitHubLight} className="size-4" /> Star on
+              GitHub
             </Button>
           </div>
         </section>
@@ -102,7 +372,10 @@ export default function LandingPage() {
         {/* The product on a backdrop, the way the reference seats its screenshot. The image is
             decorative, so it carries an empty alt and the panel above it says everything. */}
         <div className="relative isolate">
-          <div aria-hidden="true" className="absolute inset-x-0 -top-44 bottom-0 overflow-hidden">
+          <div
+            aria-hidden="true"
+            className="absolute inset-x-0 -top-44 bottom-0 overflow-hidden"
+          >
             <Image
               src="/backdrop/hero.webp"
               alt=""
@@ -124,7 +397,9 @@ export default function LandingPage() {
         {/* Intake channels. The reference puts a logo wall here; ours is the four ways a report
             can arrive, three of which are honestly unavailable. */}
         <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-20">
-          <h2 className="text-title text-foreground">Reports arrive from where they arrive</h2>
+          <h2 className="text-title text-foreground">
+            Reports arrive from where they arrive
+          </h2>
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {INTEGRATIONS.map((channel) => {
               const Icon = CHANNEL_ICONS[channel.icon];
@@ -140,10 +415,14 @@ export default function LandingPage() {
                     <span className="flex size-10 items-center justify-center rounded-lg border border-border/50 bg-background">
                       <Icon className="size-5" />
                     </span>
-                    {channel.built ? <Badge variant="success">Live</Badge> : null}
+                    {channel.built ? (
+                      <Badge variant="success">Live</Badge>
+                    ) : null}
                   </span>
 
-                  <span className="text-body font-medium text-foreground">{channel.name}</span>
+                  <span className="text-body font-medium text-foreground">
+                    {channel.name}
+                  </span>
 
                   {channel.built ? (
                     <Button
@@ -153,7 +432,8 @@ export default function LandingPage() {
                       render={<Link href="/login" />}
                       className="w-full justify-center"
                     >
-                      <RollingIcon icon={GitHubLight} className="size-4" /> Connect
+                      <RollingIcon icon={GitHubLight} className="size-4" />{" "}
+                      Connect
                     </Button>
                   ) : (
                     <Button
@@ -228,9 +508,10 @@ export default function LandingPage() {
               Meet Agent Bounty
             </h2>
             <p className="text-lead text-muted-foreground">
-              It reads every report, checks it against the target the server pins, and drafts the
-              reply. What it never does is decide: the verdict comes from the oracle, and the
-              words that go out are the ones you signed.
+              It reads every report, checks it against the target the server
+              pins, and drafts the reply. What it never does is decide: the
+              verdict comes from the oracle, and the words that go out are the
+              ones you signed.
             </p>
           </div>
         </section>
@@ -264,7 +545,22 @@ export default function LandingPage() {
           body="Six columns, and a card that is mid-run says so: the phase spins rather than sitting still, and Agent Bounty is doing the thing the column names. The one waiting on a person is marked, and only when there is a call a reviewer can actually answer."
           visual={
             <Framed src="/backdrop/queue.webp">
-              <QueuePanel />
+              <Preview height={630}>
+                <Inert>
+                  <div className="h-full rounded-xl border border-border/50 bg-card p-4">
+                    <QueuePreview
+                      columns={QUEUE_COLUMNS}
+                      traveller={
+                        TRAVELLER as unknown as Parameters<
+                          typeof QueuePreview
+                        >[0]["traveller"]
+                      }
+                      mascots={queueMascots}
+                      drift={queueDrift}
+                    />
+                  </div>
+                </Inert>
+              </Preview>
             </Framed>
           }
         />
@@ -275,7 +571,11 @@ export default function LandingPage() {
           body="The board hides closed work on purpose, so the index is the list that hides nothing. Search across title, issue and repository, filter to what is open or what is waiting on you, and open any of them straight into its case file."
           visual={
             <Framed src="/backdrop/reports.webp">
-              <ReportsPanel />
+              <Preview height={630}>
+                <Inert>
+                  <ReportsTable rows={REPORT_ROWS} />
+                </Inert>
+              </Preview>
             </Framed>
           }
         />
@@ -304,6 +604,52 @@ export default function LandingPage() {
 }
 
 /**
+ * A desktop interface shown at the size a half-column allows.
+ *
+ * Scaled rather than rebuilt: the two components inside are the ones the console renders, so a
+ * smaller copy of them cannot drift from the product the way a drawing would. Laid out at
+ * desktop width and then transformed, which keeps the type and spacing in their real
+ * proportion instead of reflowing into something the product never looks like.
+ */
+function Preview({
+  height,
+  children,
+}: {
+  /** The interface's own height at DESIGN_WIDTH, which sets the scale. */
+  height: number;
+  children: React.ReactNode;
+}) {
+  return (
+    // An opaque ground, so the interface reads as a window sitting on the photograph rather
+    // than a translucent overlay: the table paints its own card, but the search field and the
+    // filter chips are transparent and the picture came through them.
+    <div
+      className="flex w-full items-center justify-center overflow-hidden rounded-xl bg-background"
+      style={{ height: PREVIEW_HEIGHT }}
+    >
+      {/* Laid out at desktop width and then scaled, which keeps the type and spacing in their
+          real proportion instead of reflowing into something the product never looks like.
+
+          The box is a fixed size, not the content's. A transform does not change layout, so
+          the queue's own height still grows and shrinks by a hundred pixels as the card
+          changes column, and letting that through would resize the photograph behind it on a
+          loop. Scaled by height because that is the dimension the frame fixes; DESIGN_WIDTH is
+          then chosen so the width lands on the frame's at desktop. */}
+      <div
+        className="shrink-0"
+        style={{
+          width: DESIGN_WIDTH,
+          height,
+          transform: `scale(${PREVIEW_HEIGHT / height})`,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
  * One feature: prose on one side, an illustration on the other, alternating down the page.
  *
  * The visual comes after the prose in the DOM whichever side it lands on, so the reading order
@@ -324,14 +670,20 @@ function Feature({
 }) {
   return (
     <section className="mx-auto grid w-full max-w-7xl items-center gap-10 px-6 py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
-      <div className={`flex min-w-0 flex-col items-start ${reverse ? "lg:order-2" : ""}`}>
+      <div
+        className={`flex min-w-0 flex-col items-start ${reverse ? "lg:order-2" : ""}`}
+      >
         {/* Mono and sentence case, in the accent, with a little air under it so it reads as a
             label above the heading rather than the first line of it. */}
-        <span className="font-mono text-body text-brand-soft pb-2">{eyebrow}</span>
+        <span className="font-mono text-body text-brand-soft pb-2">
+          {eyebrow}
+        </span>
         <h2 className="text-3xl leading-[1.15] font-normal tracking-[-0.02em] text-foreground sm:text-4xl">
           {title}
         </h2>
-        <p className="mt-7 max-w-[560px] text-lead text-muted-foreground">{body}</p>
+        <p className="mt-7 max-w-[560px] text-lead text-muted-foreground">
+          {body}
+        </p>
       </div>
       <div className={`min-w-0 ${reverse ? "lg:order-1" : ""}`}>{visual}</div>
     </section>
