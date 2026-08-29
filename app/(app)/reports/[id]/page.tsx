@@ -1,8 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowSquareOut } from "@phosphor-icons/react/ssr";
+import {
+  ArrowLeft,
+  ArrowSquareOut,
+  Clock,
+  GitBranch,
+  ListChecks,
+  Signature,
+  Target,
+  Tray,
+} from "@phosphor-icons/react/ssr";
 
 import { PhaseDot } from "@/components/phase-dot";
+import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +65,34 @@ function Panel({
       </header>
       {children}
     </section>
+  );
+}
+
+/**
+ * One fact about the report: an icon, a label, and the value.
+ *
+ * The value is always something the database holds. Where there is nothing, the tile says so
+ * in words rather than showing an empty slot, which reads as a value that failed to load.
+ */
+function Metric({
+  icon,
+  label,
+  children,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-card text-muted-foreground">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="text-label text-muted-foreground uppercase">{label}</span>
+        <span className="truncate text-body text-foreground">{children}</span>
+      </span>
+    </div>
   );
 }
 
@@ -301,6 +339,39 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       </header>
 
       <div className="flex flex-col gap-4 p-8">
+        {/* The overview: what this report is on the left, the shape reproduction will take on
+            the right. The diagram is architecture, not a run, and says so on the canvas. */}
+        <div className="grid items-start gap-8 lg:grid-cols-2">
+          <div className="grid gap-6 sm:grid-cols-2">
+            <Metric icon={<Tray className="size-5" />} label="Status">
+              {STATE_LABEL[file.state] ?? file.state}
+            </Metric>
+            <Metric icon={<Target className="size-5" />} label="Bound target">
+              {file.target?.name ?? "None bound"}
+            </Metric>
+            <Metric icon={<GitBranch className="size-5" />} label="Intake">
+              {file.repositoryFullName ?? file.channel}
+            </Metric>
+            <Metric icon={<ListChecks className="size-5" />} label="Recorded events">
+              {file.events.length === 0
+                ? "None yet"
+                : `${file.events.length} ${file.events.length === 1 ? "event" : "events"}`}
+            </Metric>
+            <Metric icon={<Signature className="size-5" />} label="Verdict">
+              {file.verdict
+                ? `${OUTCOME[file.verdict.outcome] ?? file.verdict.outcome} · revision ${file.verdict.revision}`
+                : "Not drafted"}
+            </Metric>
+            <Metric icon={<Clock className="size-5" />} label="Last change">
+              <time dateTime={file.updatedAt.toISOString()}>
+                {file.updatedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
+              </time>
+            </Metric>
+          </div>
+
+          <SandboxDiagram targetName={file.target?.name ?? null} />
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-3">
           <Panel
             title="Reporter input"
@@ -372,27 +443,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           </ol>
         </Panel>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          {/* Both of these panels are empty by design, not by accident. Reproduction is not
-              built: there is no sandbox, no canary and no artifact store, so there is nothing
-              to render and nothing that may be implied. They keep their place so the shape is
-              right when the sandbox lands. */}
-          <Panel title="Sandbox and compute" aside={<Badge variant="outline">Not run</Badge>}>
-            <p className="text-body text-muted-foreground">
-              No sandbox was provisioned for this report. Reproduction is designed and not
-              built, so there is no target container, no egress policy and no resource use to
-              show.
-            </p>
-            <div className="flex flex-col">
-              <Row label="Bound target">{file.target?.name ?? "none bound"}</Row>
-              <Row label="Pinned image">
-                <span className="font-mono text-meta">
-                  {file.target?.imageDigest ? `${file.target.imageDigest.slice(0, 23)}…` : "—"}
-                </span>
-              </Row>
-            </div>
-          </Panel>
-
+        <div>
+          {/* Reproduction is not built, so there is no canary, no negative control and no
+              oracle result to weigh. The panel keeps its place and says that, rather than
+              leaving a gap that reads like a value which failed to load. The topology it used
+              to describe is the diagram at the top of the page. */}
           <Panel title="Evidence and analysis" aside={<Badge variant="outline">Not run</Badge>}>
             <p className="text-body text-muted-foreground">
               No canary was seeded, no negative control ran and no oracle was consulted, so
