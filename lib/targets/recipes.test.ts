@@ -22,15 +22,20 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns exactly the two frozen scenarios", () => {
+test("juice-shop-v17.3.0 returns exactly the one recipe whose oracle is fully provable today", () => {
+  // juice-shop-login-bypass is intentionally withheld: its oracleCheck can only inspect the
+  // login response itself, and hasAuthToken returns true for any minted token, including an
+  // unrelated login that never touched the injection. The frozen spec's real oracle needs a
+  // second, token-authenticated GET /api/Users call the current (response, canary) -> boolean
+  // signature can't express. See the comment on getRecipesForTarget in recipes.ts.
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
-    ["juice-shop-sqli-search", "juice-shop-login-bypass"],
+    ["juice-shop-sqli-search"],
   );
 });
 
-test("the registration fixture matches decisions.md Q18 exactly, for both scenarios", () => {
+test("the registration fixture matches decisions.md Q18 exactly", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   for (const recipe of recipes) {
     assert.deepEqual(recipe.fixture.request, {
@@ -61,22 +66,6 @@ test("sqli-search negative control and exploit match decisions.md Q18 exactly", 
     path:
       "/rest/products/search?q=qwert'))%20UNION%20SELECT%20id%2Cemail%2Cpassword%2C" +
       "'4'%2C'5'%2C'6'%2C'7'%2C'8'%2C'9'%20FROM%20Users--",
-  });
-});
-
-test("login-bypass negative control and exploit match decisions.md Q18 exactly", () => {
-  const [, login] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
-
-  assert.deepEqual(login.negativeControl, {
-    method: "POST",
-    path: "/rest/user/login",
-    body: { email: "{{canary}}", password: "definitely-the-wrong-password" },
-  });
-
-  assert.deepEqual(login.exploit, {
-    method: "POST",
-    path: "/rest/user/login",
-    body: { email: "' OR 1=1--", password: "x" },
   });
 });
 
@@ -122,17 +111,6 @@ test("sqli-search oracle: a non-JSON body does not throw and is false", async ()
   assert.equal(await sqli.oracleCheck({ status: 500, body: "<html>not json</html>" }, "canary"), false);
 });
 
-test("login-bypass oracle: a minted token is true", async () => {
-  const [, login] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
-  const body = JSON.stringify({ authentication: { token: "a.jwt.token", bid: 1, umail: "admin@juice-sh.op" } });
-
-  assert.equal(await login.oracleCheck({ status: 200, body }, "canary-abc123@bountydesk.test"), true);
-});
-
-test("login-bypass oracle: the negative control's 401 plain-text body is false", async () => {
-  const [, login] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
-  assert.equal(
-    await login.oracleCheck({ status: 401, body: "Invalid email or password." }, "canary-abc123@bountydesk.test"),
-    false,
-  );
-});
+// login-bypass's own oracle behavior (hasAuthToken) has no coverage here on purpose: the recipe
+// is no longer exported by getRecipesForTarget (see that test above), and hasAuthToken is a
+// module-private function with no other caller to reach it through.

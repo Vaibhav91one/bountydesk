@@ -6,10 +6,12 @@ import type {
 } from "@/lib/reproduction/types";
 
 /**
- * The two frozen reproduction scenarios from docs/decisions.md Q18, both against the one pinned
- * Juice Shop target. Recipes are code because `oracleCheck` cannot live in a jsonb column (see
- * the type doc in lib/reproduction/types.ts); everything else here is read from the bound
- * TargetProfile's `config`, never hardcoded separately from it.
+ * Reproduction scenarios from docs/decisions.md Q18, against the one pinned Juice Shop target.
+ * Recipes are code because `oracleCheck` cannot live in a jsonb column (see the type doc in
+ * lib/reproduction/types.ts). Only the target-specific values -- base URL, search path, canary
+ * registration path -- come from the bound TargetProfile's `config`; the frozen scenario inputs
+ * (exploit payloads, fixture password, expected status codes) are constants in this module,
+ * matching the spec Q18 froze rather than anything a report or agent could supply.
  */
 
 /** Substituted by the orchestrator with a fresh, unpredictable value before the request is
@@ -148,6 +150,10 @@ function hasAuthToken(response: ReproductionProbeResult): boolean {
   return typeof token === "string" && token.length > 0;
 }
 
+// Kept as a record of the intended scenario; not called from getRecipesForTarget (see the
+// comment there) until the oracle-check contract can express the required follow-up
+// authenticated request.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
   return {
     id: "juice-shop-login-bypass",
@@ -170,5 +176,12 @@ function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
   if (target.name !== "juice-shop-v17.3.0") return [];
   if (!isJuiceShopConfig(target.config)) return [];
-  return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config)];
+  // loginBypassRecipe is defined above but withheld here: its oracleCheck signature is
+  // (response, canary) -> boolean, which can only inspect the login response itself. The frozen
+  // spec's actual oracle for this scenario needs a second, token-authenticated GET /api/Users
+  // call to check for the canary -- without it, hasAuthToken returns true for any successfully
+  // minted token, including an unrelated login that never touched the injection at all. That
+  // would let this scenario report REPRODUCED without ever proving the exploit. Return this
+  // recipe once the oracle-check contract can express a follow-up authenticated request.
+  return [sqliSearchRecipe(target.config)];
 };
