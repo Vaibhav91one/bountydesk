@@ -225,11 +225,25 @@ async function handleAwaitingApproval(
 
   // Today's tool schema and turn message only ever hand back {capability}; a full draft is
   // what a future, investigating agent will send instead once the driver rewrite starts asking
-  // for one. Trying the fuller shape first, and falling back to the capability-only shape, lets
-  // both keep working from the same pending-call parsing without the poller having to guess
-  // which one a given deployment's agent manifest currently produces.
-  const fullDraft = publishVerdictInputSchema.safeParse(parseJson(call.argumentsJson));
-  if (fullDraft.success) {
+  // for one. A call is treated as a draft attempt the moment its arguments carry any
+  // draft-specific key, whether or not the rest of the shape is valid: falling through to the
+  // capability-only path for a malformed draft would silently approve whatever verdict already
+  // exists instead of the (possibly different) content the caller actually tried to submit.
+  const parsedArguments = parseJson(call.argumentsJson);
+  const looksLikeDraftAttempt =
+    typeof parsedArguments === "object" &&
+    parsedArguments !== null &&
+    !Array.isArray(parsedArguments) &&
+    ["outcome", "summary", "findings"].some((key) => key in (parsedArguments as Record<string, unknown>));
+
+  if (looksLikeDraftAttempt) {
+    const fullDraft = publishVerdictInputSchema.safeParse(parsedArguments);
+    if (!fullDraft.success) {
+      return refuseUnresolvablePending(
+        lease,
+        `publish_verdict arguments look like a drafted verdict but failed validation: ${fullDraft.error.issues.map((issue) => issue.message).join("; ")}`,
+      );
+    }
     if (fullDraft.data.capability !== lease.capabilityToken) {
       return refuseUnresolvablePending(
         lease,

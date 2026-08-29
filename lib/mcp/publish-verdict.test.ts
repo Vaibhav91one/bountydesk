@@ -315,7 +315,11 @@ test("an unknown capability is refused without touching any row", async () => {
 let draftSeq = 0;
 
 async function seedDraftableReport(
-  opts: { targetProfileId?: string | null; connectedRepositoryId?: string | null } = {},
+  opts: {
+    targetProfileId?: string | null;
+    connectedRepositoryId?: string | null;
+    state?: "TRIAGING" | "REPRODUCING" | "ANALYSIS_ONLY" | "CANCELLED" | "DELIVERED" | "DELIVERING";
+  } = {},
 ) {
   draftSeq += 1;
   const n = draftSeq;
@@ -327,7 +331,7 @@ async function seedDraftableReport(
       sourceRef: `github:2:issue:${n}`,
       title: `draftable report ${n}`,
       body: "body",
-      state: "TRIAGING",
+      state: opts.state ?? "TRIAGING",
       targetProfileId: opts.targetProfileId ?? null,
       connectedRepositoryId: opts.connectedRepositoryId ?? null,
     })
@@ -504,7 +508,8 @@ test("draftVerdictFromPendingCall accepts ANALYSIS_ONLY with no bound target and
       },
     ],
   });
-  assert.ok(row.payload.startsWith("Nothing conclusive found from a read of the report alone."));
+  assert.ok(row.payload.startsWith("Outcome: ANALYSIS_ONLY"));
+  assert.ok(row.payload.includes("Nothing conclusive found from a read of the report alone."));
   assert.ok(row.payload.includes("Reflected parameter in search"));
   assert.ok(row.payload.includes("MEDIUM"));
   assert.ok(row.payload.includes("scope-guard-log:1"));
@@ -546,4 +551,57 @@ test("draftVerdictFromPendingCall accepts REPRODUCED for a report with an active
   const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
   assert.equal(verdicts.length, 1);
   assert.equal(verdicts[0].outcome, "REPRODUCED");
+});
+
+test("draftVerdictFromPendingCall rejects a finding whose evidenceRef exceeds the length bound", async () => {
+  const fixture = await seedDraftableReport();
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "ok",
+    findings: [{ title: "t", severity: "low", description: "d", evidenceRef: "x".repeat(501) }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /^invalid draft:/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0);
+});
+
+test("draftVerdictFromPendingCall refuses a report already past the analysis stages, for any outcome", async () => {
+  const cancelled = await seedDraftableReport({ state: "CANCELLED" });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(cancelled.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "the agent's read of a report nobody can act on any more",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /report is CANCELLED/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, cancelled.reportId));
+  assert.equal(verdicts.length, 0, "a terminal report must never receive a fresh verdict");
+});
+
+test("draftVerdictFromPendingCall refuses a report already DELIVERING", async () => {
+  const delivering = await seedDraftableReport({ state: "DELIVERING" });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(delivering.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "a late draft for a report already on its way out",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /report is DELIVERING/);
+});
+
+test("buildAgentDraftedPayload states the outcome on its own line, independent of the summary text", () => {
+  const payload = publishVerdictModule.buildAgentDraftedPayload("verdict-1", {
+    outcome: "REPRODUCED",
+    summary: "a summary that never mentions the word itself",
+    findings: [],
+  });
+
+  assert.ok(payload.startsWith("Outcome: REPRODUCED"));
 });

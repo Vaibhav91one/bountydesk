@@ -763,11 +763,11 @@ test("a bound target with no matching recipe behaves exactly like today's uncond
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  // decideFreshVerdict still decides ANALYSIS_ONLY for exactly this reason; only how that
-  // decision becomes a persisted verdict changed, routed through draftVerdictForReport's
-  // agent-drafted rendering (see the ensureSession call site).
+  // ensureSession persists every freshly decided verdict through draftVerdictForReport's
+  // agent-drafted rendering: only decideFreshVerdict's outcome and summary are threaded
+  // through, not its own evidence or payload text.
   assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
-  assert.ok(v.payload.startsWith("Analysis-only result: automated reproduction was not run."));
+  assert.ok(v.payload.includes("Analysis-only result: automated reproduction was not run."));
 });
 
 test("a report unrelated to the recipe's own scenario never triggers reproduction", async () => {
@@ -1012,11 +1012,10 @@ test("a recipe that reproduces the report records a REPRODUCED verdict without t
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "REPRODUCED");
-  // The rich ReproductionEvidence (canary hash, fixture/control/exploit legs) is computed by
-  // decideFreshVerdict but no longer threaded into the persisted row -- draftVerdictForReport
-  // always renders the generic agent-drafted shape (see the ensureSession call site). The
-  // recipe title still reaches the payload because it's embedded in decided.summary, which is
-  // one of the two fields (outcome, summary) that do flow through.
+  // draftVerdictForReport always persists the generic agent-drafted evidence shape, not
+  // decideFreshVerdict's own ReproductionEvidence (canary hash, fixture/control/exploit legs).
+  // The recipe title still reaches the payload because it's embedded in decided.summary, one
+  // of the two fields (outcome, summary) draftVerdictForReport actually receives.
   assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
   assert.ok(v.payload.includes(recipe.title), "payload must name the scenario");
   assert.ok(v.payload.includes("reproduced"), "payload must state the reproduced result");
@@ -1067,9 +1066,9 @@ test("reproduceFn reporting an infra failure falls back to the analysis-only pay
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  // The evidence object no longer carries the reason (see the agent-drafted evidence shape
-  // above), but decideFreshVerdict still puts it in the summary text, and that field does flow
-  // through to the persisted verdict and its payload.
+  // The agent-drafted evidence shape carries no reason field, but decideFreshVerdict puts the
+  // reason in the summary text, and summary is one of the two fields that reach the persisted
+  // verdict and its payload.
   assert.match(v.summary, /COULD_NOT_DEPLOY/);
   assert.ok(
     v.payload.includes("COULD_NOT_DEPLOY"),

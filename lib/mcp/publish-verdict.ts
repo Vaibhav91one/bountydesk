@@ -2,7 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import { z } from "zod";
 
-import { agentSession, and, approvalDecision, db, eq, report, verdict, type Executor } from "@/lib/db";
+import {
+  agentSession,
+  and,
+  approvalDecision,
+  db,
+  eq,
+  report,
+  REPORT_TERMINAL_STATES,
+  verdict,
+  type Executor,
+} from "@/lib/db";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
@@ -22,7 +32,7 @@ export const findingSchema = z.object({
   title: z.string().min(1).max(200),
   severity: z.enum(["critical", "high", "medium", "low", "info"]),
   description: z.string().min(1).max(4000),
-  evidenceRef: z.string().min(1),
+  evidenceRef: z.string().min(1).max(500),
 });
 
 export const verdictDraftSchema = z.object({
@@ -58,7 +68,11 @@ export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft)
       ? `\n\nFindings:\n${draft.findings.map(renderFinding).join("\n")}`
       : "";
 
-  const body = `${draft.summary}${findingsBlock}\n\nA person still needs to review this before any next step.`;
+  // The outcome is stated on its own line, in the reviewer's and outbound comment's own words,
+  // rather than left for the free-form summary to convey: a draft's `summary` is validated only
+  // for length, not for agreeing with its own `outcome`, so the approved text must say the
+  // persisted outcome plainly instead of relying on the agent's prose to get it right.
+  const body = `Outcome: ${draft.outcome}\n\n${draft.summary}${findingsBlock}\n\nA person still needs to review this before any next step.`;
   return `${body}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
 }
 
@@ -71,6 +85,11 @@ export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft)
  * since been revoked, is refused here before its claim ever becomes a verdict row, the same way
  * decideFreshVerdict refuses an unauthorized reproduction today. ANALYSIS_ONLY needs no live
  * authorization, since it never claims the sandboxed target actually confirmed anything.
+ *
+ * A report past the analysis stages is refused regardless of outcome: a revision-1 verdict is
+ * this function's own idempotency key, so writing one for a cancelled, expired, delivered,
+ * denied, out-of-scope, or already-delivering report would permanently attach a definitive
+ * verdict to a report that can never again legitimately produce one.
  */
 async function persistAgentDraftedVerdict(
   reportId: string,
@@ -78,6 +97,23 @@ async function persistAgentDraftedVerdict(
   draft: VerdictDraft,
   tx: Executor,
 ): Promise<DraftVerdictResult> {
+  const [reportRow] = await tx
+    .select({ state: report.state })
+    .from(report)
+    .where(eq(report.id, reportId))
+    .limit(1)
+    .for("update");
+  if (!reportRow) return { ok: false, reason: "report not found" };
+  if (
+    (REPORT_TERMINAL_STATES as readonly string[]).includes(reportRow.state) ||
+    reportRow.state === "DELIVERING"
+  ) {
+    return {
+      ok: false,
+      reason: `report is ${reportRow.state}; a fresh verdict cannot be drafted for it`,
+    };
+  }
+
   if (draft.outcome === "REPRODUCED" || draft.outcome === "NOT_REPRODUCED") {
     const grant = await loadRepositoryGrantSnapshot(reportId, tx);
     if (!grant || !hasActiveRepositoryGrant(grant)) {

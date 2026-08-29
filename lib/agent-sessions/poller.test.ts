@@ -538,6 +538,35 @@ test("a full draft claiming REPRODUCED for a report with no bound target is refu
   assert.equal(verdicts.length, 0);
 });
 
+test("a malformed draft attempt is refused rather than silently approved as the legacy shape", async () => {
+  await drainOthers();
+  // This session's pending verdict already exists (seedSession pre-seeds one), the same as a
+  // real deterministic-pipeline report. A pending call that carries draft-specific keys but
+  // fails validation must never fall through to the capability-only path and bind approval to
+  // that pre-existing verdict instead of reporting the validation failure.
+  const fixture = await seedSession();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "NOT_A_REAL_OUTCOME",
+        summary: "",
+        findings: [],
+      }),
+    ],
+  });
+
+  await poller.pollOnce("w-malformed-draft", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /publish_verdict arguments look like a drafted verdict but failed validation/);
+  assert.equal(row.pendingVerdictId, null, "no approval may be bound to the pre-existing verdict");
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "TRIAGING");
+});
+
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
   await drainOthers();
   const fixture = await seedSession();

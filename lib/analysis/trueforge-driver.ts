@@ -326,10 +326,6 @@ async function decideFreshVerdict(
   };
 }
 
-// hasActiveRepositoryGrant used to live here. It moved to lib/targets/repository-grant.ts
-// (imported above) unchanged, byte-for-byte, so lib/mcp/publish-verdict.ts's authorization
-// re-check can call the exact same check instead of a second, potentially drifting copy.
-
 function adoptVerdict(row: {
   outcome: (typeof verdict.outcome.enumValues)[number];
   summary: string;
