@@ -60,6 +60,9 @@ no automated genuine/fake claim.
 
 ## Phase 4: Reproduction against pinned and dynamic targets
 
+**Status:** the pinned-target path is complete and proven live for the SQLi scenario; the
+dynamic tier is not started.
+
 - Start with the provisioning spike. It gates everything else in this phase: prove that
   BountyDesk can provision the environment, that a `TargetProfile` selects the exact snapshot,
   that the built artifact corresponds to the connected commit, that the amd64 digest verifies,
@@ -86,6 +89,27 @@ no automated genuine/fake claim.
 egress and teardown failure tests fail closed; a build that does not complete yields
 `COULD_NOT_BUILD` rather than `not-reproduced`; and a target without an approved fixture cannot
 emit `REPRODUCED` even when the PoC claims success.
+
+Confirmed live 2026-08-29 for the SQLi scenario, on the same daemon-driven path Phase 5
+describes: a real GitHub issue on `Vaibhav91one/juice-shop` matched the `juice-shop-sqli-search`
+recipe, ran fixture, negative control and exploit as direct HTTP calls against a real Daytona
+sandbox on the pinned, digest-verified snapshot, and produced a genuine `REPRODUCED` verdict
+(report `beabb524-1bd7-4651-a9b8-2363926b0a49`, verdict `7cbf3647-2b32-4582-9d43-9db49509aa4d`,
+canary hash `8210fef26e905810dfbef983ab86d55c4c961d51e59e9dc708e8d941309c9727`) with the negative
+control clean and `verifyNoEgress` confirming the sandbox's network policy before either leg
+ran. A reviewer approved it on `/review` and the daemon delivered it as
+[Vaibhav91one/juice-shop#5, comment 5464633799](https://github.com/Vaibhav91one/juice-shop/issues/5#issuecomment-5464633799),
+whose body matches the approved content hash exactly. Two real bugs surfaced and were fixed
+during this run, not before it: migration `0011_polite_warhawk.sql` had never been applied to
+the shared dev database, and `verifyNoEgress`'s probe list included a hostname, which
+`networkBlockAll`'s DNS block turns into a hang rather than the expected `403` (see PR #36).
+
+The second frozen scenario, login bypass, has its recipe and two-step oracle contract
+(exploit response feeding an authenticated follow-up request) implemented in a PR, not yet
+merged and not run live: it required extending `ReproductionRecipe` with an optional
+`exploitFollowUp` step and widening `runLeg`'s accepted-status handling for a negative control
+that Juice Shop correctly answers with 401. Until that PR lands and is proven the same way,
+this scenario stays "implemented," not "reproduced."
 
 ## Phase 5: Human approval and idempotent delivery
 
