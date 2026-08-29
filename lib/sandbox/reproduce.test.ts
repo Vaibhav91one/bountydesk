@@ -849,6 +849,25 @@ test("cancellation during build marker check tears down and rejects the run", as
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
+test("cancellation reason survives a teardown failure", async () => {
+  resetSpies();
+  const controller = new AbortController();
+  const reason = new Error("lease lost");
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      controller.abort(reason);
+      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+    }
+    return defaultExecuteResult(command);
+  };
+  deleteSandboxImpl = async () => {
+    throw new Error("delete failed");
+  };
+
+  await assert.rejects(() => reproduce(reproduceInput(), { signal: controller.signal }), reason);
+});
+
 test("teardown failure is surfaced with the sandbox id", async () => {
   resetSpies();
   deleteSandboxImpl = async (id) => {

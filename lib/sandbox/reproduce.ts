@@ -573,6 +573,14 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     if (sandbox) {
       const sandboxId = sandbox.id;
       await deleteSandbox(sandboxId).catch((error) => {
+        if (opts?.signal?.aborted) {
+          console.error(
+            `failed to delete reproduction sandbox ${sandboxId} after cancellation: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return;
+        }
         throw new Error(
           `failed to delete reproduction sandbox ${sandboxId}: ${
             error instanceof Error ? error.message : String(error)
