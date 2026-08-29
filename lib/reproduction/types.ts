@@ -48,6 +48,8 @@ export type ReproductionRecipe = {
   id: string;
   /** Human label for evidence/summary text shown to the reviewer. */
   title: string;
+  /** Report terms that must appear before the driver may select this frozen recipe. */
+  keywords: string[];
   /** Registers the canary through a trusted fixture call. `request.body` should reference
    * "{{canary}}" wherever the fresh value belongs. A non-2xx response here means the canary was
    * never actually seeded, so the orchestrator must treat that as incomplete, not proceed to the
