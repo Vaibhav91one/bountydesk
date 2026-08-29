@@ -125,6 +125,7 @@ async function decideFreshVerdict(
   const [target] = await tx
     .select({
       targetProfileId: targetProfile.id,
+      imageName: targetProfile.imageName,
       imageDigest: targetProfile.imageDigest,
       snapshotId: targetProfile.snapshotId,
       name: targetProfile.name,
@@ -144,7 +145,7 @@ async function decideFreshVerdict(
   // doesn't describe.
   const recipes = target ? getRecipes({ name: target.name, config: target.config }) : [];
   const recipe = target ? recipes.find((candidate) => matchesReport(candidate, target)) : undefined;
-  if (!target || !recipe) {
+  if (!target || !target.imageName || !recipe) {
     return {
       outcome: "ANALYSIS_ONLY",
       summary: "Analysis-only result: automated reproduction was not run.",
@@ -156,6 +157,7 @@ async function decideFreshVerdict(
   const result = await reproduceFn(
     {
       targetProfileId: target.targetProfileId,
+      imageName: target.imageName,
       imageDigest: target.imageDigest,
       snapshotId: target.snapshotId,
       recipe,

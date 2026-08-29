@@ -5,6 +5,7 @@ import test, { after, before } from "node:test";
 import type {
   GetRecipesForTargetFn,
   ReproduceFn,
+  ReproductionEvidence,
   ReproductionOutcome,
   ReproductionRecipe,
 } from "@/lib/reproduction/types";
@@ -64,22 +65,24 @@ async function seedReport(
  * reproduceFn verbatim. */
 async function seedTargetProfile(): Promise<{
   id: string;
+  imageName: string;
   imageDigest: string;
   snapshotId: string | null;
 }> {
   const imageDigest = `sha256:${randomUUID().replace(/-/g, "")}`;
+  const imageName = "ghcr.io/vaibhav91one/juice-shop";
   const [row] = await dbm.db
     .insert(dbm.targetProfile)
     .values({
       name: `juice-shop-${randomUUID()}`,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageName,
       imageDigest,
       snapshotId: "snapshot-1",
       config: { baseUrl: "http://localhost:3000" },
       scopeRules: [],
     })
     .returning({ id: dbm.targetProfile.id });
-  return { id: row.id, imageDigest, snapshotId: "snapshot-1" };
+  return { id: row.id, imageName, imageDigest, snapshotId: "snapshot-1" };
 }
 
 function context(reportId: string, signal: AbortSignal = new AbortController().signal) {
@@ -120,8 +123,8 @@ function fakeReproduce(outcome: ReproductionOutcome): ReproduceFn & { calls: num
   };
 }
 
-function reproducedEvidence(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
+function reproducedEvidence(overrides: Partial<ReproductionEvidence> = {}): ReproductionEvidence {
+  const evidence: ReproductionEvidence = {
     recipeId: "juice-shop-sqli-search",
     sandboxId: `sandbox-${randomUUID()}`,
     fixture: { ranToCompletion: true, at: new Date().toISOString() },
@@ -129,12 +132,12 @@ function reproducedEvidence(overrides: Partial<Record<string, unknown>> = {}) {
     exploit: { ranToCompletion: true, canaryFound: true, at: new Date().toISOString() },
     canaryHash: "deadbeef".repeat(8),
     requestBodyHashes: {
-      fixture: "cc".repeat(32),
-      negativeControl: "aa".repeat(32),
-      exploit: "bb".repeat(32),
+      fixture: { dispatched: true, sha256: "cc".repeat(32) },
+      negativeControl: { dispatched: true, sha256: null },
+      exploit: { dispatched: true, sha256: null },
     },
-    ...overrides,
   };
+  return { ...evidence, ...overrides };
 }
 
 /** A minimal fake: only the two methods the driver actually calls. */
@@ -622,7 +625,9 @@ test("a recipe that reproduces the report records a REPRODUCED verdict without t
   const reportId = await seedReport("TRIAGING", target.id);
   const recipe = fakeRecipe();
   const evidence = reproducedEvidence();
-  let seenInput: { imageDigest: string; snapshotId: string | null; recipe: ReproductionRecipe } | undefined;
+  let seenInput:
+    | { imageName: string; imageDigest: string; snapshotId: string | null; recipe: ReproductionRecipe }
+    | undefined;
   const reproduceFn: ReproduceFn = async (input) => {
     seenInput = input;
     return { outcome: "REPRODUCED", evidence };
@@ -633,6 +638,7 @@ test("a recipe that reproduces the report records a REPRODUCED verdict without t
     .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
     .ensureSession(context(reportId));
 
+  assert.equal(seenInput?.imageName, target.imageName, "the target's own imageName must be threaded through");
   assert.equal(seenInput?.imageDigest, target.imageDigest, "the target's own imageDigest must be threaded through");
   assert.equal(seenInput?.snapshotId, target.snapshotId);
   assert.equal(seenInput?.recipe.id, recipe.id);
