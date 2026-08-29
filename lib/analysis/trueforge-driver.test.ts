@@ -2,6 +2,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import test, { after, before } from "node:test";
 
+import type {
+  GetRecipesForTargetFn,
+  ReproduceFn,
+  ReproductionOutcome,
+  ReproductionRecipe,
+} from "@/lib/reproduction/types";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 /**
@@ -33,7 +39,10 @@ after(async () => {
   await schema?.drop();
 });
 
-async function seedReport(state: "TRIAGING" | "REPRODUCING" = "TRIAGING"): Promise<string> {
+async function seedReport(
+  state: "TRIAGING" | "REPRODUCING" = "TRIAGING",
+  targetProfileId: string | null = null,
+): Promise<string> {
   const [row] = await dbm.db
     .insert(dbm.report)
     .values({
@@ -43,15 +52,82 @@ async function seedReport(state: "TRIAGING" | "REPRODUCING" = "TRIAGING"): Promi
       body: "The search endpoint concatenates the query string directly.",
       reporterHandle: null,
       connectedRepositoryId: null,
-      targetProfileId: null,
+      targetProfileId,
       state,
     })
     .returning({ id: dbm.report.id });
   return row.id;
 }
 
+/** A bound target profile. imageDigest/snapshotId are what decideFreshVerdict must hand to
+ * reproduceFn verbatim. */
+async function seedTargetProfile(): Promise<{
+  id: string;
+  imageDigest: string;
+  snapshotId: string | null;
+}> {
+  const imageDigest = `sha256:${randomUUID().replace(/-/g, "")}`;
+  const [row] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: `juice-shop-${randomUUID()}`,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest,
+      snapshotId: "snapshot-1",
+      config: { baseUrl: "http://localhost:3000" },
+      scopeRules: [],
+    })
+    .returning({ id: dbm.targetProfile.id });
+  return { id: row.id, imageDigest, snapshotId: "snapshot-1" };
+}
+
 function context(reportId: string, signal: AbortSignal = new AbortController().signal) {
   return { reportId, lease: {} as never, signal };
+}
+
+function fakeRecipe(overrides: Partial<ReproductionRecipe> = {}): ReproductionRecipe {
+  return {
+    id: "juice-shop-sqli-search",
+    title: "SQL injection in the search endpoint",
+    fixture: { request: { method: "POST", path: "/rest/canary", body: { value: "{{canary}}" } } },
+    negativeControl: { method: "GET", path: "/rest/search?q=harmless" },
+    exploit: { method: "GET", path: "/rest/search?q=%27%20OR%201%3D1--" },
+    oracleCheck: () => false,
+    ...overrides,
+  };
+}
+
+/** getRecipes fake that always hands back one recipe, regardless of the target it's asked
+ * about, so tests don't have to thread config shape through it. */
+function fakeGetRecipes(recipe: ReproductionRecipe = fakeRecipe()): GetRecipesForTargetFn {
+  return () => [recipe];
+}
+
+const noRecipes: GetRecipesForTargetFn = () => [];
+
+/** reproduceFn fake that ignores its input and always resolves to the given outcome, while
+ * counting calls so tests can assert it never runs twice for the same report. */
+function fakeReproduce(outcome: ReproductionOutcome): ReproduceFn & { calls: number } {
+  let calls = 0;
+  const fn = async () => {
+    calls++;
+    return outcome;
+  };
+  return Object.defineProperty(fn, "calls", { get: () => calls }) as typeof fn & {
+    calls: number;
+  };
+}
+
+function reproducedEvidence(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    recipeId: "juice-shop-sqli-search",
+    sandboxId: `sandbox-${randomUUID()}`,
+    negativeControl: { ranToCompletion: true, canaryFound: false, at: new Date().toISOString() },
+    exploit: { ranToCompletion: true, canaryFound: true, at: new Date().toISOString() },
+    canaryHash: "deadbeef".repeat(8),
+    requestBodyHashes: { negativeControl: "aa".repeat(32), exploit: "bb".repeat(32) },
+    ...overrides,
+  };
 }
 
 /** A minimal fake: only the two methods the driver actually calls. */
@@ -427,4 +503,172 @@ test("run cancels an in-flight TrueForge turn request and does not persist its i
     .from(dbm.agentSession)
     .where(dbm.eq(dbm.agentSession.reportId, reportId));
   assert.equal(session.turnId, null);
+});
+
+test("a bound target with no matching recipe behaves exactly like today's unconditional analysis-only path", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const client = fakeClient();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, noRecipes)
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 0, "no recipe means reproduceFn must never be called");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+  assert.ok(v.payload.startsWith("Automated reproduction was not run for this report."));
+});
+
+test("a recipe that reproduces the report records a REPRODUCED verdict without the raw canary", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const evidence = reproducedEvidence();
+  let seenInput: { imageDigest: string; snapshotId: string | null; recipe: ReproductionRecipe } | undefined;
+  const reproduceFn: ReproduceFn = async (input) => {
+    seenInput = input;
+    return { outcome: "REPRODUCED", evidence };
+  };
+  const client = fakeClient();
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(seenInput?.imageDigest, target.imageDigest, "the target's own imageDigest must be threaded through");
+  assert.equal(seenInput?.snapshotId, target.snapshotId);
+  assert.equal(seenInput?.recipe.id, recipe.id);
+
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "REPRODUCED");
+  assert.deepEqual(v.evidence, evidence);
+  assert.ok(v.payload.includes(recipe.title), "payload must name the scenario");
+  assert.ok(v.payload.includes("reproduces"), "payload must state the reproduced result");
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(v.evidence as object, "canary"),
+    false,
+    "evidence must never carry a raw canary field, only its hash",
+  );
+  assert.ok(!v.payload.includes(evidence.canaryHash), "payload must not echo any canary material");
+});
+
+test("a recipe that does not reproduce the report records a NOT_REPRODUCED verdict", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const evidence = reproducedEvidence({
+    exploit: { ranToCompletion: true, canaryFound: false, at: new Date().toISOString() },
+  });
+  const reproduceFn = fakeReproduce({ outcome: "NOT_REPRODUCED", evidence });
+  const client = fakeClient();
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "NOT_REPRODUCED");
+  assert.deepEqual(v.evidence, evidence);
+  assert.ok(v.payload.includes("does not reproduce"));
+});
+
+test("reproduceFn reporting an infra failure falls back to the analysis-only payload but keeps the reason", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "ANALYSIS_ONLY", reason: "COULD_NOT_DEPLOY" });
+  const client = fakeClient();
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal((v.evidence as { reason: string }).reason, "COULD_NOT_DEPLOY");
+  assert.ok(
+    v.payload.startsWith("Automated reproduction was not run for this report."),
+    "an incomplete reproduction attempt still delivers the same honest analysis-only text",
+  );
+});
+
+test("ensureSession called twice for the same report invokes reproduceFn exactly once", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+  const client = fakeClient();
+  const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
+
+  await d.ensureSession(context(reportId));
+  assert.equal(reproduceFn.calls, 1);
+
+  // The second call must see the agent_session row already created by the first and return
+  // immediately, never re-reading the verdict or re-running reproduction: this is exactly
+  // the VerdictIntegrityError trap from AGENTS.md -- re-running would mint a fresh canary and
+  // hash to evidence that disagrees with the row already committed.
+  await d.ensureSession(context(reportId));
+  assert.equal(reproduceFn.calls, 1, "a second ensureSession call must not run reproduction again");
+
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(verdicts.length, 1, "still exactly one verdict row");
+});
+
+test("run tells the model reproduction already ran and hands it the verdict summary, for a REPRODUCED report", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+  let capturedInput: unknown;
+  const client = fakeClient({
+    async createTurn(_sessionId, input) {
+      capturedInput = input;
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
+  await d.ensureSession(context(reportId));
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+
+  await d.run(context(reportId));
+
+  const inputArray = capturedInput as { type: string; content: string }[];
+  assert.ok(inputArray[0].content.includes(session.capabilityToken));
+  assert.ok(
+    inputArray[0].content.includes(v.summary),
+    "the turn message must carry the verdict's own summary text",
+  );
+  assert.ok(
+    inputArray[0].content.includes("already ran"),
+    "the turn message must tell the model reproduction already happened",
+  );
+  assert.ok(
+    !inputArray[0].content.includes("there is no sandbox"),
+    "the analysis-only disclaimer must not appear once a real reproduction ran",
+  );
 });
