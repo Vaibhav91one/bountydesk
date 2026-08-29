@@ -15,6 +15,7 @@
     "db:studio": "drizzle-kit studio",
     "db:drift": "drizzle-kit generate && git diff --quiet --exit-code drizzle",
     "seed:target": "node --env-file-if-exists=.env.local --import tsx scripts/seed-target.ts",
+    "seed:reports": "node --env-file-if-exists=.env.local --import tsx scripts/seed-reports.ts",
     "quarantine:stale-target": "node --env-file-if-exists=.env.local --import tsx scripts/quarantine-stale-target.ts",
     "spike:daytona": "node --env-file-if-exists=.env.local --import tsx scripts/spike-daytona.ts",
     "agent:apply": "node --env-file-if-exists=.env.local --import tsx scripts/apply-agent.ts",
