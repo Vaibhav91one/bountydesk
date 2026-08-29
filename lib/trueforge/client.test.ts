@@ -64,6 +64,31 @@ test("createSession returns the session id from a real-shape GetSessionResponse"
   );
 });
 
+test("createSession sends the report-scoped idempotency key", async () => {
+  let seenKey: string | null = null;
+  await withFetch(
+    (async (_input, init) => {
+      seenKey = new Headers(init?.headers).get("Idempotency-Key");
+      return json({
+        data: {
+          id: "sess_1",
+          agent: { type: "reference", id: "agent_1", name: "bountydesk" },
+          created_at: "2026-01-01T00:00:00Z",
+          created_by: "svc",
+          title: null,
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      });
+    }) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      await client.createSession({ idempotencyKey: "bountydesk:agent-session:report-1" });
+    },
+  );
+
+  assert.equal(seenKey, "bountydesk:agent-session:report-1");
+});
+
 test("createTurn resolves to running when the turn has not settled yet", async () => {
   await withFetch(
     (async () =>

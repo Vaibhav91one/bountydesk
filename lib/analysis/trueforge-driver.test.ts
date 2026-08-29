@@ -504,9 +504,11 @@ test("ensureSession retry after session creation failure does not rerun reproduc
     return { outcome: "REPRODUCED", evidence };
   };
   let createSessionCalls = 0;
+  const idempotencyKeys: (string | undefined)[] = [];
   const client = fakeClient({
-    async createSession() {
+    async createSession(opts) {
       createSessionCalls++;
+      idempotencyKeys.push(opts?.idempotencyKey);
       if (createSessionCalls === 1) {
         throw new Error("trueforge unavailable");
       }
@@ -532,6 +534,10 @@ test("ensureSession retry after session creation failure does not rerun reproduc
   await d.ensureSession(context(reportId));
 
   assert.equal(reproduceCalls, 1, "retry must adopt the committed verdict without rerunning reproduction");
+  assert.deepEqual(idempotencyKeys, [
+    `bountydesk:agent-session:${reportId}`,
+    `bountydesk:agent-session:${reportId}`,
+  ]);
   const sessionsAfterRetry = await dbm.db
     .select()
     .from(dbm.agentSession)
@@ -1004,13 +1010,20 @@ test("two concurrent first-time ensureSession calls for the same report converge
     await new Promise((resolve) => setTimeout(resolve, 50));
     return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
   };
-  const client = fakeClient();
+  let createSessionCalls = 0;
+  const client = fakeClient({
+    async createSession() {
+      createSessionCalls++;
+      await new Promise((resolve) => setTimeout(resolve, 5_500));
+      return { sessionId: `truesession-${randomUUID()}` };
+    },
+  });
   const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
 
   await Promise.all([d.ensureSession(context(reportId)), d.ensureSession(context(reportId))]);
 
   assert.ok(calls >= 1, "at least one caller must run reproduction for a matching report");
-  assert.equal(client.createSessionCalls, 1, "only the worker holding the claim may create a TrueForge session");
+  assert.equal(createSessionCalls, 1, "only the worker holding the claim may create a TrueForge session");
 
   const verdicts = await dbm.db
     .select()

@@ -31,7 +31,6 @@ import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 // two paths should never see the wording drift.
 const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.`;
 const SESSION_CREATION_CLAIM_SECONDS = 300;
-const SESSION_CREATION_WAIT_MS = 5_000;
 const SESSION_CREATION_POLL_MS = 100;
 
 function buildPayload(verdictId: string): string {
@@ -197,6 +196,15 @@ async function claimAgentSessionCreation(reportId: string, claimToken: string): 
   return rows.length > 0;
 }
 
+async function agentSessionCreationClaim(reportId: string): Promise<{ expiresAt: Date } | null> {
+  const [claim] = await db
+    .select({ expiresAt: agentSessionClaim.expiresAt })
+    .from(agentSessionClaim)
+    .where(eq(agentSessionClaim.reportId, reportId))
+    .limit(1);
+  return claim ?? null;
+}
+
 async function releaseAgentSessionCreationClaim(reportId: string, claimToken: string): Promise<void> {
   await db
     .delete(agentSessionClaim)
@@ -208,14 +216,14 @@ async function releaseAgentSessionCreationClaim(reportId: string, claimToken: st
     );
 }
 
-async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal): Promise<void> {
-  const deadline = Date.now() + SESSION_CREATION_WAIT_MS;
-  while (Date.now() < deadline) {
+async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal): Promise<"session-created" | "claim-open"> {
+  for (;;) {
     if (signal.aborted) throw signal.reason;
-    if (await agentSessionExists(reportId)) return;
+    if (await agentSessionExists(reportId)) return "session-created";
+    const claim = await agentSessionCreationClaim(reportId);
+    if (!claim || claim.expiresAt.getTime() <= Date.now()) return "claim-open";
     await new Promise((resolve) => setTimeout(resolve, SESSION_CREATION_POLL_MS));
   }
-  throw new Error(`agent session creation for report ${reportId} is already claimed`);
 }
 
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh
@@ -494,16 +502,21 @@ export function createTrueforgeAnalysisDriver(
       if (!shouldCreateSession) return;
       if (signal.aborted) throw signal.reason;
 
-      const claimToken = randomUUID();
-      const claimed = await claimAgentSessionCreation(reportId, claimToken);
-      if (!claimed) {
-        await waitForClaimedAgentSession(reportId, signal);
-        return;
+      let claimToken = randomUUID();
+      for (;;) {
+        const claimed = await claimAgentSessionCreation(reportId, claimToken);
+        if (claimed) break;
+        const waitResult = await waitForClaimedAgentSession(reportId, signal);
+        if (waitResult === "session-created") return;
+        claimToken = randomUUID();
       }
 
       let sessionId: string;
       try {
-        ({ sessionId } = await client.createSession({ signal }));
+        ({ sessionId } = await client.createSession({
+          signal,
+          idempotencyKey: `bountydesk:agent-session:${reportId}`,
+        }));
       } catch (error) {
         await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
@@ -526,8 +539,18 @@ export function createTrueforgeAnalysisDriver(
                   eq(agentSessionClaim.reportId, reportId),
                   eq(agentSessionClaim.claimToken, claimToken),
                 ),
-              );
+            );
             return;
+          }
+
+          const [currentClaim] = await tx
+            .select({ claimToken: agentSessionClaim.claimToken })
+            .from(agentSessionClaim)
+            .where(eq(agentSessionClaim.reportId, reportId))
+            .for("update")
+            .limit(1);
+          if (currentClaim?.claimToken !== claimToken) {
+            throw new Error(`agent session creation claim for report ${reportId} changed before persistence`);
           }
 
           // Opaque handle the model echoes back as publish_verdict's sole argument; the only
