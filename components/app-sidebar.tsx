@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+
+import type { ActiveReport } from "@/lib/reports/queue";
 import {
   BookOpen,
   CaretUpDown,
@@ -24,6 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PhaseDot } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import {
   Sidebar,
@@ -36,6 +39,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
@@ -58,7 +64,14 @@ export const NAV = [
   { href: "/settings/general", label: "Settings", icon: Gear, soon: true },
 ];
 
-export function AppSidebar({ reviewer }: { reviewer: string }) {
+export function AppSidebar({
+  reviewer,
+  activeReports = [],
+}: {
+  reviewer: string;
+  /** Reports in flight, most urgent first. Empty until there are any. */
+  activeReports?: ActiveReport[];
+}) {
   const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
   // The sidebar provider persists across navigation, so a mobile tap that doesn't clear
@@ -119,6 +132,33 @@ export function AppSidebar({ reviewer }: { reviewer: string }) {
                   </SidebarMenuButton>
                   {item.soon ? (
                     <SidebarMenuBadge className="text-muted-foreground">soon</SidebarMenuBadge>
+                  ) : null}
+
+                  {/* What is in the queue, not just that a queue exists. Only under the open
+                      route: five report titles under every nav item would be a second menu
+                      competing with the first. SidebarMenuSub hides itself on the rail. */}
+                  {item.href === "/board" && pathname === "/board" && activeReports.length > 0 ? (
+                    <SidebarMenuSub>
+                      {activeReports.map((report) => (
+                        <SidebarMenuSubItem key={report.id}>
+                          <SidebarMenuSubButton
+                            size="sm"
+                            // A plain anchor, not Link: :target is only re-evaluated on a real
+                            // fragment navigation, and a client-side pushState leaves the card
+                            // unhighlighted with the hash in the address bar to prove it.
+                            render={
+                              <a
+                                href={`/board#report-${report.id}`}
+                                onClick={closeMobileSheet}
+                              />
+                            }
+                          >
+                            <PhaseDot phase={report.phase} />
+                            <span className="truncate">{report.title}</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
                   ) : null}
                 </SidebarMenuItem>
                 );
