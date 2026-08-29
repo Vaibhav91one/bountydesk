@@ -176,6 +176,11 @@ function fetchStub(
   calls: FetchCall[],
   responses: {
     fixtureStatus?: number;
+    fixtureHeaders?: HeadersInit;
+    negativeControlStatus?: number;
+    negativeControlHeaders?: HeadersInit;
+    exploitStatus?: number;
+    exploitHeaders?: HeadersInit;
     negativeControlBody: (canary: string) => string;
     exploitBody: (canary: string) => string;
   },
@@ -201,15 +206,24 @@ function fetchStub(
       const body = JSON.parse(String(init?.body ?? "{}")) as { email?: string };
       lastCanary = body.email ?? null;
       calls.push({ url, init, canary: lastCanary });
-      return new Response(JSON.stringify({ status: "success" }), { status: responses.fixtureStatus ?? 201 });
+      return new Response(JSON.stringify({ status: "success" }), {
+        status: responses.fixtureStatus ?? 201,
+        headers: responses.fixtureHeaders,
+      });
     }
     if (path === "/negative") {
       calls.push({ url, init, canary: lastCanary });
-      return new Response(responses.negativeControlBody(lastCanary ?? ""), { status: 200 });
+      return new Response(responses.negativeControlBody(lastCanary ?? ""), {
+        status: responses.negativeControlStatus ?? 200,
+        headers: responses.negativeControlHeaders,
+      });
     }
     if (path === "/exploit") {
       calls.push({ url, init, canary: lastCanary });
-      return new Response(responses.exploitBody(lastCanary ?? ""), { status: 200 });
+      return new Response(responses.exploitBody(lastCanary ?? ""), {
+        status: responses.exploitStatus ?? 200,
+        headers: responses.exploitHeaders,
+      });
     }
 
     throw new Error(`unexpected fetch to ${url}`);
@@ -459,6 +473,7 @@ test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never 
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
+  assert.ok(!executeCalls.some((command) => command.includes("nohup node build/app")));
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "a marker mismatch still tears the sandbox down");
 });
 
@@ -520,6 +535,67 @@ test("a rejected fixture (non-2xx) stops the run before the negative control or 
     "the exploit must never run once the fixture is rejected",
   );
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "the sandbox is still torn down");
+});
+
+test("a redirecting fixture does not follow the target outside the preview origin", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      fixtureStatus: 307,
+      fixtureHeaders: { location: "https://attacker.example/steal" },
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+  assert.ok(!calls.some((call) => call.url.startsWith("https://attacker.example")));
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("a redirecting exploit leg is incomplete, not sandbox evidence", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitStatus: 302,
+      exploitHeaders: { location: "https://attacker.example/result" },
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+  }
+  assert.ok(!calls.some((call) => call.url.startsWith("https://attacker.example")));
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("an error response from an oracle leg is incomplete, not NOT_REPRODUCED", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitStatus: 502,
+      exploitBody: () => JSON.stringify({ error: "preview unavailable" }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+  }
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
 test("a dirty negative control (canary already present) is never trusted, and the exploit never runs", async () => {
@@ -653,6 +729,24 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("a failed app start reports TARGET_UNAVAILABLE without waiting for readiness probes", async () => {
+  resetSpies();
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes("nohup node build/app")) {
+      return { exitCode: 1, result: "missing build/app" };
+    }
+    return defaultExecuteResult(command);
+  };
+
+  const outcome = await reproduce(reproduceInput());
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+  assert.equal(executeCalls.filter((command) => command.includes("http://localhost:3000/")).length, 0);
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 

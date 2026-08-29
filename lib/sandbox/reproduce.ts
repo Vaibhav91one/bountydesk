@@ -183,7 +183,10 @@ async function waitForAppReady(
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  await execute(sandbox, START_APP_COMMAND, 10);
+  const started = await execute(sandbox, START_APP_COMMAND, 10);
+  if (started.exitCode !== 0) {
+    throw new Error(`sandbox ${sandbox.id} app start failed: ${started.result.slice(0, 200)}`);
+  }
 
   const deadline = Date.now() + timeoutMs;
   const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}/ 2>/dev/null || echo 000`;
@@ -264,6 +267,7 @@ async function sendToSandbox(
     method: request.method,
     headers: sandboxRequestHeaders(request.headers, preview.token, bodyText !== undefined),
     body: bodyText,
+    redirect: "manual",
     signal: timeoutSignal(signal),
   });
 
@@ -320,6 +324,9 @@ async function runLeg(
   try {
     const sent = await sendToSandbox(preview, request, canary, signal);
     bodyEvidence = sent.bodyEvidence;
+    if (sent.probe.status < 200 || sent.probe.status >= 300) {
+      return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
+    }
     const canaryFound = await oracleCheck(sent.probe, canary);
     return { ranToCompletion: true, canaryFound, at, bodyEvidence };
   } catch (error) {
@@ -417,19 +424,19 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
     }
 
+    // A second, independent proof of build identity (see build-marker.ts), on top of
+    // assertSnapshotImage's control-plane check that createSandbox already ran above. This
+    // reads a marker from the booted image before the target application starts, so a mismatched
+    // tag-pinned snapshot cannot execute target code before being rejected.
+    if (!(await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER))) {
+      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
+    }
+
     try {
       await waitForAppReady(sandbox, authorization.appPort, READINESS_TIMEOUT_MS, opts?.signal);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
-    }
-
-    // A second, independent proof of build identity (see build-marker.ts), on top of
-    // assertSnapshotImage's control-plane check that createSandbox already ran above. A
-    // mismatch here is the same class of failure as a snapshot that never came up correctly,
-    // so it shares COULD_NOT_DEPLOY rather than adding a new reason to the frozen union.
-    if (!(await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER))) {
-      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
     }
 
     const canary = generateCanary();

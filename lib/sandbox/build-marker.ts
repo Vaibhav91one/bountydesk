@@ -9,13 +9,9 @@
  * tag-pinned, and a tag can be repointed at a different image at any time: assertSnapshotImage's
  * exact-match check alone cannot prove which build actually booted.
  *
- * An earlier version of this file read Daytona's own `DAYTONA_SANDBOX_SNAPSHOT` env var, which
- * happened to carry the resolved digest -- but that is undocumented internal platform behaviour,
- * not something BountyDesk controls or Daytona has committed to keeping stable. This version is
- * the defender-authored marker docs/decisions.md originally called for: the build workflow
- * (.github/workflows/build-daytona-target.yml) bakes the exact commit it built into the image at
- * a fixed path, and this reads that file back from inside the booted sandbox and compares it
- * against the commit the caller expects.
+ * The build workflow (.github/workflows/build-daytona-target.yml) bakes the exact commit it
+ * built into the image at a fixed path, and this reads that file back from inside the booted
+ * sandbox and compares it against the commit the caller expects.
  */
 import type { Sandbox } from "./daytona";
 import { execute } from "./daytona";
