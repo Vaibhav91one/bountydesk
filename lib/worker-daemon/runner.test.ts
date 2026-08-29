@@ -153,7 +153,6 @@ test("runSweeper sweeps immediately, then again on its own interval, independent
   });
 
   assert.equal(sweeps, 3);
-  // Two sleeps between three sweeps: it sweeps first, then waits, sweeps, waits, sweeps, stops.
   assert.deepEqual(sleeps, [30_000, 30_000]);
 });
 

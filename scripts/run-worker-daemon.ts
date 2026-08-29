@@ -7,8 +7,11 @@
  *
  *   npm run worker:daemon
  *
- * Stops on SIGINT/SIGTERM: new claims stop immediately, and whatever's already claimed is left
- * for its own lease to recover, the same as a crash would be handled.
+ * Stops on SIGINT/SIGTERM: no loop claims new work once the shared signal aborts. Work already
+ * claimed is handled by each queue's own abort behavior: runOnce, deliverOnce, and
+ * submitApprovalOnce release or fail their lease explicitly on an aborted signal, while
+ * pollOnce (see lib/agent-sessions/poller.ts) has no such handling and simply lets its lease
+ * expire for the next sweep, the same as an unhandled error would.
  */
 import { randomUUID } from "node:crypto";
 

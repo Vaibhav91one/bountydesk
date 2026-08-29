@@ -11,8 +11,24 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function defaultSleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Resolves early when `signal` aborts, rather than always waiting out the full duration. A
+ * SIGTERM during a 30-second sweeper interval (or any backoff) must not make shutdown wait for
+ * that timer: most deployment platforms send SIGKILL well before then.
+ */
+async function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** +/- 20% around the base, so four independently-started loops don't wake in lockstep. */
@@ -25,7 +41,7 @@ export type ClaimOnce = (signal: AbortSignal) => Promise<string | null>;
 
 export type RunLoopOptions = {
   signal: AbortSignal;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   jitter?: () => number;
   logger?: Logger;
   idleBackoffMs?: number;
@@ -61,7 +77,7 @@ export async function runLoop(
     } catch (error) {
       if (opts.signal.aborted) return;
       logger.error(`[${name}] claim failed: ${errorMessage(error)}`);
-      await sleep(withJitter(errorBackoffMs, jitter));
+      await sleep(withJitter(errorBackoffMs, jitter), opts.signal);
       continue;
     }
 
@@ -72,13 +88,13 @@ export async function runLoop(
       continue;
     }
 
-    await sleep(withJitter(idleBackoffMs, jitter));
+    await sleep(withJitter(idleBackoffMs, jitter), opts.signal);
   }
 }
 
 export type RunSweeperOptions = {
   signal: AbortSignal;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   logger?: Logger;
   intervalMs?: number;
 };
@@ -105,7 +121,7 @@ export async function runSweeper(
       logger.error(`[${name}] sweep failed: ${errorMessage(error)}`);
     }
     if (opts.signal.aborted) return;
-    await sleep(intervalMs);
+    await sleep(intervalMs, opts.signal);
   }
 }
 
@@ -117,7 +133,7 @@ export type QueueSpec = {
 
 export type RunDaemonOptions = {
   signal: AbortSignal;
-  sleep?: (ms: number) => Promise<void>;
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   jitter?: () => number;
   logger?: Logger;
   idleBackoffMs?: number;
@@ -127,7 +143,7 @@ export type RunDaemonOptions = {
 
 /**
  * Starts one poll loop and one sweeper per queue, all sharing `opts.signal`. Resolves once
- * every loop has returned, which only happens after the signal aborts — so awaiting this is
+ * every loop has returned, which only happens after the signal aborts, so awaiting this is
  * the correct way to wait for a clean shutdown.
  */
 export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Promise<void> {
