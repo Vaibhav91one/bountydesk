@@ -367,3 +367,43 @@ test("the index carries the latest verdict revision, not the first", async () =>
   const row = (await queue.listAllReports()).find((r) => r.id === id);
   assert.equal(row?.outcome, "REPRODUCED");
 });
+
+test("the home counts split open from closed and only count answerable approvals", async () => {
+  const { readHomeSummary } = await import("@/lib/home/summary");
+
+  const before = await readHomeSummary();
+
+  await seedReport("TRIAGING");
+  await seedReport("DELIVERED");
+  // AWAITING_APPROVAL on paper, with no pending call behind it. A home card saying somebody
+  // is waiting on a reviewer would send them to a screen whose buttons refuse.
+  await seedReport("AWAITING_APPROVAL");
+
+  const answerable = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: answerable,
+      outcome: "ANALYSIS_ONLY",
+      summary: "did not run",
+      payload: "the exact comment",
+      contentHash: `home-hash-${answerable}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: answerable,
+    capabilityToken: `home-token-${answerable}`,
+    sessionId: `home-session-${answerable}`,
+    pendingThreadId: "thread-1",
+    pendingToolCallId: "call-1",
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `home-hash-${answerable}`,
+  });
+
+  const after = await readHomeSummary();
+  assert.equal(after.reports - before.reports, 4);
+  // Three of the four are non-terminal; DELIVERED is not.
+  assert.equal(after.open - before.open, 3);
+  assert.equal(after.awaiting - before.awaiting, 1, "only the one with a pending call counts");
+});
