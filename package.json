@@ -19,6 +19,7 @@
     "quarantine:stale-target": "node --env-file-if-exists=.env.local --import tsx scripts/quarantine-stale-target.ts",
     "spike:daytona": "node --env-file-if-exists=.env.local --import tsx scripts/spike-daytona.ts",
     "agent:apply": "node --env-file-if-exists=.env.local --import tsx scripts/apply-agent.ts",
+    "skills:apply": "node --env-file-if-exists=.env.local --import tsx scripts/apply-skills.ts",
     "worker:jobs": "node --env-file-if-exists=.env.local --import tsx scripts/run-worker-once.ts",
     "worker:delivery": "node --env-file-if-exists=.env.local --import tsx scripts/run-delivery-once.ts",
     "worker:daemon": "node --env-file-if-exists=.env.local --import tsx scripts/run-worker-daemon.ts",
