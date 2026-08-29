@@ -4,6 +4,7 @@ import test from "node:test";
 import { decideOutcome, type ReproductionRun } from "./decide";
 
 const clean: ReproductionRun = {
+  fixtureCompleted: true,
   negativeControlCompleted: true,
   negativeControlCanaryFound: false,
   exploitCompleted: true,
@@ -16,6 +17,13 @@ test("a completed run with a clean negative control and a found canary reproduce
 
 test("a completed run with a clean negative control and no canary found does not reproduce", () => {
   assert.equal(decideOutcome(clean), "NOT_REPRODUCED");
+});
+
+test("a fixture that never completed never produces a definitive verdict, even if both legs look clean", () => {
+  assert.equal(
+    decideOutcome({ ...clean, fixtureCompleted: false, exploitCanaryFound: true }),
+    "ANALYSIS_ONLY",
+  );
 });
 
 test("an incomplete negative control never produces a definitive verdict", () => {
@@ -36,9 +44,10 @@ test("a dirty negative control (canary found before the exploit ran) is never tr
   );
 });
 
-test("both legs incomplete is still ANALYSIS_ONLY, not a guess", () => {
+test("everything incomplete is still ANALYSIS_ONLY, not a guess", () => {
   assert.equal(
     decideOutcome({
+      fixtureCompleted: false,
       negativeControlCompleted: false,
       negativeControlCanaryFound: false,
       exploitCompleted: false,
