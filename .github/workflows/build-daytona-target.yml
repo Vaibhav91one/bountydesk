@@ -79,6 +79,16 @@ jobs:
             && apt-get update \
             && apt-get install -y --no-install-recommends curl \
             && rm -rf /var/lib/apt/lists/*
+          # The defender-authored build marker lib/sandbox/build-marker.ts reads back from
+          # inside a booted sandbox: a second, independent proof of which commit this image was
+          # built from, since Daytona's control plane can only report the tag a snapshot was
+          # registered under, never the digest it resolved to. The exact commit is already the
+          # one value this workflow can't get wrong -- it's the same SOURCE_COMMIT baked into the
+          # image labels below -- so it costs nothing new to also write it into the filesystem
+          # where a running sandbox can read it.
+          ARG BOUNTYDESK_BUILD_MARKER
+          RUN test -n "$BOUNTYDESK_BUILD_MARKER" \
+            && printf '%s' "$BOUNTYDESK_BUILD_MARKER" > /etc/bountydesk-build-marker
           CMD ["node", "build/app.js"]
           EOF
 
@@ -87,6 +97,7 @@ jobs:
             --label "org.bountydesk.source.repo=${SOURCE_REPO}" \
             --label "org.bountydesk.source.commit=${SOURCE_COMMIT}" \
             --label "org.bountydesk.build.workflow_run=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            --build-arg "BOUNTYDESK_BUILD_MARKER=${SOURCE_COMMIT}" \
             -t "$tag" \
             sandbox
           docker push "$tag"
