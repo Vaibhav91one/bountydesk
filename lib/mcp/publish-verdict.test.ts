@@ -305,3 +305,303 @@ test("an unknown capability is refused without touching any row", async () => {
 
   assert.deepEqual(result, { ok: false, reason: "unknown capability" });
 });
+
+/**
+ * draftVerdictFromPendingCall: the new agent-drafted path. Reports here have no pre-seeded
+ * verdict or pending markers -- unlike seedFixture above, which sets up an already-approvable
+ * publishVerdict fixture -- since this function's whole job is minting that first verdict row.
+ */
+
+let draftSeq = 0;
+
+async function seedDraftableReport(
+  opts: {
+    targetProfileId?: string | null;
+    connectedRepositoryId?: string | null;
+    state?: "TRIAGING" | "REPRODUCING" | "ANALYSIS_ONLY" | "CANCELLED" | "DELIVERED" | "DELIVERING";
+  } = {},
+) {
+  draftSeq += 1;
+  const n = draftSeq;
+
+  const [r] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "github",
+      sourceRef: `github:2:issue:${n}`,
+      title: `draftable report ${n}`,
+      body: "body",
+      state: opts.state ?? "TRIAGING",
+      targetProfileId: opts.targetProfileId ?? null,
+      connectedRepositoryId: opts.connectedRepositoryId ?? null,
+    })
+    .returning({ id: dbm.report.id });
+
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: r.id,
+      capabilityToken: `draft-cap-${n}-${randomUUID()}`,
+      sessionId: `draft-session-${n}`,
+    })
+    .returning({ capabilityToken: dbm.agentSession.capabilityToken });
+
+  return { reportId: r.id, capability: session.capabilityToken };
+}
+
+/** A bound target profile, optionally behind a connected repository with a specific grant
+ * state, the same shape trueforge-driver.test.ts exercises for the deterministic pipeline. */
+async function seedTargetWithGrant(
+  opts: { active?: boolean; suspended?: boolean } = {},
+): Promise<{ targetProfileId: string; connectedRepositoryId: string }> {
+  const [target] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: `draft-target-${randomUUID()}`,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: `sha256:${randomUUID().replace(/-/g, "")}`,
+      config: {},
+      scopeRules: [],
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  const [installation] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({
+      installationId: Number(`9${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      accountLogin: `acct-${randomUUID()}`,
+      accountId: Number(`8${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      suspendedAt: opts.suspended ? new Date() : null,
+    })
+    .returning({ id: dbm.githubInstallation.id });
+
+  const [repo] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({
+      installationId: installation.id,
+      repoId: Number(`7${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      fullName: `owner/repo-${randomUUID()}`,
+      targetProfileId: target.id,
+      active: opts.active ?? true,
+    })
+    .returning({ id: dbm.connectedRepository.id });
+
+  return { targetProfileId: target.id, connectedRepositoryId: repo.id };
+}
+
+test("draftVerdictFromPendingCall rejects an invalid draft before touching the database", async () => {
+  // The capability below names no real session on purpose: if validation ran after a DB
+  // lookup, this would come back "unknown capability" instead of a schema error.
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(`no-such-capability-${randomUUID()}`, {
+    outcome: "SOMETHING_ELSE",
+    summary: "",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /^invalid draft:/);
+});
+
+test("draftVerdictFromPendingCall rejects a findings array with an out-of-range severity", async () => {
+  const fixture = await seedDraftableReport();
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "ok",
+    findings: [{ title: "t", severity: "catastrophic", description: "d", evidenceRef: "e" }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /^invalid draft:/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0);
+});
+
+test("draftVerdictFromPendingCall rejects an unknown capability", async () => {
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(`unknown-${randomUUID()}`, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "ok",
+    findings: [],
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "unknown capability" });
+});
+
+test("draftVerdictFromPendingCall rejects REPRODUCED for a report with no bound target profile", async () => {
+  const fixture = await seedDraftableReport();
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "REPRODUCED",
+    summary: "the agent claims this reproduces",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /ANALYSIS_ONLY is permitted/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0, "an unauthorized claim must never become a verdict row");
+});
+
+test("draftVerdictFromPendingCall rejects NOT_REPRODUCED for a revoked repository grant", async () => {
+  const target = await seedTargetWithGrant({ active: false });
+  const fixture = await seedDraftableReport({
+    targetProfileId: target.targetProfileId,
+    connectedRepositoryId: target.connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "NOT_REPRODUCED",
+    summary: "the agent claims this does not reproduce",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /ANALYSIS_ONLY is permitted/);
+});
+
+test("draftVerdictFromPendingCall rejects REPRODUCED for a suspended installation", async () => {
+  const target = await seedTargetWithGrant({ suspended: true });
+  const fixture = await seedDraftableReport({
+    targetProfileId: target.targetProfileId,
+    connectedRepositoryId: target.connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "REPRODUCED",
+    summary: "the agent claims this reproduces",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+});
+
+test("draftVerdictFromPendingCall accepts ANALYSIS_ONLY with no bound target and renders findings deterministically", async () => {
+  const fixture = await seedDraftableReport();
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "Nothing conclusive found from a read of the report alone.",
+    findings: [
+      {
+        title: "Reflected parameter in search",
+        severity: "medium",
+        description: "The query parameter is echoed back unescaped.",
+        evidenceRef: "scope-guard-log:1",
+      },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+  const verdictId = (result as { verdictId: string }).verdictId;
+  const [row] = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.id, verdictId));
+
+  assert.equal(row.outcome, "ANALYSIS_ONLY");
+  assert.equal(row.summary, "Nothing conclusive found from a read of the report alone.");
+  assert.deepEqual(row.evidence, {
+    source: "agent-drafted",
+    findings: [
+      {
+        title: "Reflected parameter in search",
+        severity: "medium",
+        description: "The query parameter is echoed back unescaped.",
+        evidenceRef: "scope-guard-log:1",
+      },
+    ],
+  });
+  assert.ok(row.payload.startsWith("Outcome: ANALYSIS_ONLY"));
+  assert.ok(row.payload.includes("Nothing conclusive found from a read of the report alone."));
+  assert.ok(row.payload.includes("Reflected parameter in search"));
+  assert.ok(row.payload.includes("MEDIUM"));
+  assert.ok(row.payload.includes("scope-guard-log:1"));
+  const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
+  assert.equal(row.payload.split(marker).length, 2, "marker must appear exactly once");
+  assert.equal(row.contentHash, computeContentHash(row.payload));
+
+  // Rendering is deterministic: the same draft always produces the same payload text, given
+  // the same verdict id.
+  const rebuilt = publishVerdictModule.buildAgentDraftedPayload(verdictId, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "Nothing conclusive found from a read of the report alone.",
+    findings: [
+      {
+        title: "Reflected parameter in search",
+        severity: "medium",
+        description: "The query parameter is echoed back unescaped.",
+        evidenceRef: "scope-guard-log:1",
+      },
+    ],
+  });
+  assert.equal(rebuilt, row.payload);
+});
+
+test("draftVerdictFromPendingCall accepts REPRODUCED for a report with an active repository grant", async () => {
+  const target = await seedTargetWithGrant();
+  const fixture = await seedDraftableReport({
+    targetProfileId: target.targetProfileId,
+    connectedRepositoryId: target.connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "REPRODUCED",
+    summary: "the agent verified this against the sandboxed target",
+    findings: [],
+  });
+
+  assert.equal(result.ok, true);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 1);
+  assert.equal(verdicts[0].outcome, "REPRODUCED");
+});
+
+test("draftVerdictFromPendingCall rejects a finding whose evidenceRef exceeds the length bound", async () => {
+  const fixture = await seedDraftableReport();
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "ok",
+    findings: [{ title: "t", severity: "low", description: "d", evidenceRef: "x".repeat(501) }],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /^invalid draft:/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0);
+});
+
+test("draftVerdictFromPendingCall refuses a report already past the analysis stages, for any outcome", async () => {
+  const cancelled = await seedDraftableReport({ state: "CANCELLED" });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(cancelled.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "the agent's read of a report nobody can act on any more",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /report is CANCELLED/);
+  const verdicts = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.reportId, cancelled.reportId));
+  assert.equal(verdicts.length, 0, "a terminal report must never receive a fresh verdict");
+});
+
+test("draftVerdictFromPendingCall refuses a report already DELIVERING", async () => {
+  const delivering = await seedDraftableReport({ state: "DELIVERING" });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(delivering.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "a late draft for a report already on its way out",
+    findings: [],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /report is DELIVERING/);
+});
+
+test("buildAgentDraftedPayload states the outcome on its own line, independent of the summary text", () => {
+  const payload = publishVerdictModule.buildAgentDraftedPayload("verdict-1", {
+    outcome: "REPRODUCED",
+    summary: "a summary that never mentions the word itself",
+    findings: [],
+  });
+
+  assert.ok(payload.startsWith("Outcome: REPRODUCED"));
+});

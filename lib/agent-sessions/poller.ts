@@ -1,4 +1,5 @@
 import { and, db, eq, report, verdict } from "@/lib/db";
+import { draftVerdictFromPendingCall, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
 import { transition } from "@/lib/reports/lifecycle";
 import {
   createTrueForgeClient,
@@ -41,13 +42,16 @@ async function refuseUnresolvablePending(
   return lease.id;
 }
 
-function extractCapability(argumentsJson: string): string | null {
-  let parsed: unknown;
+function parseJson(argumentsJson: string): unknown {
   try {
-    parsed = JSON.parse(argumentsJson);
+    return JSON.parse(argumentsJson);
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+function extractCapability(argumentsJson: string): string | null {
+  const parsed = parseJson(argumentsJson);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const capability = (parsed as Record<string, unknown>).capability;
   return typeof capability === "string" ? capability : null;
@@ -174,6 +178,32 @@ async function handleVerifiedPendingCall(
   return lease.id;
 }
 
+/**
+ * A pending call whose arguments already carry the full agent-drafted shape (outcome, summary,
+ * findings), not just a capability token. Mints or confirms the report's verdict from those
+ * fields before falling through to the same handleVerifiedPendingCall approval-recording flow
+ * a capability-only call uses -- the drafting step is the only part that's new.
+ *
+ * Nothing in the live agent manifest or turn message asks for this shape yet (that lands with
+ * the driver rewrite), so this branch is unreachable in production today; it exists so the
+ * poller-side half of the new schema is exercised and provable ahead of that later PR.
+ */
+async function handleAgentDraftedPendingCall(
+  lease: AgentSessionLease,
+  call: PendingToolCall,
+  input: { capability: string; outcome: string; summary: string; findings: unknown[] },
+): Promise<string> {
+  const drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
+    outcome: input.outcome,
+    summary: input.summary,
+    findings: input.findings,
+  });
+  if (!drafted.ok) {
+    return refuseUnresolvablePending(lease, `publish_verdict draft refused: ${drafted.reason}`);
+  }
+  return handleVerifiedPendingCall(lease, call);
+}
+
 async function handleAwaitingApproval(
   lease: AgentSessionLease,
   pending: PendingToolCall[],
@@ -191,6 +221,36 @@ async function handleAwaitingApproval(
       lease,
       `unsupported pending tool call: ${call.toolName} (toolInfoType ${call.toolInfoType})`,
     );
+  }
+
+  // Today's tool schema and turn message only ever hand back {capability}; a full draft is
+  // what a future, investigating agent will send instead once the driver rewrite starts asking
+  // for one. A call is treated as a draft attempt the moment its arguments carry any
+  // draft-specific key, whether or not the rest of the shape is valid: falling through to the
+  // capability-only path for a malformed draft would silently approve whatever verdict already
+  // exists instead of the (possibly different) content the caller actually tried to submit.
+  const parsedArguments = parseJson(call.argumentsJson);
+  const looksLikeDraftAttempt =
+    typeof parsedArguments === "object" &&
+    parsedArguments !== null &&
+    !Array.isArray(parsedArguments) &&
+    ["outcome", "summary", "findings"].some((key) => key in (parsedArguments as Record<string, unknown>));
+
+  if (looksLikeDraftAttempt) {
+    const fullDraft = publishVerdictInputSchema.safeParse(parsedArguments);
+    if (!fullDraft.success) {
+      return refuseUnresolvablePending(
+        lease,
+        `publish_verdict arguments look like a drafted verdict but failed validation: ${fullDraft.error.issues.map((issue) => issue.message).join("; ")}`,
+      );
+    }
+    if (fullDraft.data.capability !== lease.capabilityToken) {
+      return refuseUnresolvablePending(
+        lease,
+        "publish_verdict capability argument does not match this session's capability token",
+      );
+    }
+    return handleAgentDraftedPendingCall(lease, call, fullDraft.data);
   }
 
   const capability = extractCapability(call.argumentsJson);

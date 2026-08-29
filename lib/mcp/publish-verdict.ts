@@ -1,9 +1,209 @@
-import { agentSession, approvalDecision, db, eq, report, verdict } from "@/lib/db";
+import { randomUUID } from "node:crypto";
+
+import { z } from "zod";
+
+import {
+  agentSession,
+  and,
+  approvalDecision,
+  db,
+  eq,
+  report,
+  REPORT_TERMINAL_STATES,
+  verdict,
+  type Executor,
+} from "@/lib/db";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
+import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
+import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type PublishVerdictResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * The one shared shape for what an agent-drafted verdict looks like, imported by both the MCP
+ * route (capability-only lookup, unchanged in this PR) and the poller (the full shape, once a
+ * real agent starts drafting outcome/summary/findings instead of only echoing a capability
+ * token back). One definition means the two can never quietly drift on what counts as a valid
+ * draft.
+ */
+export const findingSchema = z.object({
+  title: z.string().min(1).max(200),
+  severity: z.enum(["critical", "high", "medium", "low", "info"]),
+  description: z.string().min(1).max(4000),
+  evidenceRef: z.string().min(1).max(500),
+});
+
+export const verdictDraftSchema = z.object({
+  outcome: z.enum(["REPRODUCED", "NOT_REPRODUCED", "ANALYSIS_ONLY"]),
+  summary: z.string().min(1).max(2000),
+  findings: z.array(findingSchema).max(20),
+});
+
+export const publishVerdictInputSchema = verdictDraftSchema.extend({
+  capability: z.string(),
+});
+
+export type Finding = z.infer<typeof findingSchema>;
+export type VerdictDraft = z.infer<typeof verdictDraftSchema>;
+export type PublishVerdictInput = z.infer<typeof publishVerdictInputSchema>;
+
+export type DraftVerdictResult = { ok: true; verdictId: string } | { ok: false; reason: string };
+
+function renderFinding(finding: Finding, index: number): string {
+  return `${index + 1}. [${finding.severity.toUpperCase()}] ${finding.title}\n   ${finding.description}\n   Evidence: ${finding.evidenceRef}`;
+}
+
+/**
+ * Server-authored prose for an agent-drafted verdict: the only thing that turns the agent's
+ * structured fields into the exact text a human approves and GitHub receives. Same reasoning
+ * as trueforge-driver.ts's buildReproducedPayload -- the agent's raw words never reach the
+ * outbound comment unrendered, which matters doubly here since the agent may have absorbed
+ * prompt-injection content while probing an untrusted target.
+ */
+export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft): string {
+  const findingsBlock =
+    draft.findings.length > 0
+      ? `\n\nFindings:\n${draft.findings.map(renderFinding).join("\n")}`
+      : "";
+
+  // The outcome is stated on its own line, in the reviewer's and outbound comment's own words,
+  // rather than left for the free-form summary to convey: a draft's `summary` is validated only
+  // for length, not for agreeing with its own `outcome`, so the approved text must say the
+  // persisted outcome plainly instead of relying on the agent's prose to get it right.
+  const body = `Outcome: ${draft.outcome}\n\n${draft.summary}${findingsBlock}\n\nA person still needs to review this before any next step.`;
+  return `${body}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+}
+
+/**
+ * The validated draft, an authorization re-check, rendering, and the actual write -- shared by
+ * both callers below so neither re-implements any of it.
+ *
+ * The authorization re-check is the load-bearing part: an agent claiming REPRODUCED or
+ * NOT_REPRODUCED for a report with no bound target profile, or one whose repository grant has
+ * since been revoked, is refused here before its claim ever becomes a verdict row, the same way
+ * decideFreshVerdict refuses an unauthorized reproduction today. ANALYSIS_ONLY needs no live
+ * authorization, since it never claims the sandboxed target actually confirmed anything.
+ *
+ * A report past the analysis stages is refused regardless of outcome: a revision-1 verdict is
+ * this function's own idempotency key, so writing one for a cancelled, expired, delivered,
+ * denied, out-of-scope, or already-delivering report would permanently attach a definitive
+ * verdict to a report that can never again legitimately produce one.
+ */
+async function persistAgentDraftedVerdict(
+  reportId: string,
+  verdictId: string,
+  draft: VerdictDraft,
+  tx: Executor,
+): Promise<DraftVerdictResult> {
+  const [reportRow] = await tx
+    .select({ state: report.state })
+    .from(report)
+    .where(eq(report.id, reportId))
+    .limit(1)
+    .for("update");
+  if (!reportRow) return { ok: false, reason: "report not found" };
+  if (
+    (REPORT_TERMINAL_STATES as readonly string[]).includes(reportRow.state) ||
+    reportRow.state === "DELIVERING"
+  ) {
+    return {
+      ok: false,
+      reason: `report is ${reportRow.state}; a fresh verdict cannot be drafted for it`,
+    };
+  }
+
+  if (draft.outcome === "REPRODUCED" || draft.outcome === "NOT_REPRODUCED") {
+    const grant = await loadRepositoryGrantSnapshot(reportId, tx);
+    if (!grant || !hasActiveRepositoryGrant(grant)) {
+      return {
+        ok: false,
+        reason: `outcome ${draft.outcome} requires a bound target with an active repository grant; only ANALYSIS_ONLY is permitted here`,
+      };
+    }
+  }
+
+  const payload = buildAgentDraftedPayload(verdictId, draft);
+  const row = await ensureInitialVerdict(
+    {
+      id: verdictId,
+      reportId,
+      outcome: draft.outcome,
+      summary: draft.summary,
+      evidence: { source: "agent-drafted", findings: draft.findings },
+      payload,
+    },
+    tx,
+  );
+  return { ok: true, verdictId: row.id };
+}
+
+/**
+ * Called from lib/agent-sessions/poller.ts once it has parsed a pending publish_verdict call's
+ * arguments into the full draft shape. Resolves the report from the capability token -- the
+ * model never supplies a report or verdict id directly -- then reuses whatever revision-1
+ * verdict id already exists for retry-safety, or mints a fresh one.
+ *
+ * Rejects an invalid draft before touching the database at all: schema validation runs first,
+ * outside any transaction.
+ */
+export async function draftVerdictFromPendingCall(
+  capability: string,
+  rawDraft: unknown,
+): Promise<DraftVerdictResult> {
+  const parsed = verdictDraftSchema.safeParse(rawDraft);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: `invalid draft: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+    };
+  }
+  const draft = parsed.data;
+
+  return db.transaction(async (tx) => {
+    const [session] = await tx
+      .select({ reportId: agentSession.reportId })
+      .from(agentSession)
+      .where(eq(agentSession.capabilityToken, capability))
+      .limit(1)
+      .for("update");
+    if (!session) return { ok: false, reason: "unknown capability" };
+
+    const [existing] = await tx
+      .select({ id: verdict.id })
+      .from(verdict)
+      .where(and(eq(verdict.reportId, session.reportId), eq(verdict.revision, 1)))
+      .limit(1);
+    const verdictId = existing?.id ?? randomUUID();
+
+    return persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
+  });
+}
+
+/**
+ * Used only by trueforge-driver.ts's still-deterministic ensureSession, for a report that has
+ * no agent session or capability token yet at the point its verdict is decided (session
+ * creation happens later, once the verdict already exists -- see the comment at that call
+ * site). draftVerdictFromPendingCall's capability-based lookup doesn't apply there, so the
+ * driver calls this directly with the reportId and verdictId it already computed, reusing the
+ * exact same validation, authorization re-check, and rendering.
+ */
+export async function draftVerdictForReport(
+  reportId: string,
+  verdictId: string,
+  rawDraft: unknown,
+  tx: Executor,
+): Promise<DraftVerdictResult> {
+  const parsed = verdictDraftSchema.safeParse(rawDraft);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      reason: `invalid draft: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
+    };
+  }
+  return persistAgentDraftedVerdict(reportId, verdictId, parsed.data, tx);
+}
 
 /**
  * The MCP tool handler for `publish_verdict`. Resolves everything from the opaque
