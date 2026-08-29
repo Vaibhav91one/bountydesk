@@ -111,7 +111,8 @@ test("sqli-search oracle: canary as a coincidental substring outside the name fi
 
 test("sqli-search oracle: a non-JSON body does not throw and is false", async () => {
   const [sqli] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
-  assert.equal(await sqli.oracleCheck({ status: 500, body: "<html>not json</html>" }, "canary"), false);
+  const canary = freshCanary();
+  assert.equal(await sqli.oracleCheck({ status: 500, body: "<html>not json</html>" }, canary), false);
 });
 
 test("sqli-search oracle: a JSON error response containing the canary is false", async () => {
