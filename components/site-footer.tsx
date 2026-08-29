@@ -9,7 +9,6 @@ const COLUMNS: { title: string; links: { label: string; href: string; out?: bool
     links: [
       { label: "Sign in", href: "/login" },
       { label: "How it works", href: "/#how" },
-      { label: "What runs today", href: "/#status" },
     ],
   },
   {

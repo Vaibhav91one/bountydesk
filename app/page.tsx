@@ -1,9 +1,8 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Check, Circle, Folder, Sparkle } from "@phosphor-icons/react/ssr";
+import { Folder, Sparkle } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
-import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
@@ -14,7 +13,13 @@ import { Button } from "@/components/ui/button";
 
 import { INTEGRATIONS, type IntegrationIcon } from "./(app)/integrations/catalog";
 import { Faq } from "./faq";
-import { ApprovalPanel, EvidencePanel, RecordPanel, SandboxList } from "./panels";
+import {
+  ApprovalPanel,
+  Framed,
+  QueuePanel,
+  ReportsPanel,
+  SandboxList,
+} from "./panels";
 
 export const metadata = {
   title: "BountyDesk",
@@ -37,37 +42,6 @@ const CHANNEL_ICONS: Record<IntegrationIcon, React.ComponentType<{ className?: s
   onedrive: OneDrive,
   folder: Folder,
 };
-
-/** The frozen MVP report lifecycle. Ten states, and the last five are terminal. */
-const LIFECYCLE: { state: string; phase: string }[] = [
-  { state: "Triaging", phase: "triaging" },
-  { state: "Reproducing", phase: "reproducing" },
-  { state: "Analysis only", phase: "analysis-only" },
-  { state: "Awaiting approval", phase: "awaiting-approval" },
-  { state: "Delivering", phase: "delivered" },
-  { state: "Delivered", phase: "delivered" },
-  { state: "Denied", phase: "closed" },
-  { state: "Out of scope", phase: "closed" },
-  { state: "Cancelled", phase: "closed" },
-  { state: "Expired", phase: "closed" },
-];
-
-const BUILT = [
-  "Signed GitHub App intake, deduplicated on the delivery id",
-  "A durable jobs queue with leased workers and a sweeper",
-  "The review queue, the reports index and the case file",
-  "The approval gate, bound to the exact payload hash",
-  "Sign-in behind a reviewer allowlist, re-checked every request",
-  "An append-only record of verdicts, decisions, events and attempts",
-];
-
-const DESIGNED = [
-  "The build and reproduction sandboxes",
-  "The canary oracle and its negative control",
-  "Comment delivery back to the issue",
-  "Email and file-upload intake",
-  "The dynamic per-repository target tier",
-];
 
 /**
  * The front door.
@@ -267,24 +241,13 @@ export default function LandingPage() {
           body="A dynamic run builds in one sandbox with narrow dependency egress and reproduces in a second with none, and only the built artifact crosses between them. A fresh canary is seeded through a trusted fixture, a negative control runs first, and the oracle that decides runs outside the sandbox it is judging."
           visual={
             <>
-              {/* Seated on a photograph, the way a product shot sits on a backdrop. The image
-                  is decorative and carries an empty alt; the panel above it says everything. */}
-              <div className="relative hidden overflow-hidden rounded-2xl p-6 md:block lg:p-8">
-                <Image
-                  src="/backdrop/panel.webp"
-                  alt=""
-                  fill
-                  sizes="(min-width: 1024px) 50vw, 100vw"
-                  className="object-cover object-center"
-                />
-                <div aria-hidden="true" className="absolute inset-0 bg-background/35" />
-
-                {/* The diagram sets touch-none across a 460px band, which on a phone is a
-                    place a scrolling finger gets stuck. The list below says the same thing
-                    and scrolls, which is why this half starts at md. */}
-                <div className="relative overflow-hidden rounded-xl shadow-[0_24px_48px_rgba(0,0,0,0.55)]">
+              {/* The diagram sets touch-none across a 460px band, which on a phone is a place
+                  a scrolling finger gets stuck. The list below says the same thing and
+                  scrolls, which is why the framed half starts at md. */}
+              <div className="hidden md:block">
+                <Framed src="/backdrop/panel.webp">
                   <SandboxDiagram targetName="juice-shop-v17.3.0" status={{}} />
-                </div>
+                </Framed>
               </div>
 
               <div className="md:hidden">
@@ -296,85 +259,26 @@ export default function LandingPage() {
 
         <Feature
           reverse
-          eyebrow="Evidence"
-          title="No fixture, no reproduced verdict"
-          body="A target without a defender-authored fixture and oracle cannot return a reproduced verdict, whatever the proof of concept printed and whatever the model read out of a log. That run produces an analysis packet instead, and a human decides. It is the rule that does not move when the sandboxes ship."
-          visual={<EvidencePanel />}
+          eyebrow="Review queue"
+          title="Work in flight, by phase"
+          body="Six columns, and a card that is mid-run says so: the phase spins rather than sitting still, and Agent Bounty is doing the thing the column names. The one waiting on a person is marked, and only when there is a call a reviewer can actually answer."
+          visual={
+            <Framed src="/backdrop/queue.webp">
+              <QueuePanel />
+            </Framed>
+          }
         />
 
         <Feature
-          eyebrow="The gate"
-          title="Nothing is ever auto-closed"
-          body="The verdict is drafted, frozen, and posted only after a reviewer approves the exact words. The delivery worker reads the immutable verdict and refuses any payload whose hash differs from the approved one, so an approval cannot be reused for different text."
-          visual={<RecordPanel />}
+          eyebrow="Reports"
+          title="Everything that arrived, however it ended"
+          body="The board hides closed work on purpose, so the index is the list that hides nothing. Search across title, issue and repository, filter to what is open or what is waiting on you, and open any of them straight into its case file."
+          visual={
+            <Framed src="/backdrop/reports.webp">
+              <ReportsPanel />
+            </Framed>
+          }
         />
-
-        {/* The lifecycle, where the reference puts a demo video. There is no video, and this is
-            the one thing a screenshot could not show anyway. */}
-        <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-24">
-          <div className="flex flex-col gap-3">
-            <span className="font-mono text-body text-brand-soft pb-2">Lifecycle</span>
-            <h2 className="text-title text-foreground">Ten states, and five of them are the end</h2>
-            <p className="max-w-2xl text-lead text-muted-foreground">
-              The report lifecycle is frozen and separate from job execution, so a failed delivery
-              is a worker retrying, not a state a reviewer has to read.
-            </p>
-          </div>
-          <ul className="flex flex-wrap gap-2">
-            {LIFECYCLE.map((entry) => (
-              <li key={entry.state}>
-                <PhaseBadge phase={entry.phase}>{entry.state}</PhaseBadge>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        {/* What runs today */}
-        <section id="status" className="mx-auto w-full max-w-7xl scroll-mt-20 px-6 py-24">
-          <div className="flex flex-col gap-8 rounded-xl border border-border/50 bg-card p-8">
-            <div className="flex flex-col gap-3">
-              <span className="font-mono text-body text-brand-soft pb-2">Status</span>
-              <h2 className="text-title text-foreground">What runs today</h2>
-              <p className="max-w-2xl text-lead text-muted-foreground">
-                This product refuses to post a comment nobody read. It would be a poor front door
-                for it to overstate what it does.
-              </p>
-            </div>
-
-            <div className="grid gap-8 sm:grid-cols-2">
-              <div className="flex flex-col gap-3">
-                <h3 className="text-heading text-foreground">Built</h3>
-                <ul className="flex flex-col gap-2.5">
-                  {BUILT.map((item) => (
-                    <li key={item} className="flex items-start gap-2.5">
-                      <Check
-                        weight="bold"
-                        aria-hidden="true"
-                        className="mt-1 size-3.5 shrink-0 text-phase-delivered"
-                      />
-                      <span className="text-body text-muted-foreground">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="flex flex-col gap-3">
-                <h3 className="text-heading text-foreground">Coming soon</h3>
-                <ul className="flex flex-col gap-2.5">
-                  {DESIGNED.map((item) => (
-                    <li key={item} className="flex items-start gap-2.5">
-                      <Circle
-                        aria-hidden="true"
-                        className="mt-1 size-3.5 shrink-0 text-muted-foreground/60"
-                      />
-                      <span className="text-body text-muted-foreground">{item}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        </section>
 
         {/* FAQ */}
         <section

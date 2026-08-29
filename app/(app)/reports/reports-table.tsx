@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
 
@@ -11,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
 import type { IndexRow } from "@/lib/reports/queue";
 
-import { ReportSheet } from "./report-sheet";
 
 /**
  * Dates cross the server boundary as strings, and the phase comes with them.
@@ -79,9 +79,9 @@ function matchesFilter(row: ReportRow, key: string): boolean {
 }
 
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
-  const [open, setOpen] = useState<string | null>(null);
 
   const counts = useMemo(
     () =>
@@ -108,7 +108,9 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
             row.sourceLabel.toLowerCase().includes(needle) ||
             row.origin.toLowerCase().includes(needle)
           )),
-      onSelect: () => setOpen(row.id),
+      // Straight to the case file. A summary in a panel was a stop on the way to the
+      // page that has everything, and the row already says what the summary said.
+      onSelect: () => router.push(`/reports/${row.id}`),
       cells: [
         <span key="report" className="flex min-w-0 items-center gap-2.5">
           <PhaseDot phase={row.phase} />
@@ -139,7 +141,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         </span>,
       ],
     }));
-  }, [rows, query, filter]);
+  }, [rows, query, filter, router]);
 
   if (rows.length === 0) {
     return (
@@ -160,8 +162,6 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       </div>
     );
   }
-
-  const phase = rows.find((row) => row.id === open)?.phase ?? "triaging";
 
   return (
     <div className="flex flex-col gap-4 p-8">
@@ -196,7 +196,6 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         }
       />
 
-      <ReportSheet id={open} phase={phase} onOpenChange={(next) => !next && setOpen(null)} />
     </div>
   );
 }

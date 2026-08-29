@@ -26,9 +26,6 @@ export function SiteHeader({ links = true }: { links?: boolean }) {
               <a href="#how" className="text-body text-muted-foreground hover:text-foreground">
                 How it works
               </a>
-              <a href="#status" className="text-body text-muted-foreground hover:text-foreground">
-                What runs today
-              </a>
               <a href="#faq" className="text-body text-muted-foreground hover:text-foreground">
                 Questions
               </a>

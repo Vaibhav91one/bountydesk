@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { RepoStatus } from "@/lib/github/connections";
 
 import { ConfigureButton } from "../integrations/configure-button";
+import { RepositorySheet } from "./repository-sheet";
 
 const COLUMNS = [
   { key: "repository", label: "Repository", width: "1.6fr" },
@@ -100,10 +101,14 @@ export function ConnectionTabs({
 }) {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string>("all");
+  const [open, setOpen] = useState<string | null>(null);
 
   const needle = query.trim().toLowerCase();
   const rows: TableRow[] = repositories.map((repo) => ({
     id: repo.id,
+    // The row opens the panel; the buttons inside the last cell stop the click before it
+    // gets here, so Configure still configures rather than opening a sheet.
+    onSelect: () => setOpen(repo.id),
     hidden:
       !inGroup(repo.status, group) ||
       (needle.length > 0 &&
@@ -206,6 +211,11 @@ export function ConnectionTabs({
               label="Connected repositories"
               minWidth={880}
               empty={<>No repository matches.</>}
+            />
+
+            <RepositorySheet
+              repo={repositories.find((r) => r.id === open) ?? null}
+              onOpenChange={(next) => !next && setOpen(null)}
             />
           </div>
         )}
