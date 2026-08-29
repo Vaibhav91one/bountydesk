@@ -119,3 +119,12 @@ export function trueforgeApiKey(): string {
 export function mcpServerSecret(): string {
   return requireSecret("MCP_SERVER_SECRET");
 }
+
+/**
+ * Bearer secret the scope-guard MCP route requires on every call. Same role as
+ * `mcpServerSecret()`, for a separate connector: only the TrueForge harness's scope-guard
+ * connector should ever be able to mint grants or edit the allowlist.
+ */
+export function scopeGuardToken(): string {
+  return requireSecret("SCOPE_GUARD_TOKEN");
+}

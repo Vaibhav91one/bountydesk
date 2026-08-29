@@ -75,6 +75,12 @@ export const deliveryState = pgEnum("delivery_state", [
   "FAILED",
 ]);
 
+export const scopeGuardAuditVerdict = pgEnum("scope_guard_audit_verdict", [
+  "allowed",
+  "denied",
+  "mutated",
+]);
+
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -475,6 +481,18 @@ export const agentSession = pgTable(
   ],
 );
 
+export const agentSessionClaim = pgTable(
+  "agent_session_claim",
+  {
+    reportId: uuid("report_id")
+      .primaryKey()
+      .references(() => report.id, { onDelete: "restrict" }),
+    claimToken: text("claim_token").notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+);
+
 /**
  * The durable, retryable act of telling TrueForge about a decision already recorded in
  * `approval_decision`. Separate from the decision itself: a crash between "we decided" and
@@ -507,5 +525,67 @@ export const approvalSubmission = pgTable(
     uniqueIndex("approval_submission_approval_decision_key").on(t.approvalDecisionId),
     index("approval_submission_claim_idx").on(t.state, t.nextAttemptAt),
     index("approval_submission_lease_idx").on(t.leaseExpiresAt),
+  ],
+);
+
+/**
+ * The scope-guard hash-chained audit log (ported from Sentinel's JSONL file, see
+ * lib/scope-guard/audit.ts). One global chain, not partitioned per report: scope-guard
+ * governs one sandbox target, not one report at a time. `seq` and `prev_hash`/`hash` are
+ * assigned atomically per insert (a transaction-scoped Postgres advisory lock serializes
+ * appends; see audit.ts for why a plain `SELECT ... FOR UPDATE` on the latest row cannot do
+ * this on its own), so no amount of concurrent appending can fork or duplicate the chain. The
+ * insert-only trigger below matches session_event/verdict/approval_decision/delivery_attempt:
+ * this is the one writer that runs without approval, and deleting from it is the first thing
+ * an attacker would want to do.
+ */
+export const scopeGuardAudit = pgTable(
+  "scope_guard_audit",
+  {
+    id: id(),
+    seq: bigint("seq", { mode: "number" }).notNull(),
+    prevHash: text("prev_hash").notNull(),
+    hash: text("hash").notNull(),
+    ts: timestamp("ts", { withTimezone: true }).notNull().defaultNow(),
+    actor: text("actor").notNull(),
+    auth: text("auth").notNull(),
+    action: text("action").notNull(),
+    args: jsonb("args").notNull().default(sql`'{}'::jsonb`),
+    verdict: scopeGuardAuditVerdict("verdict").notNull(),
+    reason: text("reason").notNull(),
+  },
+  (t) => [
+    uniqueIndex("scope_guard_audit_seq_key").on(t.seq),
+    uniqueIndex("scope_guard_audit_hash_key").on(t.hash),
+  ],
+);
+
+/**
+ * Single-use grants backing `verify_grant`/`request_intrusive_approval`, replacing Sentinel's
+ * in-memory `Map` (see lib/scope-guard/grants.ts). Minting a grant inserts an `issued` row;
+ * consuming it inserts a matching `consumed` row rather than updating the issued one, which is
+ * what lets this table stay insert-only like the audit log while still making double-spend
+ * impossible: the two partial unique indexes below allow at most one `issued` and one
+ * `consumed` row per token, and `verify_grant` takes out a `SELECT ... FOR UPDATE` on the
+ * issued row before inserting the consumed one, so two callers racing the same token
+ * serialize instead of both seeing "not yet consumed."
+ */
+export const scopeGuardGrant = pgTable(
+  "scope_guard_grant",
+  {
+    id: id(),
+    token: text("token").notNull(),
+    target: text("target").notNull(),
+    action: text("action").notNull(),
+    event: text("event").notNull(),
+    /** Set on the `issued` row; null on the `consumed` row that references the same token. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("scope_guard_grant_token_issued_key").on(t.token).where(sql`${t.event} = 'issued'`),
+    uniqueIndex("scope_guard_grant_token_consumed_key").on(t.token).where(sql`${t.event} = 'consumed'`),
+    index("scope_guard_grant_token_idx").on(t.token),
+    check("scope_guard_grant_event_check", sql`${t.event} in ('issued', 'consumed')`),
   ],
 );

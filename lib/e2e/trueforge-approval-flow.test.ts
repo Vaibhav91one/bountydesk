@@ -143,6 +143,7 @@ function fakeTrueForge(): TrueForgeClient & { submittedInputs: ApprovalInput[] }
     async createSession() {
       return { sessionId: `truesession-${randomUUID()}` };
     },
+    async deleteSession() {},
     async createTurn(_sessionId, input) {
       turnCounter += 1;
       const turnId = `trueturn-${turnCounter}`;
