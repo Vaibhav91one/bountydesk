@@ -32,19 +32,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Qodo signals the revision it reviewed in three different ways:
+          # Qodo signals the revision it reviewed in a few different ways:
           #   1. On the first pass it submits a formal review whose commit_id is the
           #      reviewed SHA.
           #   2. On a later push with real diff content, it edits that same comment
           #      in place instead of submitting another review, so commit_id goes
           #      stale. The refreshed body links the revision it actually covers as
-          #      ".../commit/<sha>".
-          #   3. On a push whose tree is identical to what it already reviewed (a
-          #      merge or rebase that pulls in already-reviewed upstream content
-          #      with no net diff of its own, for instance), it posts "No code
-          #      changes since the last review — review skipped" instead of a
-          #      commit-linked body, since there is nothing new to comment on.
-          # Accept any of the three, or a PR is unmergeable after a no-op push.
+          #      ".../commit/<sha>" -- but only sometimes: a large cumulative
+          #      findings rollup (mixing new and already-resolved items) can blow
+          #      past GitHub's 65536-char comment limit and get truncated before
+          #      that link ever appears, and a no-op push (a merge or rebase that
+          #      pulls in already-reviewed upstream content with no net diff of its
+          #      own) gets a plain "No code changes since the last review" reply
+          #      with no commit link at all.
+          # A commit-linked match is the strongest signal, so it's tried first. Absent
+          # that, correlate by time: Qodo edits this one comment in place on every
+          # pass regardless of what it says, so any update at or after HEAD_SHA's own
+          # commit timestamp means Qodo has already accounted for this exact tree,
+          # whether the outcome was findings, zero findings, or an explicit skip.
 
           reviewed_head() {
             local reviews comments head_pushed_at
@@ -74,21 +79,12 @@ jobs:
               return 0
             fi
 
-            # A "review skipped, no code changes" reply carries no commit reference
-            # to match against, so correlate it by time instead: it only counts if
-            # it was posted at or after HEAD_SHA's own commit timestamp, meaning
-            # Qodo looked at (or would have looked at) this exact tree and found
-            # nothing new relative to what it already reviewed.
             head_pushed_at="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}" \
               --jq '.commit.committer.date')"
             if jq -e --arg bot "$BOT_LOGIN" --arg since "$head_pushed_at" '
-              any(.[][];
-                .user.login == $bot and
-                (.body | test("no code changes since the last review"; "i")) and
-                .updated_at >= $since
-              )
+              any(.[][]; .user.login == $bot and .updated_at >= $since)
             ' <<<"$comments" >/dev/null; then
-              echo "Qodo reported no code changes since its last review, at or after ${HEAD_SHA}'s own commit time."
+              echo "Qodo's review comment was last updated at or after ${HEAD_SHA}'s own commit time."
               return 0
             fi
 
