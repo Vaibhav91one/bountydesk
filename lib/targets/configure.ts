@@ -27,6 +27,27 @@ const SCOPE_RULES = [{ allow: "localhost" }];
  */
 export const IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop";
 
+/**
+ * The tag Daytona's registered snapshot declares as its imageName, matching the `docker push`
+ * tag in .github/workflows/build-daytona-target.yml. assertSnapshotImage wants an exact digest
+ * match, and gets one whenever a snapshot has been registered digest-pinned; today it can't be,
+ * because Daytona's own `POST /api/snapshots` rejects any imageName containing "@sha256:" as an
+ * "invalid reference format" (confirmed live against both GHCR and a plain Docker Hub image, see
+ * PR #31's description). Until that platform limitation is fixed, this is the one explicitly
+ * named tag createSandbox is allowed to accept in the digest's place, with buildMarkerCheck
+ * re-verifying the image that actually booted immediately afterward, from inside the sandbox.
+ */
+export const TAG_PINNED_SNAPSHOT_IMAGE_REF = `${IMAGE_NAME}:v17.3.0-bountydesk-sandbox`;
+
+/**
+ * The commit the Daytona target image is built from, baked into the image at a fixed path by
+ * the build workflow (see lib/sandbox/build-marker.ts) so buildMarkerCheck can prove which
+ * build actually booted without relying on Daytona's own undocumented internals. Same value as
+ * SOURCE_COMMIT in .github/workflows/build-daytona-target.yml; keep both in sync if the target
+ * is ever rebuilt from a different commit.
+ */
+export const EXPECTED_BUILD_MARKER = "1867b926c5f50e4e692dc9c8f61821413cebe0cd";
+
 const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 /**
  * Same character class createSandbox already accepts for a snapshot identifier. An env.example

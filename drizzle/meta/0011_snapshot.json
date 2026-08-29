@@ -1,5 +1,5 @@
 {
-  "id": "ccbb8344-f5de-4528-ae80-41b7e4472204",
+  "id": "09802c7c-0998-4d31-bbf0-0ad3cb1507df",
   "prevId": "79fd3363-9c6a-4c29-bd1f-d279147c0c45",
   "version": "7",
   "dialect": "postgresql",
@@ -244,6 +244,59 @@
           "value": "(\"agent_session\".\"pending_thread_id\" is null) = (\"agent_session\".\"pending_tool_call_id\" is null)\n          and (\"agent_session\".\"pending_tool_call_id\" is null) = (\"agent_session\".\"pending_verdict_id\" is null)\n          and (\"agent_session\".\"pending_verdict_id\" is null) = (\"agent_session\".\"pending_approved_content_hash\" is null)"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.agent_session_claim": {
+      "name": "agent_session_claim",
+      "schema": "",
+      "columns": {
+        "report_id": {
+          "name": "report_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "agent_session_claim_report_id_report_id_fk": {
+          "name": "agent_session_claim_report_id_report_id_fk",
+          "tableFrom": "agent_session_claim",
+          "tableTo": "report",
+          "columnsFrom": [
+            "report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.approval_decision": {
@@ -1505,230 +1558,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.scope_guard_audit": {
-      "name": "scope_guard_audit",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "seq": {
-          "name": "seq",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "prev_hash": {
-          "name": "prev_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "hash": {
-          "name": "hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "ts": {
-          "name": "ts",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "actor": {
-          "name": "actor",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "auth": {
-          "name": "auth",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "args": {
-          "name": "args",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "verdict": {
-          "name": "verdict",
-          "type": "scope_guard_audit_verdict",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "reason": {
-          "name": "reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "scope_guard_audit_seq_key": {
-          "name": "scope_guard_audit_seq_key",
-          "columns": [
-            {
-              "expression": "seq",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "scope_guard_audit_hash_key": {
-          "name": "scope_guard_audit_hash_key",
-          "columns": [
-            {
-              "expression": "hash",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.scope_guard_grant": {
-      "name": "scope_guard_grant",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "token": {
-          "name": "token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "target": {
-          "name": "target",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "event": {
-          "name": "event",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "scope_guard_grant_token_issued_key": {
-          "name": "scope_guard_grant_token_issued_key",
-          "columns": [
-            {
-              "expression": "token",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"scope_guard_grant\".\"event\" = 'issued'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "scope_guard_grant_token_consumed_key": {
-          "name": "scope_guard_grant_token_consumed_key",
-          "columns": [
-            {
-              "expression": "token",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"scope_guard_grant\".\"event\" = 'consumed'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "scope_guard_grant_token_idx": {
-          "name": "scope_guard_grant_token_idx",
-          "columns": [
-            {
-              "expression": "token",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "scope_guard_grant_event_check": {
-          "name": "scope_guard_grant_event_check",
-          "value": "\"scope_guard_grant\".\"event\" in ('issued', 'consumed')"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.session_event": {
       "name": "session_event",
       "schema": "",
@@ -2124,15 +1953,6 @@
         "OUT_OF_SCOPE",
         "CANCELLED",
         "EXPIRED"
-      ]
-    },
-    "public.scope_guard_audit_verdict": {
-      "name": "scope_guard_audit_verdict",
-      "schema": "public",
-      "values": [
-        "allowed",
-        "denied",
-        "mutated"
       ]
     },
     "public.verdict_outcome": {

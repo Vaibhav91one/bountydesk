@@ -165,13 +165,29 @@ export function assertSnapshotLimits(spec: SandboxSpec, snapshot: SnapshotInfo):
  * `imageName` the provider recorded when the snapshot was created is the only field that says
  * which one. A missing `imageName` counts as a mismatch, the same way a missing limit does:
  * a snapshot that declines to say what it was built from has not shown us anything.
+ *
+ * `allowedImageNameOverride` is a narrow, explicit escape hatch, not a general bypass. It exists
+ * because Daytona's `POST /api/snapshots` currently refuses a digest-pinned `imageName` outright
+ * (confirmed live against both GHCR and a plain Docker Hub image, see PR #31's description), so
+ * no snapshot registered today can ever satisfy the digest-exact check above. When the caller
+ * passes one, a snapshot is also accepted if its `imageName` matches that exact, explicitly
+ * supplied value -- never a pattern, never derived from `spec` -- on top of the digest match,
+ * never instead of validating that the two are different things. A caller that uses this without
+ * immediately re-verifying build identity from inside the booted sandbox (see build-marker.ts)
+ * has removed the one check this file makes for identity, so it must never be the default path.
  */
-export function assertSnapshotImage(spec: SandboxSpec, snapshot: SnapshotInfo): void {
-  if (snapshot.imageName !== spec.imageRef) {
-    throw new UnsafeSandboxSpec(
-      `snapshot ${snapshot.name} image ${snapshot.imageName ?? "(not declared)"} != expected ${spec.imageRef}`,
-    );
-  }
+export function assertSnapshotImage(
+  spec: SandboxSpec,
+  snapshot: SnapshotInfo,
+  allowedImageNameOverride?: string,
+): void {
+  if (snapshot.imageName === spec.imageRef) return;
+  if (allowedImageNameOverride && snapshot.imageName === allowedImageNameOverride) return;
+
+  throw new UnsafeSandboxSpec(
+    `snapshot ${snapshot.name} image ${snapshot.imageName ?? "(not declared)"} != expected ${spec.imageRef}` +
+      (allowedImageNameOverride ? ` (and != allowed override ${allowedImageNameOverride})` : ""),
+  );
 }
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -205,8 +221,12 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
  * `spec.snapshot` may be a mutable display name, and a name that gets repointed between the
  * lookup and the create would hand back a sandbox built from something other than the
  * snapshot whose state and limits were just checked.
+ *
+ * `allowedImageNameOverride`, when given, is forwarded to assertSnapshotImage as the one
+ * explicitly named exception to its digest-exact check -- see that function's doc comment for
+ * why this exists and how narrow it is. Leave it unset and this behaves exactly as before.
  */
-export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
+export async function createSandbox(spec: SandboxSpec, allowedImageNameOverride?: string): Promise<Sandbox> {
   assertSafeSpec(spec);
 
   // Verify the limits rather than request them: the provider rejects resource fields
@@ -219,7 +239,7 @@ export async function createSandbox(spec: SandboxSpec): Promise<Sandbox> {
     throw new UnsafeSandboxSpec(`snapshot ${spec.snapshot} resolved without an immutable id`);
   }
   assertSnapshotLimits(spec, snapshot);
-  assertSnapshotImage(spec, snapshot);
+  assertSnapshotImage(spec, snapshot, allowedImageNameOverride);
 
   const body = {
     snapshot: snapshot.id,

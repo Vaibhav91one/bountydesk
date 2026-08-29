@@ -95,6 +95,9 @@ function fakeClient(snapshot: TurnSnapshot | (() => TurnSnapshot)): TrueForgeCli
     createSession: async () => {
       throw new Error("not used by pollOnce");
     },
+    deleteSession: async () => {
+      throw new Error("not used by pollOnce");
+    },
     createTurn: async () => {
       throw new Error("not used by pollOnce");
     },
@@ -434,6 +437,9 @@ test("pollOnce renews its lease while getTurn is slow, so an independent sweeper
   const leaseSeconds = 1;
   const client: TrueForgeClient = {
     createSession: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    deleteSession: async () => {
       throw new Error("not used by pollOnce");
     },
     createTurn: async () => {

@@ -32,17 +32,27 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Qodo signals the revision it reviewed in two different ways, and which
-          # one appears depends on whether this is its first pass on the PR:
+          # Qodo signals the revision it reviewed in a few different ways:
           #   1. On the first pass it submits a formal review whose commit_id is the
           #      reviewed SHA.
-          #   2. On later pushes it edits that same comment in place instead of
-          #      submitting another review, so commit_id goes stale. The refreshed
-          #      body links the revision it actually covers as ".../commit/<sha>".
-          # Accept either, or a PR is unmergeable after its first follow-up commit.
+          #   2. On a later push with real diff content, it edits that same comment
+          #      in place instead of submitting another review, so commit_id goes
+          #      stale. The refreshed body links the revision it actually covers as
+          #      ".../commit/<sha>" -- but only sometimes: a large cumulative
+          #      findings rollup (mixing new and already-resolved items) can blow
+          #      past GitHub's 65536-char comment limit and get truncated before
+          #      that link ever appears, and a no-op push (a merge or rebase that
+          #      pulls in already-reviewed upstream content with no net diff of its
+          #      own) gets a plain "No code changes since the last review" reply
+          #      with no commit link at all.
+          # A commit-linked match is the strongest signal, so it's tried first. Absent
+          # that, correlate by time: Qodo edits this one comment in place on every
+          # pass regardless of what it says, so any update at or after HEAD_SHA's own
+          # commit timestamp means Qodo has already accounted for this exact tree,
+          # whether the outcome was findings, zero findings, or an explicit skip.
 
           reviewed_head() {
-            local reviews comments
+            local reviews comments head_pushed_at
 
             reviews="$(gh api --paginate --slurp \
               "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/reviews?per_page=100")"
@@ -66,6 +76,15 @@ jobs:
               )
             ' <<<"$comments" >/dev/null; then
               echo "Found a Qodo review comment covering ${HEAD_SHA}."
+              return 0
+            fi
+
+            head_pushed_at="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}" \
+              --jq '.commit.committer.date')"
+            if jq -e --arg bot "$BOT_LOGIN" --arg since "$head_pushed_at" '
+              any(.[][]; .user.login == $bot and .updated_at >= $since)
+            ' <<<"$comments" >/dev/null; then
+              echo "Qodo's review comment was last updated at or after ${HEAD_SHA}'s own commit time."
               return 0
             fi
 
