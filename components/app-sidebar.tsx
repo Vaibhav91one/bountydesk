@@ -49,7 +49,7 @@ import {
  */
 export const NAV = [
   { href: "/home", label: "Home", icon: House },
-  { href: "/board", label: "Review queue", icon: Tray, soon: true },
+  { href: "/board", label: "Review queue", icon: Tray },
   { href: "/reports", label: "Reports", icon: Files, soon: true },
   { href: "/settings/integrations", label: "Integrations", icon: PlugsConnected },
   { href: "/settings/connections", label: "Connections", icon: ShareNetwork },
