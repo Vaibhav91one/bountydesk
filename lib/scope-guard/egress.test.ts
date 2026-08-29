@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
-import { createServer as createTcpServer, type Server as TcpServer } from "node:net";
+import { createServer as createTcpServer, type Server as TcpServer, type Socket } from "node:net";
 import test from "node:test";
 
-import { httpProbe, tcpProbe } from "./egress";
+import { httpProbe, tcpProbe, tcpProbeWithConnect } from "./egress";
 import { defaultScopeState, Scope } from "./scope";
 
 /**
@@ -110,13 +111,15 @@ test("tcpProbe reaches an IPv6 target scoped with an explicit bracketed port", a
 
 test("tcpProbe reports a pre-connect timeout as a failed probe, not a successful one", async () => {
   const scope = makeScope();
-  // 10.255.255.1 is private (addable) but unrouted in every sandbox this suite runs in, so the
-  // TCP handshake never completes and node's own idle timer - not a remote refusal - is what
-  // fires first. That's the exact condition this test exists to pin down: a timeout before
-  // 'connect' must not be reported the same way as a timeout after a live connection idles out.
-  assert.equal(await scope.add("10.255.255.1"), null);
+  const fakeSocket = new EventEmitter() as Socket;
+  fakeSocket.destroy = () => fakeSocket;
+  fakeSocket.write = (() => true) as Socket["write"];
+  fakeSocket.end = (() => fakeSocket) as Socket["end"];
 
-  const result = await tcpProbe(scope, { host: "10.255.255.1", port: 12345, timeoutSeconds: 1 });
+  const result = await tcpProbeWithConnect(scope, { host: "127.0.0.1", port: 12345, timeoutSeconds: 1 }, () => {
+    queueMicrotask(() => fakeSocket.emit("timeout"));
+    return fakeSocket;
+  });
   assert.equal(result.probed, false);
   assert.match(result.error ?? "", /handshake/);
 });

@@ -393,6 +393,7 @@ function buildServer(): McpServer {
           signal: AbortSignal.timeout(20000),
         });
         if (!res.ok) {
+          await res.body?.cancel().catch(() => undefined);
           // Not res.ok must never fall through to the success shape below: {count: 0, vulns:
           // []} reads identically to "genuinely no known vulnerabilities", and an agent (or a
           // human skimming the audit log) can't tell OSV.dev being down from a clean result.

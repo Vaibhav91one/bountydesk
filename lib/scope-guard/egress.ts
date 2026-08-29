@@ -1,6 +1,6 @@
 import { request as httpRequestNode, type ClientRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequestNode } from "node:https";
-import { connect as tcpConnect } from "node:net";
+import { connect as tcpConnect, type Socket } from "node:net";
 
 import * as grants from "./grants";
 import { normalizeTargetValue, splitHostPort, type Scope } from "./scope";
@@ -206,11 +206,21 @@ export interface TcpProbeResult {
   note?: string;
 }
 
+type TcpConnectFn = typeof tcpConnect;
+
 /**
  * Host-side raw TCP transport for protocols httpProbe can't reach. One connect, optional
  * write, capped read, then close - a connect+send+recv primitive, not a port scanner.
  */
 export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpProbeResult> {
+  return tcpProbeWithConnect(scope, input, tcpConnect);
+}
+
+export async function tcpProbeWithConnect(
+  scope: Scope,
+  input: TcpProbeInput,
+  connectSocket: TcpConnectFn,
+): Promise<TcpProbeResult> {
   // A bare IPv6 host needs brackets before ":port" is appended, or the result ("::1:6379") is
   // ambiguous between "host ::1:6379" and "host ::1, port 6379" - scope.check() parses this
   // string as a URL, and an unbracketed IPv6-with-port URL authority doesn't parse at all.
@@ -245,7 +255,7 @@ export async function tcpProbe(scope: Scope, input: TcpProbeInput): Promise<TcpP
 
     // Dial the pinned address; the original hostname has no protocol role for raw TCP the way
     // it does for HTTP's Host header / TLS SNI, so nothing else needs it past this point.
-    const sock = tcpConnect({ host: auth.connectAddress, port: input.port, timeout: timeoutMs });
+    const sock: Socket = connectSocket({ host: auth.connectAddress, port: input.port, timeout: timeoutMs });
     sock.on("connect", () => {
       connected = true;
       if (input.dataBase64) {
