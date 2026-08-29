@@ -1,4 +1,4 @@
-import { db, desc, eq, inArray, report, sql, targetProfile } from "@/lib/db";
+import { db, desc, eq, inArray, report, sql, targetProfile, type Executor } from "@/lib/db";
 import { TERMINAL_STATES } from "@/lib/reports/states";
 import type { ReportState } from "@/lib/reports/states";
 
@@ -66,6 +66,13 @@ export const COLUMNS: { key: string; label: string; states: ReportState[] }[] = 
   { key: "delivered", label: "Delivered", states: ["DELIVERING", "DELIVERED"] },
   {
     key: "closed",
+    // Four of the five terminal states, not all five. DELIVERED is terminal and deliberately
+    // sits in its own column: a report that shipped a verdict and one that was denied, ruled
+    // out of scope, cancelled or expired are the two answers a reviewer most needs to tell
+    // apart, and a single Closed column holding both hides exactly that.
+    //
+    // This is how the board groups states, not what the lifecycle calls terminal.
+    // TERMINAL_STATES in lib/reports/states.ts is the authority on that and still lists five.
     label: "Closed",
     states: ["DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"],
   },
@@ -77,8 +84,8 @@ export function sourceLabel(sourceRef: string, id: string): string {
   return issue ? `#${issue[1]}` : `#${id.slice(0, 8)}`;
 }
 
-async function cardsFor(states: ReportState[]): Promise<QueueCard[]> {
-  const rows = await db
+async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[]> {
+  const rows = await tx
     .select({
       id: report.id,
       title: report.title,
@@ -135,21 +142,35 @@ async function cardsFor(states: ReportState[]): Promise<QueueCard[]> {
  *
  * The totals come from a separate grouped count rather than from the cards, so a column that
  * hit the limit still knows what it is hiding.
+ *
+ * All seven reads share one repeatable-read transaction, which is what makes the board a
+ * single moment rather than seven. Without it an intake landing between the count and the
+ * cards renders a board that contradicts itself: a column showing cards above a total of zero,
+ * or the whole screen claiming "No reports yet" while the card queries already found some.
+ * Read-only, so there is nothing to retry on a serialisation failure.
  */
 export async function listQueue(): Promise<QueueColumn[]> {
-  const counts = await db
-    .select({ state: report.state, total: sql<number>`count(*)::int` })
-    .from(report)
-    .groupBy(report.state);
+  return db.transaction(
+    async (tx) => {
+      const counts = await tx
+        .select({ state: report.state, total: sql<number>`count(*)::int` })
+        .from(report)
+        .groupBy(report.state);
 
-  const byState = new Map(counts.map((row) => [row.state, row.total]));
-  const cards = await Promise.all(COLUMNS.map((column) => cardsFor(column.states)));
+      const byState = new Map(counts.map((row) => [row.state, row.total]));
+      // Sequential rather than Promise.all: one transaction is one connection, and concurrent
+      // queries on it would serialise anyway or error, depending on the driver.
+      const cards: QueueCard[][] = [];
+      for (const column of COLUMNS) cards.push(await cardsFor(column.states, tx));
 
-  return COLUMNS.map((column, index) => ({
-    ...column,
-    total: column.states.reduce((sum, state) => sum + (byState.get(state) ?? 0), 0),
-    cards: cards[index],
-  }));
+      return COLUMNS.map((column, index) => ({
+        ...column,
+        total: column.states.reduce((sum, state) => sum + (byState.get(state) ?? 0), 0),
+        cards: cards[index],
+      }));
+    },
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }
 
 /**

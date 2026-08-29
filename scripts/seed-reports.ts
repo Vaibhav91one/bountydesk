@@ -9,11 +9,10 @@ import {
   isNull,
   report,
   targetProfile,
-  verdict,
 } from "@/lib/db";
 import { recordEvent } from "@/lib/reports/lifecycle";
 import type { ReportState } from "@/lib/reports/states";
-import { computeContentHash } from "@/lib/verdicts/hash";
+import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 
 /**
  * Fill a local database with reports across the lifecycle, so the board and the case file have
@@ -161,13 +160,23 @@ const AWAITING: Seed = {
   events: ["intake.accepted", "analysis.stub_session.created", "analysis.completed"],
 };
 
-const PAYLOAD = `**Verdict: analysis only**
+/**
+ * The comment a reviewer would be signing.
+ *
+ * The delivery marker carries the verdict id, so the id has to exist before the text does.
+ * The delivery worker refuses any payload that does not contain its marker exactly once, which
+ * would have left a seeded verdict approvable but permanently undeliverable.
+ */
+function payloadFor(verdictId: string): string {
+  return `**Verdict: analysis only**
 
 BountyDesk could not reproduce this report automatically, so no reproduced verdict was
 produced. A reviewer read the report and the run's own event log and is signing this reply by
 hand.
 
-Signed via BountyDesk.`;
+Signed via BountyDesk.
+<!-- bountydesk-delivery:${verdictId} -->`;
+}
 
 async function main(): Promise<void> {
   assertLocal();
@@ -200,19 +209,18 @@ async function main(): Promise<void> {
   for (const seed of SEEDS) await create(seed);
 
   const awaitingId = await create(AWAITING);
-  const [pending] = await db
-    .insert(verdict)
-    .values({
-      reportId: awaitingId,
-      outcome: "ANALYSIS_ONLY",
-      summary: "Reproduction did not run. A reviewer decides.",
-      evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
-      payload: PAYLOAD,
-      // The real function, not a literal: the approval gate recomputes this before trusting
-      // it, so a seeded hash that did not match would refuse itself at the click.
-      contentHash: computeContentHash(PAYLOAD),
-    })
-    .returning({ id: verdict.id, contentHash: verdict.contentHash });
+  const verdictId = randomUUID();
+  // The real factory, not a hand-built insert: it is what enforces the delivery marker and
+  // computes the hash from the exact bytes, and a seed that skipped it would produce a verdict
+  // the rest of the system refuses.
+  const pending = await ensureInitialVerdict({
+    id: verdictId,
+    reportId: awaitingId,
+    outcome: "ANALYSIS_ONLY",
+    summary: "Reproduction did not run. A reviewer decides.",
+    evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    payload: payloadFor(verdictId),
+  });
 
   await db.insert(agentSession).values({
     reportId: awaitingId,

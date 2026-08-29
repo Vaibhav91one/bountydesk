@@ -100,7 +100,7 @@ test("an empty database still returns every column, so the board can say so", as
   }
 });
 
-test("reports bucket into their column and terminal states collapse into Closed", async () => {
+test("reports bucket into the column their state belongs to", async () => {
   await seedReport("TRIAGING");
   await seedReport("REPRODUCING");
   await seedReport("ANALYSIS_ONLY");
@@ -119,6 +119,25 @@ test("reports bucket into their column and terminal states collapse into Closed"
   // DELIVERING and DELIVERED share a column: one is the other in flight.
   assert.equal(column(columns, "delivered").total, 2);
   assert.equal(column(columns, "closed").total, 4);
+});
+
+test("a delivered report is terminal, and still does not sit in Closed", async () => {
+  // The board's grouping is not the lifecycle's. TERMINAL_STATES is the authority on which
+  // states are terminal; Closed is a column, and it holds the four terminal states that mean
+  // no verdict shipped. Splitting them is the point, so it gets asserted rather than assumed.
+  const { TERMINAL_STATES } = await import("./states");
+  assert.ok(TERMINAL_STATES.includes("DELIVERED"));
+
+  assert.equal(queue.phaseOf("DELIVERED"), "delivered");
+  assert.equal(
+    queue.COLUMNS.find((c) => c.key === "closed")?.states.includes("DELIVERED"),
+    false,
+  );
+
+  // Every terminal state still appears somewhere: four in Closed, DELIVERED in its own column.
+  for (const state of TERMINAL_STATES) {
+    assert.ok(queue.COLUMNS.some((c) => c.states.includes(state)), `${state} has no column`);
+  }
 });
 
 test("a report with no target and no verdict reads as exactly that", async () => {
@@ -257,4 +276,26 @@ test("listActiveReports puts awaiting approval first and excludes terminal state
 
 test("listActiveReports honours its limit", async () => {
   assert.equal((await queue.listActiveReports(2)).length, 2);
+});
+
+test("the board is one moment: cards never outnumber the total they sit under", async () => {
+  // The seven reads used to come from seven snapshots, so an intake landing between the count
+  // and the cards could render cards above a total of zero. Inserting hard while listQueue
+  // runs is what makes that race actually happen; the invariant is what catches it.
+  const churn = (async () => {
+    for (let i = 0; i < 40; i += 1) await seedReport("TRIAGING");
+  })();
+
+  for (let round = 0; round < 6; round += 1) {
+    const columns = await queue.listQueue();
+    for (const col of columns) {
+      assert.ok(
+        col.cards.length <= col.total,
+        `${col.key}: ${col.cards.length} cards under a total of ${col.total}`,
+      );
+      if (col.total === 0) assert.deepEqual(col.cards, [], `${col.key} has cards but no total`);
+    }
+  }
+
+  await churn;
 });
