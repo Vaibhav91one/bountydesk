@@ -1,6 +1,17 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { agentSession, and, db, eq, report, targetProfile, verdict, type Executor } from "@/lib/db";
+import {
+  agentSession,
+  and,
+  connectedRepository,
+  db,
+  eq,
+  githubInstallation,
+  report,
+  targetProfile,
+  verdict,
+  type Executor,
+} from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import type {
   GetRecipesForTargetFn,
@@ -130,10 +141,9 @@ function isVulnerabilityKeyword(keyword: string): boolean {
 }
 
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh
- * report (no verdict row exists yet). Isolated from ensureSession so the "existingVerdict"
- * branch never has to look at this at all. Runs inside ensureSession's row-locked transaction
- * (tx), not against the shared db handle, so the report-locking fix for the concurrent-first-run
- * race actually covers the reproduction call this function makes. */
+ * report. The caller runs this outside any database transaction because it can include a
+ * sandbox reproduction call. A short final transaction persists this decision, or adopts one
+ * another worker committed first. */
 async function decideFreshVerdict(
   reportId: string,
   verdictId: string,
@@ -157,9 +167,17 @@ async function decideFreshVerdict(
       config: targetProfile.config,
       title: report.title,
       body: report.body,
+      connectedRepositoryId: report.connectedRepositoryId,
+      repoActive: connectedRepository.active,
+      repoArchivedAt: connectedRepository.archivedAt,
+      repoTargetProfileId: connectedRepository.targetProfileId,
+      installationSuspendedAt: githubInstallation.suspendedAt,
+      installationDeletedAt: githubInstallation.deletedAt,
     })
     .from(report)
     .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
+    .leftJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
     .where(eq(report.id, reportId))
     .limit(1);
 
@@ -170,7 +188,7 @@ async function decideFreshVerdict(
   // doesn't describe.
   const recipes = target ? getRecipes({ name: target.name, config: target.config }) : [];
   const recipe = target ? recipes.find((candidate) => matchesReport(candidate, target)) : undefined;
-  if (!target || !target.imageName || !recipe) {
+  if (!target || !target.imageName || !recipe || !hasActiveRepositoryGrant(target)) {
     return {
       outcome: "ANALYSIS_ONLY",
       summary: "Analysis-only result: automated reproduction was not run.",
@@ -213,6 +231,46 @@ async function decideFreshVerdict(
   };
 }
 
+function hasActiveRepositoryGrant(target: {
+  targetProfileId: string;
+  connectedRepositoryId: string | null;
+  repoActive: boolean | null;
+  repoArchivedAt: Date | null;
+  repoTargetProfileId: string | null;
+  installationSuspendedAt: Date | null;
+  installationDeletedAt: Date | null;
+}): boolean {
+  if (!target.connectedRepositoryId) return true;
+  return (
+    target.repoActive === true &&
+    target.repoArchivedAt === null &&
+    target.repoTargetProfileId === target.targetProfileId &&
+    target.installationSuspendedAt === null &&
+    target.installationDeletedAt === null
+  );
+}
+
+type DecidedVerdict = {
+  outcome: (typeof verdict.outcome.enumValues)[number];
+  summary: string;
+  evidence: Record<string, unknown>;
+  payload: string;
+};
+
+function adoptVerdict(row: {
+  outcome: (typeof verdict.outcome.enumValues)[number];
+  summary: string;
+  evidence: unknown;
+  payload: string;
+}): DecidedVerdict {
+  return {
+    outcome: row.outcome,
+    summary: row.summary,
+    evidence: row.evidence as Record<string, unknown>,
+    payload: row.payload,
+  };
+}
+
 /**
  * The real driver: opens a TrueForge session per report and starts a turn that asks the model
  * to call publish_verdict. Unlike stubAnalysisDriver, this never transitions the report's
@@ -238,16 +296,29 @@ export function createTrueforgeAnalysisDriver(
         .limit(1);
       if (existing) return;
 
-      // Two concurrent first-time calls for the same report must not both decide the verdict:
-      // each would independently run reproduction, mint its own random canary, and land on
-      // evidence that genuinely disagrees with the other's, which ensureInitialVerdict
-      // (correctly) treats as a hard integrity error rather than a retry, since it has no way
-      // to tell that apart from two callers actually disagreeing about what happened. Locking
-      // the report row before deciding anything means the loser blocks in Postgres until the
-      // winner's transaction commits, then rereads the winner's own agent_session/verdict
-      // instead of computing (and discarding) its own. Same accepted cost as run()'s row lock
-      // around createTurn: this one can span a real reproduction run, not just a loopback
-      // call, so a slow sandbox run holds the lock for as long as it takes.
+      const [existingVerdictBeforeDecision] = await db
+        .select({
+          id: verdict.id,
+          outcome: verdict.outcome,
+          summary: verdict.summary,
+          evidence: verdict.evidence,
+          payload: verdict.payload,
+        })
+        .from(verdict)
+        .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+        .limit(1);
+
+      const proposedVerdictId = existingVerdictBeforeDecision?.id ?? randomUUID();
+      const proposed = existingVerdictBeforeDecision
+        ? adoptVerdict(existingVerdictBeforeDecision)
+        : await decideFreshVerdict(reportId, proposedVerdictId, reproduceFn, getRecipes, signal, db);
+
+      if (signal.aborted) throw signal.reason;
+
+      // Keep the transaction short. Reproduction may take minutes, so it happens above with no
+      // open transaction and no held pool connection. If another worker wins the race while we
+      // are reproducing, this transaction adopts that committed verdict instead of trying to
+      // compare two independently minted canary hashes.
       await db.transaction(async (tx) => {
         await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
 
@@ -280,15 +351,8 @@ export function createTrueforgeAnalysisDriver(
           .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
           .limit(1);
 
-        const verdictId = existingVerdict?.id ?? randomUUID();
-        const decided = existingVerdict
-          ? {
-              outcome: existingVerdict.outcome,
-              summary: existingVerdict.summary,
-              evidence: existingVerdict.evidence as Record<string, unknown>,
-              payload: existingVerdict.payload,
-            }
-          : await decideFreshVerdict(reportId, verdictId, reproduceFn, getRecipes, signal, tx);
+        const verdictId = existingVerdict?.id ?? proposedVerdictId;
+        const decided = existingVerdict ? adoptVerdict(existingVerdict) : proposed;
 
         await ensureInitialVerdict(
           {

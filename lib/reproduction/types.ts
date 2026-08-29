@@ -60,14 +60,9 @@ export type ReproductionRecipe = {
   /** Human label for evidence/summary text shown to the reviewer. */
   title: string;
   /** Case-insensitive substrings checked against a report's title and body before this recipe
-   * is ever run: the driver only starts reproduction when at least one keyword actually
-   * appears in the report's own text (lib/analysis/trueforge-driver.ts's matchesReport), so a
-   * report about an unrelated vulnerability class never gets matched to this scenario just
-   * because it's the only one configured for the target. Author these as the vocabulary a
-   * reporter would plausibly use for this exact scenario (the vulnerability class, the
-   * affected endpoint, a distinctive payload fragment), not generic bug-bounty terms that
-   * would match almost anything. lib/targets/recipes.ts is the module that constructs
-   * ReproductionRecipe values and needs to populate this field for every recipe it declares. */
+   * is ever run. The driver requires at least one vulnerability-class keyword and at least one
+   * scenario or endpoint keyword, so recipe authors should include both kinds. A class-only
+   * match, such as "sql injection", is not enough to run an endpoint-specific recipe. */
   keywords: string[];
   /** Registers the canary through a trusted fixture call. `request.body` should reference
    * "{{canary}}" wherever the fresh value belongs. A non-2xx response here means the canary was

@@ -44,6 +44,7 @@ async function seedReport(
   state: "TRIAGING" | "REPRODUCING" = "TRIAGING",
   targetProfileId: string | null = null,
   content: { title?: string; body?: string } = {},
+  connectedRepositoryId: string | null = null,
 ): Promise<string> {
   const [row] = await dbm.db
     .insert(dbm.report)
@@ -53,7 +54,7 @@ async function seedReport(
       title: content.title ?? "SQL injection in search",
       body: content.body ?? "The search endpoint concatenates the query string directly.",
       reporterHandle: null,
-      connectedRepositoryId: null,
+      connectedRepositoryId,
       targetProfileId,
       state,
     })
@@ -83,6 +84,37 @@ async function seedTargetProfile(): Promise<{
     })
     .returning({ id: dbm.targetProfile.id });
   return { id: row.id, imageName, imageDigest, snapshotId: "snapshot-1" };
+}
+
+async function seedConnectedTargetProfile(opts: {
+  active?: boolean;
+  archived?: boolean;
+  suspended?: boolean;
+  deleted?: boolean;
+} = {}): Promise<Awaited<ReturnType<typeof seedTargetProfile>> & { connectedRepositoryId: string }> {
+  const target = await seedTargetProfile();
+  const [installation] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({
+      installationId: Number(`9${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      accountLogin: `acct-${randomUUID()}`,
+      accountId: Number(`8${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      suspendedAt: opts.suspended ? new Date() : null,
+      deletedAt: opts.deleted ? new Date() : null,
+    })
+    .returning({ id: dbm.githubInstallation.id });
+  const [repo] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({
+      installationId: installation.id,
+      repoId: Number(`7${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      fullName: `owner/repo-${randomUUID()}`,
+      targetProfileId: target.id,
+      active: opts.active ?? true,
+      archivedAt: opts.archived ? new Date() : null,
+    })
+    .returning({ id: dbm.connectedRepository.id });
+  return { ...target, connectedRepositoryId: repo.id };
 }
 
 function context(reportId: string, signal: AbortSignal = new AbortController().signal) {
@@ -664,6 +696,33 @@ test("a report matching the recipe's keywords does trigger reproduction", async 
   assert.equal(v.outcome, "REPRODUCED");
 });
 
+test("a stale connected repository grant prevents reproduction", async () => {
+  const target = await seedConnectedTargetProfile({ active: false });
+  const reportId = await seedReport(
+    "TRIAGING",
+    target.id,
+    {
+      title: "SQL injection via UNION SELECT in product search",
+      body: "Sending a crafted UNION SELECT payload to the search endpoint returns other rows.",
+    },
+    target.connectedRepositoryId,
+  );
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 0, "a revoked repository grant must stop reproduction");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
 test("a recipe that reproduces the report records a REPRODUCED verdict without the raw canary", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);
@@ -774,7 +833,7 @@ test("ensureSession called twice for the same report invokes reproduceFn exactly
   assert.equal(verdicts.length, 1, "still exactly one verdict row");
 });
 
-test("two concurrent first-time ensureSession calls for the same report run reproduction exactly once", async () => {
+test("two concurrent first-time ensureSession calls for the same report converge on one persisted verdict", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);
   const recipe = fakeRecipe();
@@ -782,8 +841,8 @@ test("two concurrent first-time ensureSession calls for the same report run repr
   const reproduceFn: ReproduceFn = async () => {
     calls++;
     // A real delay, so the two overlapping ensureSession calls actually race inside the
-    // awaited reproduction call rather than resolving before either reaches it. Without the
-    // report row lock, both callers would land here and each mint their own canary.
+    // awaited reproduction call. The final short transaction must still converge on one
+    // committed verdict.
     await new Promise((resolve) => setTimeout(resolve, 50));
     return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
   };
@@ -792,7 +851,7 @@ test("two concurrent first-time ensureSession calls for the same report run repr
 
   await Promise.all([d.ensureSession(context(reportId)), d.ensureSession(context(reportId))]);
 
-  assert.equal(calls, 1, "only one caller may ever run reproduction for a given report");
+  assert.ok(calls >= 1, "at least one caller must run reproduction for a matching report");
 
   const verdicts = await dbm.db
     .select()
