@@ -199,44 +199,6 @@
   animation-iteration-count: infinite;
 }
 
-/* Agent Bounty adrift on the loading screen. Each copy gets its own distance, tilt and
-   duration through the custom properties, so one keyframe covers the whole field. */
-@keyframes mascot-drift {
-  0%,
-  100% {
-    translate: 0 0;
-    rotate: 0deg;
-  }
-  50% {
-    translate: var(--drift-x) var(--drift-y);
-    rotate: var(--drift-rotate);
-  }
-}
-
-@utility animate-mascot-drift {
-  animation-name: mascot-drift;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-}
-
-/* The starfield twinkles by fading the whole layer, not per star. Three layers at different
-   speeds is enough for the eye to read it as individual stars blinking. */
-@keyframes starfield-twinkle {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@utility animate-starfield-twinkle {
-  animation-name: starfield-twinkle;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-}
-
 /* The same marquee running sideways. Separate keyframes rather than one generalised set,
    because translate on two axes needs both values and only one of them is ever moving. */
 @keyframes mascot-marquee-x {
