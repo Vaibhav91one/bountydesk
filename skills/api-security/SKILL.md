@@ -25,16 +25,20 @@ PY
 
 ## Priority probes (OWASP API Top 10 order)
 
-1. **BOLA/IDOR**: for every path with an object identifier (`/books/{title}`,
+1. BOLA/IDOR: for every path with an object identifier (`/books/{title}`,
    `/users/{id}`): request WITHOUT auth, then with a second identity's id.
-   Success means the object came back, which is a finding.
-2. **Broken authentication**: enumerate auth requirements per endpoint from
+   A finding requires the returned object to be someone else's real,
+   non-public data that the requesting identity has no legitimate claim to,
+   the same ownership check `bountydesk-payloads`' IDOR recipe uses. A
+   resource that's meant to be public, or that happens to be your own, is
+   not a finding just because the request returned 200.
+2. Broken authentication: enumerate auth requirements per endpoint from
    the spec's `security` blocks vs actual behavior (401 vs 200 anonymous).
-3. **Mass assignment**: POST/PATCH with extra fields from GET responses
+3. Mass assignment: POST/PATCH with extra fields from GET responses
    (`{"role":"admin", ...}`). Diff response for privilege change.
-4. **Excessive data exposure**: compare list-endpoint fields vs detail fields;
+4. Excessive data exposure: compare list-endpoint fields vs detail fields;
    flag internal fields (hashes, keys, internal flags) in list responses.
-5. **Improper inventory**: deprecated/undocumented paths still responding;
+5. Improper inventory: deprecated/undocumented paths still responding;
    debug routes from HTML comments.
 
 ## JWT-specific checks (when JWTs observed)

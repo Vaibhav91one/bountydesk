@@ -71,7 +71,8 @@ Doctrine:
 Run in the sandbox:
 
 ```bash
-curl -sS -m 10 -D - -o /tmp/body.html http://<target>/ | head -60
+curl -sS -m 10 -D /tmp/headers -o /tmp/body.html http://<target>/
+head -60 /tmp/body.html
 grep -ioE 'server: .*|x-powered-by: .*' /tmp/headers 2>/dev/null || true
 ```
 

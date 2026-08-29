@@ -39,18 +39,19 @@ If extraction tools are missing, say so and fall back to string-level triage:
 
 ```bash
 strings -n 8 <image> > /tmp/artifacts/firmware/strings.txt
-grep -aiE 'shadow|passwd|private key|BEGIN RSA|api[_-]?key|secret' strings.txt | head -50
+grep -aiE 'shadow|passwd|private key|BEGIN RSA|api[_-]?key|secret' \
+  /tmp/artifacts/firmware/strings.txt | head -50
 ```
 
 ## Phase 3: hunt (on extracted rootfs or strings)
 
 Priority targets, in order:
-1. **Credentials**: `/etc/shadow`, `/etc/passwd`, wpa_supplicant.conf,
+1. Credentials: `/etc/shadow`, `/etc/passwd`, wpa_supplicant.conf,
    hardcoded `password|secret|key` in /etc/config/*, web-app configs.
-2. **Private keys/certs**: `*.key`, `*.pem`, `id_rsa`.
-3. **Services**: `/etc/init.d/` scripts starting telnetd, busybox telnet,
+2. Private keys/certs: `*.key`, `*.pem`, `id_rsa`.
+3. Services: `/etc/init.d/` scripts starting telnetd, busybox telnet,
    upnpd, debug shells (`console:::respawn`).
-4. **Version fingerprint**: `/etc/openwrt_release`, `/etc/os-release`, banner
+4. Version fingerprint: `/etc/openwrt_release`, `/etc/os-release`, banner
    strings, then feed `osv_query` for the identified components (busybox,
    dropbear, openssl, lighttpd versions from opkg status or strings).
 5. **Web root** (/www): hard-coded creds in JS, debug endpoints.

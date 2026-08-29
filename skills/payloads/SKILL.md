@@ -64,8 +64,16 @@ target did, do not repeat it).
 {{7*7}}          (template engines)
 ${7*7}           (EL/template variants)
 ```
-Confirm with the marker reflected unencoded in the response body, or template
-math evaluated. Console.log markers avoid side effects vs alert().
+An unencoded marker in the response body is a lead, not confirmation:
+reflection can land in a non-executing context (an attribute value, an
+already-escaped-elsewhere sink, a response that's never rendered as HTML) and
+still look unencoded in a raw body dump. Confirm execution the way
+`bountydesk-challenges` does for DOM XSS: render the response in headless
+`chromium` and check for an observable post-load mutation (`document.title`
+changed, a node appended), or, for template payloads, that the math actually
+evaluated (`49` in the response, not the literal `{{7*7}}`). Console.log
+markers avoid side effects vs alert() once you're confirming via a real
+render.
 
 ## JWT algorithm confusion (RS256 to HS256)
 

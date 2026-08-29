@@ -13,7 +13,12 @@ Default mode: pure static triage inside the sandbox (no device, no emulator).
 Pipeline: acquire, unpack, structure, secrets/endpoints, tool-backed static,
 dynamic (documented, device-required), correlate.
 
-## Phase 1: acquire (grant-gated if operator-supplied URL; github releases are in-scope)
+## Phase 1: acquire
+
+`scope_check` the APK's host before fetching it, exactly like any other
+network contact: the sandbox's egress allowlist reaching GitHub is not the
+same thing as GitHub being an authorized target, and a URL living on GitHub
+doesn't bypass the server-held `TargetProfile` that scope is bound to.
 
 ```bash
 curl -sSL <apk-url> -o /tmp/artifacts/app.apk   # APK is a zip container

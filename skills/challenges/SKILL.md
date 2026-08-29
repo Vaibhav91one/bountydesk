@@ -28,20 +28,20 @@ batch of work, confirm it with `verify_grant` before scanning, and embed it as
 
 Most lab apps expose their challenge/level taxonomy; pull it at runtime:
 
-- **Juice Shop**: `GET /api/Challenges/` returns JSON of every challenge (name,
+- Juice Shop: `GET /api/Challenges/` returns JSON of every challenge (name,
   category, `solved`). This IS the scoreboard and the progress signal, and is
   the app BountyDesk's pinned target (`Vaibhav91one/juice-shop`) runs today.
-- **WebGoat**: `GET /service/lessonmenu.mvc` (authenticated) lists lessons and
+- WebGoat: `GET /service/lessonmenu.mvc` (authenticated) lists lessons and
   completion; `/WebGoat/service/lessonoverview.mvc` per-lesson assignments.
-- **DVWA**: modules are fixed (Brute Force, Command Injection, CSRF, File
+- DVWA: modules are fixed (Brute Force, Command Injection, CSRF, File
   Inclusion, File Upload, Insecure CAPTCHA, SQLi, Blind SQLi, Weak Session IDs,
   XSS DOM/Reflected/Stored, CSP Bypass, JavaScript, Open HTTP Redirect). Each
   runs at 4 levels via the `security` cookie (`low|medium|high|impossible`).
   The matrix is modules times levels.
-- **VAmPI**: finite documented set (SQLi on users, mass assignment, hardcoded
+- VAmPI: finite documented set (SQLi on users, mass assignment, hardcoded
   JWT secret, IDOR/BOLA, unauth `/createdb` and `/users/v1/_debug`, excessive
   data exposure, user enumeration, ReDoS).
-- **DSVW**: about 17 endpoints, each a distinct vuln (`?id=` SQLi bool/union/
+- DSVW: about 17 endpoints, each a distinct vuln (`?id=` SQLi bool/union/
   time, `?query=` XSS, `?path=` traversal/RFI, `?xml=` XXE, `?name=` XPath,
   `?url=` SSRF, `?size=` DoS, unsafe pickle, SSTI). Enumerate from the landing
   page.
