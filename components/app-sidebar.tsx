@@ -8,14 +8,12 @@ import type { ActiveReport } from "@/lib/reports/queue";
 import {
   BookOpen,
   CaretUpDown,
-  ClockCounterClockwise,
   Files,
   Gear,
   House,
   PlugsConnected,
   ShareNetwork,
   SignOut,
-  Target,
   Tray,
 } from "@phosphor-icons/react/ssr";
 
@@ -57,11 +55,9 @@ export const NAV = [
   { href: "/home", label: "Home", icon: House },
   { href: "/board", label: "Review queue", icon: Tray },
   { href: "/reports", label: "Reports", icon: Files, soon: true },
-  { href: "/settings/integrations", label: "Integrations", icon: PlugsConnected },
-  { href: "/settings/connections", label: "Connections", icon: ShareNetwork },
-  { href: "/settings/scope", label: "Scope", icon: Target, soon: true },
-  { href: "/settings/audit", label: "Audit", icon: ClockCounterClockwise, soon: true },
-  { href: "/settings/general", label: "Settings", icon: Gear, soon: true },
+  { href: "/integrations", label: "Integrations", icon: PlugsConnected },
+  { href: "/connections", label: "Connections", icon: ShareNetwork },
+  { href: "/settings", label: "Settings", icon: Gear },
 ];
 
 export function AppSidebar({

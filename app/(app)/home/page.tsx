@@ -149,7 +149,7 @@ export default async function HomePage() {
           </ul>
 
           {live.length > 0 ? (
-            <Button size="sm" nativeButton={false} render={<Link href="/settings/integrations" />}>
+            <Button size="sm" nativeButton={false} render={<Link href="/integrations" />}>
               Manage integrations <RollingIcon icon={ArrowRight} className="size-3.5" />
             </Button>
           ) : (
@@ -165,7 +165,7 @@ export default async function HomePage() {
           body="A report can only be reproduced against a server-held target profile: a pinned image, its digest, and a defender-authored fixture. Without one a report stops at analysis only."
           done={admissible.length > 0 ? `${admissible.length} bound` : undefined}
           action={
-            <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/settings/integrations" />}>
+            <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/integrations" />}>
               Bind a target <RollingIcon icon={ArrowRight} className="size-3.5" />
             </Button>
           }
@@ -191,7 +191,7 @@ export default async function HomePage() {
         </h2>
         <ul className="flex flex-col gap-3 text-body">
           {[
-            { text: "GitHub App intake with signature checks and durable, idempotent delivery", href: "/settings/integrations", link: "Open integrations" },
+            { text: "GitHub App intake with signature checks and durable, idempotent delivery", href: "/integrations", link: "Open integrations" },
             { text: "Separate job execution and report lifecycle state machines, with leased workers", href: null, link: null },
             { text: "Scope bound at the capability boundary, never from a string the agent produced", href: null, link: null },
             { text: "Sign-in restricted to a reviewer allowlist, re-checked on every request", href: null, link: null },

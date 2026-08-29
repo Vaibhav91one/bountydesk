@@ -50,7 +50,7 @@ export default async function IntegrationsPage() {
       installed: connections.length > 0,
       action:
         connections.length > 0
-          ? { kind: "link", href: "/settings/connections", label: "Manage" }
+          ? { kind: "link", href: "/connections", label: "Manage" }
           : { kind: "link", href: installUrl(), label: "Install" },
     },
     {

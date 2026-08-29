@@ -27,7 +27,7 @@ export async function configureRepository(
     formData.get("repoId"),
   );
 
-  if (result.ok) revalidatePath("/settings/integrations");
+  if (result.ok) revalidatePath("/integrations");
 
   return result;
 }
@@ -49,7 +49,7 @@ export async function rotateRepository(
     formData.get("repoId"),
   );
 
-  if (result.ok) revalidatePath("/settings/integrations");
+  if (result.ok) revalidatePath("/integrations");
 
   return result;
 }

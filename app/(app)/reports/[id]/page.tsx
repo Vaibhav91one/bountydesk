@@ -12,6 +12,7 @@ import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
 import { ApprovalDialog } from "./approval-dialog";
+import { ArtifactsPanel, verdictArtifacts } from "./artifacts-panel";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import type { StepState } from "./lifecycle-step";
 import { StatusCard } from "./status-card";
@@ -291,6 +292,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
    * sandbox, PoC runner and oracle have never run at all, so none of them is marked and
    * nothing spins. When reproduction ships and writes its own events, this fills in on its own.
    */
+  const artifacts = verdictArtifacts(file.verdict?.evidence);
+
   // Same id-prefix trap as the lifecycle rows: several mascots share one page.
   const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
     const mascot = mascotState(key);
@@ -432,6 +435,20 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
 
+        <Panel
+          title="Artifacts"
+          aside={
+            <Badge variant="outline">
+              {artifacts.length === 0 ? "None produced" : `${artifacts.length} recorded`}
+            </Badge>
+          }
+        >
+          <ArtifactsPanel
+            artifacts={artifacts}
+            imageDigest={file.target?.imageDigest || null}
+            contentHash={file.verdict?.contentHash ?? null}
+          />
+        </Panel>
       </div>
     </main>
   );
