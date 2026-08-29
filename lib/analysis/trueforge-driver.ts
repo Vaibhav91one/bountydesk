@@ -86,22 +86,47 @@ That call submits the prepared analysis for human review. Do not invent a capabi
 only the one given here.`;
 }
 
-/** Whether a recipe's own keywords show up anywhere in the report's title or body. A recipe
- * is server-authored and knows exactly what vulnerability class and endpoint it exercises, so
- * this is the guard against running the one scenario a target happens to have against a
- * report that has nothing to do with it: see the "recipe selection is unconditional" bug this
- * closes in the PR description. Plain case-insensitive substring matching, not fuzzy scoring:
- * a recipe author writes keywords a reporter would plausibly use for this exact scenario, and
- * a false negative here is safe (falls through to ANALYSIS_ONLY) while a false positive is
- * not, so there is no reason to reach for anything cleverer than "does the text contain this
- * word."
+/** Whether a report names the same vulnerability class and scenario the recipe exercises.
+ * A recipe author writes both broad class words and endpoint-specific words; matching only one
+ * side is unsafe because it can run a search SQLi recipe for a login SQLi report, or for search
+ * XSS. A false negative falls through to ANALYSIS_ONLY, while a false positive can persist a
+ * definitive verdict for the wrong scenario.
  */
 function matchesReport(
   recipe: ReproductionRecipe,
   reportContent: { title: string; body: string },
 ): boolean {
   const haystack = `${reportContent.title}\n${reportContent.body}`.toLowerCase();
-  return recipe.keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+  let matchedVulnerability = false;
+  let matchedScenario = false;
+
+  for (const keyword of recipe.keywords) {
+    if (!haystack.includes(keyword.toLowerCase())) continue;
+    if (isVulnerabilityKeyword(keyword)) {
+      matchedVulnerability = true;
+    } else {
+      matchedScenario = true;
+    }
+  }
+
+  return matchedVulnerability && matchedScenario;
+}
+
+function isVulnerabilityKeyword(keyword: string): boolean {
+  return [
+    "sql injection",
+    "sqli",
+    "union select",
+    "xss",
+    "cross-site scripting",
+    "csrf",
+    "ssrf",
+    "rce",
+    "command injection",
+    "auth bypass",
+    "authentication bypass",
+    "login bypass",
+  ].includes(keyword.toLowerCase());
 }
 
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh

@@ -598,6 +598,50 @@ test("a report unrelated to the recipe's own scenario never triggers reproductio
   assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
 });
 
+test("a matching vulnerability class on the wrong endpoint never triggers reproduction", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "SQL injection in login",
+    body: "The login form accepts a crafted SQLi payload and returns an authenticated session.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 0, "a class-only match must not run a different endpoint's recipe");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
+test("a matching endpoint with a different vulnerability class never triggers reproduction", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "XSS in product search",
+    body: "The search endpoint reflects a script tag in the page.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 0, "an endpoint-only match must not run another vulnerability's recipe");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
 test("a report matching the recipe's keywords does trigger reproduction", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id, {
