@@ -55,10 +55,37 @@ const MASCOT: Record<string, "ingest" | "reproducing" | "delivered"> = {
 
 /** What a card in flight is doing, in the present tense, because it is still happening. */
 const RUNNING_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging…",
-  REPRODUCING: "Reproducing…",
-  DELIVERING: "Delivering…",
+  TRIAGING: "Triaging",
+  REPRODUCING: "Reproducing",
+  DELIVERING: "Delivering",
 };
+
+/**
+ * How each mascot drifts. Distance, tilt, speed and where in the cycle it starts.
+ *
+ * The negative delays are the point: a positive one would hold every mascot still until its
+ * turn came round, while a negative one starts it partway through, so a column of them is out
+ * of step from the first frame.
+ */
+const FLOAT = [
+  { y: "-4px", tilt: "2deg", seconds: 3.6, delay: -0.4 },
+  { y: "-6px", tilt: "-3deg", seconds: 4.4, delay: -2.1 },
+  { y: "-3px", tilt: "3deg", seconds: 3.1, delay: -1.3 },
+  { y: "-5px", tilt: "-2deg", seconds: 5.2, delay: -3.4 },
+  { y: "-7px", tilt: "1deg", seconds: 4.8, delay: -0.9 },
+];
+
+/**
+ * Which drift a card gets: its position among the mascots on the board, cycling through FLOAT.
+ *
+ * Hashing the id was the first attempt and it collided three ways out of four, which is what
+ * hashing four things into five buckets does. Counting guarantees the property instead of
+ * hoping for it: five consecutive mascots never match, and neighbours in a column are always
+ * consecutive. Deterministic either way, which server rendering requires.
+ */
+function driftAt(index: number) {
+  return FLOAT[index % FLOAT.length];
+}
 
 /** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
 function age(from: Date): string {
@@ -74,13 +101,16 @@ function Card({
   card,
   showState,
   mascot,
+  index,
 }: {
   card: QueueCard;
   showState: boolean;
   mascot?: MascotState;
+  index: number;
 }) {
   const phase = phaseOf(card.state);
   const running = RUNNING.has(card.state);
+  const float = driftAt(index);
 
   const status = card.awaitingVerdictId
     ? "Needs review"
@@ -99,8 +129,20 @@ function Card({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-body font-medium text-foreground">{card.title}</span>
-          <span className="text-meta text-muted-foreground">
+          {/* Two lines and then an ellipsis. A report title is written by whoever filed it and
+              has no length anyone here controls, so the card decides how much of it fits. */}
+          <span
+            title={card.title}
+            className="line-clamp-2 text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
+          >
+            {card.title}
+          </span>
+          {/* One line. The source and the target are an identifier, and an identifier that
+              wraps mid-token reads as two things rather than one. */}
+          <span
+            title={`${card.sourceLabel} · ${card.targetName ?? "no target bound"}`}
+            className="line-clamp-1 text-meta break-all text-muted-foreground"
+          >
             {card.sourceLabel} · {card.targetName ?? "no target bound"}
           </span>
         </div>
@@ -111,7 +153,13 @@ function Card({
         {mascot ? (
           <span
             aria-hidden="true"
-            className="-my-1 size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+            className="animate-mascot-float -my-2 size-20 shrink-0 motion-reduce:animate-none [&>svg]:block [&>svg]:size-full"
+            style={{
+              animationDuration: `${float.seconds}s`,
+              animationDelay: `${float.delay}s`,
+              ["--float-y" as string]: float.y,
+              ["--float-tilt" as string]: float.tilt,
+            }}
             dangerouslySetInnerHTML={{
               __html: mascot.markup.replaceAll(
                 `${mascot.key}__`,
@@ -163,9 +211,11 @@ function Card({
 function Column({
   column,
   mascots,
+  drift,
 }: {
   column: QueueColumn;
   mascots: Map<string, MascotState>;
+  drift: Map<string, number>;
 }) {
   const hidden = column.total - column.cards.length;
 
@@ -190,6 +240,7 @@ function Column({
           <Card
             key={card.id}
             card={card}
+            index={drift.get(card.id) ?? 0}
             showState={column.states.length > 1}
             mascot={mascots.get(card.state)}
           />
@@ -221,6 +272,15 @@ export default async function BoardPage() {
       .map((state) => [state, mascotState(MASCOT[state])] as const),
   );
 
+  // Numbered across the board rather than within a column, so the drifts stay spread out even
+  // when one column holds every mascot on screen.
+  const drift = new Map<string, number>();
+  for (const column of columns) {
+    for (const card of column.cards) {
+      if (mascots.has(card.state)) drift.set(card.id, drift.size);
+    }
+  }
+
   return (
     <main className="flex flex-1 flex-col">
       <header className="flex flex-wrap items-center gap-3 border-b border-border/50 px-8 py-7">
@@ -248,7 +308,7 @@ export default async function BoardPage() {
               with the column count. */}
           <div className="grid min-h-full min-w-max auto-cols-[300px] grid-flow-col divide-x divide-border/50">
             {columns.map((column) => (
-              <Column key={column.key} column={column} mascots={mascots} />
+              <Column key={column.key} column={column} mascots={mascots} drift={drift} />
             ))}
           </div>
         </div>

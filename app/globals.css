@@ -235,3 +235,24 @@
   animation-timing-function: linear;
   animation-iteration-count: infinite;
 }
+
+/* Agent Bounty bobbing on a board card. This rides on top of the animation baked into each
+   SVG, so the two compose rather than replace one another: the export handles what the mascot
+   is doing, this handles it drifting while it does it. */
+@keyframes mascot-float {
+  0%,
+  100% {
+    translate: 0 0;
+    rotate: 0deg;
+  }
+  50% {
+    translate: 0 var(--float-y);
+    rotate: var(--float-tilt);
+  }
+}
+
+@utility animate-mascot-float {
+  animation-name: mascot-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
