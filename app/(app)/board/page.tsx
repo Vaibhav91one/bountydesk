@@ -102,7 +102,7 @@ function Column({ column }: { column: QueueColumn }) {
   const hidden = column.total - column.cards.length;
 
   return (
-    <section className="flex w-[280px] shrink-0 flex-col gap-3">
+    <section className="flex flex-col gap-3 px-5 first:pl-0 last:pr-0">
       <header className="flex items-center gap-2.5">
         <PhaseDot phase={column.key} />
         <h2 className="flex-1 text-body font-medium text-foreground">{column.label}</h2>
@@ -158,7 +158,11 @@ export default async function BoardPage() {
         // The strip scrolls, not the page: six columns do not fit the content area at 1440,
         // and a board that pushes the whole document sideways is worse than one that does not.
         <div className="flex-1 overflow-x-auto p-8">
-          <div className="flex min-w-max gap-4">
+          {/* A grid rather than a flex row, so every column is the same height and the rules
+              between them run the full board instead of stopping at the tallest stack of
+              cards. divide-x draws them, which means no separator element to keep in step
+              with the column count. */}
+          <div className="grid min-h-full min-w-max auto-cols-[300px] grid-flow-col divide-x divide-border/50">
             {columns.map((column) => (
               <Column key={column.key} column={column} />
             ))}
