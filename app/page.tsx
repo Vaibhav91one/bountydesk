@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowSquareOut, Check, Circle, Folder } from "@phosphor-icons/react/ssr";
+import { ArrowRight, Check, Circle, Folder } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { PhaseBadge } from "@/components/phase-dot";
@@ -94,7 +94,7 @@ export default function LandingPage() {
         {/* Hero. Centred rather than split: the reference puts the headline in the middle of
             the page and the product underneath it on a backdrop, which gives the claim the
             whole width and stops the panel competing with it for attention. */}
-        <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-14 text-center lg:pt-28">
+        <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-10 text-center lg:pt-24">
           <span className="flex items-center gap-3">
             <span
               aria-hidden="true"
@@ -108,16 +108,14 @@ export default function LandingPage() {
               records why that matters: a 64px headline on a phone is a scroll, not a hero.
               Login hides its headline below lg; a landing page cannot, so this steps up and
               carries the token's weight and tracking at the smaller sizes. */}
-          <h1 className="text-4xl leading-[1.06] font-semibold tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
+          <h1 className="text-4xl leading-[1.06] font-normal tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
             Read every report.
             <br />
             Sign every verdict.
           </h1>
 
-          <p className="max-w-[680px] text-lead text-balance text-muted-foreground">
-            BountyDesk authenticates a bug report, checks it against a target the server pins,
-            and drafts the reply. Nothing reaches the reporter until you approve the exact
-            words.
+          <p className="max-w-[760px] text-lead text-muted-foreground">
+            Every report authenticated and scope-checked. No verdict ships until you sign it.
           </p>
 
           <div className="flex flex-wrap items-center justify-center gap-3">
@@ -127,7 +125,7 @@ export default function LandingPage() {
               render={<Link href="/login" />}
               className="rounded-full px-6"
             >
-              <RollingIcon icon={GitHubLight} className="size-4" /> Sign in with GitHub
+              Get started <RollingIcon icon={ArrowRight} className="size-4" />
             </Button>
             <Button
               size="lg"
@@ -136,38 +134,29 @@ export default function LandingPage() {
               render={<a href={SOURCE} target="_blank" rel="noreferrer noopener" />}
               className="rounded-full px-6"
             >
-              <RollingIcon icon={ArrowSquareOut} className="size-4" /> View the source
+              <RollingIcon icon={GitHubLight} className="size-4" /> Star on GitHub
             </Button>
           </div>
-
-          {/* Where the reference puts its install command. Same shape, and the only thing worth
-              putting in it here is what actually runs. Said once, then carried by the per-panel
-              labels rather than repeated. */}
-          <p className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-2xl border border-border/50 bg-card/60 px-5 py-2.5 sm:rounded-full text-meta text-muted-foreground">
-            <span className="text-phase-delivered">Runs today</span>
-            <span aria-hidden="true" className="text-muted-foreground/40">|</span>
-            intake, the queue, the case file and the approval gate
-          </p>
         </section>
 
         {/* The product on a backdrop, the way the reference seats its screenshot. The image is
             decorative, so it carries an empty alt and the panel above it says everything. */}
         <div className="relative isolate">
-          <div aria-hidden="true" className="absolute inset-0 overflow-hidden">
+          <div aria-hidden="true" className="absolute inset-x-0 -top-12 bottom-0 overflow-hidden">
             <Image
               src="/backdrop/hero.webp"
               alt=""
               fill
               priority
               sizes="100vw"
-              className="object-cover object-center opacity-80"
+              className="object-cover object-bottom opacity-75"
             />
             {/* Fades the band into the page at both edges, so it reads as one surface rather
                 than a photo pasted between two dark blocks. */}
-            <div className="absolute inset-0 bg-gradient-to-b from-background via-background/20 to-background" />
+            <div className="absolute inset-0 bg-gradient-to-b from-background from-30% via-background/35 via-70% to-background" />
           </div>
 
-          <div className="relative mx-auto w-full max-w-5xl px-6 pt-14 pb-24 lg:pt-20">
+          <div className="relative mx-auto w-full max-w-5xl px-6 pt-10 pb-24 lg:pt-12">
             <ApprovalPanel />
           </div>
         </div>
