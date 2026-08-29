@@ -138,7 +138,7 @@ export default function LandingPage() {
             />
             {/* Fades the band into the page at both edges, so it reads as one surface rather
                 than a photo pasted between two dark blocks. */}
-            <div className="absolute inset-0 bg-gradient-to-b from-background from-30% via-background/35 via-70% to-background" />
+            <div className="absolute inset-0 bg-gradient-to-b from-background from-8% via-background/20 via-55% to-background" />
           </div>
 
           <div className="relative mx-auto w-full max-w-5xl px-6 pt-10 pb-24 lg:pt-12">
