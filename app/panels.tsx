@@ -1,4 +1,6 @@
 import Image from "next/image";
+
+import { Parallax } from "@/components/parallax";
 import Link from "next/link";
 import { ArrowRight, Prohibit, Signature } from "@phosphor-icons/react/ssr";
 
@@ -164,10 +166,6 @@ export function ApprovalPanel() {
   );
 }
 
-
-
-
-
 /** The mobile stand-in for SandboxDiagram, which cannot scroll under a finger. */
 export function SandboxList() {
   const stages = [
@@ -214,27 +212,41 @@ export function SandboxList() {
  * whatever is behind it. Below md the frame goes: a photo behind a component on a phone is
  * two things competing for 390px.
  */
-export function Framed({ src, children }: { src: string; children: React.ReactNode }) {
+export function Framed({
+  src,
+  children,
+}: {
+  src: string;
+  children: React.ReactNode;
+}) {
   return (
     // One height for every frame on the page, so the three sections keep the same rhythm
     // however tall the thing inside them happens to be, and the content sits in the middle
     // rather than at the top of a box it does not fill.
     <div className="relative flex items-center justify-center overflow-hidden rounded-2xl md:min-h-[524px] md:p-8">
-      <Image
-        src={src}
-        alt=""
-        fill
-        sizes="(min-width: 1024px) 50vw, 100vw"
-        className="hidden object-cover object-center md:block"
+      {/* Taller than the frame and pulled up by half the excess, so the picture stays centred
+          while the drift has somewhere to go. At 8% of 132% the travel is 10.6% of the frame,
+          inside the 16% of slack above and below. */}
+      <Parallax
+        from="-8%"
+        to="8%"
+        className="absolute inset-x-0 -top-[16%] h-[132%]"
+      >
+        <Image
+          src={src}
+          alt=""
+          fill
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          className="hidden object-cover object-center md:block"
+        />
+      </Parallax>
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 hidden bg-background/40 md:block"
       />
-      <div aria-hidden="true" className="absolute inset-0 hidden bg-background/40 md:block" />
       <div className="relative w-full overflow-hidden rounded-xl md:shadow-[0_24px_48px_rgba(0,0,0,0.55)]">
         {children}
       </div>
     </div>
   );
 }
-
-
-
-

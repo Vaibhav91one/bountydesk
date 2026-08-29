@@ -5,6 +5,7 @@ import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { MASCOT_ON_CARD } from "@/components/queue-board";
+import { Parallax } from "@/components/parallax";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -376,14 +377,23 @@ export default function LandingPage() {
             aria-hidden="true"
             className="absolute inset-x-0 -top-44 bottom-0 overflow-hidden"
           >
-            <Image
-              src="/backdrop/hero.webp"
-              alt=""
-              fill
-              priority
-              sizes="100vw"
-              className="object-cover object-bottom opacity-75"
-            />
+            {/* Headroom above only, and the drift goes one way. The composition puts the
+                horizon on the bottom edge, so lifting the picture would open a gap there that
+                the gradient does not reach. 10% of 112% travels 11.2%, inside the 12% above. */}
+            <Parallax
+              from="0%"
+              to="10%"
+              className="absolute inset-x-0 -top-[12%] h-[112%]"
+            >
+              <Image
+                src="/backdrop/hero.webp"
+                alt=""
+                fill
+                priority
+                sizes="100vw"
+                className="object-cover object-bottom opacity-75"
+              />
+            </Parallax>
             {/* Fades the band into the page at both edges, so it reads as one surface rather
                 than a photo pasted between two dark blocks. */}
             <div className="absolute inset-0 bg-gradient-to-b from-background from-20% via-background/20 via-60% to-background" />
