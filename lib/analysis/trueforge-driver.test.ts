@@ -42,14 +42,15 @@ after(async () => {
 async function seedReport(
   state: "TRIAGING" | "REPRODUCING" = "TRIAGING",
   targetProfileId: string | null = null,
+  content: { title?: string; body?: string } = {},
 ): Promise<string> {
   const [row] = await dbm.db
     .insert(dbm.report)
     .values({
       channel: "github",
       sourceRef: `test:${randomUUID()}`,
-      title: "SQL injection in search",
-      body: "The search endpoint concatenates the query string directly.",
+      title: content.title ?? "SQL injection in search",
+      body: content.body ?? "The search endpoint concatenates the query string directly.",
       reporterHandle: null,
       connectedRepositoryId: null,
       targetProfileId,
@@ -89,6 +90,7 @@ function fakeRecipe(overrides: Partial<ReproductionRecipe> = {}): ReproductionRe
   return {
     id: "juice-shop-sqli-search",
     title: "SQL injection in the search endpoint",
+    keywords: ["sql injection", "sqli", "search", "union select"],
     fixture: { request: { method: "POST", path: "/rest/canary", body: { value: "{{canary}}" } } },
     negativeControl: { method: "GET", path: "/rest/search?q=harmless" },
     exploit: { method: "GET", path: "/rest/search?q=%27%20OR%201%3D1--" },
@@ -122,10 +124,15 @@ function reproducedEvidence(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     recipeId: "juice-shop-sqli-search",
     sandboxId: `sandbox-${randomUUID()}`,
+    fixture: { ranToCompletion: true, at: new Date().toISOString() },
     negativeControl: { ranToCompletion: true, canaryFound: false, at: new Date().toISOString() },
     exploit: { ranToCompletion: true, canaryFound: true, at: new Date().toISOString() },
     canaryHash: "deadbeef".repeat(8),
-    requestBodyHashes: { negativeControl: "aa".repeat(32), exploit: "bb".repeat(32) },
+    requestBodyHashes: {
+      fixture: "cc".repeat(32),
+      negativeControl: "aa".repeat(32),
+      exploit: "bb".repeat(32),
+    },
     ...overrides,
   };
 }
@@ -525,6 +532,57 @@ test("a bound target with no matching recipe behaves exactly like today's uncond
   assert.ok(v.payload.startsWith("Automated reproduction was not run for this report."));
 });
 
+test("a report unrelated to the recipe's own scenario never triggers reproduction", async () => {
+  const target = await seedTargetProfile();
+  // Neither "search" nor "sql" nor anything scenario-relevant: this report is about a
+  // completely different vulnerability class than the one recipe this target has configured.
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "Broken access control on invoice downloads",
+    body: "Any authenticated user can view another customer's invoice PDF simply by incrementing the numeric id in the download URL. No crafted query strings or unexpected input are needed to trigger this.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(
+    reproduceFn.calls,
+    0,
+    "an unrelated report must never trigger the one recipe this target happens to have",
+  );
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+});
+
+test("a report matching the recipe's keywords does trigger reproduction", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "SQL injection via UNION SELECT in product search",
+    body: "Sending a crafted UNION SELECT payload to the search box returns rows from other tables.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 1, "a report matching the recipe's own keywords must run it");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "REPRODUCED");
+});
+
 test("a recipe that reproduces the report records a REPRODUCED verdict without the raw canary", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);
@@ -630,6 +688,39 @@ test("ensureSession called twice for the same report invokes reproduceFn exactly
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(verdicts.length, 1, "still exactly one verdict row");
+});
+
+test("two concurrent first-time ensureSession calls for the same report run reproduction exactly once", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  let calls = 0;
+  const reproduceFn: ReproduceFn = async () => {
+    calls++;
+    // A real delay, so the two overlapping ensureSession calls actually race inside the
+    // awaited reproduction call rather than resolving before either reaches it. Without the
+    // report row lock, both callers would land here and each mint their own canary.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
+  };
+  const client = fakeClient();
+  const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
+
+  await Promise.all([d.ensureSession(context(reportId)), d.ensureSession(context(reportId))]);
+
+  assert.equal(calls, 1, "only one caller may ever run reproduction for a given report");
+
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(verdicts.length, 1, "the loser must converge on the winner's verdict, not fail");
+
+  const sessions = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessions.length, 1);
 });
 
 test("run tells the model reproduction already ran and hands it the verdict summary, for a REPRODUCED report", async () => {

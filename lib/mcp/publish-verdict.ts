@@ -74,9 +74,15 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
       return { ok: false, reason: "content hash mismatch" };
     }
 
-    // Belt-and-suspenders: nothing in this codebase can produce another outcome yet, but the
-    // handler enforces it independently of whatever anyone might have approved.
-    if (verdictRow.outcome !== "ANALYSIS_ONLY") {
+    // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
+    // human has approved it, so this only guards against a value nothing in this codebase
+    // writes today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
+    const publishableOutcomes: (typeof verdict.outcome.enumValues)[number][] = [
+      "ANALYSIS_ONLY",
+      "REPRODUCED",
+      "NOT_REPRODUCED",
+    ];
+    if (!publishableOutcomes.includes(verdictRow.outcome)) {
       return { ok: false, reason: "verdict outcome is not publishable" };
     }
 

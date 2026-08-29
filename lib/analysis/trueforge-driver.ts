@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { agentSession, and, db, eq, report, targetProfile, verdict } from "@/lib/db";
+import { agentSession, and, db, eq, report, targetProfile, verdict, type Executor } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import type {
   GetRecipesForTargetFn,
@@ -10,8 +10,9 @@ import type {
 } from "@/lib/reproduction/types";
 // Track B (sandbox orchestrator) and Track C (scenario recipes) are being built in parallel
 // worktrees against the frozen contracts in lib/reproduction/types.ts. These imports won't
-// resolve until feat/reproduction-orchestrator and feat/reproduction-recipes merge; until
-// then lint/tsc fail on exactly these two lines, and every test here injects a fake instead.
+// resolve until feat/reproduction-orchestrator and feat/reproduction-recipes merge; until then
+// tsc fails on exactly these two lines (lint is unaffected), and every test here injects a
+// fake reproduceFn/getRecipes instead of relying on the real modules.
 import { reproduce } from "@/lib/sandbox/reproduce";
 import { getRecipesForTarget } from "@/lib/targets/recipes";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
@@ -41,7 +42,7 @@ function buildReproducedPayload(
       ? "The exploit request tripped the canary. The report reproduces."
       : "The exploit request did not trip the canary. The report does not reproduce as described.";
 
-  const body = `Automated reproduction ran the "${recipe.title}" scenario against an isolated, pinned copy of the target. An unpredictable canary was seeded fresh for this run through a trusted fixture call, a negative control confirmed the same request without the injection left the canary untouched, and then the exploit request ran.
+  const body = `Automated reproduction ran the "${recipe.title}" scenario against an isolated, pinned copy of the target. An unpredictable canary was seeded fresh for this run through a trusted fixture call, a negative control request ran first and left the canary untouched, and then the exploit request ran.
 
 ${finding}
 
@@ -90,37 +91,65 @@ That call submits the prepared analysis for human review. Do not invent a capabi
 only the one given here.`;
 }
 
+/** Whether a recipe's own keywords show up anywhere in the report's title or body. A recipe
+ * is server-authored and knows exactly what vulnerability class and endpoint it exercises, so
+ * this is the guard against running the one scenario a target happens to have against a
+ * report that has nothing to do with it: see the "recipe selection is unconditional" bug this
+ * closes in the PR description. Plain case-insensitive substring matching, not fuzzy scoring:
+ * a recipe author writes keywords a reporter would plausibly use for this exact scenario, and
+ * a false negative here is safe (falls through to ANALYSIS_ONLY) while a false positive is
+ * not, so there is no reason to reach for anything cleverer than "does the text contain this
+ * word."
+ */
+function matchesReport(
+  recipe: ReproductionRecipe,
+  reportContent: { title: string; body: string },
+): boolean {
+  const haystack = `${reportContent.title}\n${reportContent.body}`.toLowerCase();
+  return recipe.keywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+}
+
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh
  * report (no verdict row exists yet). Isolated from ensureSession so the "existingVerdict"
- * branch never has to look at this at all. */
+ * branch never has to look at this at all. Runs inside ensureSession's row-locked transaction
+ * (tx), not against the shared db handle, so the report-locking fix for the concurrent-first-run
+ * race actually covers the reproduction call this function makes. */
 async function decideFreshVerdict(
   reportId: string,
   verdictId: string,
   reproduceFn: ReproduceFn,
   getRecipes: GetRecipesForTargetFn,
   signal: AbortSignal,
+  tx: Executor,
 ): Promise<{
   outcome: (typeof verdict.outcome.enumValues)[number];
   summary: string;
   evidence: Record<string, unknown>;
   payload: string;
 }> {
-  const [target] = await db
+  const [target] = await tx
     .select({
+      targetProfileId: targetProfile.id,
       imageDigest: targetProfile.imageDigest,
       snapshotId: targetProfile.snapshotId,
       name: targetProfile.name,
       config: targetProfile.config,
+      title: report.title,
+      body: report.body,
     })
     .from(report)
     .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
     .where(eq(report.id, reportId))
     .limit(1);
 
-  // No bound target, or a bound target with no known recipe: the common/default case today.
-  // Fall back to the unconditional ANALYSIS_ONLY path exactly as it already works.
+  // No bound target, or a bound target with no recipe that actually matches what this report
+  // says: the common/default case today, and also the fix for a report that has nothing to do
+  // with the one scenario a target happens to have. Both fall back to the unconditional
+  // ANALYSIS_ONLY path exactly as it already works; never guess a recipe onto a report it
+  // doesn't describe.
   const recipes = target ? getRecipes({ name: target.name, config: target.config }) : [];
-  if (!target || recipes.length === 0) {
+  const recipe = target ? recipes.find((candidate) => matchesReport(candidate, target)) : undefined;
+  if (!target || !recipe) {
     return {
       outcome: "ANALYSIS_ONLY",
       summary: "Analysis-only result: automated reproduction was not run.",
@@ -129,11 +158,13 @@ async function decideFreshVerdict(
     };
   }
 
-  // Effectively one active recipe per target for now; recipes[0] is the recipe author's own
-  // declared order in lib/targets/recipes.ts, so the first entry is the one to run.
-  const recipe = recipes[0];
   const result = await reproduceFn(
-    { imageDigest: target.imageDigest, snapshotId: target.snapshotId, recipe },
+    {
+      targetProfileId: target.targetProfileId,
+      imageDigest: target.imageDigest,
+      snapshotId: target.snapshotId,
+      recipe,
+    },
     { signal },
   );
 
@@ -184,62 +215,86 @@ export function createTrueforgeAnalysisDriver(
         .limit(1);
       if (existing) return;
 
-      // A retry after this same function failed partway (session creation or the insert
-      // below threw, after the verdict already committed) must reuse every field of that
-      // verdict exactly, not recompute any of them: ensureInitialVerdict treats a
-      // (reportId, revision) match that disagrees on outcome, summary, evidence or payload as
-      // a hard integrity error, since it has no way to tell "this is just a retry" from "two
-      // different callers disagree about what this report's verdict says." Recomputing would
-      // also call reproduceFn a second time, mint a fresh random canary, and hash to
-      // different evidence than the row already committed, so this select has to read the
-      // committed outcome/summary/evidence too, not just the id and payload, or a retry of a
-      // reproduced report would try to overwrite them with the hardcoded analysis-only shape.
-      const [existingVerdict] = await db
-        .select({
-          id: verdict.id,
-          outcome: verdict.outcome,
-          summary: verdict.summary,
-          evidence: verdict.evidence,
-          payload: verdict.payload,
-        })
-        .from(verdict)
-        .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
-        .limit(1);
+      // Two concurrent first-time calls for the same report must not both decide the verdict:
+      // each would independently run reproduction, mint its own random canary, and land on
+      // evidence that genuinely disagrees with the other's, which ensureInitialVerdict
+      // (correctly) treats as a hard integrity error rather than a retry, since it has no way
+      // to tell that apart from two callers actually disagreeing about what happened. Locking
+      // the report row before deciding anything means the loser blocks in Postgres until the
+      // winner's transaction commits, then rereads the winner's own agent_session/verdict
+      // instead of computing (and discarding) its own. Same accepted cost as run()'s row lock
+      // around createTurn: this one can span a real reproduction run, not just a loopback
+      // call, so a slow sandbox run holds the lock for as long as it takes.
+      await db.transaction(async (tx) => {
+        await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
 
-      const verdictId = existingVerdict?.id ?? randomUUID();
-      const decided = existingVerdict
-        ? {
-            outcome: existingVerdict.outcome,
-            summary: existingVerdict.summary,
-            evidence: existingVerdict.evidence as Record<string, unknown>,
-            payload: existingVerdict.payload,
-          }
-        : await decideFreshVerdict(reportId, verdictId, reproduceFn, getRecipes, signal);
+        const [existingAfterLock] = await tx
+          .select({ id: agentSession.id })
+          .from(agentSession)
+          .where(eq(agentSession.reportId, reportId))
+          .limit(1);
+        if (existingAfterLock) return;
 
-      await ensureInitialVerdict({
-        id: verdictId,
-        reportId,
-        outcome: decided.outcome,
-        summary: decided.summary,
-        evidence: decided.evidence,
-        payload: decided.payload,
+        // A retry after this same function failed partway (session creation or the insert
+        // below threw, after the verdict already committed) must reuse every field of that
+        // verdict exactly, not recompute any of them: ensureInitialVerdict treats a
+        // (reportId, revision) match that disagrees on outcome, summary, evidence or payload as
+        // a hard integrity error, since it has no way to tell "this is just a retry" from "two
+        // different callers disagree about what this report's verdict says." Recomputing would
+        // also call reproduceFn a second time, mint a fresh random canary, and hash to
+        // different evidence than the row already committed, so this select has to read the
+        // committed outcome/summary/evidence too, not just the id and payload, or a retry of a
+        // reproduced report would try to overwrite them with the hardcoded analysis-only shape.
+        const [existingVerdict] = await tx
+          .select({
+            id: verdict.id,
+            outcome: verdict.outcome,
+            summary: verdict.summary,
+            evidence: verdict.evidence,
+            payload: verdict.payload,
+          })
+          .from(verdict)
+          .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+          .limit(1);
+
+        const verdictId = existingVerdict?.id ?? randomUUID();
+        const decided = existingVerdict
+          ? {
+              outcome: existingVerdict.outcome,
+              summary: existingVerdict.summary,
+              evidence: existingVerdict.evidence as Record<string, unknown>,
+              payload: existingVerdict.payload,
+            }
+          : await decideFreshVerdict(reportId, verdictId, reproduceFn, getRecipes, signal, tx);
+
+        await ensureInitialVerdict(
+          {
+            id: verdictId,
+            reportId,
+            outcome: decided.outcome,
+            summary: decided.summary,
+            evidence: decided.evidence,
+            payload: decided.payload,
+          },
+          tx,
+        );
+
+        // Opaque handle the model echoes back as publish_verdict's sole argument; the only
+        // report identifier it ever sees.
+        const capabilityToken = randomBytes(32).toString("base64url");
+        const { sessionId } = await client.createSession({ signal });
+
+        // onConflictDoNothing is now belt-and-suspenders rather than the primary defense: the
+        // report row lock above already keeps two concurrent first-time callers from racing
+        // this far together. It still matters for the retry case above, where a differently
+        // timed crash could leave two attempts both reaching this insert.
+        await tx
+          .insert(agentSession)
+          .values({ reportId, capabilityToken, sessionId })
+          .onConflictDoNothing({ target: agentSession.reportId });
+
+        if (signal.aborted) throw signal.reason;
       });
-
-      // Opaque handle the model echoes back as publish_verdict's sole argument; the only
-      // report identifier it ever sees.
-      const capabilityToken = randomBytes(32).toString("base64url");
-      const { sessionId } = await client.createSession({ signal });
-
-      // onConflictDoNothing: if a concurrent call already inserted this report's session
-      // first, the session just opened above is simply unused. Same accepted at-least-once
-      // cost as the other queues in this codebase (see lib/delivery/worker.ts) rather than
-      // adding locking beyond what ensureInitialVerdict and the unique index already give us.
-      await db
-        .insert(agentSession)
-        .values({ reportId, capabilityToken, sessionId })
-        .onConflictDoNothing({ target: agentSession.reportId });
-
-      if (signal.aborted) throw signal.reason;
     },
 
     async run({ reportId, signal }: AnalysisContext): Promise<void> {
