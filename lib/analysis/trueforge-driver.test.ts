@@ -493,7 +493,7 @@ test("ensureSession cancels an in-flight TrueForge session request and does not 
   assert.equal(sessions.length, 0);
 });
 
-test("ensureSession retry after session creation failure does not rerun reproduction", async () => {
+test("ensureSession keeps the verdict and claim when session creation fails", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);
   const recipe = fakeRecipe();
@@ -504,15 +504,10 @@ test("ensureSession retry after session creation failure does not rerun reproduc
     return { outcome: "REPRODUCED", evidence };
   };
   let createSessionCalls = 0;
-  const idempotencyKeys: (string | undefined)[] = [];
   const client = fakeClient({
-    async createSession(opts) {
+    async createSession() {
       createSessionCalls++;
-      idempotencyKeys.push(opts?.idempotencyKey);
-      if (createSessionCalls === 1) {
-        throw new Error("trueforge unavailable");
-      }
-      return { sessionId: `truesession-${randomUUID()}` };
+      throw new Error("trueforge unavailable");
     },
   });
   const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
@@ -530,19 +525,13 @@ test("ensureSession retry after session creation failure does not rerun reproduc
     .from(dbm.agentSession)
     .where(dbm.eq(dbm.agentSession.reportId, reportId));
   assert.equal(sessionsAfterFailure.length, 0);
-
-  await d.ensureSession(context(reportId));
-
-  assert.equal(reproduceCalls, 1, "retry must adopt the committed verdict without rerunning reproduction");
-  assert.deepEqual(idempotencyKeys, [
-    `bountydesk:agent-session:${reportId}`,
-    `bountydesk:agent-session:${reportId}`,
-  ]);
-  const sessionsAfterRetry = await dbm.db
+  const claimsAfterFailure = await dbm.db
     .select()
-    .from(dbm.agentSession)
-    .where(dbm.eq(dbm.agentSession.reportId, reportId));
-  assert.equal(sessionsAfterRetry.length, 1);
+    .from(dbm.agentSessionClaim)
+    .where(dbm.eq(dbm.agentSessionClaim.reportId, reportId));
+  assert.equal(reproduceCalls, 1);
+  assert.equal(createSessionCalls, 1);
+  assert.equal(claimsAfterFailure.length, 1, "an ambiguous remote failure must not be retried automatically");
 });
 
 test("ensureSession persists a session if cancellation arrives after TrueForge created it", async () => {
@@ -563,6 +552,37 @@ test("ensureSession persists a session if cancellation arrives after TrueForge c
     .from(dbm.agentSession)
     .where(dbm.eq(dbm.agentSession.reportId, reportId));
   assert.equal(session.sessionId, "truesession-late-cancel");
+});
+
+test("ensureSession deletes the remote session when local session persistence fails", async () => {
+  const existingReportId = await seedReport("TRIAGING");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: existingReportId,
+    capabilityToken: `cap-${randomUUID()}`,
+    sessionId: "truesession-duplicate",
+  });
+  const reportId = await seedReport("TRIAGING");
+  const deletedSessions: string[] = [];
+  const client = fakeClient({
+    async createSession() {
+      return { sessionId: "truesession-duplicate" };
+    },
+    async deleteSession(sessionId) {
+      deletedSessions.push(sessionId);
+    },
+  });
+
+  await assert.rejects(
+    () => driver.createTrueforgeAnalysisDriver(client).ensureSession(context(reportId)),
+    /Failed query: insert into "agent_session"/,
+  );
+
+  assert.deepEqual(deletedSessions, ["truesession-duplicate"]);
+  const claimsAfterFailure = await dbm.db
+    .select()
+    .from(dbm.agentSessionClaim)
+    .where(dbm.eq(dbm.agentSessionClaim.reportId, reportId));
+  assert.equal(claimsAfterFailure.length, 0);
 });
 
 test("ensureSession refuses to persist a verdict if reproduction returns after cancellation", async () => {

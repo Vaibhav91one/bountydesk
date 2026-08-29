@@ -9,7 +9,6 @@ import {
   eq,
   githubInstallation,
   report,
-  sql,
   targetProfile,
   verdict,
   type Executor,
@@ -30,7 +29,6 @@ import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 // "reproduction was not performed" message, and a reviewer comparing verdicts across the
 // two paths should never see the wording drift.
 const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.`;
-const SESSION_CREATION_CLAIM_SECONDS = 300;
 const SESSION_CREATION_POLL_MS = 100;
 
 function buildPayload(verdictId: string): string {
@@ -182,23 +180,32 @@ async function agentSessionExists(reportId: string): Promise<boolean> {
   return existing !== undefined;
 }
 
-async function claimAgentSessionCreation(reportId: string, claimToken: string): Promise<boolean> {
-  const rows = await db.execute<{ report_id: string }>(sql`
-    insert into ${agentSessionClaim} (report_id, claim_token, expires_at)
-    values (${reportId}, ${claimToken}, now() + make_interval(secs => ${SESSION_CREATION_CLAIM_SECONDS}))
-    on conflict (report_id) do update
-       set claim_token = excluded.claim_token,
-           expires_at = excluded.expires_at,
-           updated_at = now()
-     where ${agentSessionClaim.expiresAt} <= now()
-    returning ${agentSessionClaim.reportId} as report_id
-  `);
-  return rows.length > 0;
+async function claimAgentSessionCreation(
+  reportId: string,
+  claimToken: string,
+): Promise<"claimed" | "session-created" | "busy"> {
+  return db.transaction(async (tx) => {
+    await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
+
+    const [existing] = await tx
+      .select({ id: agentSession.id })
+      .from(agentSession)
+      .where(eq(agentSession.reportId, reportId))
+      .limit(1);
+    if (existing) return "session-created";
+
+    const rows = await tx
+      .insert(agentSessionClaim)
+      .values({ reportId, claimToken })
+      .onConflictDoNothing({ target: agentSessionClaim.reportId })
+      .returning({ reportId: agentSessionClaim.reportId });
+    return rows.length > 0 ? "claimed" : "busy";
+  });
 }
 
-async function agentSessionCreationClaim(reportId: string): Promise<{ expiresAt: Date } | null> {
+async function agentSessionCreationClaim(reportId: string): Promise<{ claimToken: string } | null> {
   const [claim] = await db
-    .select({ expiresAt: agentSessionClaim.expiresAt })
+    .select({ claimToken: agentSessionClaim.claimToken })
     .from(agentSessionClaim)
     .where(eq(agentSessionClaim.reportId, reportId))
     .limit(1);
@@ -221,7 +228,7 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
     if (signal.aborted) throw signal.reason;
     if (await agentSessionExists(reportId)) return "session-created";
     const claim = await agentSessionCreationClaim(reportId);
-    if (!claim || claim.expiresAt.getTime() <= Date.now()) return "claim-open";
+    if (!claim) return "claim-open";
     await new Promise((resolve) => setTimeout(resolve, SESSION_CREATION_POLL_MS));
   }
 }
@@ -504,8 +511,9 @@ export function createTrueforgeAnalysisDriver(
 
       let claimToken = randomUUID();
       for (;;) {
-        const claimed = await claimAgentSessionCreation(reportId, claimToken);
-        if (claimed) break;
+        const claimResult = await claimAgentSessionCreation(reportId, claimToken);
+        if (claimResult === "session-created") return;
+        if (claimResult === "claimed") break;
         const waitResult = await waitForClaimedAgentSession(reportId, signal);
         if (waitResult === "session-created") return;
         claimToken = randomUUID();
@@ -513,12 +521,8 @@ export function createTrueforgeAnalysisDriver(
 
       let sessionId: string;
       try {
-        ({ sessionId } = await client.createSession({
-          signal,
-          idempotencyKey: `bountydesk:agent-session:${reportId}`,
-        }));
+        ({ sessionId } = await client.createSession({ signal }));
       } catch (error) {
-        await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
       }
 
@@ -575,6 +579,15 @@ export function createTrueforgeAnalysisDriver(
             );
         });
       } catch (error) {
+        if (client.deleteSession) {
+          await client.deleteSession(sessionId).catch((deleteError) => {
+            console.error(
+              `failed to delete unpersisted TrueForge session ${sessionId}: ${
+                deleteError instanceof Error ? deleteError.message : String(deleteError)
+              }`,
+            );
+          });
+        }
         await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
       }

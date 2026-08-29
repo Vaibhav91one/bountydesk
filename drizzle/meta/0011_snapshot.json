@@ -1,5 +1,5 @@
 {
-  "id": "8e7dbf86-7258-4791-a40a-3a0232e9258b",
+  "id": "09802c7c-0998-4d31-bbf0-0ad3cb1507df",
   "prevId": "79fd3363-9c6a-4c29-bd1f-d279147c0c45",
   "version": "7",
   "dialect": "postgresql",
@@ -262,12 +262,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -283,23 +277,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "agent_session_claim_expires_idx": {
-          "name": "agent_session_claim_expires_idx",
-          "columns": [
-            {
-              "expression": "expires_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "agent_session_claim_report_id_report_id_fk": {
           "name": "agent_session_claim_report_id_report_id_fk",

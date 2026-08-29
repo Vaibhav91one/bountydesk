@@ -11,7 +11,8 @@ import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
  * itself via `listTurnEvents`).
  */
 export interface TrueForgeClient {
-  createSession(opts?: { signal?: AbortSignal; idempotencyKey?: string }): Promise<{ sessionId: string }>;
+  createSession(opts?: { signal?: AbortSignal }): Promise<{ sessionId: string }>;
+  deleteSession?(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
    * it has already reached a pending approval. Callers must poll `getTurn` to find out. */
@@ -184,12 +185,13 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
     async createSession(requestOpts) {
       const res = await client.sessions.create(
         { agent: { name: "bountydesk" } },
-        {
-          abortSignal: requestOpts?.signal,
-          ...(requestOpts?.idempotencyKey ? { headers: { "Idempotency-Key": requestOpts.idempotencyKey } } : {}),
-        },
+        { abortSignal: requestOpts?.signal },
       );
       return { sessionId: res.data.id };
+    },
+
+    async deleteSession(sessionId, requestOpts) {
+      await client.sessions.delete(sessionId, { abortSignal: requestOpts?.signal });
     },
 
     async createTurn(sessionId, input, requestOpts) {

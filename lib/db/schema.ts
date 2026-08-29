@@ -482,11 +482,9 @@ export const agentSessionClaim = pgTable(
       .primaryKey()
       .references(() => report.id, { onDelete: "restrict" }),
     claimToken: text("claim_token").notNull(),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("agent_session_claim_expires_idx").on(t.expiresAt)],
 );
 
 /**
