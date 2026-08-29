@@ -125,7 +125,8 @@ function sqliSearchRecipe(config: JuiceShopConfig): ReproductionRecipe {
       method: "GET",
       path: `${config.searchPath}?q=${encodeURIComponent(SQLI_SEARCH_PAYLOAD)}`,
     },
-    oracleCheck: (response, canary) => canaryInSearchResponse(response.body, canary),
+    oracleCheck: (response, canary) =>
+      response.status === 200 && canaryInSearchResponse(response.body, canary),
   };
 }
 
