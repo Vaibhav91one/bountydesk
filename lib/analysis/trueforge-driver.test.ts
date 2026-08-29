@@ -674,6 +674,28 @@ test("a matching endpoint with a different vulnerability class never triggers re
   assert.equal(v.outcome, "ANALYSIS_ONLY");
 });
 
+test("a NoSQL report on the same endpoint never triggers the SQL recipe", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "NoSQL injection in product search",
+    body: "The product search endpoint accepts a Mongo selector and returns hidden inventory records.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  const reproduceFn = fakeReproduce({ outcome: "REPRODUCED", evidence: reproducedEvidence() });
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(reproduceFn.calls, 0, "NoSQL must not satisfy the SQL injection recipe keyword");
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
 test("a report matching the recipe's keywords does trigger reproduction", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id, {
@@ -743,6 +765,40 @@ test("repository revocation during reproduction prevents a definitive verdict", 
       .update(dbm.connectedRepository)
       .set({ active: false })
       .where(dbm.eq(dbm.connectedRepository.id, target.connectedRepositoryId));
+    return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
+  };
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(calls, 1);
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+});
+
+test("target artifact rotation during reproduction prevents a definitive verdict", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id, {
+    title: "SQL injection via UNION SELECT in product search",
+    body: "Sending a crafted UNION SELECT payload to the search endpoint returns other rows.",
+  });
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  let calls = 0;
+  const reproduceFn: ReproduceFn = async () => {
+    calls++;
+    await dbm.db
+      .update(dbm.targetProfile)
+      .set({
+        imageDigest: `sha256:${"f".repeat(64)}`,
+        snapshotId: "snapshot-2",
+      })
+      .where(dbm.eq(dbm.targetProfile.id, target.id));
     return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
   };
 

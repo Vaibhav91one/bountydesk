@@ -107,12 +107,12 @@ function matchesReport(
   recipe: ReproductionRecipe,
   reportContent: { title: string; body: string },
 ): boolean {
-  const haystack = `${reportContent.title}\n${reportContent.body}`.toLowerCase();
+  const haystack = `${reportContent.title}\n${reportContent.body}`;
   let matchedVulnerability = false;
   let matchedScenario = false;
 
   for (const keyword of recipe.keywords) {
-    if (!haystack.includes(keyword.toLowerCase())) continue;
+    if (!containsKeyword(haystack, keyword)) continue;
     if (isVulnerabilityKeyword(keyword)) {
       matchedVulnerability = true;
     } else {
@@ -121,6 +121,11 @@ function matchesReport(
   }
 
   return matchedVulnerability && matchedScenario;
+}
+
+function containsKeyword(haystack: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, "i").test(haystack);
 }
 
 function isVulnerabilityKeyword(keyword: string): boolean {
@@ -140,12 +145,19 @@ function isVulnerabilityKeyword(keyword: string): boolean {
   ].includes(keyword.toLowerCase());
 }
 
+type ReproductionTargetSnapshot = {
+  targetProfileId: string;
+  imageName: string;
+  imageDigest: string;
+  snapshotId: string | null;
+};
+
 type DecidedVerdict = {
   outcome: (typeof verdict.outcome.enumValues)[number];
   summary: string;
   evidence: Record<string, unknown>;
   payload: string;
-  reproductionTargetProfileId?: string;
+  reproductionTarget?: ReproductionTargetSnapshot;
 };
 
 function analysisNotRunDecision(verdictId: string): DecidedVerdict {
@@ -222,7 +234,12 @@ async function decideFreshVerdict(
       // evidence never carries the raw canary, only its hash, per the Phase-0 contract.
       evidence: { reason: result.reason, ...(result.evidence ?? {}) },
       payload: buildPayload(verdictId),
-      reproductionTargetProfileId: target.targetProfileId,
+      reproductionTarget: {
+        targetProfileId: target.targetProfileId,
+        imageName: target.imageName,
+        imageDigest: target.imageDigest,
+        snapshotId: target.snapshotId,
+      },
     };
   }
 
@@ -234,7 +251,12 @@ async function decideFreshVerdict(
         : `Automated reproduction ran "${recipe.title}" against the sandboxed target and did not reproduce it.`,
     evidence: { ...result.evidence },
     payload: buildReproducedPayload(verdictId, recipe, result),
-    reproductionTargetProfileId: target.targetProfileId,
+    reproductionTarget: {
+      targetProfileId: target.targetProfileId,
+      imageName: target.imageName,
+      imageDigest: target.imageDigest,
+      snapshotId: target.snapshotId,
+    },
   };
 }
 
@@ -271,7 +293,11 @@ function adoptVerdict(row: {
   };
 }
 
-async function targetStillAuthorized(tx: Executor, reportId: string, targetProfileId: string): Promise<boolean> {
+async function targetStillAuthorized(
+  tx: Executor,
+  reportId: string,
+  target: ReproductionTargetSnapshot,
+): Promise<boolean> {
   const [current] = await tx
     .select({
       targetProfileId: report.targetProfileId,
@@ -289,9 +315,26 @@ async function targetStillAuthorized(tx: Executor, reportId: string, targetProfi
     .where(eq(report.id, reportId))
     .limit(1);
 
-  if (!current || current.targetProfileId !== targetProfileId) return false;
+  if (!current || current.targetProfileId !== target.targetProfileId) return false;
   if (current.state !== "TRIAGING" && current.state !== "REPRODUCING") return false;
-  return hasActiveRepositoryGrant({ ...current, targetProfileId });
+  if (!hasActiveRepositoryGrant({ ...current, targetProfileId: target.targetProfileId })) return false;
+
+  const [currentProfile] = await tx
+    .select({
+      imageName: targetProfile.imageName,
+      imageDigest: targetProfile.imageDigest,
+      snapshotId: targetProfile.snapshotId,
+    })
+    .from(targetProfile)
+    .where(eq(targetProfile.id, target.targetProfileId))
+    .for("share")
+    .limit(1);
+
+  return (
+    currentProfile?.imageName === target.imageName &&
+    currentProfile.imageDigest === target.imageDigest &&
+    currentProfile.snapshotId === target.snapshotId
+  );
 }
 
 /**
@@ -376,8 +419,7 @@ export function createTrueforgeAnalysisDriver(
 
         const verdictId = existingVerdict?.id ?? proposedVerdictId;
         const proposedStillAuthorized =
-          !proposed.reproductionTargetProfileId ||
-          (await targetStillAuthorized(tx, reportId, proposed.reproductionTargetProfileId));
+          !proposed.reproductionTarget || (await targetStillAuthorized(tx, reportId, proposed.reproductionTarget));
         const decided = existingVerdict
           ? adoptVerdict(existingVerdict)
           : proposedStillAuthorized
