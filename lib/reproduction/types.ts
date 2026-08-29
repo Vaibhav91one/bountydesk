@@ -59,7 +59,10 @@ export type ReproductionRecipe = {
   id: string;
   /** Human label for evidence/summary text shown to the reviewer. */
   title: string;
-  /** Report terms that must appear before the driver may select this frozen recipe. */
+  /** Case-insensitive substrings checked against a report's title and body before this recipe
+   * is ever run. The driver requires at least one vulnerability-class keyword and at least one
+   * scenario or endpoint keyword, so recipe authors should include both kinds. A class-only
+   * match, such as "sql injection", is not enough to run an endpoint-specific recipe. */
   keywords: string[];
   /** Registers the canary through a trusted fixture call. `request.body` should reference
    * "{{canary}}" wherever the fresh value belongs. A non-2xx response here means the canary was

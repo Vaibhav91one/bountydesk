@@ -41,6 +41,7 @@ async function seedFixture(
     approval?: "none" | "approved" | "denied" | "stale";
     tamperPayloadAfterDecision?: boolean;
     channel?: "github" | "manual";
+    outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
   } = {},
 ) {
   seq += 1;
@@ -69,7 +70,7 @@ async function seedFixture(
   await dbm.db.insert(dbm.verdict).values({
     id: verdictId,
     reportId: r.id,
-    outcome: "ANALYSIS_ONLY",
+    outcome: opts.outcome ?? "ANALYSIS_ONLY",
     summary: "summary",
     payload: storedPayload,
     contentHash,
@@ -202,6 +203,26 @@ test("the happy path enqueues delivery, moves the report to DELIVERING, and clea
   assert.equal(pending.pendingToolCallId, null);
   assert.equal(pending.pendingVerdictId, null);
   assert.equal(pending.pendingApprovedContentHash, null);
+});
+
+test("an approved REPRODUCED verdict publishes", async () => {
+  const fixture = await seedFixture({ approval: "approved", outcome: "REPRODUCED" });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(await deliveryCount(fixture.verdictId), 1);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an approved NOT_REPRODUCED verdict publishes", async () => {
+  const fixture = await seedFixture({ approval: "approved", outcome: "NOT_REPRODUCED" });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(await deliveryCount(fixture.verdictId), 1);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
 });
 
 test("a non-GitHub report is not moved into the GitHub delivery queue", async () => {
