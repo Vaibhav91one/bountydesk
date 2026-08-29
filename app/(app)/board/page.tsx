@@ -128,13 +128,18 @@ function Card({
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           {/* Two lines and then an ellipsis. A report title is written by whoever filed it and
-              has no length anyone here controls, so the card decides how much of it fits. */}
-          <span
+              has no length anyone here controls, so the card decides how much of it fits.
+
+              The title is the link, rather than the whole card: a card carries a button of its
+              own, and nesting one inside a link is invalid markup that browsers resolve by
+              guessing. */}
+          <Link
+            href={`/reports/${card.id}`}
             title={card.title}
-            className="line-clamp-2 text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
+            className="line-clamp-2 cursor-pointer text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
           >
             {card.title}
-          </span>
+          </Link>
           {/* One line. The source and the target are an identifier, and an identifier that
               wraps mid-token reads as two things rather than one. */}
           <span
