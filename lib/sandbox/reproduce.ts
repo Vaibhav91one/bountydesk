@@ -393,6 +393,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
   return async (input, opts) => {
   const recipeId = input.recipe.id;
   let sandbox: Sandbox | undefined;
+  let cancellationInFlight = false;
 
   try {
     throwIfAborted(opts?.signal);
@@ -565,6 +566,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     }
     return { outcome: decision, evidence };
   } catch (error) {
+    cancellationInFlight = opts?.signal?.aborted === true;
     rethrowIfAborted(error, opts?.signal);
     // Anything unaccounted for above is infrastructure until proven otherwise, never a
     // guessed verdict.
@@ -573,7 +575,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     if (sandbox) {
       const sandboxId = sandbox.id;
       await deleteSandbox(sandboxId).catch((error) => {
-        if (opts?.signal?.aborted) {
+        if (cancellationInFlight) {
           console.error(
             `failed to delete reproduction sandbox ${sandboxId} after cancellation: ${
               error instanceof Error ? error.message : String(error)

@@ -888,6 +888,29 @@ test("teardown failure is surfaced with the sandbox id", async () => {
   );
 });
 
+test("cancellation during teardown does not hide a delete failure after success", async () => {
+  resetSpies();
+  const controller = new AbortController();
+  deleteSandboxImpl = async (id) => {
+    deleteSandboxCalls.push(id);
+    controller.abort(new Error("lease lost during delete"));
+    throw new Error(`delete failed for ${id}`);
+  };
+  const calls: FetchCall[] = [];
+
+  await assert.rejects(
+    () =>
+      withFetch(
+        fetchStub(calls, {
+          negativeControlBody: () => JSON.stringify({ data: [] }),
+          exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+        }),
+        () => reproduce(reproduceInput(), { signal: controller.signal }),
+      ),
+    /failed to delete reproduction sandbox sandbox-under-test/,
+  );
+});
+
 test("teardown still runs when an unexpected error happens after provisioning", async () => {
   resetSpies();
   // No fetch stub installed: getPortPreviewUrl's call to Daytona's real API will fail against
