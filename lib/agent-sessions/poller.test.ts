@@ -413,3 +413,53 @@ test("a fence lost between claim and release surfaces as LeaseLostError", async 
 
   await assert.rejects(poller.pollOnce("w-fence-loss", { client }), queue.LeaseLostError);
 });
+
+test("pollOnce rejects a lease that cannot reach its first heartbeat", async () => {
+  await drainOthers();
+
+  await assert.rejects(
+    poller.pollOnce("w-too-short", { leaseSeconds: 0.05 }),
+    /leaseSeconds must exceed the 50 ms heartbeat floor/,
+  );
+});
+
+test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+
+  // A leaseSeconds this short with a getTurn slower than the lease itself only completes
+  // cleanly if the heartbeat is actually renewing in the background: without it, the lease
+  // would expire partway through and the sweep below would reclaim the row before getTurn
+  // ever resolves.
+  const leaseSeconds = 1;
+  const client: TrueForgeClient = {
+    createSession: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    createTurn: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    getTurn: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      return { status: "running" };
+    },
+    getTurnInput: async () => {
+      throw new Error("not used by pollOnce");
+    },
+  };
+
+  const pollPromise = poller.pollOnce("w-heartbeat", { client, leaseSeconds });
+
+  // Past the original 1-second lease, but before getTurn resolves at 1200ms: only reachable
+  // without reclaiming the row if a renewal already pushed the expiry further out.
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  const swept = await queue.sweepExpiredLeases();
+  assert.equal(swept.released, 0, "the heartbeat should have kept this lease from expiring");
+
+  const claimedId = await pollPromise;
+  assert.equal(claimedId, fixture.agentSessionId);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.leaseOwner, null);
+  assert.equal(row.turnStatus, "RUNNING");
+});

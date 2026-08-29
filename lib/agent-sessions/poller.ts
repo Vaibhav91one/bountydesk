@@ -6,7 +6,7 @@ import {
   type TrueForgeClient,
 } from "@/lib/trueforge/client";
 
-import { claim, release, type AgentSessionLease } from "./queue";
+import { claim, release, renew, type AgentSessionLease } from "./queue";
 
 /**
  * How long a poll waits before checking a running (or not-yet-started) turn again.
@@ -16,6 +16,7 @@ import { claim, release, type AgentSessionLease } from "./queue";
  * capped exponential (same formula as lib/jobs/queue.ts's fail()) if that stops being true.
  */
 const POLL_BACKOFF_MS = 5000;
+const MIN_HEARTBEAT_INTERVAL_MS = 50;
 
 /** Once a pending call is verified, hold off polling again until the approval submission
  * worker has had a chance to act; a retried poll before then is a safe no-op (see below) but
@@ -210,14 +211,75 @@ async function handleAwaitingApproval(
 }
 
 /**
+ * Renews the held lease every third of its duration while `operation` runs, so a slow
+ * `getTurn` call (event pagination, a sluggish TrueForge) can't outlive its own lease and get
+ * reclaimed by a sweeper running on a shorter, independent cadence than the tick route's
+ * once-per-tick sweep this was originally sized for. Same shape as
+ * lib/approval-submission/worker.ts's own runWithHeartbeat.
+ */
+async function runWithHeartbeat<T>(
+  lease: AgentSessionLease,
+  leaseSeconds: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+  outerSignal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const signal = outerSignal
+    ? AbortSignal.any([controller.signal, outerSignal])
+    : controller.signal;
+  const intervalMs = Math.max(
+    MIN_HEARTBEAT_INTERVAL_MS,
+    Math.floor((leaseSeconds * 1000) / 3),
+  );
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let renewal = Promise.resolve();
+  let rejectLeaseLoss!: (reason: unknown) => void;
+  const leaseLoss = new Promise<never>((_, reject) => {
+    rejectLeaseLoss = reject;
+  });
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+
+  const heartbeat = () => {
+    renewal = renew(lease, leaseSeconds)
+      .then(() => {
+        if (!stopped) timer = setTimeout(heartbeat, intervalMs);
+      })
+      .catch((error: unknown) => {
+        controller.abort(error);
+        rejectLeaseLoss(error);
+      });
+  };
+
+  timer = setTimeout(heartbeat, intervalMs);
+  try {
+    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    if (signal.aborted) throw signal.reason;
+    return result;
+  } finally {
+    stopped = true;
+    signal.removeEventListener("abort", onAbort);
+    if (timer) clearTimeout(timer);
+    await renewal.catch(() => undefined);
+  }
+}
+
+/**
  * Advance one claimable agent_session as far as one poll allows: ask TrueForge for the
  * turn's current state, and record whatever that state is.
  *
  * Returns the claimed row's id once something was done with it, or null when nothing was
  * claimable. Deliberately has no top-level try/catch: an unexpected error (a TrueForge
- * outage, a malformed response) propagates out and the lease is simply never released. It
- * expires on its own, and sweepExpiredLeases (called from the tick route, not from here)
- * reclaims it for the next attempt.
+ * outage, a malformed response, or the heartbeat above losing the lease) propagates out and
+ * the lease is simply never released. It expires on its own, and sweepExpiredLeases (called
+ * from the tick route or a persistent worker, not from here) reclaims it for the next
+ * attempt.
  */
 export async function pollOnce(
   owner: string,
@@ -225,6 +287,12 @@ export async function pollOnce(
 ): Promise<string | null> {
   if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
+  if (
+    !Number.isFinite(leaseSeconds) ||
+    leaseSeconds * 1000 <= MIN_HEARTBEAT_INTERVAL_MS
+  ) {
+    throw new Error("leaseSeconds must exceed the 50 ms heartbeat floor");
+  }
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
 
@@ -234,9 +302,15 @@ export async function pollOnce(
     await release(lease, { nextPollAt: inFuture(POLL_BACKOFF_MS) });
     return lease.id;
   }
+  const turnId = lease.turnId;
 
   const client = opts.client ?? createTrueForgeClient();
-  const snapshot = await client.getTurn(lease.sessionId, lease.turnId, { signal: opts.signal });
+  const snapshot = await runWithHeartbeat(
+    lease,
+    leaseSeconds,
+    (signal) => client.getTurn(lease.sessionId, turnId, { signal }),
+    opts.signal,
+  );
 
   switch (snapshot.status) {
     case "running":
