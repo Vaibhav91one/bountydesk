@@ -3,6 +3,7 @@ import { GitHubLight } from "developer-icons";
 import { RollingIcon } from "@/components/rolling-icon";
 
 import { Button } from "@/components/ui/button";
+import { formatStamp } from "@/lib/format";
 import { mascotForState } from "@/lib/mascot/states";
 import type { CaseFile } from "@/lib/reports/case";
 
@@ -10,7 +11,7 @@ import type { CaseFile } from "@/lib/reports/case";
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <span className="text-label tracking-normal text-muted-foreground">{label}</span>
+      <span className="text-meta text-muted-foreground">{label}</span>
       <span className="truncate text-body text-foreground">{children}</span>
     </div>
   );
@@ -40,18 +41,14 @@ export function StatusCard({
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
         <h2 className="text-heading text-foreground">Current run</h2>
-        {/* The mark says GitHub better than the words did, but a button with no text has no
-            name, so the label moves to where a screen reader and a hover can both reach it. */}
         {file.issueUrl ? (
           <Button
-            size="icon-sm"
+            size="sm"
             variant="outline"
-            title="Open on GitHub"
-            aria-label="Open this issue on GitHub"
             nativeButton={false}
             render={<a href={file.issueUrl} target="_blank" rel="noreferrer" />}
           >
-            <RollingIcon icon={GitHubLight} className="size-4" />
+            <RollingIcon icon={GitHubLight} className="size-4" /> Open on GitHub
           </Button>
         ) : null}
       </header>
@@ -83,7 +80,7 @@ export function StatusCard({
           </Fact>
           <Fact label="Last change">
             <time dateTime={file.updatedAt.toISOString()}>
-              {file.updatedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
+              {formatStamp(file.updatedAt)}
             </time>
           </Fact>
         </div>

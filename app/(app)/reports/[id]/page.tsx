@@ -6,6 +6,7 @@ import { PhaseDot } from "@/components/phase-dot";
 import { SandboxDiagram, type NodeStatus } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { formatStamp } from "@/lib/format";
 import { requireReviewer } from "@/lib/auth/dal";
 import { readCase, type CaseEvent, type CaseFile } from "@/lib/reports/case";
 import { phaseOf } from "@/lib/reports/queue";
@@ -52,7 +53,7 @@ function Panel({
       className={`flex min-w-0 flex-col gap-4 rounded-xl border border-border/50 bg-card p-5 ${className ?? ""}`}
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-label tracking-normal text-muted-foreground">{title}</h2>
+        <h2 className="text-meta text-muted-foreground">{title}</h2>
         {aside}
       </header>
       {children}
@@ -486,7 +487,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                 <p className="text-body text-muted-foreground">
                   {file.approval.decision === "APPROVED" ? "Approved" : "Denied"} by{" "}
                   {file.approval.reviewer} on{" "}
-                  {file.approval.decidedAt.toISOString().replace("T", " ").slice(0, 16)} UTC.
+                  {formatStamp(file.approval.decidedAt)}.
                   {file.approval.note ? ` Note: ${file.approval.note}` : ""}
                 </p>
               ) : file.awaitingVerdictId ? (
