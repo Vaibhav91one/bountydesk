@@ -1,3 +1,5 @@
+import { CircleNotch } from "@phosphor-icons/react/ssr";
+
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,41 +18,46 @@ const TONE: Record<string, string> = {
   closed: "bg-phase-closed",
 };
 
+/** The same six colours as ink rather than fill, for anything that is not a dot. */
+const INK: Record<string, string> = {
+  triaging: "text-phase-triaging",
+  reproducing: "text-phase-reproducing",
+  "analysis-only": "text-phase-analysis",
+  "awaiting-approval": "text-phase-approval",
+  delivered: "text-phase-delivered",
+  closed: "text-phase-closed",
+};
+
+/**
+ * A spinner in the phase's colour, for a report something is actively doing.
+ *
+ * It replaces the dot rather than joining it. A spinner already says "in progress", and a
+ * pulsing dot beside one is two things saying it at once.
+ */
+export function PhaseSpinner({ phase, className }: { phase: string; className?: string }) {
+  return (
+    <CircleNotch
+      aria-hidden="true"
+      className={cn(
+        "size-3.5 shrink-0 animate-spin motion-reduce:animate-none",
+        INK[phase] ?? INK.closed,
+        className,
+      )}
+    />
+  );
+}
+
 /**
  * A phase's colour, and nothing else.
  *
  * aria-hidden throughout: every dot in this product sits beside a label that says the same
  * thing in words, and a screen reader announcing an unlabelled bullet adds noise, not meaning.
  */
-export function PhaseDot({
-  phase,
-  running = false,
-  className,
-}: {
-  phase: string;
-  /** Adds the ping. Only for phases something is actively doing, never for one that waits. */
-  running?: boolean;
-  className?: string;
-}) {
-  const tone = TONE[phase] ?? TONE.closed;
-
-  if (!running) {
-    return (
-      <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", tone, className)} />
-    );
-  }
-
+export function PhaseDot({ phase, className }: { phase: string; className?: string }) {
   return (
-    <span aria-hidden="true" className={cn("relative flex size-2 shrink-0", className)}>
-      {/* Two dots: one still, one expanding out of it. animate-ping scales and fades, so a
-          single element would spend most of the cycle invisible. */}
-      <span
-        className={cn(
-          "absolute inline-flex size-full animate-ping rounded-full opacity-70 motion-reduce:hidden",
-          tone,
-        )}
-      />
-      <span className={cn("relative inline-flex size-full rounded-full", tone)} />
-    </span>
+    <span
+      aria-hidden="true"
+      className={cn("size-2 shrink-0 rounded-full", TONE[phase] ?? TONE.closed, className)}
+    />
   );
 }

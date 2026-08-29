@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/ssr";
 
-import { PhaseDot } from "@/components/phase-dot";
+import { PhaseDot, PhaseSpinner } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
 import { listQueue, phaseOf, type QueueCard, type QueueColumn } from "@/lib/reports/queue";
+import { mascotState, type MascotState } from "@/lib/mascot/states";
 
 export const metadata = { title: "Review queue · BountyDesk" };
 
@@ -39,6 +40,19 @@ const STATE_LABEL: Record<string, string> = {
  */
 const RUNNING = new Set(["TRIAGING", "REPRODUCING", "DELIVERING"]);
 
+/**
+ * Which mascot stands in for a state something is doing.
+ *
+ * Only the running three. Agent Bounty appearing on a finished report would be watching
+ * something that already stopped, and on one awaiting approval he would be doing the waiting
+ * rather than the reviewer.
+ */
+const MASCOT: Record<string, "ingest" | "reproducing" | "delivered"> = {
+  TRIAGING: "ingest",
+  REPRODUCING: "reproducing",
+  DELIVERING: "delivered",
+};
+
 /** What a card in flight is doing, in the present tense, because it is still happening. */
 const RUNNING_LABEL: Record<string, string> = {
   TRIAGING: "Triaging…",
@@ -56,7 +70,15 @@ function age(from: Date): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
+function Card({
+  card,
+  showState,
+  mascot,
+}: {
+  card: QueueCard;
+  showState: boolean;
+  mascot?: MascotState;
+}) {
   const phase = phaseOf(card.state);
   const running = RUNNING.has(card.state);
 
@@ -75,11 +97,29 @@ function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
       id={`report-${card.id}`}
       className="flex scroll-mt-24 flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 target:border-brand"
     >
-      <div className="flex flex-col gap-1">
-        <span className="text-body font-medium text-foreground">{card.title}</span>
-        <span className="text-meta text-muted-foreground">
-          {card.sourceLabel} · {card.targetName ?? "no target bound"}
-        </span>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="text-body font-medium text-foreground">{card.title}</span>
+          <span className="text-meta text-muted-foreground">
+            {card.sourceLabel} · {card.targetName ?? "no target bound"}
+          </span>
+        </div>
+
+        {/* Every id in the file is prefixed with the state key, so re-prefixing with this
+            card's id keeps two cards in the same state from sharing them. Without it the
+            second copy's animation would drive the first. */}
+        {mascot ? (
+          <span
+            aria-hidden="true"
+            className="-my-1 size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+            dangerouslySetInnerHTML={{
+              __html: mascot.markup.replaceAll(
+                `${mascot.key}__`,
+                `${mascot.key}__${card.id.slice(0, 8)}__`,
+              ),
+            }}
+          />
+        ) : null}
       </div>
 
       {showState ? (
@@ -94,7 +134,7 @@ function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
         {/* The phase, and the outcome or the honest absence of one. Never a canary or a
             confidence: no reproduction has run, so the card has nothing to say about one. */}
         <span className="flex items-center gap-2 text-meta text-muted-foreground">
-          <PhaseDot phase={phase} running={running} />
+          {running ? <PhaseSpinner phase={phase} /> : <PhaseDot phase={phase} />}
           {status}
         </span>
         <span className="text-meta text-muted-foreground">
@@ -120,7 +160,13 @@ function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
   );
 }
 
-function Column({ column }: { column: QueueColumn }) {
+function Column({
+  column,
+  mascots,
+}: {
+  column: QueueColumn;
+  mascots: Map<string, MascotState>;
+}) {
   const hidden = column.total - column.cards.length;
 
   return (
@@ -141,7 +187,12 @@ function Column({ column }: { column: QueueColumn }) {
 
       <ul className="flex flex-col gap-2.5">
         {column.cards.map((card) => (
-          <Card key={card.id} card={card} showState={column.states.length > 1} />
+          <Card
+            key={card.id}
+            card={card}
+            showState={column.states.length > 1}
+            mascot={mascots.get(card.state)}
+          />
         ))}
       </ul>
 
@@ -160,6 +211,15 @@ export default async function BoardPage() {
   await requireReviewer();
   const columns = await listQueue();
   const total = columns.reduce((sum, column) => sum + column.total, 0);
+
+  // Read once per state rather than once per card: two reports reproducing share the file, and
+  // only the ids need to differ, which happens at render.
+  const present = new Set(columns.flatMap((c) => c.cards.map((card) => card.state)));
+  const mascots = new Map(
+    [...present]
+      .filter((state) => state in MASCOT)
+      .map((state) => [state, mascotState(MASCOT[state])] as const),
+  );
 
   return (
     <main className="flex flex-1 flex-col">
@@ -188,7 +248,7 @@ export default async function BoardPage() {
               with the column count. */}
           <div className="grid min-h-full min-w-max auto-cols-[300px] grid-flow-col divide-x divide-border/50">
             {columns.map((column) => (
-              <Column key={column.key} column={column} />
+              <Column key={column.key} column={column} mascots={mascots} />
             ))}
           </div>
         </div>
