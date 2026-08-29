@@ -140,6 +140,23 @@ function isVulnerabilityKeyword(keyword: string): boolean {
   ].includes(keyword.toLowerCase());
 }
 
+type DecidedVerdict = {
+  outcome: (typeof verdict.outcome.enumValues)[number];
+  summary: string;
+  evidence: Record<string, unknown>;
+  payload: string;
+  reproductionTargetProfileId?: string;
+};
+
+function analysisNotRunDecision(verdictId: string): DecidedVerdict {
+  return {
+    outcome: "ANALYSIS_ONLY",
+    summary: "Analysis-only result: automated reproduction was not run.",
+    evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    payload: buildPayload(verdictId),
+  };
+}
+
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh
  * report. The caller runs this outside any database transaction because it can include a
  * sandbox reproduction call. A short final transaction persists this decision, or adopts one
@@ -151,12 +168,7 @@ async function decideFreshVerdict(
   getRecipes: GetRecipesForTargetFn,
   signal: AbortSignal,
   tx: Executor,
-): Promise<{
-  outcome: (typeof verdict.outcome.enumValues)[number];
-  summary: string;
-  evidence: Record<string, unknown>;
-  payload: string;
-}> {
+): Promise<DecidedVerdict> {
   const [target] = await tx
     .select({
       targetProfileId: targetProfile.id,
@@ -181,20 +193,13 @@ async function decideFreshVerdict(
     .where(eq(report.id, reportId))
     .limit(1);
 
-  // No bound target, or a bound target with no recipe that actually matches what this report
-  // says: the common/default case today, and also the fix for a report that has nothing to do
-  // with the one scenario a target happens to have. Both fall back to the unconditional
-  // ANALYSIS_ONLY path exactly as it already works; never guess a recipe onto a report it
-  // doesn't describe.
+  // Missing target bindings, inactive repository grants and missing matching recipes all stop
+  // at ANALYSIS_ONLY. A definitive reproduction verdict is only for the exact authorized
+  // target and scenario this report still owns.
   const recipes = target ? getRecipes({ name: target.name, config: target.config }) : [];
   const recipe = target ? recipes.find((candidate) => matchesReport(candidate, target)) : undefined;
   if (!target || !target.imageName || !recipe || !hasActiveRepositoryGrant(target)) {
-    return {
-      outcome: "ANALYSIS_ONLY",
-      summary: "Analysis-only result: automated reproduction was not run.",
-      evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
-      payload: buildPayload(verdictId),
-    };
+    return analysisNotRunDecision(verdictId);
   }
 
   const result = await reproduceFn(
@@ -217,6 +222,7 @@ async function decideFreshVerdict(
       // evidence never carries the raw canary, only its hash, per the Phase-0 contract.
       evidence: { reason: result.reason, ...(result.evidence ?? {}) },
       payload: buildPayload(verdictId),
+      reproductionTargetProfileId: target.targetProfileId,
     };
   }
 
@@ -228,6 +234,7 @@ async function decideFreshVerdict(
         : `Automated reproduction ran "${recipe.title}" against the sandboxed target and did not reproduce it.`,
     evidence: { ...result.evidence },
     payload: buildReproducedPayload(verdictId, recipe, result),
+    reproductionTargetProfileId: target.targetProfileId,
   };
 }
 
@@ -250,13 +257,6 @@ function hasActiveRepositoryGrant(target: {
   );
 }
 
-type DecidedVerdict = {
-  outcome: (typeof verdict.outcome.enumValues)[number];
-  summary: string;
-  evidence: Record<string, unknown>;
-  payload: string;
-};
-
 function adoptVerdict(row: {
   outcome: (typeof verdict.outcome.enumValues)[number];
   summary: string;
@@ -269,6 +269,29 @@ function adoptVerdict(row: {
     evidence: row.evidence as Record<string, unknown>,
     payload: row.payload,
   };
+}
+
+async function targetStillAuthorized(tx: Executor, reportId: string, targetProfileId: string): Promise<boolean> {
+  const [current] = await tx
+    .select({
+      targetProfileId: report.targetProfileId,
+      state: report.state,
+      connectedRepositoryId: report.connectedRepositoryId,
+      repoActive: connectedRepository.active,
+      repoArchivedAt: connectedRepository.archivedAt,
+      repoTargetProfileId: connectedRepository.targetProfileId,
+      installationSuspendedAt: githubInstallation.suspendedAt,
+      installationDeletedAt: githubInstallation.deletedAt,
+    })
+    .from(report)
+    .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
+    .leftJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
+    .where(eq(report.id, reportId))
+    .limit(1);
+
+  if (!current || current.targetProfileId !== targetProfileId) return false;
+  if (current.state !== "TRIAGING" && current.state !== "REPRODUCING") return false;
+  return hasActiveRepositoryGrant({ ...current, targetProfileId });
 }
 
 /**
@@ -352,7 +375,14 @@ export function createTrueforgeAnalysisDriver(
           .limit(1);
 
         const verdictId = existingVerdict?.id ?? proposedVerdictId;
-        const decided = existingVerdict ? adoptVerdict(existingVerdict) : proposed;
+        const proposedStillAuthorized =
+          !proposed.reproductionTargetProfileId ||
+          (await targetStillAuthorized(tx, reportId, proposed.reproductionTargetProfileId));
+        const decided = existingVerdict
+          ? adoptVerdict(existingVerdict)
+          : proposedStillAuthorized
+            ? proposed
+            : analysisNotRunDecision(verdictId);
 
         await ensureInitialVerdict(
           {

@@ -723,6 +723,42 @@ test("a stale connected repository grant prevents reproduction", async () => {
   assert.equal(v.outcome, "ANALYSIS_ONLY");
 });
 
+test("repository revocation during reproduction prevents a definitive verdict", async () => {
+  const target = await seedConnectedTargetProfile();
+  const reportId = await seedReport(
+    "TRIAGING",
+    target.id,
+    {
+      title: "SQL injection via UNION SELECT in product search",
+      body: "Sending a crafted UNION SELECT payload to the search endpoint returns other rows.",
+    },
+    target.connectedRepositoryId,
+  );
+  const client = fakeClient();
+  const recipe = fakeRecipe();
+  let calls = 0;
+  const reproduceFn: ReproduceFn = async () => {
+    calls++;
+    await dbm.db
+      .update(dbm.connectedRepository)
+      .set({ active: false })
+      .where(dbm.eq(dbm.connectedRepository.id, target.connectedRepositoryId));
+    return { outcome: "REPRODUCED", evidence: reproducedEvidence() };
+  };
+
+  await driver
+    .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+    .ensureSession(context(reportId));
+
+  assert.equal(calls, 1);
+  const [v] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+});
+
 test("a recipe that reproduces the report records a REPRODUCED verdict without the raw canary", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);
