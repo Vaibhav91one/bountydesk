@@ -627,6 +627,33 @@ test("ensureSession keeps the claim when remote cleanup fails after local persis
   assert.equal(claimsAfterFailure.length, 1);
 });
 
+test("ensureSession keeps the claim when cleanup support is unavailable", async () => {
+  const existingReportId = await seedReport("TRIAGING");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: existingReportId,
+    capabilityToken: `cap-${randomUUID()}`,
+    sessionId: "truesession-no-cleanup",
+  });
+  const reportId = await seedReport("TRIAGING");
+  const client = fakeClient({
+    async createSession() {
+      return { sessionId: "truesession-no-cleanup" };
+    },
+    deleteSession: undefined,
+  });
+
+  await assert.rejects(
+    () => driver.createTrueforgeAnalysisDriver(client).ensureSession(context(reportId)),
+    /without deleteSession/,
+  );
+
+  const claimsAfterFailure = await dbm.db
+    .select()
+    .from(dbm.agentSessionClaim)
+    .where(dbm.eq(dbm.agentSessionClaim.reportId, reportId));
+  assert.equal(claimsAfterFailure.length, 1);
+});
+
 test("ensureSession refuses to persist a verdict if reproduction returns after cancellation", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);

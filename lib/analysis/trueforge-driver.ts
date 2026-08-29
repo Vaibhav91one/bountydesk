@@ -580,6 +580,9 @@ export function createTrueforgeAnalysisDriver(
             );
         });
       } catch (error) {
+        if (!client.deleteSession) {
+          throw new Error(`cannot release agent session creation claim for report ${reportId} without deleteSession`);
+        }
         await client.deleteSession(sessionId);
         await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
