@@ -74,13 +74,15 @@ test("an unknown target profile id is refused, not treated as a caller-supplied 
 test("a profile with no image name cannot be authorized for a live run", async () => {
   await dbm.db.update(dbm.targetProfile).set({ imageName: null }).where(dbm.eq(dbm.targetProfile.id, profileId));
 
-  const result = await authorize.authorizeReproductionTarget({
-    targetProfileId: profileId,
-    recipeId: "juice-shop-sqli-search",
-  });
-
-  assert.deepEqual(result, { ok: false, reason: "COULD_NOT_DEPLOY" });
-  await restoreProfile();
+  try {
+    const result = await authorize.authorizeReproductionTarget({
+      targetProfileId: profileId,
+      recipeId: "juice-shop-sqli-search",
+    });
+    assert.deepEqual(result, { ok: false, reason: "COULD_NOT_DEPLOY" });
+  } finally {
+    await restoreProfile();
+  }
 });
 
 test("a profile whose config carries no usable app port has no approved oracle", async () => {
@@ -89,13 +91,15 @@ test("a profile whose config carries no usable app port has no approved oracle",
     .set({ config: { searchPath: "/rest/products/search" } })
     .where(dbm.eq(dbm.targetProfile.id, profileId));
 
-  const result = await authorize.authorizeReproductionTarget({
-    targetProfileId: profileId,
-    recipeId: "juice-shop-sqli-search",
-  });
-
-  assert.deepEqual(result, { ok: false, reason: "NO_APPROVED_ORACLE" });
-  await restoreProfile();
+  try {
+    const result = await authorize.authorizeReproductionTarget({
+      targetProfileId: profileId,
+      recipeId: "juice-shop-sqli-search",
+    });
+    assert.deepEqual(result, { ok: false, reason: "NO_APPROVED_ORACLE" });
+  } finally {
+    await restoreProfile();
+  }
 });
 
 test("a recipe id that this target does not offer is refused, even for an otherwise-valid target", async () => {

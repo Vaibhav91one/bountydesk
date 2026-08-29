@@ -240,11 +240,9 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
   }
 
   // IP literals only, deliberately: networkBlockAll blocks DNS resolution too, not just the
-  // HTTP(S) request itself, so a by-hostname probe (an earlier version of this list used
-  // "https://example.com") never reaches the interception proxy at all -- it hangs in curl's
-  // own resolver until --max-time gives up, which reads as a probe failure even though egress
-  // is genuinely blocked. An IP literal skips DNS entirely and reaches the proxy directly,
-  // which is what actually answers with the "Internet is restricted" 403 this loop checks for.
+  // HTTP(S) request itself, so a by-hostname probe never reaches the interception proxy at
+  // all. An IP literal skips DNS entirely and reaches the proxy directly, which is what
+  // actually answers with the "Internet is restricted" 403 this loop checks for.
   const probes = [
     "http://1.1.1.1",
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
