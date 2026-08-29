@@ -95,3 +95,21 @@ export type ReproductionOutcome =
       reason: AnalysisOnlyReason;
       evidence?: Partial<ReproductionEvidence>;
     };
+
+/**
+ * The two function signatures the parallel pieces of Track B are fixed against, so
+ * lib/sandbox/reproduce.ts, lib/targets/recipes.ts and lib/analysis/trueforge-driver.ts's
+ * integration can all be built concurrently without drifting on shape. Whoever lands last
+ * wires the real implementations together; until then each side can mock against these types.
+ */
+export type ReproduceFn = (
+  input: { imageDigest: string; snapshotId: string | null; recipe: ReproductionRecipe },
+  opts?: { signal?: AbortSignal },
+) => Promise<ReproductionOutcome>;
+
+/** Returns [] when the named target has no known recipes -- the caller's cue to fall back to
+ * today's unconditional ANALYSIS_ONLY behavior exactly as it works now. */
+export type GetRecipesForTargetFn = (target: {
+  name: string;
+  config: unknown;
+}) => ReproductionRecipe[];
