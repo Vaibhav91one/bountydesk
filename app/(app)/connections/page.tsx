@@ -37,6 +37,7 @@ export default async function ConnectionsPage() {
       return {
         id: `repo-${repo.connectedRepositoryId}`,
         account: connection.accountLogin,
+        status: repo.status,
         fullName: repo.fullName,
         label: status.label,
         hint: status.hint,

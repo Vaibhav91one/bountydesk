@@ -4,15 +4,48 @@ import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import { useState } from "react";
 import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
+import { FilterTable, type TableRow } from "@/components/filter-table";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import type { RepoStatus } from "@/lib/github/connections";
+
 import { ConfigureButton } from "../integrations/configure-button";
+
+const COLUMNS = [
+  { key: "repository", label: "Repository", width: "1.6fr" },
+  { key: "target", label: "Bound target", width: "1fr" },
+  { key: "status", label: "Status", width: "1fr" },
+  { key: "action", label: "", width: "0.7fr", align: "end" as const },
+];
+
+/**
+ * Three groups rather than one chip per status.
+ *
+ * The distinction that matters is whether a report opened here would be accepted, and the
+ * three ways it would not are different problems: one is ours to fix by binding a target, and
+ * the others happened on GitHub and cannot be fixed from this screen.
+ */
+const FILTERS = [
+  { key: "all", label: "All", dot: undefined },
+  { key: "accepting", label: "Accepting", dot: "bg-phase-delivered" },
+  { key: "unconfigured", label: "No target", dot: "bg-phase-approval" },
+  { key: "blocked", label: "Blocked", dot: "bg-phase-closed" },
+] as const;
+
+function inGroup(status: RepoStatus, key: string): boolean {
+  if (key === "accepting") return status === "admissible";
+  if (key === "unconfigured") return status === "not-configured";
+  if (key === "blocked") return ["archived", "disconnected", "suspended"].includes(status);
+  return true;
+}
 
 export type RepositoryRow = {
   id: string;
   account: string;
+  /** The raw status, which is what the chips filter on. `label` is what a person reads. */
+  status: RepoStatus;
   fullName: string;
   label: string;
   hint: string;
@@ -64,13 +97,36 @@ export function ConnectionTabs({
   installUrl: string;
 }) {
   const [query, setQuery] = useState("");
+  const [group, setGroup] = useState<string>("all");
 
   const needle = query.trim().toLowerCase();
-  const visible = needle
-    ? repositories.filter((repo) =>
-        `${repo.fullName} ${repo.label} ${repo.target ?? ""}`.toLowerCase().includes(needle),
-      )
-    : repositories;
+  const rows: TableRow[] = repositories.map((repo) => ({
+    id: repo.id,
+    hidden:
+      !inGroup(repo.status, group) ||
+      (needle.length > 0 &&
+        !`${repo.fullName} ${repo.label} ${repo.target ?? ""}`.toLowerCase().includes(needle)),
+    cells: [
+      <span key="repository" className="flex min-w-0 items-center gap-2.5">
+        <GitHubLight className="size-4 shrink-0" />
+        <span className="truncate font-medium text-foreground" title={repo.hint}>
+          {repo.fullName}
+        </span>
+      </span>,
+      <span key="target" className="min-w-0 truncate text-muted-foreground">
+        {repo.target ?? "None bound"}
+      </span>,
+      <Badge key="status" variant={repo.connected ? "success" : "outline"}>
+        {repo.label}
+      </Badge>,
+      <ConfigureButton
+        key="action"
+        repoId={repo.repoId}
+        configured={repo.configured}
+        label={repo.configured ? "Reconfigure" : "Configure"}
+      />,
+    ],
+  }));
 
   return (
     <Tabs defaultValue="repositories" className="gap-6">
@@ -112,57 +168,32 @@ export function ConnectionTabs({
           // The scroller is this container, which is what lets the search bar stick: sticky
           // positions against the nearest scrolling ancestor, so a bar outside it would just
           // scroll away with the page.
-          <div className="flex max-h-[60vh] flex-col overflow-y-auto">
-            <div className="sticky top-0 z-10 bg-background pb-3">
-              <div className="relative">
-                <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search repositories"
-                  aria-label="Search repositories"
-                  className="h-11 border-border/50 pl-9 text-body"
-                />
-              </div>
+          <div className="flex flex-col gap-3">
+            <div className="relative">
+              <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Search repositories"
+                aria-label="Search repositories"
+                className="h-11 border-border/50 pl-9 text-body"
+              />
             </div>
 
-            {visible.length === 0 ? (
-              <p className="rounded-xl border border-border/50 bg-card px-5 py-8 text-center text-body text-muted-foreground">
-                No repository matches “{query}”.
-              </p>
-            ) : null}
-
-            <ul className="flex flex-col gap-2.5">
-              {visible.map((repo) => (
-                <li
-                  key={repo.id}
-                  className="flex flex-wrap items-center gap-4 rounded-xl border border-border/50 bg-card px-4 py-3.5"
-                >
-                  <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-background">
-                    <GitHubLight className="size-5" />
-                  </span>
-
-                  <div className="flex min-w-40 flex-1 flex-col gap-1">
-                    <span className="flex items-center gap-2.5">
-                      <span className="text-body font-medium text-foreground">
-                        {repo.fullName}
-                      </span>
-                      <Badge variant={repo.connected ? "success" : "outline"}>{repo.label}</Badge>
-                    </span>
-                    <span className="text-meta text-muted-foreground">
-                      {repo.hint} Target: {repo.target ?? "none bound"}.
-                    </span>
-                  </div>
-
-                  <ConfigureButton
-                    repoId={repo.repoId}
-                    configured={repo.configured}
-                    label={repo.configured ? "Reconfigure" : "Configure"}
-                  />
-                </li>
-              ))}
-            </ul>
+            <FilterTable
+              columns={COLUMNS}
+              filters={FILTERS.map((option) => ({
+                key: option.key,
+                label: option.label,
+                dot: option.dot,
+                count: repositories.filter((repo) => inGroup(repo.status, option.key)).length,
+              }))}
+              active={group}
+              onFilter={setGroup}
+              rows={rows}
+              empty={<>No repository matches.</>}
+            />
           </div>
         )}
       </TabsContent>
