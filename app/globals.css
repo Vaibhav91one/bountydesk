@@ -268,3 +268,23 @@
   animation-timing-function: ease-in-out;
   animation-iteration-count: infinite;
 }
+
+/* Lifecycle steps arriving one after another, so the eye follows the pipeline left to right
+   rather than meeting all of it at once. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@utility animate-step-in {
+  animation-name: step-in;
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  animation-fill-mode: both;
+}

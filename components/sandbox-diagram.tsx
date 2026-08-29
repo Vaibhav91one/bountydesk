@@ -1,6 +1,8 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { Docker, GitHubLight, NextJs } from "developer-icons";
+import { MagnifyingGlass, Terminal } from "@phosphor-icons/react/ssr";
 
 import { cn } from "@/lib/utils";
 
@@ -26,20 +28,33 @@ type Node = {
   kind: string;
   title: string;
   caption: string;
+  icon: React.ReactNode;
   /** Ties the node to a phase colour, so the diagram reads like the rest of the console. */
-  tone: "triaging" | "reproducing" | "delivered";
+  tone: "triaging" | "reproducing" | "analysis" | "delivered";
 };
 
 const TONE: Record<Node["tone"], { dot: string; pill: string }> = {
   triaging: { dot: "bg-phase-triaging", pill: "text-phase-triaging" },
   reproducing: { dot: "bg-phase-reproducing", pill: "text-phase-reproducing" },
+  analysis: { dot: "bg-phase-analysis", pill: "text-phase-analysis" },
   delivered: { dot: "bg-phase-delivered", pill: "text-phase-delivered" },
 };
 
+/**
+ * The dynamic tier, as the board draws it: connected repo, controller resolves an exact
+ * commit, untrusted build sandbox builds it, the immutable result boots offline, an approved
+ * plan runs against it, and an oracle outside that environment decides.
+ *
+ * The last edge goes back to the controller, because the oracle reports to it rather than to
+ * the sandbox. That return is the whole point of the shape.
+ */
 const EDGES: [string, string][] = [
-  ["capability", "build"],
-  ["build", "reproduction"],
-  ["reproduction", "oracle"],
+  ["repo", "controller"],
+  ["controller", "build"],
+  ["build", "target"],
+  ["target", "poc"],
+  ["poc", "oracle"],
+  ["oracle", "controller"],
 ];
 
 const CARD_WIDTH = 210;
@@ -53,40 +68,64 @@ const ESTIMATED_HEIGHT = 74;
 export function SandboxDiagram({ targetName }: { targetName: string | null }) {
   const nodes: Node[] = [
     {
-      id: "capability",
-      x: 0.04,
-      y: 0.06,
-      kind: "Server-held",
-      title: "Target capability",
-      caption: "Repository and pinned snapshot",
+      id: "repo",
+      x: 0.03,
+      y: 0.04,
+      kind: "Connected repo",
+      title: "Exact commit",
+      caption: "Resolved by the controller, never by the sandbox.",
+      icon: <GitHubLight className="size-4" />,
+      tone: "triaging",
+    },
+    {
+      id: "controller",
+      x: 0.53,
+      y: 0.04,
+      kind: "Trusted controller",
+      title: "BountyDesk",
+      caption: "Mints the token, seeds the canary, owns teardown.",
+      icon: <NextJs className="size-4" />,
       tone: "triaging",
     },
     {
       id: "build",
-      x: 0.54,
-      y: 0.06,
-      kind: "Build sandbox",
-      title: "Narrow egress",
-      caption: "Runs the customer's code. Not trusted.",
+      x: 0.03,
+      y: 0.36,
+      kind: "Untrusted build",
+      title: "Build sandbox",
+      caption: "Runs the customer's code. Narrow egress, no secrets.",
+      icon: <Docker className="size-4" />,
       tone: "reproducing",
     },
     {
-      id: "reproduction",
-      x: 0.04,
-      y: 0.56,
-      kind: "Reproduction sandbox",
+      id: "target",
+      x: 0.53,
+      y: 0.36,
+      kind: "Target runtime",
       // The one node with something real behind it: the target this report is bound to.
       title: targetName ?? "no target bound",
-      caption: "Offline. Only the built artifact crosses in.",
+      caption: "The immutable build. Offline, one port open.",
+      icon: <Docker className="size-4" />,
       tone: "reproducing",
+    },
+    {
+      id: "poc",
+      x: 0.03,
+      y: 0.68,
+      kind: "PoC runner",
+      title: "Approved plan",
+      caption: "Reaches the target's endpoint and nothing else.",
+      icon: <Terminal className="size-4" />,
+      tone: "analysis",
     },
     {
       id: "oracle",
-      x: 0.54,
-      y: 0.56,
-      kind: "Outside the sandbox",
-      title: "Canary oracle",
-      caption: "Decides the verdict. The model never does.",
+      x: 0.53,
+      y: 0.68,
+      kind: "External oracle",
+      title: "Canary check",
+      caption: "Outside the PoC. Decides. Never trusts its output.",
+      icon: <MagnifyingGlass className="size-4" />,
       tone: "delivered",
     },
   ];
@@ -226,7 +265,7 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
   return (
     <div
       ref={canvasRef}
-      className="relative h-[380px] w-full touch-none overflow-hidden rounded-xl border border-border/50 bg-background select-none"
+      className="relative h-[460px] w-full touch-none overflow-hidden rounded-xl border border-border/50 bg-background select-none"
       style={{
         backgroundImage: "radial-gradient(var(--border) 1px, transparent 1.25px)",
         backgroundSize: "22px 22px",
@@ -269,9 +308,14 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
               <span className={cn("size-1.5 shrink-0 rounded-full", TONE[node.tone].dot)} />
               <span className={cn("truncate", TONE[node.tone].pill)}>{node.kind}</span>
             </span>
-            <div className="flex flex-col gap-1 rounded-xl border border-border/50 bg-card p-3">
-              <span className="text-body font-medium text-foreground">{node.title}</span>
-              <span className="text-meta text-muted-foreground">{node.caption}</span>
+            <div className="flex gap-2.5 rounded-xl border border-border/50 bg-card p-3">
+              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
+                {node.icon}
+              </span>
+              <span className="flex min-w-0 flex-col gap-1">
+                <span className="truncate text-body font-medium text-foreground">{node.title}</span>
+                <span className="text-meta text-muted-foreground">{node.caption}</span>
+              </span>
             </div>
           </div>
         );

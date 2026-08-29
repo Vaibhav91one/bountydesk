@@ -6,7 +6,6 @@ import {
   Clock,
   GitBranch,
   ListChecks,
-  Signature,
   Target,
   Tray,
 } from "@phosphor-icons/react/ssr";
@@ -17,9 +16,11 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
+import { mascotState } from "@/lib/mascot/states";
 import { readCase, type CaseEvent, type CaseFile } from "@/lib/reports/case";
 import { phaseOf } from "@/lib/reports/queue";
 
+import { StepBadge } from "./lifecycle-step";
 import { SignVerdict } from "./sign-verdict";
 
 export const metadata = { title: "Case file · BountyDesk" };
@@ -178,12 +179,6 @@ function lifecycle(file: CaseFile) {
   ];
 }
 
-const STEP_TONE: Record<string, string> = {
-  done: "border-phase-delivered text-phase-delivered",
-  current: "border-phase-approval text-phase-approval",
-  pending: "border-border/50 text-muted-foreground",
-  skipped: "border-border/50 text-muted-foreground",
-};
 
 function EventRow({ event }: { event: CaseEvent }) {
   return (
@@ -268,6 +263,25 @@ function Reporter({
   );
 }
 
+/**
+ * Agent Bounty at the size of an icon, for the tile that speaks in his voice.
+ *
+ * Inlined rather than an <img> for the usual reason: the animation is a <style> block inside
+ * the file. The id prefix is fixed because this renders once on the page.
+ */
+function MascotBadge() {
+  const mascot = mascotState("greeting");
+  return (
+    <span
+      aria-hidden="true"
+      className="size-11 [&>svg]:block [&>svg]:size-full"
+      dangerouslySetInnerHTML={{
+        __html: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__verdict__`),
+      }}
+    />
+  );
+}
+
 export default async function CaseFilePage({ params }: { params: Promise<{ id: string }> }) {
   await requireReviewer();
   const { id } = await params;
@@ -280,6 +294,21 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
   const phase = phaseOf(file.state);
   const steps = lifecycle(file);
+
+  /**
+   * Whose verdict this is.
+   *
+   * Agent Bounty drafts it today, because reproduction is not built and no oracle has ever
+   * run: verdict.evidence says as much, in the one reason string it carries. The moment an
+   * oracle does decide, this stops being Agent Bounty's to claim. The invariant is that the
+   * verdict comes from the canary and the model never narrates it, so the label is derived
+   * rather than written down, and it changes by itself when the evidence changes.
+   */
+  const drafted =
+    !file.verdict ||
+    (file.verdict.evidence as { reason?: string } | null)?.reason ===
+      "AUTOMATED_REPRODUCTION_NOT_RUN";
+  const verdictLabel = drafted ? "Agent Bounty says" : "The oracle says";
 
   return (
     <main className="flex flex-1 flex-col">
@@ -341,8 +370,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       <div className="flex flex-col gap-4 p-8">
         {/* The overview: what this report is on the left, the shape reproduction will take on
             the right. The diagram is architecture, not a run, and says so on the canvas. */}
-        <div className="grid items-start gap-8 lg:grid-cols-2">
-          <div className="grid gap-6 sm:grid-cols-2">
+        <div className="grid items-center gap-8 lg:grid-cols-2">
+          <div className="grid gap-x-6 gap-y-10 sm:grid-cols-2">
             <Metric icon={<Tray className="size-5" />} label="Status">
               {STATE_LABEL[file.state] ?? file.state}
             </Metric>
@@ -357,10 +386,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                 ? "None yet"
                 : `${file.events.length} ${file.events.length === 1 ? "event" : "events"}`}
             </Metric>
-            <Metric icon={<Signature className="size-5" />} label="Verdict">
+            <Metric icon={<MascotBadge />} label={verdictLabel}>
               {file.verdict
                 ? `${OUTCOME[file.verdict.outcome] ?? file.verdict.outcome} · revision ${file.verdict.revision}`
-                : "Not drafted"}
+                : "Nothing drafted yet"}
             </Metric>
             <Metric icon={<Clock className="size-5" />} label="Last change">
               <time dateTime={file.updatedAt.toISOString()}>
@@ -428,14 +457,27 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </span>
           }
         >
-          <ol className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {/* Horizontal and scrollable rather than a wrapping grid: the pipeline has an
+              order, and a grid that reflows to two rows on a narrow screen breaks it. The
+              connector is the same hairline the sandbox diagram draws, so the two read as one
+              language. */}
+          <ol className="-mx-1 flex overflow-x-auto px-1 pb-1">
             {steps.map((step, index) => (
-              <li key={step.key} className="flex flex-col gap-2">
-                <span
-                  className={`flex size-7 items-center justify-center rounded-full border text-meta ${STEP_TONE[step.state]}`}
-                >
-                  {step.state === "done" ? "✓" : index + 1}
-                </span>
+              <li
+                key={step.key}
+                className="animate-step-in relative flex w-40 shrink-0 flex-col items-center gap-2 px-2 text-center motion-reduce:animate-none"
+                style={{ animationDelay: `${index * 70}ms` }}
+              >
+                {/* Runs from the previous badge's centre to this one's. The items are equal
+                    width, so half of one plus half of the next is exactly that span. */}
+                {index > 0 ? (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-3.5 right-1/2 -left-1/2 h-px bg-border/50"
+                  />
+                ) : null}
+
+                <StepBadge state={step.state} index={index + 1} />
                 <span className="text-body font-medium text-foreground">{step.label}</span>
                 <span className="text-meta text-muted-foreground">{step.note}</span>
               </li>
