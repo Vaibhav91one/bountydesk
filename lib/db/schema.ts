@@ -475,6 +475,20 @@ export const agentSession = pgTable(
   ],
 );
 
+export const agentSessionClaim = pgTable(
+  "agent_session_claim",
+  {
+    reportId: uuid("report_id")
+      .primaryKey()
+      .references(() => report.id, { onDelete: "restrict" }),
+    claimToken: text("claim_token").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("agent_session_claim_expires_idx").on(t.expiresAt)],
+);
+
 /**
  * The durable, retryable act of telling TrueForge about a decision already recorded in
  * `approval_decision`. Separate from the decision itself: a crash between "we decided" and

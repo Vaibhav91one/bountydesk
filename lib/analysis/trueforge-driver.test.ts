@@ -1010,6 +1010,7 @@ test("two concurrent first-time ensureSession calls for the same report converge
   await Promise.all([d.ensureSession(context(reportId)), d.ensureSession(context(reportId))]);
 
   assert.ok(calls >= 1, "at least one caller must run reproduction for a matching report");
+  assert.equal(client.createSessionCalls, 1, "only the worker holding the claim may create a TrueForge session");
 
   const verdicts = await dbm.db
     .select()

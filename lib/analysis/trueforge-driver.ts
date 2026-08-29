@@ -2,12 +2,14 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import {
   agentSession,
+  agentSessionClaim,
   and,
   connectedRepository,
   db,
   eq,
   githubInstallation,
   report,
+  sql,
   targetProfile,
   verdict,
   type Executor,
@@ -28,6 +30,9 @@ import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 // "reproduction was not performed" message, and a reviewer comparing verdicts across the
 // two paths should never see the wording drift.
 const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.`;
+const SESSION_CREATION_CLAIM_SECONDS = 300;
+const SESSION_CREATION_WAIT_MS = 5_000;
+const SESSION_CREATION_POLL_MS = 100;
 
 function buildPayload(verdictId: string): string {
   return `${ANALYSIS_MESSAGE}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
@@ -167,6 +172,50 @@ function analysisNotRunDecision(verdictId: string): DecidedVerdict {
     evidence: { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
     payload: buildPayload(verdictId),
   };
+}
+
+async function agentSessionExists(reportId: string): Promise<boolean> {
+  const [existing] = await db
+    .select({ id: agentSession.id })
+    .from(agentSession)
+    .where(eq(agentSession.reportId, reportId))
+    .limit(1);
+  return existing !== undefined;
+}
+
+async function claimAgentSessionCreation(reportId: string, claimToken: string): Promise<boolean> {
+  const rows = await db.execute<{ report_id: string }>(sql`
+    insert into ${agentSessionClaim} (report_id, claim_token, expires_at)
+    values (${reportId}, ${claimToken}, now() + make_interval(secs => ${SESSION_CREATION_CLAIM_SECONDS}))
+    on conflict (report_id) do update
+       set claim_token = excluded.claim_token,
+           expires_at = excluded.expires_at,
+           updated_at = now()
+     where ${agentSessionClaim.expiresAt} <= now()
+    returning ${agentSessionClaim.reportId} as report_id
+  `);
+  return rows.length > 0;
+}
+
+async function releaseAgentSessionCreationClaim(reportId: string, claimToken: string): Promise<void> {
+  await db
+    .delete(agentSessionClaim)
+    .where(
+      and(
+        eq(agentSessionClaim.reportId, reportId),
+        eq(agentSessionClaim.claimToken, claimToken),
+      ),
+    );
+}
+
+async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal): Promise<void> {
+  const deadline = Date.now() + SESSION_CREATION_WAIT_MS;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw signal.reason;
+    if (await agentSessionExists(reportId)) return;
+    await new Promise((resolve) => setTimeout(resolve, SESSION_CREATION_POLL_MS));
+  }
+  throw new Error(`agent session creation for report ${reportId} is already claimed`);
 }
 
 /** What to decide the verdict's outcome/summary/evidence/payload are, for a genuinely fresh
@@ -445,30 +494,67 @@ export function createTrueforgeAnalysisDriver(
       if (!shouldCreateSession) return;
       if (signal.aborted) throw signal.reason;
 
-      await db.transaction(async (tx) => {
-        await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
+      const claimToken = randomUUID();
+      const claimed = await claimAgentSessionCreation(reportId, claimToken);
+      if (!claimed) {
+        await waitForClaimedAgentSession(reportId, signal);
+        return;
+      }
 
-        const [existingAfterLock] = await tx
-          .select({ id: agentSession.id })
-          .from(agentSession)
-          .where(eq(agentSession.reportId, reportId))
-          .limit(1);
-        if (existingAfterLock) return;
+      let sessionId: string;
+      try {
+        ({ sessionId } = await client.createSession({ signal }));
+      } catch (error) {
+        await releaseAgentSessionCreationClaim(reportId, claimToken);
+        throw error;
+      }
 
-        // Opaque handle the model echoes back as publish_verdict's sole argument; the only
-        // report identifier it ever sees.
-        const capabilityToken = randomBytes(32).toString("base64url");
-        const { sessionId } = await client.createSession({ signal });
+      try {
+        await db.transaction(async (tx) => {
+          await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
 
-        // onConflictDoNothing is now belt-and-suspenders rather than the primary defense: the
-        // report row lock above already keeps two concurrent first-time callers from racing
-        // this far together. It still matters for the retry case above, where a differently
-        // timed crash could leave two attempts both reaching this insert.
-        await tx
-          .insert(agentSession)
-          .values({ reportId, capabilityToken, sessionId })
-          .onConflictDoNothing({ target: agentSession.reportId });
-      });
+          const [existingAfterLock] = await tx
+            .select({ id: agentSession.id })
+            .from(agentSession)
+            .where(eq(agentSession.reportId, reportId))
+            .limit(1);
+          if (existingAfterLock) {
+            await tx
+              .delete(agentSessionClaim)
+              .where(
+                and(
+                  eq(agentSessionClaim.reportId, reportId),
+                  eq(agentSessionClaim.claimToken, claimToken),
+                ),
+              );
+            return;
+          }
+
+          // Opaque handle the model echoes back as publish_verdict's sole argument; the only
+          // report identifier it ever sees.
+          const capabilityToken = randomBytes(32).toString("base64url");
+
+          // onConflictDoNothing is now belt-and-suspenders rather than the primary defense:
+          // the claim row above already keeps two concurrent first-time callers from racing
+          // this far together. It still matters for the retry case above, where a differently
+          // timed crash could leave two attempts both reaching this insert.
+          await tx
+            .insert(agentSession)
+            .values({ reportId, capabilityToken, sessionId })
+            .onConflictDoNothing({ target: agentSession.reportId });
+          await tx
+            .delete(agentSessionClaim)
+            .where(
+              and(
+                eq(agentSessionClaim.reportId, reportId),
+                eq(agentSessionClaim.claimToken, claimToken),
+              ),
+            );
+        });
+      } catch (error) {
+        await releaseAgentSessionCreationClaim(reportId, claimToken);
+        throw error;
+      }
     },
 
     async run({ reportId, signal }: AnalysisContext): Promise<void> {

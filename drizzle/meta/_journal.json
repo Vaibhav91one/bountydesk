@@ -78,6 +78,13 @@
       "when": 1787845819406,
       "tag": "0010_brown_hobgoblin",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788021466869,
+      "tag": "0011_polite_warhawk",
+      "breakpoints": true
     }
   ]
 }
