@@ -143,12 +143,9 @@ export function AppSidebar({
                         <SidebarMenuSubItem key={report.id}>
                           <SidebarMenuSubButton
                             size="sm"
-                            // A plain anchor, not Link: :target is only re-evaluated on a real
-                            // fragment navigation, and a client-side pushState leaves the card
-                            // unhighlighted with the hash in the address bar to prove it.
                             render={
-                              <a
-                                href={`/board#report-${report.id}`}
+                              <Link
+                                href={`/reports/${report.id}`}
                                 onClick={closeMobileSheet}
                               />
                             }

@@ -198,7 +198,7 @@ function Card({
           size="sm"
           variant="outline"
           nativeButton={false}
-          render={<Link href="/review" />}
+          render={<Link href={`/reports/${card.id}`} />}
           className="mt-1 w-full justify-center"
         >
           Review evidence <RollingIcon icon={ArrowRight} className="size-3.5" />
