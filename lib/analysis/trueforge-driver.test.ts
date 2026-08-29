@@ -458,6 +458,40 @@ test("ensureSession cancels an in-flight TrueForge session request and does not 
   assert.equal(sessions.length, 0);
 });
 
+test("ensureSession refuses to persist a verdict if reproduction returns after cancellation", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  const controller = new AbortController();
+  const reason = new Error("lease lost");
+  const reproduceFn: ReproduceFn = async (_input, opts) => {
+    assert.equal(opts?.signal, controller.signal);
+    controller.abort(reason);
+    return { outcome: "ANALYSIS_ONLY", reason: "TARGET_UNAVAILABLE" };
+  };
+  const client = fakeClient();
+
+  await assert.rejects(
+    () =>
+      driver
+        .createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe))
+        .ensureSession(context(reportId, controller.signal)),
+    (error: unknown) => error === reason,
+  );
+
+  assert.equal(client.createSessionCalls, 0);
+  const sessions = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessions.length, 0);
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(verdicts.length, 0);
+});
+
 test("an already-aborted signal makes run throw and touch nothing", async () => {
   const reportId = await seedReport("TRIAGING");
   const client = fakeClient();

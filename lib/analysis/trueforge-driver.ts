@@ -8,11 +8,6 @@ import type {
   ReproductionOutcome,
   ReproductionRecipe,
 } from "@/lib/reproduction/types";
-// Track B (sandbox orchestrator) and Track C (scenario recipes) are being built in parallel
-// worktrees against the frozen contracts in lib/reproduction/types.ts. These imports won't
-// resolve until feat/reproduction-orchestrator and feat/reproduction-recipes merge; until then
-// tsc fails on exactly these two lines (lint is unaffected), and every test here injects a
-// fake reproduceFn/getRecipes instead of relying on the real modules.
 import { reproduce } from "@/lib/sandbox/reproduce";
 import { getRecipesForTarget } from "@/lib/targets/recipes";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
@@ -167,6 +162,7 @@ async function decideFreshVerdict(
     },
     { signal },
   );
+  if (signal.aborted) throw signal.reason;
 
   if (result.outcome !== "REPRODUCED" && result.outcome !== "NOT_REPRODUCED") {
     return {
