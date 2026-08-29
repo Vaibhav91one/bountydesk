@@ -7,6 +7,8 @@
   },
   "scripts": {
     "dev": "next dev",
+    "video:studio": "remotion studio remotion/index.ts",
+    "video:render": "remotion render remotion/index.ts BountyDeskDemo renders/bountydesk-demo.mp4 --codec=h264 --audio-codec=aac",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -44,6 +46,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@remotion/cli": "^4.0.518",
+    "@remotion/media": "^4.0.518",
+    "@remotion/transitions": "^4.0.518",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -51,6 +56,7 @@
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.3",
+    "remotion": "^4.0.518",
     "shadcn": "^4.19.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
