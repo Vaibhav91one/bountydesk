@@ -18,6 +18,7 @@ const TARGET_PROFILE_ID = "profile-under-test";
 type TestReproductionAuthorization =
   | {
       ok: true;
+      imageName: string;
       imageDigest: string;
       snapshotId: string | null;
       recipe: ReproductionRecipe;
@@ -90,6 +91,7 @@ let authorizeImpl: (input: {
   authorizeCalls.push(input);
   return {
     ok: true,
+    imageName: "ghcr.io/vaibhav91one/juice-shop",
     imageDigest: "sha256:" + "a".repeat(64),
     snapshotId: "snap",
     recipe,
@@ -135,6 +137,7 @@ function resetSpies(): void {
     authorizeCalls.push(input);
     return {
       ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: "sha256:" + "a".repeat(64),
       snapshotId: "snap",
       recipe,
@@ -213,6 +216,7 @@ const recipe: ReproductionRecipe = {
 function reproduceInput(overrides: Partial<Parameters<typeof reproduce>[0]> = {}) {
   return {
     targetProfileId: TARGET_PROFILE_ID,
+    imageName: "ghcr.io/vaibhav91one/juice-shop",
     imageDigest: "sha256:" + "a".repeat(64),
     snapshotId: "snap",
     recipe,
@@ -252,9 +256,14 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
   assert.equal(outcome.evidence.fixture.ranToCompletion, true);
   assert.equal(outcome.evidence.negativeControl.canaryFound, false);
   assert.equal(outcome.evidence.exploit.canaryFound, true);
-  assert.ok(outcome.evidence.requestBodyHashes.fixture, "the fixture body carried the canary and must be hashed");
-  assert.ok(outcome.evidence.requestBodyHashes.negativeControl === null, "a GET with no body hashes to null");
-  assert.ok(outcome.evidence.requestBodyHashes.exploit === null);
+  assert.equal(outcome.evidence.requestBodyHashes.fixture.dispatched, true);
+  assert.ok(outcome.evidence.requestBodyHashes.fixture.sha256, "the fixture body carried the canary and must be hashed");
+  assert.deepEqual(
+    outcome.evidence.requestBodyHashes.negativeControl,
+    { dispatched: true, sha256: null },
+    "a dispatched GET with no body records dispatch without inventing a hash",
+  );
+  assert.deepEqual(outcome.evidence.requestBodyHashes.exploit, { dispatched: true, sha256: null });
 
   // The raw canary must never appear anywhere in what gets recorded -- only its hash.
   assert.ok(!JSON.stringify(outcome.evidence).includes(canary!));
@@ -293,6 +302,7 @@ test("caller-supplied image and snapshot values are replaced by the bound target
     authorizeCalls.push(input);
     return {
       ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
       snapshotId: "authorized-snapshot",
       recipe,
@@ -430,7 +440,13 @@ test("a negative control that never completes stops the run before the exploit e
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe: throwingRecipe };
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      recipe: throwingRecipe,
+    };
   };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -465,7 +481,13 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe: throwingRecipe };
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      recipe: throwingRecipe,
+    };
   };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -483,7 +505,8 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the
     // sendToSandbox actually sent the exploit request and computed its hash before oracleCheck
     // threw; that hash must survive, not collapse to null just because what came after failed.
     assert.ok(
-      outcome.evidence?.requestBodyHashes?.exploit,
+      outcome.evidence?.requestBodyHashes?.exploit?.dispatched &&
+        outcome.evidence.requestBodyHashes.exploit.sha256,
       "a request that was genuinely dispatched must keep its body hash even if the oracle check after it throws",
     );
   }
@@ -521,7 +544,13 @@ test("a missing snapshot id short-circuits before touching the sandbox client at
   resetSpies();
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: null, recipe };
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: null,
+      recipe,
+    };
   };
   const outcome = await reproduce(reproduceInput());
 

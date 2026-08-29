@@ -31,8 +31,9 @@ import type {
   ReproductionOutcome,
   ReproductionProbeResult,
   ReproductionRequest,
+  RequestBodyEvidence,
 } from "@/lib/reproduction/types";
-import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, imageRefFor } from "@/lib/targets/configure";
+import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, isValidImageDigest } from "@/lib/targets/configure";
 import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, deleteSandbox, execute, getSnapshot, type Sandbox } from "./daytona";
 import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
@@ -74,6 +75,13 @@ const SANDBOX_TTL_MINUTES = 10;
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+function imageRefForProfile(imageName: string, imageDigest: string): string {
+  if (!isValidImageDigest(imageDigest)) {
+    throw new Error(`not a valid image digest: ${imageDigest}`);
+  }
+  return `${imageName}@${imageDigest}`;
 }
 
 /** Fresh and unpredictable every run, per decisions.md Q3 -- never a fixed literal. 18 random
@@ -194,7 +202,7 @@ async function waitForAppReady(sandbox: Sandbox, timeoutMs: number, signal?: Abo
   throw new Error(`sandbox ${sandbox.id} did not answer on port ${APP_PORT} within ${timeoutMs}ms`);
 }
 
-type SentRequest = { probe: ReproductionProbeResult; bodyHash: string | null };
+type SentRequest = { probe: ReproductionProbeResult; bodyEvidence: RequestBodyEvidence };
 
 /** Send one recipe leg as a real HTTP request to the sandbox's preview URL, and read the real
  * Response -- the direct-call half of the oracle-boundary rule. */
@@ -222,25 +230,32 @@ async function sendToSandbox(
   const text = await response.text();
   return {
     probe: { status: response.status, body: text },
-    bodyHash: bodyText === undefined ? null : sha256Hex(bodyText),
+    bodyEvidence: {
+      dispatched: true,
+      sha256: bodyText === undefined ? null : sha256Hex(bodyText),
+    },
   };
 }
 
-type LegResult = { ranToCompletion: boolean; canaryFound: boolean; at: string; bodyHash: string | null };
+type LegResult = {
+  ranToCompletion: boolean;
+  canaryFound: boolean;
+  at: string;
+  bodyEvidence: RequestBodyEvidence;
+};
 
 function notRun(at: string): LegResult {
-  return { ranToCompletion: false, canaryFound: false, at, bodyHash: null };
+  return { ranToCompletion: false, canaryFound: false, at, bodyEvidence: { dispatched: false, sha256: null } };
 }
 
 /**
  * Run one negative-control or exploit leg: send it, hand the real response to the recipe's
  * own oracleCheck, and record what happened.
  *
- * `bodyHash` is tracked separately from "did this leg run to completion": the request can be
- * genuinely dispatched (sendToSandbox returns) and its body hash computed, and only then have
- * oracleCheck itself throw. That is a leg that didn't run to completion, but the request really
- * was sent, so the hash is kept -- losing it here would make the evidence packet claim a
- * request was never sent when it was.
+ * `bodyEvidence` is tracked separately from "did this leg run to completion": the request can
+ * be genuinely dispatched (sendToSandbox returns) and its body hash computed, and only then
+ * have oracleCheck itself throw. That is a leg that didn't run to completion, but the request
+ * really was sent, so the dispatch marker is kept.
  */
 async function runLeg(
   preview: PortPreviewUrl,
@@ -250,15 +265,15 @@ async function runLeg(
   signal?: AbortSignal,
 ): Promise<LegResult> {
   const at = new Date().toISOString();
-  let bodyHash: string | null = null;
+  let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
   try {
     const sent = await sendToSandbox(preview, request, canary, signal);
-    bodyHash = sent.bodyHash;
+    bodyEvidence = sent.bodyEvidence;
     const canaryFound = await oracleCheck(sent.probe, canary);
-    return { ranToCompletion: true, canaryFound, at, bodyHash };
+    return { ranToCompletion: true, canaryFound, at, bodyEvidence };
   } catch (error) {
     rethrowIfAborted(error, signal);
-    return { ranToCompletion: false, canaryFound: false, at, bodyHash };
+    return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
   }
 }
 
@@ -304,7 +319,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     let imageRef: string;
     try {
-      imageRef = imageRefFor(authorization.imageDigest);
+      imageRef = imageRefForProfile(authorization.imageName, authorization.imageDigest);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
@@ -371,11 +386,11 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // negative control or the exploit to look for -- both are skipped entirely rather than run
     // against a sandbox with no canary in it.
     const fixtureAt = new Date().toISOString();
-    let fixtureBodyHash: string | null = null;
+    let fixtureBodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
     let fixtureCompleted = false;
     try {
       const sent = await sendToSandbox(preview, recipe.fixture.request, canary, opts?.signal);
-      fixtureBodyHash = sent.bodyHash;
+      fixtureBodyEvidence = sent.bodyEvidence;
       fixtureCompleted = sent.probe.status >= 200 && sent.probe.status < 300;
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
@@ -428,9 +443,9 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       },
       canaryHash,
       requestBodyHashes: {
-        fixture: fixtureBodyHash,
-        negativeControl: negativeControl.bodyHash,
-        exploit: exploit.bodyHash,
+        fixture: fixtureBodyEvidence,
+        negativeControl: negativeControl.bodyEvidence,
+        exploit: exploit.bodyEvidence,
       },
     };
 

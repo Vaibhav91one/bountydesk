@@ -3,6 +3,7 @@ import type { AnalysisOnlyReason, ReproductionRecipe } from "@/lib/reproduction/
 export type ReproductionAuthorization =
   | {
       ok: true;
+      imageName: string;
       imageDigest: string;
       snapshotId: string | null;
       recipe: ReproductionRecipe;
@@ -22,6 +23,7 @@ export async function authorizeReproductionTarget(input: {
     .select({
       id: targetProfile.id,
       name: targetProfile.name,
+      imageName: targetProfile.imageName,
       imageDigest: targetProfile.imageDigest,
       snapshotId: targetProfile.snapshotId,
       config: targetProfile.config,
@@ -31,6 +33,7 @@ export async function authorizeReproductionTarget(input: {
     .limit(1);
 
   if (!profile) return { ok: false, reason: "NO_BOUND_TARGET" };
+  if (!profile.imageName) return { ok: false, reason: "COULD_NOT_DEPLOY" };
 
   const recipe = getRecipesForTarget({ name: profile.name, config: profile.config }).find(
     (candidate) => candidate.id === input.recipeId,
@@ -39,6 +42,7 @@ export async function authorizeReproductionTarget(input: {
 
   return {
     ok: true,
+    imageName: profile.imageName,
     imageDigest: profile.imageDigest,
     snapshotId: profile.snapshotId,
     recipe,
