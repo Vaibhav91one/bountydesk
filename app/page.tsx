@@ -95,20 +95,18 @@ export default function LandingPage() {
             the page and the product underneath it on a backdrop, which gives the claim the
             whole width and stops the panel competing with it for attention. */}
         <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-10 text-center lg:pt-24">
-          <span className="flex items-center gap-3">
-            <span
-              aria-hidden="true"
-              className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
-              dangerouslySetInnerHTML={{ __html: mascot.markup }}
-            />
-            <span className="text-heading text-brand-soft">Meet Agent Bounty</span>
-          </span>
-
           {/* text-display is 64px with no responsive variant, and app/login/page.tsx already
               records why that matters: a 64px headline on a phone is a scroll, not a hero.
               Login hides its headline below lg; a landing page cannot, so this steps up and
               carries the token's weight and tracking at the smaller sizes. */}
           <h1 className="text-4xl leading-[1.06] font-normal tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
+            {/* Sized in em so it tracks the headline through every breakpoint, and
+                aria-hidden because the sentence reads the same without it. */}
+            <span
+              aria-hidden="true"
+              className="mr-3 inline-block size-[0.82em] align-[-0.1em] [&>svg]:block [&>svg]:size-full"
+              dangerouslySetInnerHTML={{ __html: mascot.markup }}
+            />
             Read every report.
             <br />
             Sign every verdict.

@@ -1,7 +1,9 @@
 import Image from "next/image";
+import Link from "next/link";
 import { ArrowRight, Check, Prohibit, Signature, X } from "@phosphor-icons/react/ssr";
 
 import { PhaseBadge } from "@/components/phase-dot";
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 
 /**
@@ -25,19 +27,28 @@ function Panel({
   label,
   children,
   className,
+  header = true,
 }: {
   label: string;
   children: React.ReactNode;
   className?: string;
+  /**
+   * The small panels keep their caption bar, because a list of rows that looks like data wants
+   * saying it is not. The hero panel drops it: it is the first thing on the page and it carries
+   * its own honesty in the footer, which reads "Analysis only, nothing ran".
+   */
+  header?: boolean;
 }) {
   return (
     <div
       className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-border/50 bg-card ${className ?? ""}`}
     >
-      <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2.5">
-        <span className="text-label text-muted-foreground uppercase">{label}</span>
-        <span className="text-label text-muted-foreground/60 uppercase">Example</span>
-      </div>
+      {header ? (
+        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2.5">
+          <span className="text-label text-muted-foreground uppercase">{label}</span>
+          <span className="text-label text-muted-foreground/60 uppercase">Example</span>
+        </div>
+      ) : null}
       {children}
     </div>
   );
@@ -55,7 +66,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 /** The hero panel: the moment the whole product exists for. */
 export function ApprovalPanel() {
   return (
-    <Panel label="Sign the verdict">
+    <Panel label="Sign the verdict" header={false}>
       <div className="flex flex-col gap-4 p-5">
         <div className="flex flex-wrap items-center gap-2.5">
           <PhaseBadge phase="awaiting-approval">Awaiting approval</PhaseBadge>
@@ -94,13 +105,21 @@ export function ApprovalPanel() {
           </span>
           <span className="text-meta text-muted-foreground">Analysis only, nothing ran</span>
         </span>
-        {/* Real buttons, inert on purpose. This is a picture of the gate, not the gate. */}
-        <span aria-hidden="true" className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" className="pointer-events-none text-destructive">
-            <Prohibit className="size-4" /> Deny
+        {/* Live, and both go to sign-in. A picture of a button that does nothing when you
+            press it is worse than no button; pressing this one takes you to the place the real
+            gate lives, which is the honest answer to the click. */}
+        <span className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            nativeButton={false}
+            render={<Link href="/login" />}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
-          <Button size="sm" className="pointer-events-none">
-            <Signature weight="fill" className="size-4" /> Approve
+          <Button size="sm" nativeButton={false} render={<Link href="/login" />}>
+            <RollingIcon icon={Signature} weight="fill" className="size-4" /> Approve
           </Button>
         </span>
       </div>

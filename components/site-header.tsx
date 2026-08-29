@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { GitHubLight } from "developer-icons";
+import { ArrowRight } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ export function SiteHeader({ links = true }: { links?: boolean }) {
           ) : null}
 
           <Button size="sm" nativeButton={false} render={<Link href="/login" />} className="rounded-full px-4">
-            <RollingIcon icon={GitHubLight} className="size-4" /> Sign in
+            Get started <RollingIcon icon={ArrowRight} className="size-4" />
           </Button>
         </nav>
       </div>
