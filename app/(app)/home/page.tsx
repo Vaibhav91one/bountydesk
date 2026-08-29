@@ -2,17 +2,14 @@ import Link from "next/link";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import {
   ArrowRight,
-  ArrowSquareOut,
   Check,
   CheckCircle,
-  Envelope,
   Files,
   Folder,
   Gear,
   Plus,
   ShareNetwork,
   Tray,
-  UploadSimple,
 } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
@@ -241,52 +238,6 @@ export default async function HomePage() {
           />
         </div>
       </div>
-
-      <section className="flex flex-col gap-4 rounded-xl border border-border/50 border-l-2 border-l-brand/60 bg-card/40 px-6 py-5">
-        <h2 className="text-label text-muted-foreground uppercase">
-          What is built so far
-        </h2>
-        <ul className="flex flex-col gap-3 text-body">
-          {[
-            { text: "GitHub App intake with signature checks and durable, idempotent delivery", href: "/integrations", link: "Open integrations" },
-            { text: "Separate job execution and report lifecycle state machines, with leased workers", href: null, link: null },
-            { text: "Scope bound at the capability boundary, never from a string the agent produced", href: null, link: null },
-            { text: "Sign-in restricted to a reviewer allowlist, re-checked on every request", href: null, link: null },
-          ].map((row) => (
-            <li key={row.text} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-foreground">{row.text}</span>
-              {row.href ? (
-                <Link href={row.href} className="inline-flex items-center gap-1 text-brand-soft">
-                  <ArrowRight className="size-3.5" />
-                  {row.link}
-                </Link>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-label text-muted-foreground uppercase">
-          Channels that need no GitHub connection
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground">
-            <Envelope className="size-4" /> Email intake
-            <Badge variant="outline" className="text-muted-foreground">designed</Badge>
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground">
-            <UploadSimple className="size-4" /> File upload
-            <Badge variant="outline" className="text-muted-foreground">designed</Badge>
-          </span>
-          <a
-            href="https://github.com/Vaibhav91one/bountydesk"
-            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground hover:text-foreground"
-          >
-            Repository <ArrowSquareOut className="size-3.5" />
-          </a>
-        </div>
-      </section>
     </main>
   );
 }
