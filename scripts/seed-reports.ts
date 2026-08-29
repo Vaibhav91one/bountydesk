@@ -6,6 +6,7 @@ import {
   db,
   eq,
   githubInstallation,
+  isNull,
   report,
   targetProfile,
   verdict,
@@ -74,24 +75,27 @@ async function ensureRepository(targetProfileId: string): Promise<string> {
 
   if (existingRepo) return existingRepo.id;
 
-  const [installation] = await db
-    .insert(githubInstallation)
-    .values({
-      installationId: 99_000_001,
-      accountLogin: "Vaibhav91one",
-      accountId: 108_279_746,
-      accountType: "User",
-    })
-    .onConflictDoNothing({ target: githubInstallation.installationId })
-    .returning({ id: githubInstallation.id });
+  // Reuse whatever installation this database already has. There is no unique constraint on
+  // account_login, so always inserting a fixed installation_id gave a local database two rows
+  // for the same account, and the Integrations screen honestly reported both.
+  const [existingInstallation] = await db
+    .select({ id: githubInstallation.id })
+    .from(githubInstallation)
+    .where(isNull(githubInstallation.deletedAt))
+    .limit(1);
 
   const installationRowId =
-    installation?.id ??
+    existingInstallation?.id ??
     (
       await db
-        .select({ id: githubInstallation.id })
-        .from(githubInstallation)
-        .where(eq(githubInstallation.installationId, 99_000_001))
+        .insert(githubInstallation)
+        .values({
+          installationId: 99_000_001,
+          accountLogin: "Vaibhav91one",
+          accountId: 108_279_746,
+          accountType: "User",
+        })
+        .returning({ id: githubInstallation.id })
     )[0].id;
 
   const [created] = await db

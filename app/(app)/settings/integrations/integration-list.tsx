@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useEffect } from "react";
+import Link from "next/link";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
@@ -13,8 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-import { ConfigureButton } from "./configure-button";
 
 const ICONS = {
   github: GitHubLight,
@@ -31,7 +30,6 @@ export type IntegrationRow = {
   installed: boolean;
   action:
     | { kind: "link"; href: string; label: string }
-    | { kind: "configure"; repoId: number; configured: boolean }
     | { kind: "none"; label: string };
 };
 
@@ -135,16 +133,18 @@ export function IntegrationList({ rows }: { rows: IntegrationRow[] }) {
                   size="sm"
                   variant="outline"
                   nativeButton={false}
-                  render={<a href={row.action.href} />}
+                  // An in-app route goes through Link so it navigates client-side; GitHub's
+                  // own settings pages are a real departure and get a plain anchor.
+                  render={
+                    row.action.href.startsWith("/") ? (
+                      <Link href={row.action.href} />
+                    ) : (
+                      <a href={row.action.href} />
+                    )
+                  }
                 >
                   {row.action.label}
                 </Button>
-              ) : row.action.kind === "configure" ? (
-                <ConfigureButton
-                  repoId={row.action.repoId}
-                  configured={row.action.configured}
-                  label={row.action.configured ? "Reconfigure" : "Configure"}
-                />
               ) : (
                 <Button size="sm" variant="outline" disabled title={row.detail}>
                   {row.action.label}
