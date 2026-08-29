@@ -102,6 +102,20 @@ The append-only event log is the only writer that runs without approval. A Denie
 ### Q13 — Deployment topology
 **One host.** The browser talks only to Next.js over HTTPS 443; Next.js proxies the SDK calls and the SSE stream server-side (Node runtime, not edge). TrueForge stays on loopback/private Docker net, never public (its local mode has no auth). API keys stay server-side. Vercel drops out of the request path (or serves only a static page). This removes the "Vercel can't reach private :8790" contradiction and the serverless SSE-timeout failure mode.
 
+**Amended 2026-08-28.** Development remains local. The planned deployment separates public,
+stateless work from persistent execution, with Supabase as the durable boundary between them.
+Vercel receives intake, serves the reviewer UI and hosts the authenticated `publish_verdict` MCP
+route. A private Zerops worker claims Supabase rows and calls TrueForge through a private proxy that
+checks the bearer token in `TRUEFORGE_API_KEY`. The unauthenticated TrueForge listener stays on
+loopback behind that proxy. Vercel never opens or holds a connection to TrueForge. The worker
+imports the four queue processors directly; it does not run another Next.js server or call the
+public tick routes. TrueForge starts in standalone mode with SQLite on Zerops Local Storage.
+Postgres and Valkey are required only if it moves to multiple replicas. This supersedes the literal
+one-host rule while preserving its security purpose: TrueForge and the worker are never public, and
+the browser still talks only to Next.js. Required service ports accept private ingress only from
+their intended callers. The deployment and its durability gates are recorded in
+[`deployment.md`](deployment.md).
+
 ### Q14 — Intake durability
 **One durable jobs table.** Idempotency is a durable row keyed unique `(channel, delivery_id)`, and the decision is by job **state**, not existence: insert as `RECEIVED`, return 202 fast, then a worker drives `RECEIVED → PARSED → SESSION_CREATED → RUNNING → DONE` or `→ DEAD_LETTER`. A retry that collides checks state (terminal → 200 no-op; in-flight → ignore/resume) so nothing started is ever dropped. The table is the queue: worker leases (`lease_owner`, `lease_expires_at`, `attempts`) with a sweeper. **Persistence = Postgres (Supabase free tier) via Drizzle ORM** — the app fronts on Vercel (serverless, no persistent disk for a SQLite file), and Postgres makes the lease correct by construction with `SELECT … FOR UPDATE SKIP LOCKED` (a real row lock, not a faked global write-lock); Supabase/Neon are Postgres, so there is no dialect rewrite if we migrate hosts. Concurrency 1 for the demo, but the lock is real so it scales past 1 unchanged. Keep the idempotency key for the retention period, not 24h. Drop pool-cap/shedding/2.5N from demo scope or label unbuilt.
 
