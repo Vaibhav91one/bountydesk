@@ -45,6 +45,7 @@ test("a persist call built from a stale read cannot overwrite a mutation committ
   // then write back later without re-checking whether anything else touched it meanwhile.
   const stalePersist = scopeProfile.makePersist(dbm.db, {
     id: row.id,
+    config: row.config,
     scopeRules: row.scopeRules,
     updatedAt: row.updatedAt,
   });
@@ -69,6 +70,7 @@ test("a persist call still writes normally when nothing else touched the row sin
 
   const persist = scopeProfile.makePersist(dbm.db, {
     id: row.id,
+    config: row.config,
     scopeRules: row.scopeRules,
     updatedAt: row.updatedAt,
   });

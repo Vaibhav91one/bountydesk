@@ -40,7 +40,19 @@ const GENESIS_HASH = "GENESIS";
  */
 const AUDIT_CHAIN_LOCK_KEY = 0x5c0be_6001;
 
-/** Canonical (field-order-independent for our purposes) payload the hash commits to. */
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value as Record<string, unknown>)
+        .sort()
+        .map((key) => [key, canonicalize((value as Record<string, unknown>)[key])]),
+    );
+  }
+  return value;
+}
+
+/** Canonical payload the hash commits to, independent of jsonb object-key ordering. */
 function hashPayload(record: Omit<AuditEntry, "hash">): string {
   return JSON.stringify({
     seq: record.seq,
@@ -49,7 +61,7 @@ function hashPayload(record: Omit<AuditEntry, "hash">): string {
     actor: record.actor,
     auth: record.auth,
     action: record.action,
-    args: record.args,
+    args: canonicalize(record.args),
     verdict: record.verdict,
     reason: record.reason,
   });

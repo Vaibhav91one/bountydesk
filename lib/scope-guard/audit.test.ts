@@ -57,6 +57,24 @@ test("each append advances seq by exactly one and chains to the previous hash", 
   assert.deepEqual(result, { ok: true });
 });
 
+test("hash verification survives jsonb key normalization for nested args", async () => {
+  await auditModule.append(
+    baseInput({
+      action: "http_probe",
+      args: {
+        url: "http://localhost:3000/path",
+        method: "POST",
+        headers: { "x-z": "last", "x-a": "first" },
+        nested: [{ z: 2, a: 1 }],
+      },
+      reason: "HTTP 200 in 1ms",
+    }),
+  );
+
+  const result = await auditModule.verifyChain();
+  assert.deepEqual(result, { ok: true });
+});
+
 test("read() returns entries newest-first", async () => {
   const entries = await auditModule.read(10);
   const seqs = entries.map((e) => e.seq);

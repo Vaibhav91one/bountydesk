@@ -47,6 +47,7 @@ export function serializeScopeState(state: ScopeState): RawRule[] {
 
 export interface ResolvedProfile {
   id: string;
+  config: unknown;
   scopeRules: unknown;
   updatedAt: Date;
 }
@@ -55,7 +56,12 @@ async function resolveProfile(executor: Executor, forUpdate: boolean): Promise<R
   const wantedName = process.env.SCOPE_GUARD_TARGET_PROFILE?.trim();
 
   let query = executor
-    .select({ id: targetProfile.id, scopeRules: targetProfile.scopeRules, updatedAt: targetProfile.updatedAt })
+    .select({
+      id: targetProfile.id,
+      config: targetProfile.config,
+      scopeRules: targetProfile.scopeRules,
+      updatedAt: targetProfile.updatedAt,
+    })
     .from(targetProfile)
     .$dynamic();
   if (wantedName) query = query.where(eq(targetProfile.name, wantedName));
@@ -136,15 +142,22 @@ export async function withScope<T>(
   mutate: boolean,
   fn: (scope: Scope) => Promise<T> | T,
 ): Promise<T> {
+  return withScopeProfile(mutate, (scope) => fn(scope));
+}
+
+export async function withScopeProfile<T>(
+  mutate: boolean,
+  fn: (scope: Scope, profile: ResolvedProfile) => Promise<T> | T,
+): Promise<T> {
   if (!mutate) {
     const profile = await resolveProfile(db, false);
     const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, makePersist(db, profile));
-    return fn(scope);
+    return fn(scope, profile);
   }
 
   return db.transaction(async (tx) => {
     const profile = await resolveProfile(tx, true);
     const scope = new Scope(stateFromRaw(profile.scopeRules), undefined, makePersist(tx, profile));
-    return fn(scope);
+    return fn(scope, profile);
   });
 }

@@ -31,6 +31,7 @@ before(async () => {
   await dbm.db.insert(dbm.targetProfile).values({
     name: `route-test-${randomUUID()}`,
     imageDigest: `sha256:${"0".repeat(64)}`,
+    config: { baseUrl: "http://localhost:3000" },
     scopeRules: [{ allow: "localhost" }],
   });
 });
@@ -158,13 +159,13 @@ test("policy_get reports the current allowlist size", async () => {
 test("http_probe denies an out-of-scope target without ever opening a socket", async () => {
   const result = await callTool("http_probe", { url: "http://not-in-scope.example/" });
   assert.equal(result.probed, false);
-  assert.match(result.error as string, /scope denial/);
+  assert.match(result.error as string, /outside the target profile baseUrl/);
 });
 
 test("tcp_probe denies an out-of-scope target without ever opening a socket", async () => {
   const result = await callTool("tcp_probe", { host: "not-in-scope.example", port: 9999 });
   assert.equal(result.probed, false);
-  assert.match(result.error as string, /scope denial/);
+  assert.match(result.error as string, /does not match the target profile baseUrl/);
 });
 
 /**
@@ -190,10 +191,18 @@ test("http_probe and tcp_probe reach an in-scope localhost target, pinned to the
   const tcpPort = (tcpServer.address() as { port: number }).port;
 
   try {
-    const httpResult = await callTool("http_probe", { url: `http://localhost:${httpPort}/` });
+    await dbm.db
+      .update(dbm.targetProfile)
+      .set({ config: { baseUrl: `http://localhost:${httpPort}` } });
+
+    const httpResult = await callTool("http_probe", { url: "/" });
     assert.equal(httpResult.probed, true);
     assert.equal(httpResult.status, 200);
     assert.match(httpResult.body_preview as string, /ok from test server/);
+
+    await dbm.db
+      .update(dbm.targetProfile)
+      .set({ config: { baseUrl: `http://localhost:${tcpPort}` } });
 
     const tcpResult = await callTool("tcp_probe", { host: "localhost", port: tcpPort });
     assert.equal(tcpResult.probed, true);

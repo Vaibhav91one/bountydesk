@@ -10,7 +10,7 @@ import * as audit from "@/lib/scope-guard/audit";
 import { httpProbe, tcpProbe } from "@/lib/scope-guard/egress";
 import * as grants from "@/lib/scope-guard/grants";
 import { isLoopbackTarget, normalizeTargetValue } from "@/lib/scope-guard/scope";
-import { withScope } from "@/lib/scope-guard/scope-profile";
+import { withScope, withScopeProfile, type ResolvedProfile } from "@/lib/scope-guard/scope-profile";
 
 // node:crypto and the Postgres connections this route opens (scope, audit, grants) all need
 // the Node runtime, same reasoning as the publish-verdict route.
@@ -35,6 +35,55 @@ function isAuthorized(header: string | null): boolean {
 
 function text(result: unknown): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+}
+
+function profileBaseUrl(profile: ResolvedProfile): URL | null {
+  if (typeof profile.config !== "object" || profile.config === null) return null;
+  const baseUrl = (profile.config as Record<string, unknown>).baseUrl;
+  if (typeof baseUrl !== "string") return null;
+  try {
+    return new URL(baseUrl);
+  } catch {
+    return null;
+  }
+}
+
+function defaultPort(protocol: string): number {
+  return protocol === "https:" ? 443 : 80;
+}
+
+function profileHttpUrl(profile: ResolvedProfile, requested: string): { url: string } | { error: string } {
+  const base = profileBaseUrl(profile);
+  if (!base || (base.protocol !== "http:" && base.protocol !== "https:")) {
+    return { error: "target profile has no http(s) baseUrl" };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = requested.startsWith("/") ? new URL(requested, base) : new URL(requested);
+  } catch {
+    return { error: "invalid URL or path" };
+  }
+  if (parsed.origin !== base.origin) {
+    return { error: "requested URL is outside the target profile baseUrl" };
+  }
+
+  const bound = new URL(`${parsed.pathname}${parsed.search}`, base);
+  return { url: bound.toString() };
+}
+
+function profileTcpTarget(
+  profile: ResolvedProfile,
+  requestedHost: string,
+  requestedPort: number,
+): { host: string; port: number } | { error: string } {
+  const base = profileBaseUrl(profile);
+  if (!base) return { error: "target profile has no baseUrl" };
+  const boundPort = base.port ? Number(base.port) : defaultPort(base.protocol);
+  if (requestedHost !== base.hostname || requestedPort !== boundPort) {
+    return { error: "requested TCP target does not match the target profile baseUrl" };
+  }
+  return { host: base.hostname, port: boundPort };
 }
 
 function buildServer(): McpServer {
@@ -75,7 +124,7 @@ function buildServer(): McpServer {
         + "re-probe the Location URL so each hop is re-scoped); response bodies capped at 32 KB; no raw TCP, no "
         + "port scanning. For deep exploitation continue inside the sandbox lab.",
       inputSchema: {
-        url: z.string().describe("Absolute http(s) URL to probe"),
+        url: z.string().describe("Path or absolute http(s) URL under the bound target profile baseUrl"),
         method: z.enum(["GET", "POST", "HEAD", "OPTIONS"]).default("GET").optional(),
         headers: z.record(z.string(), z.string()).optional().describe("Extra request headers"),
         body: z.string().max(16384).optional().describe("Request body (POST only)"),
@@ -85,16 +134,18 @@ function buildServer(): McpServer {
       annotations: { readOnlyHint: false },
     },
     async ({ url, method, headers, body, timeout_seconds, grant_token }) => {
-      const result = await withScope(false, (scope) =>
-        httpProbe(scope, {
-          url,
+      const result = await withScopeProfile(false, (scope, profile) => {
+        const bound = profileHttpUrl(profile, url);
+        if ("error" in bound) return { probed: false, error: bound.error };
+        return httpProbe(scope, {
+          url: bound.url,
           method,
           headers,
           body,
           timeoutSeconds: timeout_seconds,
           grantToken: grant_token,
-        }),
-      );
+        });
+      });
       await audit.append({
         actor: "agent",
         auth: AUTH_MODE,
@@ -118,7 +169,7 @@ function buildServer(): McpServer {
         + "bytes capped at 32 KB and returned as UTF-8 (best-effort) plus base64 (exact bytes). Use nmap inside "
         + "the sandbox for port sweeps.",
       inputSchema: {
-        host: z.string().describe("Target hostname or IP (no scheme)"),
+        host: z.string().describe("Must match the bound target profile baseUrl host"),
         port: z.number().int().min(1).max(65535),
         data_base64: z.string().optional().describe("Bytes to write after connecting, base64-encoded"),
         timeout_seconds: z.number().int().min(1).max(20).optional().describe("Default 8"),
@@ -127,9 +178,17 @@ function buildServer(): McpServer {
       annotations: { readOnlyHint: false },
     },
     async ({ host, port, data_base64, timeout_seconds, grant_token }) => {
-      const result = await withScope(false, (scope) =>
-        tcpProbe(scope, { host, port, dataBase64: data_base64, timeoutSeconds: timeout_seconds, grantToken: grant_token }),
-      );
+      const result = await withScopeProfile(false, (scope, profile) => {
+        const bound = profileTcpTarget(profile, host, port);
+        if ("error" in bound) return { probed: false, error: bound.error };
+        return tcpProbe(scope, {
+          host: bound.host,
+          port: bound.port,
+          dataBase64: data_base64,
+          timeoutSeconds: timeout_seconds,
+          grantToken: grant_token,
+        });
+      });
       await audit.append({
         actor: "agent",
         auth: AUTH_MODE,
