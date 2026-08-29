@@ -32,7 +32,7 @@ import type {
   ReproductionProbeResult,
   ReproductionRequest,
 } from "@/lib/reproduction/types";
-import { imageRefFor } from "@/lib/targets/configure";
+import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, imageRefFor } from "@/lib/targets/configure";
 import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, deleteSandbox, execute, getSnapshot, type Sandbox } from "./daytona";
 
@@ -145,14 +145,21 @@ function timeoutSignal(outer?: AbortSignal): AbortSignal {
  * This is the one place execute() is allowed to gate anything: a boot check, matching
  * AGENTS.md's "READY means the target started and answered its health check". The status
  * code is read only to decide whether to keep polling, never fed into the oracle.
+ *
+ * `signal` is checked between poll attempts, not inside a single execute() call: a caller
+ * that cancels mid-probe still waits out that one in-flight command, but never starts another.
  */
-async function waitForAppReady(sandbox: Sandbox, timeoutMs: number): Promise<void> {
+async function waitForAppReady(sandbox: Sandbox, timeoutMs: number, signal?: AbortSignal): Promise<void> {
   await execute(sandbox, START_APP_COMMAND, 10);
 
   const deadline = Date.now() + timeoutMs;
   const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/ 2>/dev/null || echo 000`;
 
   while (Date.now() < deadline) {
+    if (signal?.aborted) {
+      throw new Error(`readiness wait for sandbox ${sandbox.id} was cancelled`);
+    }
+
     const result = await execute(sandbox, probe, 10);
     const status = result.result.trim();
     if (/^2\d\d$/.test(status)) return;
@@ -196,12 +203,19 @@ async function sendToSandbox(
 
 type LegResult = { ranToCompletion: boolean; canaryFound: boolean; at: string; bodyHash: string | null };
 
+function notRun(at: string): LegResult {
+  return { ranToCompletion: false, canaryFound: false, at, bodyHash: null };
+}
+
 /**
  * Run one negative-control or exploit leg: send it, hand the real response to the recipe's
- * own oracleCheck, and record what happened. A leg that throws anywhere along the way --
- * network failure, a malformed response, oracleCheck itself misbehaving -- is recorded as
- * not having run to completion rather than guessed at, which is what lets decideOutcome
- * refuse a verdict on a partial run instead of this function refusing on its behalf.
+ * own oracleCheck, and record what happened.
+ *
+ * `bodyHash` is tracked separately from "did this leg run to completion": the request can be
+ * genuinely dispatched (sendToSandbox returns) and its body hash computed, and only then have
+ * oracleCheck itself throw. That is a leg that didn't run to completion, but the request really
+ * was sent, so the hash is kept -- losing it here would make the evidence packet claim a
+ * request was never sent when it was.
  */
 async function runLeg(
   preview: PortPreviewUrl,
@@ -211,12 +225,14 @@ async function runLeg(
   signal?: AbortSignal,
 ): Promise<LegResult> {
   const at = new Date().toISOString();
+  let bodyHash: string | null = null;
   try {
     const sent = await sendToSandbox(preview, request, canary, signal);
+    bodyHash = sent.bodyHash;
     const canaryFound = await oracleCheck(sent.probe, canary);
-    return { ranToCompletion: true, canaryFound, at, bodyHash: sent.bodyHash };
+    return { ranToCompletion: true, canaryFound, at, bodyHash };
   } catch {
-    return { ranToCompletion: false, canaryFound: false, at, bodyHash: null };
+    return { ranToCompletion: false, canaryFound: false, at, bodyHash };
   }
 }
 
@@ -227,11 +243,12 @@ async function runLeg(
  * INTAKE_PARSE_FAILED -- those belong to earlier pipeline stages -- and COULD_NOT_BUILD, which
  * belongs to the dynamic build tier this pinned-image path never runs. What is left is a
  * three-way split: the sandbox itself never came up, or came up on the wrong build
- * (COULD_NOT_DEPLOY -- see build-marker.ts for the second case), it came up but never
- * answered or a request to it failed in flight (TARGET_UNAVAILABLE), or both legs of the
- * oracle ran but produced a run decideOutcome refuses to trust -- an incomplete leg or a
- * negative control that itself found the canary -- which is a statement about the oracle
- * result for this run, not about reachability (NO_APPROVED_ORACLE).
+ * (COULD_NOT_DEPLOY -- see build-marker.ts for the second case); it came up but never
+ * answered, a request to it failed in flight, or the trusted fixture never seeded a canary to
+ * look for at all (TARGET_UNAVAILABLE); or the negative control and exploit both ran but
+ * produced a run decideOutcome refuses to trust -- an incomplete leg or a negative control
+ * that itself found the canary -- which is a statement about the oracle result for this run,
+ * not about reachability (NO_APPROVED_ORACLE).
  */
 function analysisOnly(reason: AnalysisOnlyReason, evidence?: Partial<ReproductionEvidence>): ReproductionOutcome {
   return { outcome: "ANALYSIS_ONLY", reason, evidence };
@@ -255,18 +272,26 @@ export const reproduce: ReproduceFn = async (input, opts) => {
 
     try {
       const snapshotInfo = await getSnapshot(input.snapshotId);
-      sandbox = await createSandbox({
-        snapshot: input.snapshotId,
-        imageRef,
-        // Matched to the snapshot's own declared limits, the same way scripts/spike-daytona.ts
-        // does it: createSandbox refuses to request resources of its own, so these are read
-        // back from the snapshot record and createSandbox re-verifies them before it provisions.
-        cpu: snapshotInfo.cpu ?? 0,
-        memoryGb: snapshotInfo.mem ?? 0,
-        diskGb: snapshotInfo.disk ?? 0,
-        ttlMinutes: SANDBOX_TTL_MINUTES,
-        labels: { "bountydesk.recipe": recipeId },
-      });
+      sandbox = await createSandbox(
+        {
+          snapshot: input.snapshotId,
+          imageRef,
+          // Matched to the snapshot's own declared limits, the same way scripts/spike-daytona.ts
+          // does it: createSandbox refuses to request resources of its own, so these are read
+          // back from the snapshot record and createSandbox re-verifies them before it provisions.
+          cpu: snapshotInfo.cpu ?? 0,
+          memoryGb: snapshotInfo.mem ?? 0,
+          diskGb: snapshotInfo.disk ?? 0,
+          ttlMinutes: SANDBOX_TTL_MINUTES,
+          labels: { "bountydesk.recipe": recipeId, "bountydesk.targetProfileId": input.targetProfileId },
+        },
+        // The narrow, explicitly-named exception documented on assertSnapshotImage: today's
+        // registered snapshot can only be tag-pinned (see that function's doc comment), so this
+        // is the one tag createSandbox is allowed to accept in the digest's place. The
+        // buildMarkerCheck call below is what makes that safe to do -- it must run, and it must
+        // fail closed, every single time this override is exercised.
+        TAG_PINNED_SNAPSHOT_IMAGE_REF,
+      );
     } catch {
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
     }
@@ -274,7 +299,7 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     opts?.signal?.throwIfAborted();
 
     try {
-      await waitForAppReady(sandbox, READINESS_TIMEOUT_MS);
+      await waitForAppReady(sandbox, READINESS_TIMEOUT_MS, opts?.signal);
     } catch {
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
     }
@@ -283,7 +308,7 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     // assertSnapshotImage's control-plane check that createSandbox already ran above. A
     // mismatch here is the same class of failure as a snapshot that never came up correctly,
     // so it shares COULD_NOT_DEPLOY rather than adding a new reason to the frozen union.
-    if (!(await buildMarkerCheck(sandbox, input.imageDigest))) {
+    if (!(await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER))) {
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
     }
 
@@ -298,31 +323,45 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     }
 
     // The fixture seeds the canary through the trusted registration endpoint, never through
-    // anything the exploit request can reach directly (decisions.md Q3). A fixture that fails
-    // to complete means there is no canary to look for, so nothing past this point can be
-    // trusted either.
+    // anything the exploit request can reach directly (decisions.md Q3). A response that isn't
+    // a genuine 2xx means the canary was never actually seeded, so there is nothing for the
+    // negative control or the exploit to look for -- both are skipped entirely rather than run
+    // against a sandbox with no canary in it.
+    const fixtureAt = new Date().toISOString();
+    let fixtureBodyHash: string | null = null;
+    let fixtureCompleted = false;
     try {
-      await sendToSandbox(preview, input.recipe.fixture.request, canary, opts?.signal);
+      const sent = await sendToSandbox(preview, input.recipe.fixture.request, canary, opts?.signal);
+      fixtureBodyHash = sent.bodyHash;
+      fixtureCompleted = sent.probe.status >= 200 && sent.probe.status < 300;
     } catch {
-      return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id, canaryHash });
+      fixtureCompleted = false;
     }
 
     opts?.signal?.throwIfAborted();
 
-    // Negative control first, always, per Q3 -- and the exploit still runs even if the
-    // control didn't complete cleanly, so the evidence packet reflects what actually
-    // happened. decideOutcome is what refuses to trust an unclean or partial run, not this
-    // function skipping ahead of it.
-    const negativeControl = await runLeg(
-      preview,
-      input.recipe.negativeControl,
-      canary,
-      input.recipe.oracleCheck,
-      opts?.signal,
-    );
-    const exploit = await runLeg(preview, input.recipe.exploit, canary, input.recipe.oracleCheck, opts?.signal);
+    // Negative control next, always, per Q3 -- but only if the fixture actually seeded a
+    // canary, and the exploit only if the negative control both completed and stayed clean.
+    // Anything short-circuited here is recorded as never having run, not guessed at.
+    let negativeControl = notRun(fixtureAt);
+    let exploit = notRun(fixtureAt);
+
+    if (fixtureCompleted) {
+      negativeControl = await runLeg(
+        preview,
+        input.recipe.negativeControl,
+        canary,
+        input.recipe.oracleCheck,
+        opts?.signal,
+      );
+
+      if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
+        exploit = await runLeg(preview, input.recipe.exploit, canary, input.recipe.oracleCheck, opts?.signal);
+      }
+    }
 
     const decision = decideOutcome({
+      fixtureCompleted,
       negativeControlCompleted: negativeControl.ranToCompletion,
       negativeControlCanaryFound: negativeControl.canaryFound,
       exploitCompleted: exploit.ranToCompletion,
@@ -332,6 +371,7 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     const evidence: ReproductionEvidence = {
       recipeId,
       sandboxId: sandbox.id,
+      fixture: { ranToCompletion: fixtureCompleted, at: fixtureAt },
       negativeControl: {
         ranToCompletion: negativeControl.ranToCompletion,
         canaryFound: negativeControl.canaryFound,
@@ -344,12 +384,20 @@ export const reproduce: ReproduceFn = async (input, opts) => {
       },
       canaryHash,
       requestBodyHashes: {
+        fixture: fixtureBodyHash,
         negativeControl: negativeControl.bodyHash,
         exploit: exploit.bodyHash,
       },
     };
 
-    if (decision === "ANALYSIS_ONLY") return analysisOnly("NO_APPROVED_ORACLE", evidence);
+    if (decision === "ANALYSIS_ONLY") {
+      // A fixture that never completed means no canary was ever seeded, the same "request to
+      // the target failed" class as TARGET_UNAVAILABLE's other cases. Once the fixture is
+      // clean, an incomplete or dirty negative control (or an incomplete exploit) is a
+      // statement about the oracle result, not about reachability: NO_APPROVED_ORACLE.
+      const reason: AnalysisOnlyReason = fixtureCompleted ? "NO_APPROVED_ORACLE" : "TARGET_UNAVAILABLE";
+      return analysisOnly(reason, evidence);
+    }
     return { outcome: decision, evidence };
   } catch {
     // Anything unaccounted for above -- an unexpected throw, an aborted signal bubbling up --

@@ -2,53 +2,49 @@
  * A second, independent proof of build identity, run from inside a live sandbox, alongside
  * (never instead of) daytona.ts's assertSnapshotImage.
  *
- * The interim substitute docs/decisions.md anticipated for this gap is a defender-authored
- * build marker baked into the image at CI time. That turned out not to be necessary: Daytona's
- * own sandbox agent already injects DAYTONA_SANDBOX_SNAPSHOT into every sandbox it boots, of
- * the form `cr.app.daytona.io/sbox/daytona-<64 hex>:daytona`, where the hex is the resolved
- * digest of the image the snapshot was built from -- confirmed live against the pinned Juice
- * Shop snapshot, where it matched DAYTONA_TARGET_IMAGE_DIGEST byte for byte. That is exactly
- * the value assertSnapshotImage wants and cannot get: the control-plane's own
- * `GET /snapshots/{id}` only ever reports the tag a snapshot was registered under, never the
- * digest it resolved to at build time. Reading it from inside the sandbox recovers it from a
- * vantage point the control-plane call doesn't have.
+ * Daytona's control plane can't help here either: `GET /snapshots/{id}` only ever reports the
+ * tag a snapshot was registered under, never the digest it resolved to, and `POST /api/snapshots`
+ * itself refuses a digest-pinned imageName outright (confirmed live against both GHCR and a
+ * plain Docker Hub image -- see PR #31's description). So the registered snapshot can only be
+ * tag-pinned, and a tag can be repointed at a different image at any time: assertSnapshotImage's
+ * exact-match check alone cannot prove which build actually booted.
  *
- * This is undocumented Daytona behaviour, the same category as reproduce.ts's per-port
- * preview-url call: not in their published API reference, confirmed by observation. It could
- * change in a future Daytona release, which is exactly why this stays a second check beside
- * assertSnapshotImage rather than a replacement for it.
+ * An earlier version of this file read Daytona's own `DAYTONA_SANDBOX_SNAPSHOT` env var, which
+ * happened to carry the resolved digest -- but that is undocumented internal platform behaviour,
+ * not something BountyDesk controls or Daytona has committed to keeping stable. This version is
+ * the defender-authored marker docs/decisions.md originally called for: the build workflow
+ * (.github/workflows/build-daytona-target.yml) bakes the exact commit it built into the image at
+ * a fixed path, and this reads that file back from inside the booted sandbox and compares it
+ * against the commit the caller expects.
  */
 import type { Sandbox } from "./daytona";
 import { execute } from "./daytona";
 
-const SNAPSHOT_ENV_VAR = "DAYTONA_SANDBOX_SNAPSHOT";
-const RESOLVED_DIGEST_RE = /daytona-([0-9a-f]{64})(?::|$)/i;
+const MARKER_PATH = "/etc/bountydesk-build-marker";
 
 /**
- * Read the digest Daytona itself resolved for this sandbox's image and compare it against the
- * digest this run expects, as `input.imageDigest` already carries (`sha256:<64 hex>`) -- no new
- * field needed on ReproduceFn's input, since this is the same value assertSnapshotImage already
- * checks, just recovered from a different vantage point.
+ * Read the build marker baked into this sandbox's image and compare it against
+ * `expectedMarker` -- e.g. lib/targets/configure.ts's EXPECTED_BUILD_MARKER -- never hardcoded
+ * here, so a future rebuild from a different commit changes one constant at the call site
+ * rather than this file.
  *
- * Fails closed on every path that isn't an exact match: execute() throwing, a non-zero exit,
- * an env var that isn't there, or a value that doesn't parse. None of those prove a mismatch,
- * but none of them prove a match either, and this function's only job is to say yes when it
- * actually saw the digest it expected.
+ * Fails closed on every path that isn't an exact match: a blank expected value, execute()
+ * throwing, a non-zero exit (the file is missing, which for this image means it predates the
+ * marker), or output that doesn't match byte for byte. None of those prove a mismatch, but none
+ * of them prove a match either, and this function's only job is to say yes when it actually
+ * read the value it expected.
  */
-export async function buildMarkerCheck(sandbox: Sandbox, expectedImageDigest: string): Promise<boolean> {
-  const expectedHex = expectedImageDigest.replace(/^sha256:/, "").toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(expectedHex)) return false;
+export async function buildMarkerCheck(sandbox: Sandbox, expectedMarker: string): Promise<boolean> {
+  const expected = expectedMarker.trim();
+  if (!expected) return false;
 
   let result;
   try {
-    result = await execute(sandbox, `printenv ${SNAPSHOT_ENV_VAR}`, 10);
+    result = await execute(sandbox, `cat ${MARKER_PATH}`, 10);
   } catch {
     return false;
   }
   if (result.exitCode !== 0) return false;
 
-  const match = RESOLVED_DIGEST_RE.exec(result.result);
-  if (!match) return false;
-
-  return match[1].toLowerCase() === expectedHex;
+  return result.result.trim() === expected;
 }

@@ -18,8 +18,7 @@ const FAKE_SANDBOX: Sandbox = {
   public: false,
 };
 
-const HEX = "27431c48ea981f99ffd59bf15271936c2b305197a963ab737aea919aeb80fdee";
-const EXPECTED = `sha256:${HEX}`;
+const EXPECTED_MARKER = "1867b926c5f50e4e692dc9c8f61821413cebe0cd";
 
 let executeImpl: (sandbox: Sandbox, command: string) => Promise<ExecResult>;
 
@@ -35,23 +34,16 @@ before(async () => {
   ({ buildMarkerCheck } = await import("./build-marker"));
 });
 
-test("a matching resolved digest passes", async () => {
-  executeImpl = async () => ({
-    exitCode: 0,
-    result: `cr.app.daytona.io/sbox/daytona-${HEX}:daytona\n`,
-  });
+test("a matching marker passes", async () => {
+  executeImpl = async () => ({ exitCode: 0, result: `${EXPECTED_MARKER}\n` });
 
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED), true);
+  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED_MARKER), true);
 });
 
-test("a mismatched resolved digest fails", async () => {
-  const wrongHex = "0".repeat(64);
-  executeImpl = async () => ({
-    exitCode: 0,
-    result: `cr.app.daytona.io/sbox/daytona-${wrongHex}:daytona\n`,
-  });
+test("a mismatched marker fails", async () => {
+  executeImpl = async () => ({ exitCode: 0, result: `${"0".repeat(40)}\n` });
 
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED), false);
+  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED_MARKER), false);
 });
 
 test("execute() throwing is treated as a failure, never assumed to pass", async () => {
@@ -59,28 +51,22 @@ test("execute() throwing is treated as a failure, never assumed to pass", async 
     throw new Error("toolbox unreachable");
   };
 
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED), false);
+  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED_MARKER), false);
 });
 
-test("a non-zero exit code (env var unset) fails closed", async () => {
+test("a non-zero exit code (the marker file is missing) fails closed", async () => {
   executeImpl = async () => ({ exitCode: 1, result: "" });
 
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED), false);
+  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED_MARKER), false);
 });
 
-test("output that doesn't parse as a snapshot reference fails closed", async () => {
-  executeImpl = async () => ({ exitCode: 0, result: "not-a-daytona-snapshot-string\n" });
-
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, EXPECTED), false);
-});
-
-test("an invalid expected digest is refused before executing anything", async () => {
+test("an empty expected marker is refused before executing anything", async () => {
   let called = false;
   executeImpl = async () => {
     called = true;
-    return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${HEX}:daytona` };
+    return { exitCode: 0, result: EXPECTED_MARKER };
   };
 
-  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, "not-a-digest"), false);
-  assert.equal(called, false, "a malformed expected digest is a bug worth catching before touching the sandbox");
+  assert.equal(await buildMarkerCheck(FAKE_SANDBOX, "   "), false);
+  assert.equal(called, false, "a blank expected marker is a bug worth catching before touching the sandbox");
 });

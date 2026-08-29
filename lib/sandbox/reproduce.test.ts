@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test, { before, mock } from "node:test";
 
 import type { ReproductionRecipe } from "@/lib/reproduction/types";
+import { EXPECTED_BUILD_MARKER } from "@/lib/targets/configure";
 
 import type { ExecResult, Sandbox, SandboxSpec, SnapshotInfo } from "./daytona";
 
@@ -11,6 +12,8 @@ process.env.DAYTONA_API_KEY = "dtn_test_key_not_a_real_one";
 // make every run of this file sit through a real timeout for no reason.
 process.env.BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS = "30";
 process.env.BOUNTYDESK_REPRODUCE_READINESS_POLL_MS = "5";
+
+const TARGET_PROFILE_ID = "profile-under-test";
 
 /**
  * The seam this whole file rests on: reproduce.ts imports its sandbox lifecycle from
@@ -48,9 +51,9 @@ let executeCalls: string[] = [];
 
 /** Every test in this file passes `imageDigest: "sha256:" + "a".repeat(64)` (or the equivalent
  * derived from FAKE_SNAPSHOT), so the default execute() stub answers the build-marker read
- * with a resolved digest that matches it -- otherwise every existing test in this file would
- * start failing at the new buildMarkerCheck gate instead of testing what it already tests. */
-const MATCHING_RESOLVED_DIGEST_HEX = "a".repeat(64);
+ * with the marker reproduce.ts actually expects -- otherwise every existing test in this file
+ * would start failing at the buildMarkerCheck gate instead of testing what it already tests. */
+const BUILD_MARKER_COMMAND_FRAGMENT = "bountydesk-build-marker";
 
 /** Overridable per test: lets a test make provisioning, readiness or teardown fail without
  * touching the shared default. */
@@ -60,8 +63,8 @@ let createSandboxImpl: (spec: SandboxSpec) => Promise<Sandbox> = async (spec) =>
 };
 let executeImpl: (sandbox: Sandbox, command: string) => Promise<ExecResult> = async (_sandbox, command) => {
   executeCalls.push(command);
-  if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
-    return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${MATCHING_RESOLVED_DIGEST_HEX}:daytona\n` };
+  if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+    return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
   }
   // Any status starting with 2 satisfies waitForAppReady's readiness regex; the start-app
   // call's result is never inspected, so the same canned answer covers both execute() calls.
@@ -96,8 +99,8 @@ function resetSpies(): void {
   };
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
-    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
-      return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${MATCHING_RESOLVED_DIGEST_HEX}:daytona\n` };
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
     }
     return { exitCode: 0, result: "200" };
   };
@@ -123,6 +126,7 @@ type FetchCall = { url: string; init?: RequestInit; canary: string | null };
 function fetchStub(
   calls: FetchCall[],
   responses: {
+    fixtureStatus?: number;
     negativeControlBody: (canary: string) => string;
     exploitBody: (canary: string) => string;
   },
@@ -148,7 +152,7 @@ function fetchStub(
       const body = JSON.parse(String(init?.body ?? "{}")) as { email?: string };
       lastCanary = body.email ?? null;
       calls.push({ url, init, canary: lastCanary });
-      return new Response(JSON.stringify({ status: "success" }), { status: 201 });
+      return new Response(JSON.stringify({ status: "success" }), { status: responses.fixtureStatus ?? 201 });
     }
     if (path === "/negative") {
       calls.push({ url, init, canary: lastCanary });
@@ -172,6 +176,16 @@ const recipe: ReproductionRecipe = {
   oracleCheck: (response, canary) => response.body.includes(canary),
 };
 
+function reproduceInput(overrides: Partial<Parameters<typeof reproduce>[0]> = {}) {
+  return {
+    targetProfileId: TARGET_PROFILE_ID,
+    imageDigest: "sha256:" + "a".repeat(64),
+    snapshotId: "snap",
+    recipe,
+    ...overrides,
+  };
+}
+
 async function withFetch<T>(stub: typeof fetch, run: () => Promise<T>): Promise<T> {
   const real = globalThis.fetch;
   globalThis.fetch = stub;
@@ -190,7 +204,7 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
       negativeControlBody: () => JSON.stringify({ data: [] }),
       exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
     }),
-    () => reproduce({ imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1], snapshotId: "snap", recipe }),
+    () => reproduce(reproduceInput({ imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1] })),
   );
 
   assert.equal(outcome.outcome, "REPRODUCED");
@@ -201,8 +215,10 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
   assert.equal(outcome.evidence.canaryHash, createHash("sha256").update(canary!).digest("hex"));
   assert.equal(outcome.evidence.sandboxId, FAKE_SANDBOX.id);
   assert.equal(outcome.evidence.recipeId, "test-recipe");
+  assert.equal(outcome.evidence.fixture.ranToCompletion, true);
   assert.equal(outcome.evidence.negativeControl.canaryFound, false);
   assert.equal(outcome.evidence.exploit.canaryFound, true);
+  assert.ok(outcome.evidence.requestBodyHashes.fixture, "the fixture body carried the canary and must be hashed");
   assert.ok(outcome.evidence.requestBodyHashes.negativeControl === null, "a GET with no body hashes to null");
   assert.ok(outcome.evidence.requestBodyHashes.exploit === null);
 
@@ -211,8 +227,13 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
 
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "the sandbox must always be torn down");
   assert.ok(
-    executeCalls.some((c) => c.includes("DAYTONA_SANDBOX_SNAPSHOT")),
+    executeCalls.some((c) => c.includes(BUILD_MARKER_COMMAND_FRAGMENT)),
     "a matching build marker must not skip the check -- it has to actually run and pass",
+  );
+  assert.deepEqual(
+    createSandboxCalls[0]?.labels,
+    { "bountydesk.recipe": "test-recipe", "bountydesk.targetProfileId": TARGET_PROFILE_ID },
+    "the target profile that authorized this run must be threaded through for audit",
   );
 });
 
@@ -220,8 +241,8 @@ test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never 
   resetSpies();
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
-    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
-      return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${"0".repeat(64)}:daytona\n` };
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: "not-the-expected-commit\n" };
     }
     return { exitCode: 0, result: "200" };
   };
@@ -229,7 +250,7 @@ test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never 
   // No fetch stub installed: if the marker check failed to short-circuit the flow, the next
   // step (the real preview-url lookup) would hit the network and this test would fail loudly
   // rather than quietly passing on the wrong path.
-  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+  const outcome = await reproduce(reproduceInput());
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
@@ -240,11 +261,11 @@ test("an execute() failure while reading the build marker fails closed, same as 
   resetSpies();
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
-    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) throw new Error("toolbox unreachable");
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) throw new Error("toolbox unreachable");
     return { exitCode: 0, result: "200" };
   };
 
-  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+  const outcome = await reproduce(reproduceInput());
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
@@ -259,14 +280,44 @@ test("a clean negative control and no canary found does not reproduce", async ()
       negativeControlBody: () => JSON.stringify({ data: [] }),
       exploitBody: () => JSON.stringify({ data: [] }),
     }),
-    () => reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe }),
+    () => reproduce(reproduceInput()),
   );
 
   assert.equal(outcome.outcome, "NOT_REPRODUCED");
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
-test("a dirty negative control (canary already present) is never trusted", async () => {
+test("a rejected fixture (non-2xx) stops the run before the negative control or exploit ever fire", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      fixtureStatus: 500,
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => JSON.stringify({ data: [] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+    assert.equal(outcome.evidence?.fixture?.ranToCompletion, false);
+    assert.equal(outcome.evidence?.negativeControl?.ranToCompletion, false);
+    assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+  }
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/negative"),
+    "the negative control must never run once the fixture is rejected",
+  );
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/exploit"),
+    "the exploit must never run once the fixture is rejected",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "the sandbox is still torn down");
+});
+
+test("a dirty negative control (canary already present) is never trusted, and the exploit never runs", async () => {
   resetSpies();
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -274,18 +325,53 @@ test("a dirty negative control (canary already present) is never trusted", async
       negativeControlBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
       exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
     }),
-    () => reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe }),
+    () => reproduce(reproduceInput()),
   );
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/exploit"),
+    "a dirty negative control must stop the run before the exploit is attempted at all",
+  );
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
-test("an exploit oracleCheck that throws never guesses REPRODUCED", async () => {
+test("a negative control that never completes stops the run before the exploit ever fires", async () => {
   resetSpies();
   const throwingRecipe: ReproductionRecipe = {
     ...recipe,
+    oracleCheck: (response, canary) => {
+      if (response.body.includes("boom")) throw new Error("malformed negative-control response");
+      return response.body.includes(canary);
+    },
+  };
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => "boom",
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: throwingRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.negativeControl?.ranToCompletion, false);
+  }
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/exploit"),
+    "an incomplete negative control must stop the run before the exploit is attempted at all",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the body hash it already sent", async () => {
+  resetSpies();
+  const throwingRecipe: ReproductionRecipe = {
+    ...recipe,
+    exploit: { method: "POST", path: "/exploit", body: { q: "{{canary}}" } },
     oracleCheck: (response) => {
       if (response.body.includes("boom")) throw new Error("malformed response");
       return false;
@@ -297,13 +383,19 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED", async () => 
       negativeControlBody: () => JSON.stringify({ data: [] }),
       exploitBody: () => "boom",
     }),
-    () => reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe: throwingRecipe }),
+    () => reproduce(reproduceInput({ recipe: throwingRecipe })),
   );
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") {
     assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
     assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+    // sendToSandbox actually sent the exploit request and computed its hash before oracleCheck
+    // threw; that hash must survive, not collapse to null just because what came after failed.
+    assert.ok(
+      outcome.evidence?.requestBodyHashes?.exploit,
+      "a request that was genuinely dispatched must keep its body hash even if the oracle check after it throws",
+    );
   }
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
@@ -314,7 +406,7 @@ test("a sandbox that never provisions reports COULD_NOT_DEPLOY and tears down no
     throw new Error("daytona is down");
   };
 
-  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+  const outcome = await reproduce(reproduceInput());
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
@@ -328,7 +420,7 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
     return { exitCode: 0, result: "000" };
   };
 
-  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+  const outcome = await reproduce(reproduceInput());
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
@@ -337,7 +429,7 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
 
 test("a missing snapshot id short-circuits before touching the sandbox client at all", async () => {
   resetSpies();
-  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: null, recipe });
+  const outcome = await reproduce(reproduceInput({ snapshotId: null }));
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
@@ -356,7 +448,7 @@ test("teardown still runs when an unexpected error happens after provisioning", 
   }) as typeof fetch;
 
   try {
-    const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+    const outcome = await reproduce(reproduceInput());
     assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   } finally {
     globalThis.fetch = originalFetch;

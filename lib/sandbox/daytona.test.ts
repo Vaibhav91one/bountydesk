@@ -98,6 +98,48 @@ test("a snapshot built from a different image is refused", () => {
   );
 });
 
+test("an explicit override is accepted only as an addition to the digest check, never instead of it", () => {
+  const taggedSnapshot = { ...snapshot, imageName: "ghcr.io/example/juice-shop:v17.3.0-bountydesk-sandbox" };
+
+  // No override supplied: the tag-pinned snapshot is refused exactly as before.
+  assert.throws(() => assertSnapshotImage(spec, taggedSnapshot), UnsafeSandboxSpec);
+
+  // The override matches this snapshot's imageName: allowed.
+  assert.doesNotThrow(() =>
+    assertSnapshotImage(spec, taggedSnapshot, "ghcr.io/example/juice-shop:v17.3.0-bountydesk-sandbox"),
+  );
+
+  // The override is supplied but matches neither the digest nor this snapshot: still refused.
+  assert.throws(
+    () => assertSnapshotImage(spec, taggedSnapshot, "ghcr.io/example/juice-shop:some-other-tag"),
+    UnsafeSandboxSpec,
+  );
+
+  // A snapshot that already matches the digest pin needs no override to pass.
+  assert.doesNotThrow(() => assertSnapshotImage(spec, snapshot, "ghcr.io/example/juice-shop:irrelevant"));
+});
+
+test("createSandbox provisions against a tag-pinned snapshot only when the override names it exactly", async () => {
+  const taggedSnapshot = { ...snapshot, imageName: "ghcr.io/example/juice-shop:v17.3.0-bountydesk-sandbox" };
+  const stub = (async (input: unknown) => {
+    if (String(input).includes("/snapshots/")) return json(taggedSnapshot);
+    return json({ id: "sb-1", state: "started", public: false });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await assert.rejects(createSandbox(spec), UnsafeSandboxSpec, "no override: still refused");
+    await assert.doesNotReject(
+      createSandbox(spec, "ghcr.io/example/juice-shop:v17.3.0-bountydesk-sandbox"),
+      "matching override: allowed",
+    );
+    await assert.rejects(
+      createSandbox(spec, "ghcr.io/example/juice-shop:wrong-tag"),
+      UnsafeSandboxSpec,
+      "an override that matches neither the digest nor the snapshot is not a wildcard",
+    );
+  });
+});
+
 test("limits and a time-to-live are mandatory and positive", () => {
   for (const patch of [
     { cpu: 0 }, { cpu: -1 }, { memoryGb: 0 }, { diskGb: 0 },
