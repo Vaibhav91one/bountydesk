@@ -386,8 +386,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               verdictId={file.awaitingVerdictId}
               contentHash={file.verdict.contentHash}
               payload={file.verdict.payload}
+              outcome={file.verdict.outcome}
               outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
               summary={file.verdict.summary}
+              revision={file.verdict.revision}
+              destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
               targetName={file.target?.name ?? null}
               reproductionRan={!drafted}
               events={file.events.map((event) => ({

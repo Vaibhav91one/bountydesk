@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { PaperPlaneRight, Signature } from "@phosphor-icons/react/ssr";
+import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,27 +12,39 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 
-import { AgentTrace, LoaderGrid, ShimmerLabel, StreamingText, type TraceRow } from "./agent-trace";
-import { SignVerdict } from "./sign-verdict";
+import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
 
-type Message = { id: number; from: "reviewer" | "agent"; text: string };
+import { AgentChat, type ChatTurn } from "./agent-chat";
+import { AgentTrace, type TraceRow } from "./agent-trace";
+import { VerdictCard } from "./verdict-card";
+
+/** The tabs on the chat, and the thing each one answers about. */
+const TOPICS = ["Evidence", "Target", "What approving binds"];
 
 /**
  * Everything a reviewer needs before signing, in one place.
  *
- * The gate itself has not moved: SignVerdict below still calls the same guarded action, which
- * re-reads and locks its own rows and refuses a payload whose hash has changed. Nothing in
- * this dialog can approve anything, and nothing in the conversation reaches it.
+ * Two ways out, and they are not symmetric. Approving is one click on the card, because the
+ * comment is right there to read. Not approving goes through the conversation: you say what is
+ * wrong, and that sentence becomes the reason on the denial. It is the one reviewer-to-system
+ * message this product records, so the chat writes to something real rather than being a
+ * decoration next to the buttons.
+ *
+ * The gate itself has not moved. Both actions are the same guarded server actions the page
+ * calls, and those re-read and lock their own rows and refuse a payload whose hash has changed.
+ * Nothing in this dialog decides anything on its own.
  */
 export function ApprovalDialog({
   reportId,
   verdictId,
   contentHash,
   payload,
+  outcome,
   outcomeLabel,
   summary,
+  revision,
+  destination,
   targetName,
   reproductionRan,
   events,
@@ -41,49 +53,72 @@ export function ApprovalDialog({
   verdictId: string;
   contentHash: string;
   payload: string;
+  outcome: string;
   outcomeLabel: string;
   summary: string;
+  revision: number;
+  destination: string;
   targetName: string | null;
   reproductionRan: boolean;
   events: TraceRow[];
 }) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [draft, setDraft] = useState("");
+  const [chatting, setChatting] = useState(false);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [topic, setTopic] = useState(TOPICS[0]);
   const [thinking, setThinking] = useState(false);
+  const [acting, setActing] = useState<"allow" | "deny" | null>(null);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
 
   /**
    * What the agent answers with.
    *
-   * Assembled from this report's own record, never invented. A canned line claiming the bug
-   * was reproduced would be the model narrating a verdict, which is the one thing it must
-   * never do; so every sentence here restates something already on this screen, and when no
-   * reproduction ran it says exactly that.
+   * Assembled from this report's own record, never invented, and keyed to whichever tab is
+   * open. A canned line claiming the bug was reproduced would be the model narrating a verdict,
+   * which is the one thing it must never do, so every sentence restates something already on
+   * this screen and the no-reproduction case says exactly that.
    */
   function reply(): string {
-    const target = targetName ? `the pinned target ${targetName}` : "no bound target";
-    const evidence = reproductionRan
-      ? "The oracle observed this run's canary outside the sandbox, and that is what decided the outcome."
-      : "No sandbox was provisioned and no canary was seeded, so nothing was reproduced and the outcome is analysis only.";
+    if (topic === "Target") {
+      return targetName
+        ? `This report is bound to the pinned target ${targetName}. Reproduction would run against that image and nothing else; the scope guard takes the target from the server-held profile, not from anything I wrote.`
+        : "No target profile is bound to this report, so there is nothing to reproduce against. That is why the run stopped at analysis only.";
+    }
 
-    return `This report is bound to ${target}. ${evidence} The verdict on record reads ${outcomeLabel.toLowerCase()}: ${summary} Approving binds the exact comment shown here and its hash; nothing is posted until you do.`;
+    if (topic === "What approving binds") {
+      return `Approving records your decision against revision ${revision} and hash ${contentHash.slice(0, 12)}. The submission worker relays that to the harness, and publish_verdict refuses any payload whose hash differs. It does not close the issue, and it does not change the verdict.`;
+    }
+
+    return reproductionRan
+      ? `The oracle observed this run's canary outside the sandbox, and that is what decided the outcome. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`
+      : `No sandbox was provisioned and no canary was seeded, so nothing was reproduced. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
   }
 
-  function send(event: React.FormEvent) {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text || thinking) return;
-
-    setMessages((current) => [
-      ...current,
-      { id: current.length, from: "reviewer", text },
-    ]);
-    setDraft("");
+  function send(text: string) {
+    setTurns((current) => [...current, { id: current.length, from: "reviewer", text }]);
     setThinking(true);
-
     window.setTimeout(() => {
-      setMessages((current) => [...current, { id: current.length, from: "agent", text: reply() }]);
+      setTurns((current) => [
+        ...current,
+        { id: current.length, from: "agent", text: reply(), source: topic },
+      ]);
       setThinking(false);
     }, 900);
+  }
+
+  // The last thing the reviewer wrote, which is what a denial carries as its reason.
+  const reason = [...turns].reverse().find((turn) => turn.from === "reviewer")?.text ?? null;
+
+  async function decide(kind: "allow" | "deny") {
+    if (acting) return;
+    setActing(kind);
+    const answer =
+      kind === "allow"
+        ? await allowVerdict(reportId, verdictId)
+        : await denyVerdict(reportId, verdictId, reason ?? undefined);
+    setActing(null);
+    setResult(answer);
+    if (answer.ok) setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
   }
 
   return (
@@ -103,84 +138,69 @@ export function ApprovalDialog({
         <DialogHeader className="border-b border-border/50 p-5">
           <DialogTitle>Sign the verdict</DialogTitle>
           <DialogDescription>
-            The run has stopped here. Nothing is posted until you approve the exact words below.
+            The run has stopped here. Approve the exact words below, or say what is wrong with
+            them.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-6 p-5">
+        <div className="flex flex-col gap-5 p-5">
           <AgentTrace rows={events} />
 
-          <div className="flex flex-col gap-2">
-            <span className="text-meta text-muted-foreground">The exact comment</span>
-            {/* Plain text, never rendered. These are the bytes that would be posted, and a
-                rendering of them is not them. */}
-            <pre className="max-h-64 overflow-auto rounded-md border border-border/50 bg-background p-4 text-body whitespace-pre-wrap text-foreground">
-              {payload}
-            </pre>
-            <p className="font-mono text-meta break-all text-muted-foreground">
-              <span className="text-muted-foreground/70">sha256 </span>
-              {contentHash}
+          {decision ? (
+            <p
+              role="status"
+              className="flex items-start gap-2.5 rounded-md bg-emerald-500/10 px-4 py-3 text-body text-emerald-400"
+            >
+              <CheckCircle className="mt-0.5 size-4 shrink-0" />
+              {decision === "ALLOWED"
+                ? "Recorded. The submission worker relays it to the harness; nothing is posted until publish_verdict runs."
+                : "Denied. Nothing will be posted, and the report is closed on BountyDesk's side."}
             </p>
-          </div>
-
-          <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-background p-4">
-            <span className="text-meta text-muted-foreground">Ask Agent Bounty</span>
-
-            {messages.length === 0 && !thinking ? (
-              <p className="text-meta text-muted-foreground">
-                Ask about the target, the evidence, or what approving binds.
-              </p>
-            ) : null}
-
-            {messages.map((message) =>
-              message.from === "reviewer" ? (
+          ) : (
+            <>
+              {/* Every refusal string comes from the action, which is the thing that actually
+                  re-reads and locks the rows. Restating it here would be a second opinion. */}
+              {result && !result.ok ? (
                 <p
-                  key={message.id}
-                  className="self-end rounded-md bg-muted px-3 py-2 text-body text-foreground"
+                  role="alert"
+                  className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-body text-destructive"
                 >
-                  {message.text}
+                  <Warning className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    {result.error}. Nothing was recorded; reload to see the state the database is
+                    actually in.
+                  </span>
                 </p>
-              ) : (
-                <StreamingText key={message.id} text={message.text} />
-              ),
-            )}
+              ) : null}
 
-            {thinking ? (
-              <span className="flex items-center gap-2.5">
-                <LoaderGrid />
-                <ShimmerLabel>Reading the record</ShimmerLabel>
-              </span>
-            ) : null}
-
-            <form onSubmit={send} className="flex items-center gap-2">
-              <Input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Ask about this report"
-                aria-label="Ask Agent Bounty about this report"
-                className="h-10 border-border/50 text-body"
+              <VerdictCard
+                payload={payload}
+                outcome={outcome}
+                outcomeLabel={outcomeLabel}
+                revision={revision}
+                contentHash={contentHash}
+                destination={destination}
+                onChat={() => setChatting(true)}
+                approve={() => decide("allow")}
+                approving={acting === "allow"}
+                disabled={acting !== null}
               />
-              <Button type="submit" size="icon-sm" variant="outline" aria-label="Send">
-                <PaperPlaneRight className="size-4" />
-              </Button>
-            </form>
 
-            {/* Said once, quietly. The answers are assembled from this report's own record and
-                the question is not sent anywhere: there is no reviewer-to-agent channel yet,
-                and somebody reading this screen without that context should not have to guess. */}
-            <p className="text-meta text-muted-foreground/70">
-              Answers are composed from this report&rsquo;s record. Questions are not sent to the
-              harness; that channel is not built.
-            </p>
-          </div>
-
-          <div className="border-t border-border/50 pt-5">
-            <SignVerdict
-              reportId={reportId}
-              verdictId={verdictId}
-              contentHash={contentHash}
-            />
-          </div>
+              {chatting ? (
+                <AgentChat
+                  turns={turns}
+                  thinking={thinking}
+                  topics={TOPICS}
+                  topic={topic}
+                  onTopic={setTopic}
+                  onSend={send}
+                  onDeny={() => decide("deny")}
+                  denying={acting === "deny"}
+                  canDeny={reason !== null && acting === null}
+                />
+              ) : null}
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>
