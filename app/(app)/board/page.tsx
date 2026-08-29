@@ -31,6 +31,21 @@ const STATE_LABEL: Record<string, string> = {
   EXPIRED: "Expired",
 };
 
+/**
+ * The states something is actively doing, as opposed to one that is waiting.
+ *
+ * AWAITING_APPROVAL is deliberately absent: nothing is running, it is sitting still until a
+ * human answers, and a pulse there would say the opposite. Terminal states are finished.
+ */
+const RUNNING = new Set(["TRIAGING", "REPRODUCING", "DELIVERING"]);
+
+/** What a card in flight is doing, in the present tense, because it is still happening. */
+const RUNNING_LABEL: Record<string, string> = {
+  TRIAGING: "Triaging…",
+  REPRODUCING: "Reproducing…",
+  DELIVERING: "Delivering…",
+};
+
 /** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
 function age(from: Date): string {
   const minutes = Math.floor((Date.now() - from.getTime()) / 60_000);
@@ -43,6 +58,15 @@ function age(from: Date): string {
 
 function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
   const phase = phaseOf(card.state);
+  const running = RUNNING.has(card.state);
+
+  const status = card.awaitingVerdictId
+    ? "Needs review"
+    : running
+      ? RUNNING_LABEL[card.state]
+      : card.outcome
+        ? OUTCOME[card.outcome] ?? card.outcome
+        : "No verdict yet";
 
   return (
     <li
@@ -64,16 +88,14 @@ function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
         </Badge>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+      {/* A rule, because this line is a different kind of thing from the two above it: those
+          identify the report, this one says where it has got to. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/50 pt-3">
         {/* The phase, and the outcome or the honest absence of one. Never a canary or a
             confidence: no reproduction has run, so the card has nothing to say about one. */}
         <span className="flex items-center gap-2 text-meta text-muted-foreground">
-          <PhaseDot phase={phase} />
-          {card.awaitingVerdictId
-            ? "Needs review"
-            : card.outcome
-              ? OUTCOME[card.outcome] ?? card.outcome
-              : "No verdict yet"}
+          <PhaseDot phase={phase} running={running} />
+          {status}
         </span>
         <span className="text-meta text-muted-foreground">
           {card.eventCount} {card.eventCount === 1 ? "event" : "events"} · {age(card.updatedAt)}
