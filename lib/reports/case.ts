@@ -54,10 +54,16 @@ export type CaseFile = {
   channel: string;
   sourceRef: string;
   sourceLabel: string;
+  /** The issue number alone, for the GitHub-style "title #482". Null off GitHub. */
+  issueNumber: string | null;
   /** Null unless the source is a GitHub issue on a repository still connected. */
   issueUrl: string | null;
   repositoryFullName: string | null;
+  repositoryUrl: string | null;
   reporterHandle: string | null;
+  /** The reporter's GitHub profile, and their avatar. Null when the handle is not a login. */
+  reporterUrl: string | null;
+  reporterAvatarUrl: string | null;
   state: ReportState;
   createdAt: Date;
   updatedAt: Date;
@@ -173,14 +179,27 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .orderBy(sessionEvent.seq);
 
       const issue = issueNumber(row.sourceRef);
+      // Only a GitHub report has a GitHub profile behind its handle, and only a handle that
+      // could be a login is worth linking: anything else builds a URL to a 404 or, worse, to
+      // somebody else's account.
+      const login =
+        row.channel === "github" && row.reporterHandle && /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(row.reporterHandle)
+          ? row.reporterHandle
+          : null;
 
       return {
         ...row,
         sourceLabel: caseSourceLabel(row.sourceRef, row.id),
+        issueNumber: issue,
         issueUrl:
           issue && row.repositoryFullName
             ? `https://github.com/${row.repositoryFullName}/issues/${issue}`
             : null,
+        repositoryUrl: row.repositoryFullName
+          ? `https://github.com/${row.repositoryFullName}`
+          : null,
+        reporterUrl: login ? `https://github.com/${login}` : null,
+        reporterAvatarUrl: login ? `https://github.com/${login}.png?size=64` : null,
         target: row.targetName
           ? { name: row.targetName, imageDigest: row.targetDigest ?? "" }
           : null,

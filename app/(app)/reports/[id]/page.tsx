@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowSquareOut } from "@phosphor-icons/react/ssr";
 
 import { PhaseDot } from "@/components/phase-dot";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
@@ -163,6 +164,72 @@ function EventRow({ event }: { event: CaseEvent }) {
   );
 }
 
+/**
+ * A link out to GitHub, or the same text unlinked.
+ *
+ * The href is null whenever the destination cannot be built honestly: an email report has no
+ * issue, a repository we no longer hold has no owner or name. Rendering an anchor to a URL
+ * assembled from half the pieces sends a reviewer somewhere that is not this report.
+ */
+function External({ href, children }: { href: string | null; children: React.ReactNode }) {
+  if (!href) return <span className="text-foreground">{children}</span>;
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-foreground underline-offset-4 hover:text-brand-soft hover:underline"
+    >
+      {children}
+    </a>
+  );
+}
+
+/** The reporter as an avatar. The handle stays as the label and the tooltip. */
+function Reporter({
+  handle,
+  href,
+  avatarUrl,
+}: {
+  handle: string;
+  href: string | null;
+  avatarUrl: string | null;
+}) {
+  const badge = (
+    <Avatar className="size-5">
+      {/* Loaded from github.com, which is where the reviewer is already authenticated. The
+          fallback covers a handle that is not a login and an image that will not load. */}
+      {avatarUrl ? <AvatarImage src={avatarUrl} alt="" /> : null}
+      <AvatarFallback className="text-[10px]">
+        {handle.slice(0, 2).toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
+  );
+
+  if (!href) {
+    return (
+      <span className="flex items-center gap-1.5 text-foreground" title={handle}>
+        {badge}
+        <span className="sr-only">{handle}</span>
+      </span>
+    );
+  }
+
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      title={handle}
+      className="flex items-center gap-1.5 text-foreground hover:text-brand-soft"
+    >
+      {badge}
+      <span className="sr-only">{handle}</span>
+    </a>
+  );
+}
+
 export default async function CaseFilePage({ params }: { params: Promise<{ id: string }> }) {
   await requireReviewer();
   const { id } = await params;
@@ -187,17 +254,49 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         </Link>
 
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex flex-col gap-1.5">
-            <h1 className="text-title text-foreground">{file.title}</h1>
-            <p className="text-meta text-muted-foreground">
-              {file.repositoryFullName ?? file.channel} · {file.sourceLabel}
-              {file.reporterHandle ? ` · opened by ${file.reporterHandle}` : ""}
+          <div className="flex min-w-0 flex-col gap-2.5">
+            {/* GitHub's shape: the title, then its number in the same line at lower
+                contrast. The number is part of the identity, not a separate field. */}
+            <h1 className="text-title text-foreground">
+              {file.title}
+              {file.issueNumber ? (
+                <span className="ml-2 font-normal text-muted-foreground">
+                  #{file.issueNumber}
+                </span>
+              ) : null}
+            </h1>
+
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-meta text-muted-foreground">
+              <span className="flex items-center gap-2 text-body text-foreground">
+                <PhaseDot phase={phase} />
+                {STATE_LABEL[file.state] ?? file.state}
+              </span>
+
+              <span aria-hidden="true">·</span>
+
+              {file.reporterHandle ? (
+                <>
+                  {/* The avatar stands in for the name, so the name has to survive somewhere
+                      a screen reader and a hover can both reach it. */}
+                  <Reporter
+                    handle={file.reporterHandle}
+                    href={file.reporterUrl}
+                    avatarUrl={file.reporterAvatarUrl}
+                  />
+                  <span>opened</span>
+                </>
+              ) : null}
+
+              <External href={file.issueUrl}>{file.sourceLabel}</External>
+
+              {file.repositoryFullName ? (
+                <>
+                  <span>in</span>
+                  <External href={file.repositoryUrl}>{file.repositoryFullName}</External>
+                </>
+              ) : null}
             </p>
           </div>
-          <span className="flex items-center gap-2.5 text-body text-foreground">
-            <PhaseDot phase={phase} />
-            {STATE_LABEL[file.state] ?? file.state}
-          </span>
         </div>
       </header>
 

@@ -207,7 +207,8 @@ async function main(): Promise<void> {
         sourceRef: `github:99100001:issue:${stamp % 100000}${issue}`,
         title: seed.title,
         body: `Seeded report. ${seed.title}.`,
-        reporterHandle: "seeded-reporter",
+        // A real login so the avatar resolves. Seeded reports are fake; the handle is not.
+        reporterHandle: "Vaibhav91one",
         state: seed.state,
         connectedRepositoryId,
         targetProfileId: seed.unbound ? null : targetProfileId,

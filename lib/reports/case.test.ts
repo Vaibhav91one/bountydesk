@@ -215,3 +215,33 @@ test("evidence is passed through as recorded, not interpreted", async () => {
   // shows up without a code change; until then it says exactly what it says.
   assert.deepEqual(file?.verdict?.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
 });
+
+test("a reporter is only linked when the handle could actually be a GitHub login", async () => {
+  const linked = await cases.readCase(await seedReport("TRIAGING"));
+  assert.equal(linked?.reporterUrl, "https://github.com/someone");
+  assert.equal(linked?.reporterAvatarUrl, "https://github.com/someone.png?size=64");
+  assert.equal(linked?.repositoryUrl, "https://github.com/acme/juice-shop");
+
+  // An email address is a perfectly good reporter handle and a terrible GitHub login. Building
+  // github.com/<that> lands on a 404 at best, and on somebody else's account at worst.
+  issues += 1;
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:reporter-${issues}@example.com`,
+      title: "sent by email",
+      body: "body",
+      reporterHandle: "reporter@example.com",
+      state: "TRIAGING",
+      connectedRepositoryId: repositoryId,
+      targetProfileId,
+    })
+    .returning({ id: dbm.report.id });
+
+  const emailed = await cases.readCase(row.id);
+  assert.equal(emailed?.reporterHandle, "reporter@example.com", "the handle is still shown");
+  assert.equal(emailed?.reporterUrl, null);
+  assert.equal(emailed?.reporterAvatarUrl, null);
+  assert.equal(emailed?.issueNumber, null);
+});
