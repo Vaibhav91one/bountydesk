@@ -205,6 +205,10 @@ function fetchStub(
     exploitHeaders?: HeadersInit;
     negativeControlBody: (canary: string) => string;
     exploitBody: (canary: string) => string;
+    /** Only exercised by the exploitFollowUp tests below: a recipe's follow-up leg hits this
+     * path, never the ones above. */
+    followUpStatus?: number;
+    followUpBody?: (canary: string) => string;
   },
 ): typeof fetch {
   let lastCanary: string | null = null;
@@ -247,6 +251,12 @@ function fetchStub(
         headers: responses.exploitHeaders,
       });
     }
+    if (path === "/followup") {
+      calls.push({ url, init, canary: lastCanary });
+      return new Response((responses.followUpBody ?? (() => ""))(lastCanary ?? ""), {
+        status: responses.followUpStatus ?? 200,
+      });
+    }
 
     throw new Error(`unexpected fetch to ${url}`);
   }) as typeof fetch;
@@ -260,6 +270,32 @@ const recipe: ReproductionRecipe = {
   negativeControl: { method: "GET", path: "/negative" },
   exploit: { method: "GET", path: "/exploit" },
   oracleCheck: (response, canary) => response.body.includes(canary),
+};
+
+/** A stand-in for the login-bypass shape: the exploit mints a token, and only a follow-up
+ * request built from that token can prove anything -- oracleCheck on the exploit's own response
+ * would just be "did a token come back", the exact gap this recipe field exists to close. */
+const recipeWithFollowUp: ReproductionRecipe = {
+  id: "test-recipe-follow-up",
+  title: "a test recipe with a follow-up leg",
+  keywords: ["test recipe"],
+  fixture: { request: { method: "POST", path: "/fixture", body: { email: "{{canary}}" } } },
+  negativeControl: { method: "GET", path: "/negative" },
+  exploit: { method: "POST", path: "/exploit", body: { attempt: "bypass" } },
+  oracleCheck: () => false,
+  exploitFollowUp: {
+    buildRequest: (exploitResponse) => {
+      let parsed: { token?: string };
+      try {
+        parsed = JSON.parse(exploitResponse.body) as { token?: string };
+      } catch {
+        return undefined;
+      }
+      if (!parsed.token) return undefined;
+      return { method: "GET", path: "/followup", headers: { Authorization: `Bearer ${parsed.token}` } };
+    },
+    oracleCheck: (response, canary) => response.body.includes(canary),
+  },
 };
 
 function reproduceInput(overrides: Partial<Parameters<typeof reproduce>[0]> = {}) {
@@ -928,5 +964,192 @@ test("teardown still runs when an unexpected error happens after provisioning", 
     globalThis.fetch = originalFetch;
   }
 
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+function withFollowUpAuthorization() {
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      appPort: 3000,
+      recipe: recipeWithFollowUp,
+    };
+  };
+}
+
+test("exploitFollowUp happy path: a minted token whose follow-up carries the canary reproduces", async () => {
+  resetSpies();
+  withFollowUpAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => JSON.stringify({ token: "minted-jwt" }),
+      followUpBody: (canary) => JSON.stringify({ data: [{ email: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithFollowUp })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(
+    calls.some((c) => new URL(c.url).pathname === "/followup"),
+    "the follow-up request must actually be dispatched",
+  );
+  assert.ok(
+    calls.some((c) => {
+      const auth = new Headers(c.init?.headers).get("authorization");
+      return auth === "Bearer minted-jwt";
+    }),
+    "the follow-up request must carry the token extracted from the exploit response",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("exploitFollowUp: a token whose follow-up response lacks this run's canary does not reproduce", async () => {
+  resetSpies();
+  withFollowUpAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => JSON.stringify({ token: "minted-jwt" }),
+      // A real admin dump comes back, just not proven to be *this run's* canary -- exactly the
+      // case the withheld "was any token minted" oracle couldn't tell apart from a real bypass.
+      followUpBody: () => JSON.stringify({ data: [{ email: "admin@juice-sh.op" }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithFollowUp })),
+  );
+
+  assert.equal(outcome.outcome, "NOT_REPRODUCED");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("exploitFollowUp: no token minted skips the follow-up request entirely and does not reproduce", async () => {
+  resetSpies();
+  withFollowUpAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => JSON.stringify({ message: "no token this time" }),
+      followUpBody: (canary) => JSON.stringify({ data: [{ email: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithFollowUp })),
+  );
+
+  assert.equal(outcome.outcome, "NOT_REPRODUCED");
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/followup"),
+    "buildRequest declined to build anything, so no follow-up request should ever be sent",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("exploitFollowUp: a failing follow-up request is ANALYSIS_ONLY, never a guessed verdict", async () => {
+  resetSpies();
+  withFollowUpAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => JSON.stringify({ token: "minted-jwt" }),
+      followUpStatus: 502,
+      followUpBody: () => JSON.stringify({ error: "preview unavailable" }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithFollowUp })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+  }
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("negativeControlAcceptedStatuses: a declared non-2xx status still completes the negative control", async () => {
+  resetSpies();
+  const recipeWithAcceptedStatus: ReproductionRecipe = {
+    ...recipe,
+    negativeControl: { method: "GET", path: "/negative" },
+    negativeControlAcceptedStatuses: [401],
+    oracleCheck: (response, canary) => response.body.includes(canary),
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      appPort: 3000,
+      recipe: recipeWithAcceptedStatus,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlStatus: 401,
+      negativeControlBody: () => JSON.stringify({ message: "Invalid email or password" }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithAcceptedStatus })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  if (outcome.outcome === "REPRODUCED") {
+    assert.equal(outcome.evidence.negativeControl.ranToCompletion, true);
+    assert.equal(outcome.evidence.negativeControl.canaryFound, false);
+  }
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("negativeControlAcceptedStatuses: an undeclared non-2xx status is still an incomplete leg", async () => {
+  resetSpies();
+  const recipeWithAcceptedStatus: ReproductionRecipe = {
+    ...recipe,
+    negativeControl: { method: "GET", path: "/negative" },
+    negativeControlAcceptedStatuses: [401],
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      appPort: 3000,
+      recipe: recipeWithAcceptedStatus,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlStatus: 503,
+      negativeControlBody: () => JSON.stringify({ error: "unavailable" }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithAcceptedStatus })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.negativeControl?.ranToCompletion, false);
+  }
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/exploit"),
+    "an incomplete negative control must still stop the run before the exploit is attempted",
+  );
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });

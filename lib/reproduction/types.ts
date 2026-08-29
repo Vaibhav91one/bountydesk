@@ -72,16 +72,44 @@ export type ReproductionRecipe = {
   /** Must NOT trip the oracle. Run before the exploit, and must complete and stay clean before
    * the exploit leg is attempted at all: see decideOutcome below. */
   negativeControl: ReproductionRequest;
+  /** Extra HTTP status codes, beyond any 2xx, that count as the negative control completing
+   * legitimately rather than as an infrastructure failure. Needed when the negative control's
+   * correct outcome is itself a non-2xx response -- e.g. a login recipe's negative control is a
+   * deliberately wrong password, which the target correctly rejects with 401. Absent for a
+   * recipe whose negative control legitimately succeeds with 2xx (the search-SQLi recipe),
+   * which leaves that recipe's behaviour in the orchestrator's runLeg exactly as it is today. */
+  negativeControlAcceptedStatuses?: number[];
   exploit: ReproductionRequest;
   /**
    * Evaluates a response the controller received directly from the target -- never sandbox-exec
-   * stdout -- for the presence of the given canary value. Called once for the negative control
-   * (expected false) and once for the exploit (the real check).
+   * stdout -- for the presence of the given canary value. Always called for the negative control
+   * (expected false). Called for the exploit too, unless `exploitFollowUp` is present, in which
+   * case the follow-up's own oracleCheck decides the exploit leg instead (see below).
    */
   oracleCheck: (
     response: ReproductionProbeResult,
     canary: string,
   ) => Promise<boolean> | boolean;
+  /**
+   * A second oracle leg for a scenario where the exploit's own response can't prove anything by
+   * itself -- it has to be used to make one more request first. The auth-bypass login recipe is
+   * the motivating case: the exploit mints a token, and only a follow-up call with that token
+   * (checked for this run's own canary) proves the token actually grants access, rather than
+   * merely that some token came back. Absent for a recipe whose exploit response is the whole
+   * proof (the search-SQLi recipe), which leaves that recipe running through the orchestrator's
+   * single-response `oracleCheck` path exactly as it does today.
+   */
+  exploitFollowUp?: {
+    /** Builds the next request from the exploit leg's own response -- e.g. extracting a minted
+     * auth token. Returns undefined when the exploit response carries nothing to follow up on
+     * (say, the injection didn't mint a token this run): the exploit leg then completes with no
+     * proof, and the orchestrator never dispatches a follow-up request at all. */
+    buildRequest: (exploitResponse: ReproductionProbeResult) => ReproductionRequest | undefined;
+    /** Evaluates the follow-up response -- never the exploit's own response -- for the canary.
+     * This is the leg that actually proves the exploit granted access, rather than merely
+     * having returned something. */
+    oracleCheck: (response: ReproductionProbeResult, canary: string) => Promise<boolean> | boolean;
+  };
 };
 
 /**
