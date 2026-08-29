@@ -414,6 +414,15 @@ test("a fence lost between claim and release surfaces as LeaseLostError", async 
   await assert.rejects(poller.pollOnce("w-fence-loss", { client }), queue.LeaseLostError);
 });
 
+test("pollOnce rejects a lease that cannot reach its first heartbeat", async () => {
+  await drainOthers();
+
+  await assert.rejects(
+    poller.pollOnce("w-too-short", { leaseSeconds: 0.05 }),
+    /leaseSeconds must exceed the 50 ms heartbeat floor/,
+  );
+});
+
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
   await drainOthers();
   const fixture = await seedSession();

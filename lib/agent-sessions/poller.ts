@@ -16,6 +16,7 @@ import { claim, release, renew, type AgentSessionLease } from "./queue";
  * capped exponential (same formula as lib/jobs/queue.ts's fail()) if that stops being true.
  */
 const POLL_BACKOFF_MS = 5000;
+const MIN_HEARTBEAT_INTERVAL_MS = 50;
 
 /** Once a pending call is verified, hold off polling again until the approval submission
  * worker has had a chance to act; a retried poll before then is a safe no-op (see below) but
@@ -226,7 +227,10 @@ async function runWithHeartbeat<T>(
   const signal = outerSignal
     ? AbortSignal.any([controller.signal, outerSignal])
     : controller.signal;
-  const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
+  const intervalMs = Math.max(
+    MIN_HEARTBEAT_INTERVAL_MS,
+    Math.floor((leaseSeconds * 1000) / 3),
+  );
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let renewal = Promise.resolve();
@@ -283,6 +287,12 @@ export async function pollOnce(
 ): Promise<string | null> {
   if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
+  if (
+    !Number.isFinite(leaseSeconds) ||
+    leaseSeconds * 1000 <= MIN_HEARTBEAT_INTERVAL_MS
+  ) {
+    throw new Error("leaseSeconds must exceed the 50 ms heartbeat floor");
+  }
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
 
