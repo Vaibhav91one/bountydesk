@@ -124,7 +124,16 @@ export function IntegrationList({ rows }: { rows: IntegrationRow[] }) {
               </span>
 
               <div className="flex min-w-40 flex-1 flex-col">
-                <span className="text-body font-medium text-foreground">{row.name}</span>
+                {/* The name is the link, not the row: the row carries a button of its own, and
+                    a button nested inside a link is invalid markup. Every channel has a page,
+                    including the three that are not built, because what a channel will do and
+                    why it does not do it yet is exactly what somebody clicking wants. */}
+                <Link
+                  href={`/integrations/${row.id}`}
+                  className="w-fit cursor-pointer text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
+                >
+                  {row.name}
+                </Link>
                 <span className="text-meta text-muted-foreground">{row.detail}</span>
               </div>
 

@@ -48,10 +48,7 @@ export default async function IntegrationsPage() {
       detail: githubDetail(),
       icon: "github",
       installed: connections.length > 0,
-      action:
-        connections.length > 0
-          ? { kind: "link", href: "/connections", label: "Manage" }
-          : { kind: "link", href: installUrl(), label: "Install" },
+      action: { kind: "link", href: "/integrations/github", label: "View" },
     },
     {
       id: "email",
@@ -59,7 +56,7 @@ export default async function IntegrationsPage() {
       detail: "Report intake by email. Designed, not built.",
       icon: "gmail",
       installed: false,
-      action: { kind: "none", label: "Unavailable" },
+      action: { kind: "link", href: "/integrations/email", label: "View" },
     },
     {
       id: "upload",
@@ -67,7 +64,7 @@ export default async function IntegrationsPage() {
       detail: "Report intake by upload. Designed, not built.",
       icon: "folder",
       installed: false,
-      action: { kind: "none", label: "Unavailable" },
+      action: { kind: "link", href: "/integrations/upload", label: "View" },
     },
     {
       id: "drive",
@@ -75,7 +72,7 @@ export default async function IntegrationsPage() {
       detail: "Not planned for this version.",
       icon: "onedrive",
       installed: false,
-      action: { kind: "none", label: "Unavailable" },
+      action: { kind: "link", href: "/integrations/drive", label: "View" },
     },
   ];
 
