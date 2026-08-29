@@ -21,6 +21,7 @@ type TestReproductionAuthorization =
       imageName: string;
       imageDigest: string;
       snapshotId: string | null;
+      appPort: number;
       recipe: ReproductionRecipe;
     }
   | { ok: false; reason: "NO_BOUND_TARGET" | "NO_APPROVED_ORACLE" };
@@ -66,20 +67,31 @@ let authorizeCalls: { targetProfileId: string; recipeId: string }[] = [];
  * would start failing at the buildMarkerCheck gate instead of testing what it already tests. */
 const BUILD_MARKER_COMMAND_FRAGMENT = "bountydesk-build-marker";
 
+function defaultExecuteResult(command: string): ExecResult {
+  if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+    return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+  }
+  if (command.includes("command -v curl")) {
+    return { exitCode: 0, result: "CURL_PRESENT\n" };
+  }
+  if (command.includes("bountydesk-egress")) {
+    return { exitCode: 0, result: "PROBE curl_exit=0 status=403\nBODY Internet is restricted\n" };
+  }
+  return { exitCode: 0, result: "200" };
+}
+
 /** Overridable per test: lets a test make provisioning, readiness or teardown fail without
  * touching the shared default. */
 let createSandboxImpl: (spec: SandboxSpec) => Promise<Sandbox> = async (spec) => {
   createSandboxCalls.push(spec);
   return FAKE_SANDBOX;
 };
+let getSandboxImpl: (id: string) => Promise<Sandbox> = async () => FAKE_SANDBOX;
 let executeImpl: (sandbox: Sandbox, command: string) => Promise<ExecResult> = async (_sandbox, command) => {
   executeCalls.push(command);
-  if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
-    return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
-  }
   // Any status starting with 2 satisfies waitForAppReady's readiness regex; the start-app
   // call's result is never inspected, so the same canned answer covers both execute() calls.
-  return { exitCode: 0, result: "200" };
+  return defaultExecuteResult(command);
 };
 let deleteSandboxImpl: (id: string) => Promise<void> = async (id) => {
   deleteSandboxCalls.push(id);
@@ -94,6 +106,7 @@ let authorizeImpl: (input: {
     imageName: "ghcr.io/vaibhav91one/juice-shop",
     imageDigest: "sha256:" + "a".repeat(64),
     snapshotId: "snap",
+    appPort: 3000,
     recipe,
   };
 };
@@ -101,6 +114,7 @@ let authorizeImpl: (input: {
 mock.module("./daytona", {
   namedExports: {
     createSandbox: (spec: SandboxSpec) => createSandboxImpl(spec),
+    getSandbox: (id: string) => getSandboxImpl(id),
     execute: (sandbox: Sandbox, command: string) => executeImpl(sandbox, command),
     deleteSandbox: (id: string) => deleteSandboxImpl(id),
     getSnapshot: async (): Promise<SnapshotInfo> => FAKE_SNAPSHOT,
@@ -123,12 +137,10 @@ function resetSpies(): void {
     createSandboxCalls.push(spec);
     return FAKE_SANDBOX;
   };
+  getSandboxImpl = async () => FAKE_SANDBOX;
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
-    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
-      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
-    }
-    return { exitCode: 0, result: "200" };
+    return defaultExecuteResult(command);
   };
   deleteSandboxImpl = async (id) => {
     deleteSandboxCalls.push(id);
@@ -140,6 +152,7 @@ function resetSpies(): void {
       imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: "sha256:" + "a".repeat(64),
       snapshotId: "snap",
+      appPort: 3000,
       recipe,
     };
   };
@@ -305,6 +318,7 @@ test("caller-supplied image and snapshot values are replaced by the bound target
       imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
       snapshotId: "authorized-snapshot",
+      appPort: 3000,
       recipe,
     };
   };
@@ -329,6 +343,105 @@ test("caller-supplied image and snapshot values are replaced by the bound target
   assert.equal(createSandboxCalls[0]?.imageRef, FAKE_SNAPSHOT.imageName);
 });
 
+test("the authorized target profile port drives readiness and preview lookup", async () => {
+  resetSpies();
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
+      snapshotId: "snap",
+      appPort: 8080,
+      recipe,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(executeCalls.some((command) => command.includes("http://localhost:8080/")));
+  assert.ok(calls.some((call) => call.url.includes("/ports/8080/preview-url")));
+});
+
+test("an already-aborted signal stops before authorization or provisioning", async () => {
+  resetSpies();
+  const controller = new AbortController();
+  const reason = new Error("lease lost");
+  controller.abort(reason);
+
+  await assert.rejects(() => reproduce(reproduceInput(), { signal: controller.signal }), reason);
+  assert.deepEqual(authorizeCalls, []);
+  assert.deepEqual(createSandboxCalls, []);
+  assert.deepEqual(deleteSandboxCalls, []);
+});
+
+test("egress policy mismatch fails closed before app startup or oracle requests", async () => {
+  resetSpies();
+  createSandboxImpl = async (spec) => {
+    createSandboxCalls.push(spec);
+    return FAKE_SANDBOX;
+  };
+  getSandboxImpl = async () => ({ ...FAKE_SANDBOX, networkBlockAll: false });
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
+  assert.ok(!executeCalls.some((command) => command.includes("nohup node build/app")));
+  assert.ok(!calls.some((call) => !call.url.includes("/ports/")));
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("recipe headers cannot override the Daytona preview token", async () => {
+  resetSpies();
+  const headerRecipe: ReproductionRecipe = {
+    ...recipe,
+    fixture: {
+      request: {
+        ...recipe.fixture.request,
+        headers: { "X-Daytona-Preview-Token": "recipe-supplied-token" },
+      },
+    },
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      appPort: 3000,
+      recipe: headerRecipe,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: headerRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+});
+
 test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never reaches the oracle", async () => {
   resetSpies();
   executeImpl = async (_sandbox, command) => {
@@ -336,7 +449,7 @@ test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never 
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
       return { exitCode: 0, result: "not-the-expected-commit\n" };
     }
-    return { exitCode: 0, result: "200" };
+    return defaultExecuteResult(command);
   };
 
   // No fetch stub installed: if the marker check failed to short-circuit the flow, the next
@@ -354,7 +467,7 @@ test("an execute() failure while reading the build marker fails closed, same as 
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) throw new Error("toolbox unreachable");
-    return { exitCode: 0, result: "200" };
+    return defaultExecuteResult(command);
   };
 
   const outcome = await reproduce(reproduceInput());
@@ -445,6 +558,7 @@ test("a negative control that never completes stops the run before the exploit e
       imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: "sha256:" + "a".repeat(64),
       snapshotId: "snap",
+      appPort: 3000,
       recipe: throwingRecipe,
     };
   };
@@ -486,6 +600,7 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the
       imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: "sha256:" + "a".repeat(64),
       snapshotId: "snap",
+      appPort: 3000,
       recipe: throwingRecipe,
     };
   };
@@ -530,6 +645,7 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
   resetSpies();
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
+    if (!command.includes("http://localhost")) return defaultExecuteResult(command);
     return { exitCode: 0, result: "000" };
   };
 
@@ -549,6 +665,7 @@ test("a missing snapshot id short-circuits before touching the sandbox client at
       imageName: "ghcr.io/vaibhav91one/juice-shop",
       imageDigest: "sha256:" + "a".repeat(64),
       snapshotId: null,
+      appPort: 3000,
       recipe,
     };
   };
@@ -570,6 +687,7 @@ test("cancellation during readiness tears down the sandbox and rejects the run",
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
       return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
     }
+    if (!command.includes("http://localhost")) return defaultExecuteResult(command);
     probes += 1;
     if (probes === 2) controller.abort(reason);
     return { exitCode: 0, result: "000" };

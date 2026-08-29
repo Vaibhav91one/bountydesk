@@ -35,18 +35,10 @@ import type {
 } from "@/lib/reproduction/types";
 import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, isValidImageDigest } from "@/lib/targets/configure";
 import { buildMarkerCheck } from "./build-marker";
-import { createSandbox, deleteSandbox, execute, getSnapshot, type Sandbox } from "./daytona";
+import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox } from "./daytona";
 import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
 
 const DAYTONA_API = "https://app.daytona.io/api";
-
-/**
- * Juice Shop's app port. The one frozen TargetProfile (decisions.md Q18) declares
- * `config.baseUrl` as "http://localhost:3000", but ReproduceFn's input carries only the
- * digest, snapshot and recipe, not the profile's config -- so this stays a constant until a
- * second target with a different port earns a real parameter here.
- */
-const APP_PORT = 3000;
 
 /** Juice Shop's own start command (its package.json's `start` script). Backgrounded and
  * redirected so execute()'s own command timeout doesn't wait on a process that is meant to
@@ -184,12 +176,17 @@ function delay(ms: number, signal?: AbortSignal): Promise<void> {
  * `signal` is checked between poll attempts, not inside a single execute() call: a caller
  * that cancels mid-probe still waits out that one in-flight command, but never starts another.
  */
-async function waitForAppReady(sandbox: Sandbox, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+async function waitForAppReady(
+  sandbox: Sandbox,
+  port: number,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   throwIfAborted(signal);
   await execute(sandbox, START_APP_COMMAND, 10);
 
   const deadline = Date.now() + timeoutMs;
-  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/ 2>/dev/null || echo 000`;
+  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}/ 2>/dev/null || echo 000`;
 
   while (Date.now() < deadline) {
     throwIfAborted(signal);
@@ -199,7 +196,54 @@ async function waitForAppReady(sandbox: Sandbox, timeoutMs: number, signal?: Abo
     await delay(READINESS_POLL_MS, signal);
   }
 
-  throw new Error(`sandbox ${sandbox.id} did not answer on port ${APP_PORT} within ${timeoutMs}ms`);
+  throw new Error(`sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms`);
+}
+
+async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  if (!sandbox.networkBlockAll) {
+    throw new Error("reproduction sandbox came up with networkBlockAll false");
+  }
+  if (sandbox.networkAllowList || sandbox.domainAllowList) {
+    throw new Error("reproduction sandbox came up with a non-empty egress allow list");
+  }
+
+  const haveCurl = await execute(sandbox, "command -v curl >/dev/null && echo CURL_PRESENT", 15);
+  throwIfAborted(signal);
+  if (!haveCurl.result.includes("CURL_PRESENT")) {
+    throw new Error("curl is not available in the sandbox, so the egress probes prove nothing");
+  }
+
+  const probes = [
+    "https://example.com",
+    "http://1.1.1.1",
+    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+  ];
+  const denial = "Internet is restricted";
+
+  for (const url of probes) {
+    throwIfAborted(signal);
+    const script = [
+      ": > /tmp/bountydesk-egress.body",
+      `curl -sS --max-time 8 -o /tmp/bountydesk-egress.body -w '%{http_code}' '${url}' > /tmp/bountydesk-egress.status 2>/tmp/bountydesk-egress.err`,
+      "echo \"PROBE curl_exit=$? status=$(cat /tmp/bountydesk-egress.status)\"",
+      "echo \"BODY $(head -c 120 /tmp/bountydesk-egress.body | tr -d '\\n')\"",
+    ].join("; ");
+    const result = await execute(sandbox, script, 20);
+    throwIfAborted(signal);
+    const parsed = /PROBE curl_exit=(\d+) status=(\d*)/.exec(result.result);
+    if (result.exitCode !== 0 || !parsed) {
+      throw new Error(`egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`);
+    }
+
+    const curlExit = Number(parsed[1]);
+    const status = parsed[2] === "" || parsed[2] === "000" ? null : parsed[2];
+    const body = /BODY (.*)/.exec(result.result)?.[1]?.trim() ?? "";
+    if (curlExit !== 0 && status === null) continue;
+    if (status === "403" && body.includes(denial)) continue;
+
+    throw new Error(`reproduction sandbox reached ${url} despite networkBlockAll`);
+  }
 }
 
 type SentRequest = { probe: ReproductionProbeResult; bodyEvidence: RequestBodyEvidence };
@@ -218,11 +262,7 @@ async function sendToSandbox(
 
   const response = await fetch(url, {
     method: request.method,
-    headers: {
-      "x-daytona-preview-token": preview.token,
-      ...(bodyText !== undefined ? { "content-type": "application/json" } : {}),
-      ...request.headers,
-    },
+    headers: sandboxRequestHeaders(request.headers, preview.token, bodyText !== undefined),
     body: bodyText,
     signal: timeoutSignal(signal),
   });
@@ -235,6 +275,17 @@ async function sendToSandbox(
       sha256: bodyText === undefined ? null : sha256Hex(bodyText),
     },
   };
+}
+
+function sandboxRequestHeaders(
+  recipeHeaders: Record<string, string> | undefined,
+  previewToken: string,
+  hasBody: boolean,
+): Headers {
+  const headers = new Headers(recipeHeaders);
+  if (hasBody) headers.set("content-type", "application/json");
+  headers.set("x-daytona-preview-token", previewToken);
+  return headers;
 }
 
 type LegResult = {
@@ -303,10 +354,12 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
   let sandbox: Sandbox | undefined;
 
   try {
+    throwIfAborted(opts?.signal);
     const authorization = await authorizeTarget({
       targetProfileId: input.targetProfileId,
       recipeId,
     });
+    throwIfAborted(opts?.signal);
     if (!authorization.ok) {
       return analysisOnly(authorization.reason, { recipeId });
     }
@@ -327,6 +380,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     try {
       const snapshotInfo = await getSnapshot(authorization.snapshotId);
+      throwIfAborted(opts?.signal);
       sandbox = await createSandbox(
         {
           snapshot: authorization.snapshotId,
@@ -347,6 +401,8 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
         // fail closed, every single time this override is exercised.
         TAG_PINNED_SNAPSHOT_IMAGE_REF,
       );
+      throwIfAborted(opts?.signal);
+      sandbox = await getSandbox(sandbox.id);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
@@ -355,7 +411,14 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     throwIfAborted(opts?.signal);
 
     try {
-      await waitForAppReady(sandbox, READINESS_TIMEOUT_MS, opts?.signal);
+      await verifyNoEgress(sandbox, opts?.signal);
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
+      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
+    }
+
+    try {
+      await waitForAppReady(sandbox, authorization.appPort, READINESS_TIMEOUT_MS, opts?.signal);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
@@ -374,7 +437,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     let preview: PortPreviewUrl;
     try {
-      preview = await getPortPreviewUrl(sandbox.id, APP_PORT, opts?.signal);
+      preview = await getPortPreviewUrl(sandbox.id, authorization.appPort, opts?.signal);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id, canaryHash });
