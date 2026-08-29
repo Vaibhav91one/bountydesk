@@ -493,6 +493,72 @@ test("ensureSession cancels an in-flight TrueForge session request and does not 
   assert.equal(sessions.length, 0);
 });
 
+test("ensureSession retry after session creation failure does not rerun reproduction", async () => {
+  const target = await seedTargetProfile();
+  const reportId = await seedReport("TRIAGING", target.id);
+  const recipe = fakeRecipe();
+  let reproduceCalls = 0;
+  const evidence = reproducedEvidence();
+  const reproduceFn: ReproduceFn = async () => {
+    reproduceCalls++;
+    return { outcome: "REPRODUCED", evidence };
+  };
+  let createSessionCalls = 0;
+  const client = fakeClient({
+    async createSession() {
+      createSessionCalls++;
+      if (createSessionCalls === 1) {
+        throw new Error("trueforge unavailable");
+      }
+      return { sessionId: `truesession-${randomUUID()}` };
+    },
+  });
+  const d = driver.createTrueforgeAnalysisDriver(client, reproduceFn, fakeGetRecipes(recipe));
+
+  await assert.rejects(() => d.ensureSession(context(reportId)), /trueforge unavailable/);
+
+  const verdictsAfterFailure = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  assert.equal(verdictsAfterFailure.length, 1, "the completed verdict must survive session failure");
+  assert.equal(verdictsAfterFailure[0].outcome, "REPRODUCED");
+  const sessionsAfterFailure = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessionsAfterFailure.length, 0);
+
+  await d.ensureSession(context(reportId));
+
+  assert.equal(reproduceCalls, 1, "retry must adopt the committed verdict without rerunning reproduction");
+  const sessionsAfterRetry = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessionsAfterRetry.length, 1);
+});
+
+test("ensureSession persists a session if cancellation arrives after TrueForge created it", async () => {
+  const reportId = await seedReport("TRIAGING");
+  const controller = new AbortController();
+  const reason = new Error("lease lost after session creation");
+  const client = fakeClient({
+    async createSession() {
+      controller.abort(reason);
+      return { sessionId: "truesession-late-cancel" };
+    },
+  });
+
+  await driver.createTrueforgeAnalysisDriver(client).ensureSession(context(reportId, controller.signal));
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.sessionId, "truesession-late-cancel");
+});
+
 test("ensureSession refuses to persist a verdict if reproduction returns after cancellation", async () => {
   const target = await seedTargetProfile();
   const reportId = await seedReport("TRIAGING", target.id);

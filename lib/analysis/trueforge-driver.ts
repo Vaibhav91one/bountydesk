@@ -381,10 +381,12 @@ export function createTrueforgeAnalysisDriver(
 
       if (signal.aborted) throw signal.reason;
 
-      // Keep the transaction short. Reproduction may take minutes, so it happens above with no
-      // open transaction and no held pool connection. If another worker wins the race while we
-      // are reproducing, this transaction adopts that committed verdict instead of trying to
-      // compare two independently minted canary hashes.
+      let shouldCreateSession = false;
+
+      // Keep this transaction short. Reproduction may take minutes, so it happens above with
+      // no open transaction and no held pool connection. If another worker wins the race while
+      // we are reproducing, this transaction adopts that committed verdict instead of trying
+      // to compare two independently minted canary hashes.
       await db.transaction(async (tx) => {
         await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
 
@@ -437,6 +439,21 @@ export function createTrueforgeAnalysisDriver(
           },
           tx,
         );
+        shouldCreateSession = true;
+      });
+
+      if (!shouldCreateSession) return;
+      if (signal.aborted) throw signal.reason;
+
+      await db.transaction(async (tx) => {
+        await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
+
+        const [existingAfterLock] = await tx
+          .select({ id: agentSession.id })
+          .from(agentSession)
+          .where(eq(agentSession.reportId, reportId))
+          .limit(1);
+        if (existingAfterLock) return;
 
         // Opaque handle the model echoes back as publish_verdict's sole argument; the only
         // report identifier it ever sees.
@@ -451,8 +468,6 @@ export function createTrueforgeAnalysisDriver(
           .insert(agentSession)
           .values({ reportId, capabilityToken, sessionId })
           .onConflictDoNothing({ target: agentSession.reportId });
-
-        if (signal.aborted) throw signal.reason;
       });
     },
 
