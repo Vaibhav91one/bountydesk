@@ -26,14 +26,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      # actions/checkout@11d5960a (v4.4.0) rejects an explicit token: "" with "Input
+      # required and not supplied: token" on this runner image, so anonymous checkout goes
+      # through a plain clone instead: unambiguous, and no action-input quirk to depend on.
       - name: Check out the connected fork at the pinned commit
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ env.SOURCE_COMMIT }}
-          token: ""
-          persist-credentials: false
-          path: source
+        run: |
+          git clone --no-checkout "https://github.com/${SOURCE_REPO}.git" source
+          git -C source checkout "$SOURCE_COMMIT"
 
       - name: Confirm the checkout resolved to the exact pinned commit
         run: |
@@ -72,7 +71,12 @@ jobs:
           mkdir -p sandbox
           cat > sandbox/Dockerfile <<'EOF'
           FROM local/juice-shop-installer:pinned
-          RUN apt-get update \
+          # buster is EOL: deb.debian.org no longer serves it, so apt points at the archive
+          # mirror instead of the (now 404) live one, with Check-Valid-Until disabled since
+          # the archive's own Release files are intentionally not refreshed.
+          RUN sed -i 's|deb.debian.org|archive.debian.org|g; s|security.debian.org|archive.debian.org|g' /etc/apt/sources.list \
+            && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99no-check-valid \
+            && apt-get update \
             && apt-get install -y --no-install-recommends curl \
             && rm -rf /var/lib/apt/lists/*
           CMD ["node", "build/app.js"]
