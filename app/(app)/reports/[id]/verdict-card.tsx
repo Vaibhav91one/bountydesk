@@ -96,6 +96,7 @@ export function VerdictCard({
   deny,
   denying,
   disabled,
+  decision,
 }: {
   payload: string;
   outcome: string;
@@ -106,12 +107,17 @@ export function VerdictCard({
   /** Agent Bounty, inline SVG. The comment is what it drafted, so it says so. */
   speaker: string;
   chatMascot: string;
-  onChat: () => void;
-  approve: () => void;
-  approving: boolean;
-  deny: () => void;
-  denying: boolean;
-  disabled: boolean;
+  onChat?: () => void;
+  approve?: () => void;
+  approving?: boolean;
+  deny?: () => void;
+  denying?: boolean;
+  disabled?: boolean;
+  /**
+   * Who signed, once somebody has. Only read when the card is read-only, which is when no
+   * approve handler is passed: null then means a verdict exists that nobody has answered.
+   */
+  decision?: { decision: string; reviewer: string; note: string | null; at: string } | null;
 }) {
   const [open, setOpen] = useState(false);
   const evidence = EVIDENCE[outcome] ?? EVIDENCE.INCONCLUSIVE;
@@ -120,7 +126,7 @@ export function VerdictCard({
     <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <div className="flex flex-col gap-3 p-4">
         <span className="text-body font-medium text-foreground">
-          Post this comment to the issue?
+          {approve ? "Post this comment to the issue?" : "The comment on record"}
         </span>
 
         {/* Attributed, because a reviewer approving a comment should be able to see at a
@@ -211,6 +217,32 @@ export function VerdictCard({
           <span className="text-meta text-muted-foreground">{evidence.label}</span>
         </span>
 
+        {/* No approve handler is what makes this card a record rather than a decision. */}
+        {!approve ? (
+          decision ? (
+            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span
+                className={cn(
+                  "text-body",
+                  decision.decision === "APPROVED"
+                    ? "text-phase-delivered"
+                    : "text-destructive",
+                )}
+              >
+                {decision.decision === "APPROVED" ? "Approved" : "Denied"}
+              </span>
+              <span className="text-meta text-muted-foreground">
+                by {decision.reviewer} on {decision.at}
+                {decision.note ? ` · ${decision.note}` : ""}
+              </span>
+            </span>
+          ) : (
+            <span className="text-meta text-muted-foreground">
+              Not decided. Approval only opens while the harness is holding a pending
+              publish_verdict call.
+            </span>
+          )
+        ) : (
         <span className="flex items-center gap-2">
           {/* Not approving is meant to be a conversation, and the conversation is not built.
               Parked rather than removed: the panel behind it works, but nothing a reviewer
@@ -245,6 +277,7 @@ export function VerdictCard({
             <RollingIcon icon={CheckCircle} className="size-4" /> Approve
           </Button>
         </span>
+        )}
       </div>
     </div>
   );

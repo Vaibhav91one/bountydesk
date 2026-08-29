@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import type { Icon } from "@phosphor-icons/react";
 import type { ActiveReport } from "@/lib/reports/queue";
 import {
   BookOpen,
@@ -50,11 +51,15 @@ import {
  * Routes that do not exist yet are listed and disabled rather than hidden. The map is the
  * product, and a reviewer who can see where the queue will live is better served than one who
  * meets it for the first time when it appears. `soon` is what keeps that honest.
+ *
+ * Every route is built at the moment, so no item carries it. The field stays typed rather than
+ * inferred, because the next unbuilt screen should be one flag away from being listed honestly
+ * and not a re-derivation of how that was done.
  */
-export const NAV = [
+export const NAV: { href: string; label: string; icon: Icon; soon?: boolean }[] = [
   { href: "/home", label: "Home", icon: House },
   { href: "/board", label: "Review queue", icon: Tray },
-  { href: "/reports", label: "Reports", icon: Files, soon: true },
+  { href: "/reports", label: "Reports", icon: Files },
   { href: "/integrations", label: "Integrations", icon: PlugsConnected },
   { href: "/connections", label: "Connections", icon: ShareNetwork },
   { href: "/settings", label: "Settings", icon: Gear },

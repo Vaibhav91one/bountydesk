@@ -1,4 +1,5 @@
 import {
+  connectedRepository,
   db,
   desc,
   eq,
@@ -220,4 +221,68 @@ export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
     .limit(limit);
 
   return rows.map((row) => ({ ...row, phase: phaseOf(row.state) }));
+}
+
+/** How many rows the reports index reads. Enough that the filter is honest, bounded so it ends. */
+export const INDEX_LIMIT = 200;
+
+export type IndexRow = QueueCard & {
+  /** "Vaibhav91one/juice-shop", or the channel when the report came in another way. */
+  origin: string;
+  createdAt: Date;
+};
+
+/**
+ * Every report, newest change first, terminal ones included.
+ *
+ * The board deliberately hides closed work, which leaves a delivered report reachable only by
+ * its URL. This is the list that does not hide anything, which is why it is a separate read
+ * rather than a flag on listQueue: the two screens want opposite things.
+ */
+export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
+  const rows = await db
+    .select({
+      id: report.id,
+      title: report.title,
+      sourceRef: report.sourceRef,
+      state: report.state,
+      channel: report.channel,
+      repositoryFullName: connectedRepository.fullName,
+      targetName: targetProfile.name,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      outcome: sql<VerdictOutcome | null>`(
+        select v.outcome from verdict v
+        where v.report_id = ${report.id}
+        order by v.revision desc
+        limit 1
+      )`,
+      eventCount: sql<number>`(
+        select count(*)::int from session_event e where e.report_id = ${report.id}
+      )`,
+      awaitingVerdictId: sql<string | null>`(
+        select s.pending_verdict_id from agent_session s
+        where s.report_id = ${report.id} and s.pending_thread_id is not null
+      )`,
+    })
+    .from(report)
+    .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
+    .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .orderBy(desc(report.updatedAt))
+    .limit(limit);
+
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    sourceLabel: sourceLabel(row.sourceRef, row.id),
+    targetName: row.targetName,
+    state: row.state,
+    outcome: row.outcome,
+    eventCount: row.eventCount,
+    updatedAt: row.updatedAt,
+    // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
+    awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.awaitingVerdictId : null,
+    origin: row.repositoryFullName ?? row.channel,
+    createdAt: row.createdAt,
+  }));
 }

@@ -299,3 +299,71 @@ test("the board is one moment: cards never outnumber the total they sit under", 
 
   await churn;
 });
+
+test("the index shows terminal reports, which is the whole reason it exists", async () => {
+  const delivered = await seedReport("DELIVERED");
+  const denied = await seedReport("DENIED");
+
+  const rows = await queue.listAllReports();
+  const ids = rows.map((row) => row.id);
+  assert.ok(ids.includes(delivered), "a delivered report is missing from the index");
+  assert.ok(ids.includes(denied), "a denied report is missing from the index");
+
+  // The board is the opposite: it stops at the non-terminal states on purpose.
+  const board = await queue.listQueue();
+  const boardIds = board.flatMap((col) => col.cards.map((card) => card.id));
+  assert.ok(boardIds.includes(delivered), "the closed column still carries delivered");
+});
+
+test("the index flags a report only when a reviewer can actually answer it", async () => {
+  // Awaiting approval on paper, with no pending call behind it. A "needs you" badge here
+  // would send somebody to a screen whose buttons refuse.
+  const stranded = await seedReport("AWAITING_APPROVAL");
+
+  const answerable = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: answerable,
+      outcome: "ANALYSIS_ONLY",
+      summary: "did not run",
+      payload: "the exact comment",
+      contentHash: `hash-${answerable}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: answerable,
+    capabilityToken: `token-${answerable}`,
+    sessionId: `session-${answerable}`,
+    pendingThreadId: "thread-1",
+    pendingToolCallId: "call-1",
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `hash-${answerable}`,
+  });
+
+  const rows = await queue.listAllReports();
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  assert.equal(byId.get(stranded)?.awaitingVerdictId, null);
+  assert.equal(byId.get(answerable)?.awaitingVerdictId, v.id);
+});
+
+test("the index carries the latest verdict revision, not the first", async () => {
+  const id = await seedReport("DELIVERED");
+  for (const [revision, outcome] of [
+    [1, "INCONCLUSIVE"],
+    [2, "REPRODUCED"],
+  ] as const) {
+    await dbm.db.insert(dbm.verdict).values({
+      reportId: id,
+      outcome,
+      summary: `revision ${revision}`,
+      payload: `payload ${revision}`,
+      contentHash: `index-hash-${id}-${revision}`,
+      revision,
+    });
+  }
+
+  const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.equal(row?.outcome, "REPRODUCED");
+});

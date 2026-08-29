@@ -7,12 +7,14 @@ import { SandboxDiagram, type NodeStatus } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
+import { formatStamp } from "@/lib/format";
 import { readCase, type CaseFile } from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
 import { ApprovalDialog } from "./approval-dialog";
 import { ArtifactsPanel, verdictArtifacts } from "./artifacts-panel";
+import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import type { StepState } from "./lifecycle-step";
 import { StatusCard } from "./status-card";
@@ -434,6 +436,32 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             <SandboxDiagram targetName={file.target?.name ?? null} status={nodeStatus} />
           </Panel>
         </div>
+
+        {/* Once the gate has closed there is no dialog to open, and the comment that went out
+            would otherwise be nowhere on this page. The same card, with the decision in place
+            of the buttons. */}
+        {file.verdict && !file.awaitingVerdictId ? (
+          <VerdictCard
+            payload={file.verdict.payload}
+            outcome={file.verdict.outcome}
+            outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
+            revision={file.verdict.revision}
+            contentHash={file.verdict.contentHash}
+            destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
+            speaker={prefixed("awaiting-approval", "record")}
+            chatMascot={prefixed("greeting", "record-chat")}
+            decision={
+              file.approval
+                ? {
+                    decision: file.approval.decision,
+                    reviewer: file.approval.reviewer,
+                    note: file.approval.note,
+                    at: formatStamp(file.approval.decidedAt),
+                  }
+                : null
+            }
+          />
+        ) : null}
 
         <Panel
           title="Artifacts"
