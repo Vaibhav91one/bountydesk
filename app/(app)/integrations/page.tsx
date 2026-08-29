@@ -53,7 +53,7 @@ export default async function IntegrationsPage() {
     {
       id: "email",
       name: "Email",
-      detail: "Report intake by email. Designed, not built.",
+      detail: "Report intake by email. Coming soon.",
       icon: "gmail",
       installed: false,
       action: { kind: "link", href: "/integrations/email", label: "View" },
@@ -61,7 +61,7 @@ export default async function IntegrationsPage() {
     {
       id: "upload",
       name: "File upload",
-      detail: "Report intake by upload. Designed, not built.",
+      detail: "Report intake by upload. Coming soon.",
       icon: "folder",
       installed: false,
       action: { kind: "link", href: "/integrations/upload", label: "View" },
@@ -69,7 +69,7 @@ export default async function IntegrationsPage() {
     {
       id: "drive",
       name: "Drive",
-      detail: "Not planned for this version.",
+      detail: "Pulling reports from a shared drive folder. Coming soon.",
       icon: "onedrive",
       installed: false,
       action: { kind: "link", href: "/integrations/drive", label: "View" },

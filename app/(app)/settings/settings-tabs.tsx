@@ -133,7 +133,7 @@ export function SettingsTabs({
         <Panel
           title="Rule editing"
           detail="Adding a target, changing an image digest or editing a scope rule has no screen. A profile decides what a sandbox is allowed to reach, and it does not get a form until there is an answer for who may change one and what happens to a run already bound to it."
-          aside={<Badge variant="outline">Not built</Badge>}
+          aside={<Badge variant="outline">Coming soon</Badge>}
         >
           <Empty>Profiles are seeded server-side for now.</Empty>
         </Panel>
@@ -258,7 +258,7 @@ export function SettingsTabs({
         <Panel
           title="Appearance"
           detail="The product ships one theme. The light palette is written and unreachable; a switcher lands when there is a reason to have two."
-          aside={<Badge variant="outline">Not built</Badge>}
+          aside={<Badge variant="outline">Coming soon</Badge>}
         >
           <Empty>Dark, everywhere.</Empty>
         </Panel>
@@ -266,7 +266,7 @@ export function SettingsTabs({
         <Panel
           title="Notifications"
           detail="Nothing tells you a report is waiting. The queue is the only signal, and it does not update on its own yet either."
-          aside={<Badge variant="outline">Not built</Badge>}
+          aside={<Badge variant="outline">Coming soon</Badge>}
         >
           <Empty>No email, no webhook, no browser notification.</Empty>
         </Panel>

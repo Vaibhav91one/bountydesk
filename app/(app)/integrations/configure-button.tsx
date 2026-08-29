@@ -29,7 +29,7 @@ export function ConfigureButton({
         </Button>
         {/* No unbind helper exists yet, and a wrong one either re-opens intake or wrongly
             closes it. Disabled beats a button that lies about what it does. */}
-        <Button type="button" size="sm" variant="outline" disabled title="Not yet available">
+        <Button type="button" size="sm" variant="outline" disabled title="Coming soon">
           Remove repository
         </Button>
       </div>

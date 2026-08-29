@@ -35,7 +35,6 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -48,15 +47,10 @@ import {
 /**
  * The console's navigation, following the route map in the design file.
  *
- * Routes that do not exist yet are listed and disabled rather than hidden. The map is the
- * product, and a reviewer who can see where the queue will live is better served than one who
- * meets it for the first time when it appears. `soon` is what keeps that honest.
- *
- * Every route is built at the moment, so no item carries it. The field stays typed rather than
- * inferred, because the next unbuilt screen should be one flag away from being listed honestly
- * and not a re-derivation of how that was done.
+ * Every route here is built. An unbuilt one would be listed rather than hidden, disabled, and
+ * labelled the way every other unavailable control in this product is: Coming soon.
  */
-export const NAV: { href: string; label: string; icon: Icon; soon?: boolean }[] = [
+export const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/home", label: "Home", icon: House },
   { href: "/board", label: "Review queue", icon: Tray },
   { href: "/reports", label: "Reports", icon: Files },
@@ -120,9 +114,8 @@ export function AppSidebar({
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={active}
-                    disabled={item.soon}
-                    tooltip={item.soon ? `${item.label} (not built yet)` : item.label}
-                    render={item.soon ? undefined : <Link href={item.href} onClick={closeMobileSheet} />}
+                    tooltip={item.label}
+                    render={<Link href={item.href} onClick={closeMobileSheet} />}
                   >
                     <RollingIcon
                       icon={item.icon}
@@ -131,9 +124,6 @@ export function AppSidebar({
                     />
                     <span>{item.label}</span>
                   </SidebarMenuButton>
-                  {item.soon ? (
-                    <SidebarMenuBadge className="text-muted-foreground">soon</SidebarMenuBadge>
-                  ) : null}
 
                   {/* What is in the queue, not just that a queue exists. Only under the open
                       route: five report titles under every nav item would be a second menu

@@ -248,7 +248,7 @@ export function VerdictCard({
               Parked rather than removed: the panel behind it works, but nothing a reviewer
               typed would reach the harness, so offering it would promise a channel that does
               not exist. It sits apart from the pair that decide. */}
-          <Button size="sm" variant="outline" onClick={onChat} disabled title="Not built yet">
+          <Button size="sm" variant="outline" onClick={onChat} disabled title="Coming soon">
             {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
                 should look like it. */}
             <span
@@ -257,7 +257,7 @@ export function VerdictCard({
               dangerouslySetInnerHTML={{ __html: chatMascot }}
             />
             Chat with Agent Bounty
-            <span className="text-meta text-muted-foreground">soon</span>
+            <span className="text-meta text-muted-foreground">Coming soon</span>
           </Button>
 
           {/* Both outcomes stay reachable, and next to each other. The conversation was going

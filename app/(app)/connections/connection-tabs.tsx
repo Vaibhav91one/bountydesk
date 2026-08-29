@@ -70,12 +70,10 @@ function Unbuilt({
   icon,
   title,
   body,
-  state,
 }: {
   icon: React.ReactNode;
   title: string;
   body: string;
-  state: string;
 }) {
   return (
     <div className="flex flex-col items-start gap-4 rounded-xl border border-border/50 bg-card p-8">
@@ -85,7 +83,7 @@ function Unbuilt({
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-2.5">
           <h2 className="text-heading text-foreground">{title}</h2>
-          <Badge variant="outline">{state}</Badge>
+          <Badge variant="outline">Coming soon</Badge>
         </div>
         <p className="max-w-2xl text-body text-muted-foreground">{body}</p>
       </div>
@@ -217,7 +215,6 @@ export function ConnectionTabs({
         <Unbuilt
           icon={<Gmail className="size-6" />}
           title="Email"
-          state="designed, not built"
           body="Reports sent to a BountyDesk address become reports here, with no GitHub connection
             involved. The route does not exist yet, so nothing arrives this way today."
         />
@@ -227,7 +224,6 @@ export function ConnectionTabs({
         <Unbuilt
           icon={<Folder className="size-6" />}
           title="File upload"
-          state="designed, not built"
           body="A report pasted or uploaded straight into the console, for anything that arrived
             outside a tracker. Designed alongside email intake, and built with it."
         />
@@ -237,7 +233,6 @@ export function ConnectionTabs({
         <Unbuilt
           icon={<OneDrive className="size-6" />}
           title="Drive"
-          state="not planned"
           body="Pulling reports out of a shared drive is not in this version. It is listed so the
             answer is on the page rather than a thing you have to go and ask about."
         />

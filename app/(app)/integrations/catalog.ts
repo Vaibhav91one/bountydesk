@@ -20,11 +20,6 @@ export type Integration = {
   /** Whoever wrote the integration. BountyDesk's own App, for the one that exists. */
   developer: string;
   built: boolean;
-  /**
-   * The badge, for a channel that is not built. Designed and not built is not the same as not
-   * planned, and one label for both would make the page contradict its own overview.
-   */
-  status?: string;
   /** Long-form, rendered as headed sections on the detail page. */
   sections: { title: string; body?: string; bullets?: string[] }[];
   links: IntegrationLink[];
@@ -88,7 +83,6 @@ export const INTEGRATIONS: Integration[] = [
     icon: "gmail",
     developer: "BountyDesk",
     built: false,
-    status: "Designed, not built",
     sections: [
       {
         title: "Overview",
@@ -115,7 +109,6 @@ export const INTEGRATIONS: Integration[] = [
     icon: "folder",
     developer: "BountyDesk",
     built: false,
-    status: "Designed, not built",
     sections: [
       {
         title: "Overview",
@@ -135,7 +128,6 @@ export const INTEGRATIONS: Integration[] = [
     icon: "onedrive",
     developer: "BountyDesk",
     built: false,
-    status: "Not planned",
     sections: [
       {
         title: "Overview",

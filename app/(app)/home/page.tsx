@@ -27,16 +27,15 @@ export const metadata = { title: "Home · BountyDesk" };
 /**
  * Report sources, in the order they are likely to matter.
  *
- * `state` is what is true today, not what is planned: GitHub is the only one wired, email and
- * upload are designed channels with no route yet, and a drive connector is not in the product
- * at all. developer-icons carries no Google Drive, so OneDrive stands in for the brand, and a
- * folder is not a brand at all so it comes from Phosphor.
+ * `state` is what is true today: GitHub is the only one wired. developer-icons carries no
+ * Google Drive, so OneDrive stands in for the brand, and a folder is not a brand at all so it
+ * comes from Phosphor.
  */
 const INTEGRATIONS = [
   { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected" },
-  { key: "drive", name: "Drive", icon: OneDrive, state: "not planned" },
-  { key: "email", name: "Email", icon: Gmail, state: "designed, not built" },
-  { key: "upload", name: "File upload", icon: Folder, state: "designed, not built" },
+  { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon" },
+  { key: "email", name: "Email", icon: Gmail, state: "coming soon" },
+  { key: "upload", name: "File upload", icon: Folder, state: "coming soon" },
 ] as const;
 
 /**

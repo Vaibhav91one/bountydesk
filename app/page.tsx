@@ -1,26 +1,21 @@
 import Image from "next/image";
 import Link from "next/link";
-import { Check, Circle, Folder, Sparkle } from "@phosphor-icons/react/ssr";
+import { Check, Circle, Detective, Folder, Sparkle } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
+import { MascotMarquee } from "@/components/mascot-marquee";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { mascotStates } from "@/lib/mascot/states";
 
 import { INTEGRATIONS, type IntegrationIcon } from "./(app)/integrations/catalog";
 import { Faq } from "./faq";
-import {
-  ApprovalPanel,
-  EvidencePanel,
-  IntakePanel,
-  RecordPanel,
-  SandboxList,
-  ScopePanel,
-} from "./panels";
+import { ApprovalPanel, EvidencePanel, RecordPanel, SandboxList } from "./panels";
 
 export const metadata = {
   title: "BountyDesk",
@@ -138,7 +133,7 @@ export default function LandingPage() {
             />
             {/* Fades the band into the page at both edges, so it reads as one surface rather
                 than a photo pasted between two dark blocks. */}
-            <div className="absolute inset-0 bg-gradient-to-b from-background from-8% via-background/20 via-55% to-background" />
+            <div className="absolute inset-0 bg-gradient-to-b from-background from-20% via-background/20 via-60% to-background" />
           </div>
 
           <div className="relative mx-auto w-full max-w-5xl px-6 pt-10 pb-24 lg:pt-12">
@@ -148,7 +143,7 @@ export default function LandingPage() {
 
         {/* Intake channels. The reference puts a logo wall here; ours is the four ways a report
             can arrive, three of which are honestly unavailable. */}
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-12">
+        <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-20">
           <h2 className="text-title text-foreground">Reports arrive from where they arrive</h2>
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {INTEGRATIONS.map((channel) => {
@@ -165,11 +160,7 @@ export default function LandingPage() {
                     <span className="flex size-10 items-center justify-center rounded-lg border border-border/50 bg-background">
                       <Icon className="size-5" />
                     </span>
-                    {channel.built ? (
-                      <Badge variant="success">Live</Badge>
-                    ) : (
-                      <Badge variant="outline">{channel.status}</Badge>
-                    )}
+                    {channel.built ? <Badge variant="success">Live</Badge> : null}
                   </span>
 
                   <span className="text-body font-medium text-foreground">{channel.name}</span>
@@ -192,7 +183,7 @@ export default function LandingPage() {
                       aria-describedby={reason}
                       className="w-full justify-center"
                     >
-                      Unavailable
+                      Coming soon
                     </Button>
                   )}
 
@@ -211,26 +202,37 @@ export default function LandingPage() {
         {/* How it works */}
         <div id="how" className="scroll-mt-20" />
 
-        <Feature
-          eyebrow="Intake"
-          title="A report that proves where it came from"
-          body="A GitHub App webhook arrives signed, and the signature is checked before anything is written. Idempotency is a unique constraint on the channel and the delivery id, so a retry, a redelivery and a human pressing the button again all land on the same row."
-          visual={<IntakePanel />}
-        />
+        {/* Agent Bounty, introduced once. The carousel is the existing marquee, which is pure
+            CSS: it duplicates the list and translates the track, so there is no client JS and
+            nothing to hydrate. Full bleed on purpose, outside the page's max width. */}
+        <section className="flex flex-col items-center gap-12 py-24">
+          {/* w-full because the section centres its children, which otherwise shrink-wraps
+              the track to its own 3584px content width: the edge mask then lands far outside
+              the viewport and the fade never shows. */}
+          <MascotMarquee
+            states={mascotStates()}
+            direction="horizontal"
+            size={128}
+            className="w-full"
+          />
 
-        <Feature
-          reverse
-          eyebrow="Scope"
-          title="Bound at the capability boundary"
-          body="A report can only be reproduced against a profile the server holds: a pinned image, its digest, and the hosts it may reach. Clone, deploy and egress each read the target from that profile, never from a string the model produced, so issue text and attachments cannot widen it."
-          visual={<ScopePanel />}
-        />
+          <div className="flex max-w-2xl flex-col items-center gap-4 px-6 text-center">
+            <h2 className="flex flex-wrap items-center justify-center gap-3 text-4xl font-normal tracking-[-0.02em] text-brand-soft sm:text-5xl">
+              <Detective weight="fill" aria-hidden="true" className="size-9 sm:size-11" />
+              Meet Agent Bounty
+            </h2>
+            <p className="text-lead text-muted-foreground">
+              It reads every report, checks it against the target the server pins, and drafts the
+              reply. What it never does is decide: the verdict comes from the oracle, and the
+              words that go out are the ones you signed.
+            </p>
+          </div>
+        </section>
 
         <Feature
           eyebrow="Reproduction"
           title="Two sandboxes, and an oracle outside both"
           body="A dynamic run builds in one sandbox with narrow dependency egress and reproduces in a second with none, and only the built artifact crosses between them. A fresh canary is seeded through a trusted fixture, a negative control runs first, and the oracle that decides runs outside the sandbox it is judging."
-          status="Designed, not built"
           visual={
             <>
               {/* The diagram sets touch-none across a 460px band, which on a phone is a place
@@ -262,7 +264,7 @@ export default function LandingPage() {
 
         {/* The lifecycle, where the reference puts a demo video. There is no video, and this is
             the one thing a screenshot could not show anyway. */}
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-16">
+        <section className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-24">
           <div className="flex flex-col gap-3">
             <span className="text-label text-brand-soft uppercase">Lifecycle</span>
             <h2 className="text-title text-foreground">Ten states, and five of them are the end</h2>
@@ -281,7 +283,7 @@ export default function LandingPage() {
         </section>
 
         {/* What runs today */}
-        <section id="status" className="mx-auto w-full max-w-6xl scroll-mt-20 px-6 py-16">
+        <section id="status" className="mx-auto w-full max-w-6xl scroll-mt-20 px-6 py-24">
           <div className="flex flex-col gap-8 rounded-xl border border-border/50 bg-card p-8">
             <div className="flex flex-col gap-3">
               <span className="text-label text-brand-soft uppercase">Status</span>
@@ -310,7 +312,7 @@ export default function LandingPage() {
               </div>
 
               <div className="flex flex-col gap-3">
-                <h3 className="text-heading text-foreground">Designed, not built</h3>
+                <h3 className="text-heading text-foreground">Coming soon</h3>
                 <ul className="flex flex-col gap-2.5">
                   {DESIGNED.map((item) => (
                     <li key={item} className="flex items-start gap-2.5">
@@ -330,7 +332,7 @@ export default function LandingPage() {
         {/* FAQ */}
         <section
           id="faq"
-          className="mx-auto grid w-full max-w-6xl scroll-mt-20 gap-8 px-6 py-16 lg:grid-cols-[320px_1fr]"
+          className="mx-auto grid w-full max-w-6xl scroll-mt-20 gap-10 px-6 py-24 lg:grid-cols-[320px_1fr]"
         >
           <div className="flex flex-col gap-3">
             <h2 className="text-title text-foreground">
@@ -360,26 +362,21 @@ function Feature({
   eyebrow,
   title,
   body,
-  status,
   visual,
   reverse,
 }: {
   eyebrow: string;
   title: string;
   body: string;
-  status?: string;
   visual: React.ReactNode;
   reverse?: boolean;
 }) {
   return (
-    <section className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-14 lg:grid-cols-2 lg:gap-16">
+    <section className="mx-auto grid w-full max-w-6xl items-center gap-10 px-6 py-20 lg:grid-cols-2 lg:gap-16 lg:py-24">
       <div className={`flex min-w-0 flex-col items-start gap-4 ${reverse ? "lg:order-2" : ""}`}>
         <span className="text-label text-brand-soft uppercase">{eyebrow}</span>
         <h2 className="text-title text-foreground">{title}</h2>
         <p className="max-w-[560px] text-lead text-muted-foreground">{body}</p>
-        {/* Only the exceptions are labelled. A badge on every section would read as a
-            changelog; a badge on the one unbuilt stage reads as a specification. */}
-        {status ? <Badge variant="outline">{status}</Badge> : null}
       </div>
       <div className={`min-w-0 ${reverse ? "lg:order-1" : ""}`}>{visual}</div>
     </section>

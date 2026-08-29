@@ -1,10 +1,11 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Check, Prohibit, Signature, X } from "@phosphor-icons/react/ssr";
+import { ArrowRight, Prohibit, Signature } from "@phosphor-icons/react/ssr";
 
 import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import { mascotState } from "@/lib/mascot/states";
 
 /**
  * The illustrations on the landing page, built from the product's own tokens.
@@ -21,7 +22,6 @@ import { Button } from "@/components/ui/button";
 
 const HASH = "30e7597fc122c1c7ad3a6bc97e70f984";
 const TARGET = "juice-shop-v17.3.0";
-const COMMIT = "1867b926";
 
 function Panel({
   label,
@@ -45,8 +45,12 @@ function Panel({
     >
       {header ? (
         <div className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-2.5">
-          <span className="text-label text-muted-foreground uppercase">{label}</span>
-          <span className="text-label text-muted-foreground/60 uppercase">Example</span>
+          <span className="text-label text-muted-foreground uppercase">
+            {label}
+          </span>
+          <span className="text-label text-muted-foreground/60 uppercase">
+            Example
+          </span>
         </div>
       ) : null}
       {children}
@@ -54,7 +58,13 @@ function Panel({
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0">
       <span className="text-meta text-muted-foreground">{label}</span>
@@ -65,6 +75,14 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 /** The hero panel: the moment the whole product exists for. */
 export function ApprovalPanel() {
+  // Prefixed the way every other render site does it, so a second mascot added to this page
+  // later cannot have its gradients resolve against this one's.
+  const mascot = mascotState("awaiting-approval");
+  const speaker = mascot.markup.replaceAll(
+    `${mascot.key}__`,
+    `${mascot.key}__hero__`,
+  );
+
   return (
     <Panel label="Sign the verdict" header={false}>
       <div className="flex flex-col gap-4 p-5">
@@ -75,17 +93,33 @@ export function ApprovalPanel() {
           </span>
         </div>
 
-        <div className="flex flex-col gap-2.5 rounded-md border border-border/50 bg-background p-4">
-          <span className="text-meta text-muted-foreground">Agent Bounty drafted this reply</span>
-          <p className="text-body text-foreground">
-            <strong className="font-medium">Verdict: analysis only.</strong> BountyDesk could not
-            reproduce this report automatically, so no reproduced verdict was produced. A reviewer
-            read the report and the run&rsquo;s own event log and is signing this reply by hand.
-          </p>
-          <span className="flex items-center gap-2 text-body text-muted-foreground">
-            <Image src="/logo-small.svg" alt="" width={16} height={16} />
-            Signed via BountyDesk.
-          </span>
+        <div className="flex gap-3 rounded-md border border-border/50 bg-background p-4">
+          {/* The same attribution the real verdict card makes, mascot and all: a reviewer
+              approving a comment should see at a glance whose words they are. */}
+          <span
+            aria-hidden="true"
+            className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+            dangerouslySetInnerHTML={{ __html: speaker }}
+          />
+
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+            <span className="flex items-center gap-1.5">
+              <span className="text-meta text-foreground">Agent Bounty</span>
+              <span className="text-meta text-muted-foreground">
+                drafted this reply
+              </span>
+            </span>
+            <p className="text-body text-foreground">
+              <strong className="font-medium">Verdict: analysis only.</strong>{" "}
+              BountyDesk could not reproduce this report automatically, so no
+              reproduced verdict was produced. A reviewer read the report and
+              the run&rsquo;s own event log and is signing this reply by hand.
+            </p>
+            <span className="flex items-center gap-2 text-body text-muted-foreground">
+              <Image src="/logo-small.svg" alt="" width={16} height={16} />
+              Signed via BountyDesk.
+            </span>
+          </div>
         </div>
 
         <div className="flex flex-col px-1">
@@ -103,7 +137,9 @@ export function ApprovalPanel() {
             <span className="h-2.5 w-1 rounded-full bg-border" />
             <span className="h-2.5 w-1 rounded-full bg-border" />
           </span>
-          <span className="text-meta text-muted-foreground">Analysis only, nothing ran</span>
+          <span className="text-meta text-muted-foreground">
+            Analysis only, nothing ran
+          </span>
         </span>
         {/* Live, and both go to sign-in. A picture of a button that does nothing when you
             press it is worse than no button; pressing this one takes you to the place the real
@@ -118,8 +154,13 @@ export function ApprovalPanel() {
           >
             <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
-          <Button size="sm" nativeButton={false} render={<Link href="/login" />}>
-            <RollingIcon icon={Signature} weight="fill" className="size-4" /> Approve
+          <Button
+            size="sm"
+            nativeButton={false}
+            render={<Link href="/login" />}
+          >
+            <RollingIcon icon={Signature} weight="fill" className="size-4" />{" "}
+            Approve
           </Button>
         </span>
       </div>
@@ -127,74 +168,7 @@ export function ApprovalPanel() {
   );
 }
 
-/** Intake: a delivery arrives, is checked, and is written down once. */
-export function IntakePanel() {
-  const rows = [
-    { id: "8f2c…", note: "Signature verified", state: "accepted" },
-    { id: "8f2c…", note: "Same delivery id, replayed", state: "no-op" },
-    { id: "b41a…", note: "Signature failed", state: "refused" },
-  ];
 
-  return (
-    <Panel label="Webhook deliveries">
-      <ul className="flex flex-col px-5 py-2">
-        {rows.map((row, index) => (
-          <li
-            key={index}
-            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/50 py-3 last:border-b-0"
-          >
-            <span className="flex min-w-0 items-center gap-2.5">
-              {row.state === "refused" ? (
-                <X weight="bold" aria-hidden="true" className="size-3.5 text-destructive" />
-              ) : (
-                <Check
-                  weight="bold"
-                  aria-hidden="true"
-                  className="size-3.5 text-phase-delivered"
-                />
-              )}
-              <span className="font-mono text-meta text-foreground">{row.id}</span>
-              <span className="truncate text-meta text-muted-foreground">{row.note}</span>
-            </span>
-            <span className="shrink-0 text-meta text-muted-foreground">{row.state}</span>
-          </li>
-        ))}
-      </ul>
-    </Panel>
-  );
-}
-
-/** Scope: what the guard holds, and what it refuses. */
-export function ScopePanel() {
-  return (
-    <Panel label="Authorised target">
-      <div className="flex flex-col px-5 py-2">
-        <Row label="Profile">{TARGET}</Row>
-        <Row label="Commit">
-          <span className="font-mono">{COMMIT}</span>
-        </Row>
-        <Row label="Image digest">
-          <span className="font-mono break-all">sha256:9f31c0…</span>
-        </Row>
-      </div>
-
-      <div className="flex flex-col gap-2 border-t border-border/50 px-5 py-4">
-        <span className="flex items-start gap-2.5 text-meta">
-          <Check weight="bold" aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-phase-delivered" />
-          <span className="text-muted-foreground">
-            Clone, deploy and egress each read the target from this profile.
-          </span>
-        </span>
-        <span className="flex items-start gap-2.5 text-meta">
-          <X weight="bold" aria-hidden="true" className="mt-1 size-3.5 shrink-0 text-destructive" />
-          <span className="text-muted-foreground">
-            A host named in the report, or by the model, is refused.
-          </span>
-        </span>
-      </div>
-    </Panel>
-  );
-}
 
 /** The evidence packet a report gets when reproduction cannot run. */
 export function EvidencePanel() {
@@ -205,8 +179,9 @@ export function EvidencePanel() {
           Analysis only
         </PhaseBadge>
         <p className="text-body text-muted-foreground">
-          No canary was seeded, no negative control ran and no oracle was consulted, so there is
-          no evidence to weigh and nothing claims otherwise.
+          No canary was seeded, no negative control ran and no oracle was
+          consulted, so there is no evidence to weigh and nothing claims
+          otherwise.
         </p>
         <div className="rounded-md border border-border/50 bg-background p-3">
           <code className="font-mono text-meta break-all text-foreground">
@@ -236,13 +211,15 @@ export function RecordPanel() {
             className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/50 py-3 last:border-b-0"
           >
             <span className="font-mono text-meta text-foreground">{table}</span>
-            <span className="text-meta text-muted-foreground">UPDATE and DELETE refused</span>
+            <span className="text-meta text-muted-foreground">
+              UPDATE and DELETE refused
+            </span>
           </li>
         ))}
       </ul>
       <p className="border-t border-border/50 px-5 py-4 text-meta text-muted-foreground">
-        Enforced by database triggers, not by application code that could be talked out of it. A
-        verdict is revised by inserting the next revision.
+        Enforced by database triggers, not by application code that could be
+        talked out of it. A verdict is revised by inserting the next revision.
       </p>
     </Panel>
   );
@@ -266,11 +243,20 @@ export function SandboxList() {
           key={stage.kind}
           className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/50 px-4 py-3 last:border-b-0"
         >
-          <span className="font-mono text-meta text-muted-foreground">{index + 1}</span>
-          <span className="min-w-0 flex-1 truncate text-body text-foreground">{stage.title}</span>
-          <span className="shrink-0 text-meta text-muted-foreground">{stage.kind}</span>
+          <span className="font-mono text-meta text-muted-foreground">
+            {index + 1}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-body text-foreground">
+            {stage.title}
+          </span>
+          <span className="shrink-0 text-meta text-muted-foreground">
+            {stage.kind}
+          </span>
           {index < stages.length - 1 ? (
-            <ArrowRight aria-hidden="true" className="size-3 shrink-0 text-muted-foreground/50" />
+            <ArrowRight
+              aria-hidden="true"
+              className="size-3 shrink-0 text-muted-foreground/50"
+            />
           ) : null}
         </li>
       ))}

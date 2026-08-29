@@ -117,7 +117,7 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 <Badge variant="outline">Not installed</Badge>
               )
             ) : (
-              <Badge variant="outline">{integration.status ?? "Not built"}</Badge>
+              <Badge variant="outline">Coming soon</Badge>
             )}
           </div>
 
@@ -196,7 +196,7 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 ) : null}
               </>
             ) : (
-              <Detail label="Status">Not built</Detail>
+              <Detail label="Status">Coming soon</Detail>
             )}
 
             {integration.links.map((link) => (

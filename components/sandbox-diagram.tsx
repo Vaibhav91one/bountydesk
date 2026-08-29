@@ -349,7 +349,7 @@ export function SandboxDiagram({
       })}
 
       <span className="absolute right-3 bottom-3 text-meta text-muted-foreground">
-        Designed, not built. Drag to rearrange.
+        Coming soon. Drag to rearrange.
       </span>
     </div>
   );

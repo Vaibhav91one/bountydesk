@@ -133,7 +133,7 @@ function lifecycle(file: CaseFile) {
           ? "Did not run"
           : file.state === "REPRODUCING"
             ? "In progress"
-            : "Not built yet",
+            : "Coming soon",
       state:
         file.state === "REPRODUCING"
           ? ("current" as const)
