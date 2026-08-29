@@ -109,6 +109,14 @@ function sqliSearchRecipe(config: JuiceShopConfig): ReproductionRecipe {
   return {
     id: "juice-shop-sqli-search",
     title: "Reflected UNION SQL injection in product search",
+    keywords: [
+      "sql injection",
+      "sqli",
+      "union select",
+      "product search",
+      "search endpoint",
+      config.searchPath,
+    ],
     fixture: registrationFixture(config),
     negativeControl: {
       method: "GET",
@@ -158,6 +166,13 @@ function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
   return {
     id: "juice-shop-login-bypass",
     title: "Auth-bypass SQL injection in login",
+    keywords: [
+      "login bypass",
+      "auth bypass",
+      "authentication bypass",
+      "sql injection",
+      LOGIN_PATH,
+    ],
     fixture: registrationFixture(config),
     negativeControl: {
       method: "POST",
