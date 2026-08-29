@@ -328,7 +328,12 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
   return (
     <main className="flex flex-1 flex-col">
-      <header className="flex flex-col gap-4 border-b border-border/50 px-8 py-7">
+      {/* 53px on the right, so the approval button's edge meets the Open on GitHub button in
+          the card below it: the page's own p-8 is 32, the card's border is 1, and its header
+          pads by px-5. Written as pl/pr rather than px with an override, because two utilities
+          setting the same property are resolved by stylesheet order, not by the order they
+          appear in the attribute. */}
+      <header className="flex flex-col gap-4 border-b border-border/50 py-7 pl-8 pr-[53px]">
         <Link
           href="/board"
           className="flex w-fit items-center gap-2 text-meta text-muted-foreground hover:text-foreground"
