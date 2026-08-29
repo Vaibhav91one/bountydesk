@@ -519,6 +519,11 @@ export function createTrueforgeAnalysisDriver(
         claimToken = randomUUID();
       }
 
+      if (!client.deleteSession) {
+        await releaseAgentSessionCreationClaim(reportId, claimToken);
+        throw new Error(`cannot create TrueForge session for report ${reportId} without deleteSession support`);
+      }
+
       let sessionId: string;
       try {
         ({ sessionId } = await client.createSession({ signal }));
@@ -580,9 +585,6 @@ export function createTrueforgeAnalysisDriver(
             );
         });
       } catch (error) {
-        if (!client.deleteSession) {
-          throw new Error(`cannot release agent session creation claim for report ${reportId} without deleteSession`);
-        }
         await client.deleteSession(sessionId);
         await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
