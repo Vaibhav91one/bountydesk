@@ -11,8 +11,17 @@ One page. Follow top to bottom on demo day.
 
 ## Happy path (the live demo)
 
-**Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. This proves the source revision, not the runtime image. Before the demo, build that fork into an immutable image, record its generated digest and snapshot ID, then rerun the Q18 scenarios against it. The current Q18 evidence was collected against the official upstream image.
+**Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's, built into an immutable image and pinned by digest and snapshot ID.
 **Vuln class:** SQLi (single request, deterministic), confirmed by a **per-run canary**.
+
+**Confirmed live 2026-08-29.** This exact flow ran end to end against a real GitHub issue
+([Vaibhav91one/juice-shop#5](https://github.com/Vaibhav91one/juice-shop/issues/5)): report
+`beabb524-1bd7-4651-a9b8-2363926b0a49`, verdict `7cbf3647-2b32-4582-9d43-9db49509aa4d`,
+outcome `REPRODUCED`, delivered as
+[comment 5464633799](https://github.com/Vaibhav91one/juice-shop/issues/5#issuecomment-5464633799)
+whose body matches the approved content hash exactly. Replaying the same webhook delivery
+afterward produced no second job, report, or comment. The steps below are what actually
+happened, not a projection.
 
 1. **Intake** — a GitHub issue on the dedicated demo repo: `SQLi in /api/search`. The **installed BountyDesk GitHub App** delivers a **signed** webhook (`X-Hub-Signature-256`, platform-owned App secret); the receiver verifies it and resolves `installation_id → repo → TargetProfile` server-side → harness starts a TrueForge session.
 2. **Triage** — scope_check passes, dedupe_check clean, PoC extracted. (Text-only, seconds.)
@@ -32,7 +41,7 @@ One page. Follow top to bottom on demo day.
 |---|---------|-------------|
 | **A** | Sandbox won't boot / reproduction can't run | Let it fall to the **analysis fallback**: the harness emits `could-not-deploy` and prepares an **evidence packet for human review**. It does not determine genuineness, assign severity, or publish a verdict. **Demo it as a feature:** "when reproduction can't run, a reviewer still gets grounded evidence." Not a crash — resilience. |
 | **B** | Daytona cloud or venue network is down entirely | Narrate over the **pre-recorded run** (screen capture/GIF + the pre-generated Word packet). Hard floor, zero live dependency. |
-| **C** | The primary scenario flakes but the sandbox is fine | Switch to **Scenario 2** (login auth-bypass SQLi, frozen in decisions Q18) inside the same pinned target. A different vuln class, same image — both live-verified. Never a second target. |
+| **C** | The primary scenario flakes but the sandbox is fine | Switch to **Scenario 2** (login bypass, frozen in decisions Q18) inside the same pinned target. Its recipe and two-step oracle are implemented, but this scenario has not run live yet, so treat it as a fallback narrated from the code and tests, not a second live-verified path. Never a second target. |
 
 ---
 
@@ -40,7 +49,7 @@ One page. Follow top to bottom on demo day.
 
 - [ ] Connected fork **built at the pinned commit** and the snapshot id recorded; Daytona sandbox **provisioned and warm**; target image **pre-pulled** (no cold-start on stage).
 - [ ] **BountyDesk GitHub App** registered (Issues read/write + Metadata) and **installed on the one dedicated demo repo**. Subscribe to Issues + Repository events; handle the automatic Installation + Installation repositories events. Verify a signed test delivery, repository removal, suspension and uninstall; mint the approved-comment installation token server-side, post idempotently and discard it.
-- [ ] Both scenarios on the pinned target **confirmed green** this morning; canary seed + negative control verified on each.
+- [ ] The SQLi scenario on the pinned target **confirmed green** this morning; canary seed + negative control verified. Scenario 2 (login bypass) rehearsed from its tests if its live-run PR has landed by then.
 - [ ] One **full happy-path dry run** end to end, today, on the demo machine + demo network.
 - [ ] **Pre-recorded run** (Backup B) saved locally and openable offline.
 - [ ] Pre-generated **Word packet** from a known-good run saved locally.
