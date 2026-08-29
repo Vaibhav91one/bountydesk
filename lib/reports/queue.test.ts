@@ -227,3 +227,34 @@ test("a column past the limit caps its cards but still reports the true total", 
   // otherwise the screen would silently claim it had shown everything.
   assert.ok(closed.total > closed.cards.length);
 });
+
+test("phaseOf agrees with COLUMNS for every state", () => {
+  for (const col of queue.COLUMNS) {
+    for (const state of col.states) {
+      assert.equal(queue.phaseOf(state), col.key, `${state} should be in ${col.key}`);
+    }
+  }
+});
+
+test("listActiveReports puts awaiting approval first and excludes terminal states", async () => {
+  // Seeded after the terminal reports above, so recency alone would sort these to the front.
+  // Awaiting approval has to beat them on urgency, not on order of insertion.
+  await seedReport("TRIAGING");
+  await seedReport("REPRODUCING");
+  const awaiting = await seedReport("AWAITING_APPROVAL");
+
+  const active = await queue.listActiveReports(5);
+
+  assert.equal(active.length, 5);
+  assert.equal(active[0].id, awaiting, "awaiting approval should lead");
+  assert.equal(active[0].phase, "awaiting-approval");
+
+  const terminal = new Set(["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"]);
+  for (const row of active) {
+    assert.equal(terminal.has(row.state), false, `${row.state} is terminal and should be hidden`);
+  }
+});
+
+test("listActiveReports honours its limit", async () => {
+  assert.equal((await queue.listActiveReports(2)).length, 2);
+});

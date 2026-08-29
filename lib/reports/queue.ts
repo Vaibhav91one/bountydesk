@@ -1,4 +1,5 @@
 import { db, desc, eq, inArray, report, sql, targetProfile } from "@/lib/db";
+import { TERMINAL_STATES } from "@/lib/reports/states";
 import type { ReportState } from "@/lib/reports/states";
 
 /**
@@ -149,4 +150,42 @@ export async function listQueue(): Promise<QueueColumn[]> {
     total: column.states.reduce((sum, state) => sum + (byState.get(state) ?? 0), 0),
     cards: cards[index],
   }));
+}
+
+/**
+ * Which column a state belongs to, derived from COLUMNS rather than restated.
+ *
+ * The sidebar colours a report by its phase and the board colours a column by the same name, so
+ * a second table here would be a second chance for the two to disagree.
+ */
+export function phaseOf(state: ReportState): string {
+  const column = COLUMNS.find((c) => c.states.includes(state));
+  // Unreachable while the test asserting every state is covered keeps passing, and cheaper to
+  // answer honestly than to assert a non-null and be wrong later.
+  return column?.key ?? "closed";
+}
+
+export type ActiveReport = {
+  id: string;
+  title: string;
+  state: ReportState;
+  phase: string;
+};
+
+/**
+ * The reports in flight, for the sidebar. Most urgent first.
+ *
+ * Awaiting approval sorts ahead of everything else because it is the only state that is waiting
+ * on the person reading the sidebar; the rest is recency. Terminal reports are excluded: a list
+ * of what needs attention should not be padded with what is finished.
+ */
+export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
+  const rows = await db
+    .select({ id: report.id, title: report.title, state: report.state })
+    .from(report)
+    .where(sql`${report.state} not in ${TERMINAL_STATES}`)
+    .orderBy(sql`(${report.state} = 'AWAITING_APPROVAL') desc`, desc(report.updatedAt))
+    .limit(limit);
+
+  return rows.map((row) => ({ ...row, phase: phaseOf(row.state) }));
 }

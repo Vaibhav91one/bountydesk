@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { ArrowRight } from "@phosphor-icons/react/ssr";
 
+import { PhaseDot } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
-import { listQueue, type QueueCard, type QueueColumn } from "@/lib/reports/queue";
+import { listQueue, phaseOf, type QueueCard, type QueueColumn } from "@/lib/reports/queue";
 
 export const metadata = { title: "Review queue · BountyDesk" };
 
@@ -41,8 +42,15 @@ function age(from: Date): string {
 }
 
 function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
+  const phase = phaseOf(card.state);
+
   return (
-    <li className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-4">
+    <li
+      // The sidebar links here. scroll-mt clears the sticky header, and the ring is the :target
+      // pseudo-class, so the highlight needs no state and clears itself on the next navigation.
+      id={`report-${card.id}`}
+      className="flex scroll-mt-24 flex-col gap-3 rounded-xl border border-border/50 bg-card p-4 target:border-brand"
+    >
       <div className="flex flex-col gap-1">
         <span className="text-body font-medium text-foreground">{card.title}</span>
         <span className="text-meta text-muted-foreground">
@@ -56,11 +64,16 @@ function Card({ card, showState }: { card: QueueCard; showState: boolean }) {
         </Badge>
       ) : null}
 
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        {/* The outcome, or the honest absence of one. Never a canary or a confidence: no
-            reproduction has run, so the card has nothing to say about one. */}
-        <span className="text-meta text-muted-foreground">
-          {card.outcome ? OUTCOME[card.outcome] ?? card.outcome : "No verdict yet"}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        {/* The phase, and the outcome or the honest absence of one. Never a canary or a
+            confidence: no reproduction has run, so the card has nothing to say about one. */}
+        <span className="flex items-center gap-2 text-meta text-muted-foreground">
+          <PhaseDot phase={phase} />
+          {card.awaitingVerdictId
+            ? "Needs review"
+            : card.outcome
+              ? OUTCOME[card.outcome] ?? card.outcome
+              : "No verdict yet"}
         </span>
         <span className="text-meta text-muted-foreground">
           {card.eventCount} {card.eventCount === 1 ? "event" : "events"} · {age(card.updatedAt)}
@@ -91,8 +104,9 @@ function Column({ column }: { column: QueueColumn }) {
   return (
     <section className="flex w-[280px] shrink-0 flex-col gap-3">
       <header className="flex items-center gap-2.5">
-        <h2 className="text-body font-medium text-foreground">{column.label}</h2>
-        <Badge variant="outline">{column.total}</Badge>
+        <PhaseDot phase={column.key} />
+        <h2 className="flex-1 text-body font-medium text-foreground">{column.label}</h2>
+        <span className="text-meta text-muted-foreground">{column.total}</span>
       </header>
 
       {column.cards.length === 0 ? (
