@@ -1,5 +1,6 @@
 import {
   agentSession,
+  and,
   approvalDecision,
   connectedRepository,
   db,
@@ -79,9 +80,9 @@ export type CaseFile = {
 /**
  * Whether an oracle decided this verdict.
  *
- * Positive evidence only. The old test was the inverse, treating anything that was not the
- * single AUTOMATED_REPRODUCTION_NOT_RUN reason as oracle-decided, so an empty or unrecognised
- * evidence object would have had the page attribute a model-authored outcome to an external
+ * True only for evidence that positively records one: an `oracle` object carrying a string
+ * `result`. Anything else, including an empty or unrecognised evidence object, is not an
+ * oracle verdict, and saying otherwise would attribute a model-authored outcome to an external
  * canary check. That is the one claim this product must never make on its own.
  *
  * Nothing writes an oracle result yet, so this is false everywhere today, and it starts
@@ -100,8 +101,8 @@ export function oracleDecided(evidence: unknown): boolean {
  *
  * Checked before the query rather than after: report.id is a uuid column, so a comparison
  * against a malformed string is a Postgres error, and a reviewer following a stale link would
- * get a 500 where a not-found page is the honest answer. Group lengths are pinned, because a
- * pattern that only counts characters accepts thirty-six hyphens.
+ * get a 500 where a not-found page is the honest answer. Group lengths are pinned rather than
+ * counted, because a total-length check accepts thirty-six hyphens.
  */
 const REPORT_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -164,7 +165,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
 
       // Both halves of the pending tuple are required, the same test app/review/page.tsx
       // makes: a verdict id with no thread is not a call anyone can answer.
-      const awaitingVerdictId =
+      const pendingVerdictId =
         row.state === "AWAITING_APPROVAL" && session?.pendingThreadId
           ? session.pendingVerdictId
           : null;
@@ -177,8 +178,36 @@ export async function readCase(id: string): Promise<CaseFile | null> {
        * button that binds an older one would let somebody sign text they never read. The two
        * are usually the same row; when a revision lands after the tool call was prepared they
        * are not, and that is exactly when it matters.
+       *
+       * The report predicate stays on either branch. verdict.id and agent_session.report_id are
+       * independent foreign keys, so a session naming a verdict that belongs to a different
+       * report would otherwise render that report's payload, hash, approval and delivery here.
        */
-      const [latest] = await tx
+      const [pending] = pendingVerdictId
+        ? await tx
+            .select({
+              id: verdict.id,
+              outcome: verdict.outcome,
+              summary: verdict.summary,
+              payload: verdict.payload,
+              contentHash: verdict.contentHash,
+              revision: verdict.revision,
+              evidence: verdict.evidence,
+              createdAt: verdict.createdAt,
+            })
+            .from(verdict)
+            .where(and(eq(verdict.id, pendingVerdictId), eq(verdict.reportId, id)))
+        : [];
+
+      /**
+       * A pending id that names no verdict of this report is a broken tuple, so nothing is
+       * awaiting a decision here. The page still shows the record, read-only, because the
+       * report's own verdicts are not in doubt; what is in doubt is the call, and offering an
+       * Approve button for one nobody can identify is the failure worth closing off.
+       */
+      const awaitingVerdictId = pending ? pendingVerdictId : null;
+
+      const [newest] = await tx
         .select({
           id: verdict.id,
           outcome: verdict.outcome,
@@ -190,9 +219,11 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           createdAt: verdict.createdAt,
         })
         .from(verdict)
-        .where(awaitingVerdictId ? eq(verdict.id, awaitingVerdictId) : eq(verdict.reportId, id))
+        .where(eq(verdict.reportId, id))
         .orderBy(desc(verdict.revision))
         .limit(1);
+
+      const latest = pending ?? newest;
 
       const [decision] = latest
         ? await tx

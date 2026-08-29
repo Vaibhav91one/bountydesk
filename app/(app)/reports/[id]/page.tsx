@@ -248,9 +248,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
 
   // A uuid that does not exist and a string that is not a uuid are the same answer to a
-  // reviewer, and letting the malformed one reach the database only produces a 500. The
-  // shape has to be checked properly: the old pattern counted characters, so thirty-six
-  // hyphens passed it and reached Postgres as a uuid comparison.
+  // reviewer, and letting the malformed one reach the database only produces a 500.
   const file = isReportId(id) ? await readCase(id) : null;
   if (!file) notFound();
 

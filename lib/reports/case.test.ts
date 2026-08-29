@@ -403,3 +403,49 @@ test("a report id has to be a uuid, not thirty-six characters from its alphabet"
     assert.equal(cases.isReportId(value), false, `${value} must not be treated as an id`);
   }
 });
+
+test("a pending verdict belonging to another report is not shown or approvable", async () => {
+  const victim = await seedReport("AWAITING_APPROVAL");
+  const other = await seedReport("AWAITING_APPROVAL");
+
+  // The other report's verdict. Nothing about it belongs on the victim's page.
+  const [foreign] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: other,
+      outcome: "REPRODUCED",
+      summary: "another report's summary",
+      payload: "ANOTHER REPORT'S COMMENT",
+      contentHash: `foreign-${other}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  const [own] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: victim,
+      outcome: "ANALYSIS_ONLY",
+      summary: "this report's own summary",
+      payload: "this report's own comment",
+      contentHash: `own-${victim}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  // verdict.id and agent_session.report_id are independent foreign keys, so nothing in the
+  // schema stops a session naming a verdict that belongs somewhere else.
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: victim,
+    capabilityToken: `token-${victim}`,
+    sessionId: `session-${victim}`,
+    pendingThreadId: "thread-1",
+    pendingToolCallId: "call-1",
+    pendingVerdictId: foreign.id,
+    pendingApprovedContentHash: `foreign-${other}`,
+  });
+
+  const file = await cases.readCase(victim);
+  assert.equal(file?.verdict?.id, own.id, "the page must show this report's own verdict");
+  assert.notEqual(file?.verdict?.payload, "ANOTHER REPORT'S COMMENT");
+  // The call cannot be identified, so there is nothing here anybody may approve.
+  assert.equal(file?.awaitingVerdictId, null);
+});
