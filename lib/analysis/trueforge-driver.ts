@@ -523,6 +523,7 @@ export function createTrueforgeAnalysisDriver(
       try {
         ({ sessionId } = await client.createSession({ signal }));
       } catch (error) {
+        await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
       }
 
@@ -579,15 +580,7 @@ export function createTrueforgeAnalysisDriver(
             );
         });
       } catch (error) {
-        if (client.deleteSession) {
-          await client.deleteSession(sessionId).catch((deleteError) => {
-            console.error(
-              `failed to delete unpersisted TrueForge session ${sessionId}: ${
-                deleteError instanceof Error ? deleteError.message : String(deleteError)
-              }`,
-            );
-          });
-        }
+        await client.deleteSession(sessionId);
         await releaseAgentSessionCreationClaim(reportId, claimToken);
         throw error;
       }
