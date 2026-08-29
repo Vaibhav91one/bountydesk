@@ -1,9 +1,11 @@
 "use client";
 
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
-import { Folder } from "@phosphor-icons/react/ssr";
+import { useState } from "react";
+import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { ConfigureButton } from "../integrations/configure-button";
@@ -61,24 +63,38 @@ export function ConnectionTabs({
   repositories: RepositoryRow[];
   installUrl: string;
 }) {
+  const [query, setQuery] = useState("");
+
+  const needle = query.trim().toLowerCase();
+  const visible = needle
+    ? repositories.filter((repo) =>
+        `${repo.fullName} ${repo.label} ${repo.target ?? ""}`.toLowerCase().includes(needle),
+      )
+    : repositories;
+
   return (
     <Tabs defaultValue="repositories" className="gap-6">
-      <TabsList variant="line" className="w-full justify-start gap-6 border-b border-border/50">
-        <TabsTrigger value="repositories" className="flex-none">
-          <GitHubLight /> Repositories
-        </TabsTrigger>
-        <TabsTrigger value="email" className="flex-none">
-          <Gmail /> Email
-        </TabsTrigger>
-        <TabsTrigger value="upload" className="flex-none">
-          <Folder /> File upload
-        </TabsTrigger>
-        <TabsTrigger value="drive" className="flex-none">
-          <OneDrive /> Drive
-        </TabsTrigger>
-      </TabsList>
+      {/* The strip scrolls, the page does not: four tabs do not fit 390px. The rule and the
+          overflow live on the wrapper so the border still spans the full width and the active
+          tab's underline is not clipped by the scroll box. */}
+      <div className="overflow-x-auto border-b border-border/50 pb-1.5">
+        <TabsList variant="line" className="w-max justify-start gap-6">
+          <TabsTrigger value="repositories" className="flex-none">
+            <GitHubLight /> Repositories
+          </TabsTrigger>
+          <TabsTrigger value="email" className="flex-none">
+            <Gmail /> Email
+          </TabsTrigger>
+          <TabsTrigger value="upload" className="flex-none">
+            <Folder /> File upload
+          </TabsTrigger>
+          <TabsTrigger value="drive" className="flex-none">
+            <OneDrive /> Drive
+          </TabsTrigger>
+        </TabsList>
+      </div>
 
-      <TabsContent value="repositories" className="flex flex-col gap-2.5">
+      <TabsContent value="repositories">
         {repositories.length === 0 ? (
           <div className="flex flex-col items-start gap-4 rounded-xl border border-border/50 bg-card p-8">
             <p className="max-w-2xl text-body text-muted-foreground">
@@ -92,34 +108,63 @@ export function ConnectionTabs({
               Install BountyDesk on GitHub
             </a>
           </div>
-        ) : null}
-
-        {repositories.map((repo) => (
-          <div
-            key={repo.id}
-            className="flex flex-wrap items-center gap-4 rounded-xl border border-border/50 bg-card px-4 py-3.5"
-          >
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-background">
-              <GitHubLight className="size-5" />
-            </span>
-
-            <div className="flex min-w-40 flex-1 flex-col gap-1">
-              <span className="flex items-center gap-2.5">
-                <span className="text-body font-medium text-foreground">{repo.fullName}</span>
-                <Badge variant={repo.connected ? "success" : "outline"}>{repo.label}</Badge>
-              </span>
-              <span className="text-meta text-muted-foreground">
-                {repo.hint} Target: {repo.target ?? "none bound"}.
-              </span>
+        ) : (
+          // The scroller is this container, which is what lets the search bar stick: sticky
+          // positions against the nearest scrolling ancestor, so a bar outside it would just
+          // scroll away with the page.
+          <div className="flex max-h-[60vh] flex-col overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-background pb-3">
+              <div className="relative">
+                <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search repositories"
+                  aria-label="Search repositories"
+                  className="h-11 border-border/50 pl-9 text-body"
+                />
+              </div>
             </div>
 
-            <ConfigureButton
-              repoId={repo.repoId}
-              configured={repo.configured}
-              label={repo.configured ? "Reconfigure" : "Configure"}
-            />
+            {visible.length === 0 ? (
+              <p className="rounded-xl border border-border/50 bg-card px-5 py-8 text-center text-body text-muted-foreground">
+                No repository matches “{query}”.
+              </p>
+            ) : null}
+
+            <ul className="flex flex-col gap-2.5">
+              {visible.map((repo) => (
+                <li
+                  key={repo.id}
+                  className="flex flex-wrap items-center gap-4 rounded-xl border border-border/50 bg-card px-4 py-3.5"
+                >
+                  <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-background">
+                    <GitHubLight className="size-5" />
+                  </span>
+
+                  <div className="flex min-w-40 flex-1 flex-col gap-1">
+                    <span className="flex items-center gap-2.5">
+                      <span className="text-body font-medium text-foreground">
+                        {repo.fullName}
+                      </span>
+                      <Badge variant={repo.connected ? "success" : "outline"}>{repo.label}</Badge>
+                    </span>
+                    <span className="text-meta text-muted-foreground">
+                      {repo.hint} Target: {repo.target ?? "none bound"}.
+                    </span>
+                  </div>
+
+                  <ConfigureButton
+                    repoId={repo.repoId}
+                    configured={repo.configured}
+                    label={repo.configured ? "Reconfigure" : "Configure"}
+                  />
+                </li>
+              ))}
+            </ul>
           </div>
-        ))}
+        )}
       </TabsContent>
 
       <TabsContent value="email">
