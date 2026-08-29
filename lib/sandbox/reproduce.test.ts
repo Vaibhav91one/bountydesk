@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test, { before, mock } from "node:test";
 
-import type { ReproductionRecipe } from "@/lib/reproduction/types";
+import type { ReproduceFn, ReproductionRecipe } from "@/lib/reproduction/types";
 import { EXPECTED_BUILD_MARKER } from "@/lib/targets/configure";
 
 import type { ExecResult, Sandbox, SandboxSpec, SnapshotInfo } from "./daytona";
@@ -14,6 +14,15 @@ process.env.BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS = "30";
 process.env.BOUNTYDESK_REPRODUCE_READINESS_POLL_MS = "5";
 
 const TARGET_PROFILE_ID = "profile-under-test";
+
+type TestReproductionAuthorization =
+  | {
+      ok: true;
+      imageDigest: string;
+      snapshotId: string | null;
+      recipe: ReproductionRecipe;
+    }
+  | { ok: false; reason: "NO_BOUND_TARGET" | "NO_APPROVED_ORACLE" };
 
 /**
  * The seam this whole file rests on: reproduce.ts imports its sandbox lifecycle from
@@ -48,6 +57,7 @@ const FAKE_SNAPSHOT: SnapshotInfo = {
 let createSandboxCalls: SandboxSpec[] = [];
 let deleteSandboxCalls: string[] = [];
 let executeCalls: string[] = [];
+let authorizeCalls: { targetProfileId: string; recipeId: string }[] = [];
 
 /** Every test in this file passes `imageDigest: "sha256:" + "a".repeat(64)` (or the equivalent
  * derived from FAKE_SNAPSHOT), so the default execute() stub answers the build-marker read
@@ -73,6 +83,18 @@ let executeImpl: (sandbox: Sandbox, command: string) => Promise<ExecResult> = as
 let deleteSandboxImpl: (id: string) => Promise<void> = async (id) => {
   deleteSandboxCalls.push(id);
 };
+let authorizeImpl: (input: {
+  targetProfileId: string;
+  recipeId: string;
+}) => Promise<TestReproductionAuthorization> = async (input) => {
+  authorizeCalls.push(input);
+  return {
+    ok: true,
+    imageDigest: "sha256:" + "a".repeat(64),
+    snapshotId: "snap",
+    recipe,
+  };
+};
 
 mock.module("./daytona", {
   namedExports: {
@@ -83,16 +105,18 @@ mock.module("./daytona", {
   },
 });
 
-let reproduce: typeof import("./reproduce").reproduce;
+let reproduce: ReproduceFn;
 
 before(async () => {
-  ({ reproduce } = await import("./reproduce"));
+  const { createReproducer } = await import("./reproduce");
+  reproduce = createReproducer((input) => authorizeImpl(input));
 });
 
 function resetSpies(): void {
   createSandboxCalls = [];
   deleteSandboxCalls = [];
   executeCalls = [];
+  authorizeCalls = [];
   createSandboxImpl = async (spec) => {
     createSandboxCalls.push(spec);
     return FAKE_SANDBOX;
@@ -106,6 +130,15 @@ function resetSpies(): void {
   };
   deleteSandboxImpl = async (id) => {
     deleteSandboxCalls.push(id);
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      recipe,
+    };
   };
 }
 
@@ -170,6 +203,7 @@ function fetchStub(
 const recipe: ReproductionRecipe = {
   id: "test-recipe",
   title: "a test recipe",
+  keywords: ["test recipe"],
   fixture: { request: { method: "POST", path: "/fixture", body: { email: "{{canary}}" } } },
   negativeControl: { method: "GET", path: "/negative" },
   exploit: { method: "GET", path: "/exploit" },
@@ -235,6 +269,54 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
     { "bountydesk.recipe": "test-recipe", "bountydesk.targetProfileId": TARGET_PROFILE_ID },
     "the target profile that authorized this run must be threaded through for audit",
   );
+  assert.deepEqual(authorizeCalls, [{ targetProfileId: TARGET_PROFILE_ID, recipeId: "test-recipe" }]);
+});
+
+test("an unauthorized target profile stops before provisioning a sandbox", async () => {
+  resetSpies();
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return { ok: false, reason: "NO_BOUND_TARGET" };
+  };
+
+  const outcome = await reproduce(reproduceInput());
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "NO_BOUND_TARGET");
+  assert.deepEqual(createSandboxCalls, []);
+  assert.deepEqual(deleteSandboxCalls, []);
+});
+
+test("caller-supplied image and snapshot values are replaced by the bound target profile", async () => {
+  resetSpies();
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
+      snapshotId: "authorized-snapshot",
+      recipe,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () =>
+      reproduce(
+        reproduceInput({
+          imageDigest: "sha256:" + "b".repeat(64),
+          snapshotId: "caller-snapshot",
+        }),
+      ),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.equal(createSandboxCalls[0]?.snapshot, "authorized-snapshot");
+  assert.equal(createSandboxCalls[0]?.imageRef, FAKE_SNAPSHOT.imageName);
 });
 
 test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never reaches the oracle", async () => {
@@ -346,6 +428,10 @@ test("a negative control that never completes stops the run before the exploit e
       return response.body.includes(canary);
     },
   };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe: throwingRecipe };
+  };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
     fetchStub(calls, {
@@ -376,6 +462,10 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the
       if (response.body.includes("boom")) throw new Error("malformed response");
       return false;
     },
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe: throwingRecipe };
   };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -429,12 +519,35 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
 
 test("a missing snapshot id short-circuits before touching the sandbox client at all", async () => {
   resetSpies();
-  const outcome = await reproduce(reproduceInput({ snapshotId: null }));
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return { ok: true, imageDigest: "sha256:" + "a".repeat(64), snapshotId: null, recipe };
+  };
+  const outcome = await reproduce(reproduceInput());
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
   assert.deepEqual(createSandboxCalls, []);
   assert.deepEqual(deleteSandboxCalls, []);
+});
+
+test("cancellation during readiness tears down the sandbox and rejects the run", async () => {
+  resetSpies();
+  const controller = new AbortController();
+  const reason = new Error("lease lost");
+  let probes = 0;
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+    }
+    probes += 1;
+    if (probes === 2) controller.abort(reason);
+    return { exitCode: 0, result: "000" };
+  };
+
+  await assert.rejects(() => reproduce(reproduceInput(), { signal: controller.signal }), reason);
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
 test("teardown still runs when an unexpected error happens after provisioning", async () => {

@@ -35,6 +35,7 @@ import type {
 import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, imageRefFor } from "@/lib/targets/configure";
 import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, deleteSandbox, execute, getSnapshot, type Sandbox } from "./daytona";
+import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
 
 const DAYTONA_API = "https://app.daytona.io/api";
 
@@ -139,6 +140,32 @@ function timeoutSignal(outer?: AbortSignal): AbortSignal {
   return outer ? AbortSignal.any([outer, timeout]) : timeout;
 }
 
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new Error("operation aborted");
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+}
+
+function rethrowIfAborted(error: unknown, signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortReason(signal);
+  if (error instanceof DOMException && error.name === "AbortError") throw error;
+  if (error instanceof Error && error.name === "AbortError") throw error;
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(abortReason(signal!));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /**
  * Poll the sandbox from inside until its app port answers, or give up.
  *
@@ -150,20 +177,18 @@ function timeoutSignal(outer?: AbortSignal): AbortSignal {
  * that cancels mid-probe still waits out that one in-flight command, but never starts another.
  */
 async function waitForAppReady(sandbox: Sandbox, timeoutMs: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
   await execute(sandbox, START_APP_COMMAND, 10);
 
   const deadline = Date.now() + timeoutMs;
   const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${APP_PORT}/ 2>/dev/null || echo 000`;
 
   while (Date.now() < deadline) {
-    if (signal?.aborted) {
-      throw new Error(`readiness wait for sandbox ${sandbox.id} was cancelled`);
-    }
-
+    throwIfAborted(signal);
     const result = await execute(sandbox, probe, 10);
     const status = result.result.trim();
     if (/^2\d\d$/.test(status)) return;
-    await new Promise((resolve) => setTimeout(resolve, READINESS_POLL_MS));
+    await delay(READINESS_POLL_MS, signal);
   }
 
   throw new Error(`sandbox ${sandbox.id} did not answer on port ${APP_PORT} within ${timeoutMs}ms`);
@@ -231,7 +256,8 @@ async function runLeg(
     bodyHash = sent.bodyHash;
     const canaryFound = await oracleCheck(sent.probe, canary);
     return { ranToCompletion: true, canaryFound, at, bodyHash };
-  } catch {
+  } catch (error) {
+    rethrowIfAborted(error, signal);
     return { ranToCompletion: false, canaryFound: false, at, bodyHash };
   }
 }
@@ -254,27 +280,41 @@ function analysisOnly(reason: AnalysisOnlyReason, evidence?: Partial<Reproductio
   return { outcome: "ANALYSIS_ONLY", reason, evidence };
 }
 
-export const reproduce: ReproduceFn = async (input, opts) => {
+type AuthorizeReproductionTargetFn = typeof authorizeReproductionTarget;
+
+export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn = authorizeReproductionTarget): ReproduceFn {
+  return async (input, opts) => {
   const recipeId = input.recipe.id;
   let sandbox: Sandbox | undefined;
 
   try {
-    if (!input.snapshotId) {
+    const authorization = await authorizeTarget({
+      targetProfileId: input.targetProfileId,
+      recipeId,
+    });
+    if (!authorization.ok) {
+      return analysisOnly(authorization.reason, { recipeId });
+    }
+
+    const recipe = authorization.recipe;
+
+    if (!authorization.snapshotId) {
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
     }
 
     let imageRef: string;
     try {
-      imageRef = imageRefFor(input.imageDigest);
-    } catch {
+      imageRef = imageRefFor(authorization.imageDigest);
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
     }
 
     try {
-      const snapshotInfo = await getSnapshot(input.snapshotId);
+      const snapshotInfo = await getSnapshot(authorization.snapshotId);
       sandbox = await createSandbox(
         {
-          snapshot: input.snapshotId,
+          snapshot: authorization.snapshotId,
           imageRef,
           // Matched to the snapshot's own declared limits, the same way scripts/spike-daytona.ts
           // does it: createSandbox refuses to request resources of its own, so these are read
@@ -292,15 +332,17 @@ export const reproduce: ReproduceFn = async (input, opts) => {
         // fail closed, every single time this override is exercised.
         TAG_PINNED_SNAPSHOT_IMAGE_REF,
       );
-    } catch {
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
     }
 
-    opts?.signal?.throwIfAborted();
+    throwIfAborted(opts?.signal);
 
     try {
       await waitForAppReady(sandbox, READINESS_TIMEOUT_MS, opts?.signal);
-    } catch {
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
     }
 
@@ -318,7 +360,8 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     let preview: PortPreviewUrl;
     try {
       preview = await getPortPreviewUrl(sandbox.id, APP_PORT, opts?.signal);
-    } catch {
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id, canaryHash });
     }
 
@@ -331,14 +374,15 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     let fixtureBodyHash: string | null = null;
     let fixtureCompleted = false;
     try {
-      const sent = await sendToSandbox(preview, input.recipe.fixture.request, canary, opts?.signal);
+      const sent = await sendToSandbox(preview, recipe.fixture.request, canary, opts?.signal);
       fixtureBodyHash = sent.bodyHash;
       fixtureCompleted = sent.probe.status >= 200 && sent.probe.status < 300;
-    } catch {
+    } catch (error) {
+      rethrowIfAborted(error, opts?.signal);
       fixtureCompleted = false;
     }
 
-    opts?.signal?.throwIfAborted();
+    throwIfAborted(opts?.signal);
 
     // Negative control next, always, per Q3 -- but only if the fixture actually seeded a
     // canary, and the exploit only if the negative control both completed and stayed clean.
@@ -349,14 +393,14 @@ export const reproduce: ReproduceFn = async (input, opts) => {
     if (fixtureCompleted) {
       negativeControl = await runLeg(
         preview,
-        input.recipe.negativeControl,
+        recipe.negativeControl,
         canary,
-        input.recipe.oracleCheck,
+        recipe.oracleCheck,
         opts?.signal,
       );
 
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
-        exploit = await runLeg(preview, input.recipe.exploit, canary, input.recipe.oracleCheck, opts?.signal);
+        exploit = await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal);
       }
     }
 
@@ -399,9 +443,10 @@ export const reproduce: ReproduceFn = async (input, opts) => {
       return analysisOnly(reason, evidence);
     }
     return { outcome: decision, evidence };
-  } catch {
-    // Anything unaccounted for above -- an unexpected throw, an aborted signal bubbling up --
-    // is infrastructure until proven otherwise, never a guessed verdict.
+  } catch (error) {
+    rethrowIfAborted(error, opts?.signal);
+    // Anything unaccounted for above is infrastructure until proven otherwise, never a
+    // guessed verdict.
     return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
   } finally {
     if (sandbox) {
@@ -410,4 +455,7 @@ export const reproduce: ReproduceFn = async (input, opts) => {
       await deleteSandbox(sandbox.id).catch(() => undefined);
     }
   }
-};
+  };
+}
+
+export const reproduce: ReproduceFn = createReproducer();
