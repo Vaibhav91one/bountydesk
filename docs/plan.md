@@ -89,7 +89,7 @@ emit `REPRODUCED` even when the PoC claims success.
 
 ## Phase 5: Human approval and idempotent delivery
 
-**Status:** complete for the worker components. The persistent deployment runner is not built.
+**Status:** complete, including the persistent deployment runner.
 
 - Draft and freeze the outbound payload before the native TrueForge `@write` approval gate.
 - Bind approval to the exact content hash, `threadId` and `toolCallId`; serialize turns per report.
@@ -110,10 +110,25 @@ call nor named `publish_verdict`), the poller resolving the pending call, a revi
 the submission worker relaying it to TrueForge, and the harness's real invocation of
 `publish_verdict` moving the report to `DELIVERING`. The run stopped there rather than posting
 a live GitHub comment, the same boundary the Phase-5-foundation smoke test already drew.
-The four internal tick routes still need an operator locally. The planned Zerops deployment does
-not add an external scheduler: one long-running Node process imports the four queue processors and
-drives them directly. That runner is not built, so this status does not claim that a deployed report
-advances unattended. See [`deployment.md`](deployment.md).
+
+`scripts/run-worker-daemon.ts` (`lib/worker-daemon/runner.ts`) closed that gap: a long-running
+Node process that drives `runOnce`, `pollOnce`, `submitApprovalOnce` and `deliverOnce` as four
+independent, abortable loops plus their sweepers, the same functions the internal tick routes
+call but running continuously rather than once per request. The four tick routes stay in place
+as bounded, authenticated adapters for local and manual diagnostics; the daemon is what a
+Zerops-deployed worker service actually runs. See [`deployment.md`](deployment.md).
+
+Confirmed live 2026-08-29 with the daemon as the only driver: a real signed GitHub webhook
+against a synthetic issue on the connected `Vaibhav91one/juice-shop` fork, a real target
+profile bound from a digest-pinned Daytona image, real reviewer GitHub OAuth sign-in, and a
+real Allow click on `/review`. The daemon alone carried the report from intake through
+`TRIAGING`, `ANALYSIS_ONLY`, `AWAITING_APPROVAL` and `DELIVERED` with no manual database
+writes at any step, ending in one posted GitHub comment
+([Vaibhav91one/juice-shop#2](https://github.com/Vaibhav91one/juice-shop/issues/2)) whose body
+matches the approved verdict's content hash exactly. Replaying the identical webhook delivery
+afterward returned `TERMINAL_REPLAY`, with no second job row or comment. This proves the
+worker code end to end; the Zerops hosting of that same worker is still the open item in
+[`deployment.md`](deployment.md)'s first deployment gates.
 
 ## Phase 6: Product UI, resilience and demo release
 
