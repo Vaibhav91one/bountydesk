@@ -14,6 +14,7 @@ import {
   type Executor,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
+import { draftVerdictForReport } from "@/lib/mcp/publish-verdict";
 import type {
   GetRecipesForTargetFn,
   ReproduceFn,
@@ -21,6 +22,7 @@ import type {
   ReproductionRecipe,
 } from "@/lib/reproduction/types";
 import { reproduce } from "@/lib/sandbox/reproduce";
+import { hasActiveRepositoryGrant } from "@/lib/targets/repository-grant";
 import { getRecipesForTarget } from "@/lib/targets/recipes";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
@@ -324,24 +326,9 @@ async function decideFreshVerdict(
   };
 }
 
-function hasActiveRepositoryGrant(target: {
-  targetProfileId: string;
-  connectedRepositoryId: string | null;
-  repoActive: boolean | null;
-  repoArchivedAt: Date | null;
-  repoTargetProfileId: string | null;
-  installationSuspendedAt: Date | null;
-  installationDeletedAt: Date | null;
-}): boolean {
-  if (!target.connectedRepositoryId) return true;
-  return (
-    target.repoActive === true &&
-    target.repoArchivedAt === null &&
-    target.repoTargetProfileId === target.targetProfileId &&
-    target.installationSuspendedAt === null &&
-    target.installationDeletedAt === null
-  );
-}
+// hasActiveRepositoryGrant used to live here. It moved to lib/targets/repository-grant.ts
+// (imported above) unchanged, byte-for-byte, so lib/mcp/publish-verdict.ts's authorization
+// re-check can call the exact same check instead of a second, potentially drifting copy.
 
 function adoptVerdict(row: {
   outcome: (typeof verdict.outcome.enumValues)[number];
@@ -484,25 +471,39 @@ export function createTrueforgeAnalysisDriver(
           .limit(1);
 
         const verdictId = existingVerdict?.id ?? proposedVerdictId;
-        const proposedStillAuthorized =
-          !proposed.reproductionTarget || (await targetStillAuthorized(tx, reportId, proposed.reproductionTarget));
-        const decided = existingVerdict
-          ? adoptVerdict(existingVerdict)
-          : proposedStillAuthorized
-            ? proposed
-            : analysisNotRunDecision(verdictId);
 
-        await ensureInitialVerdict(
-          {
-            id: verdictId,
+        if (existingVerdict) {
+          // Idempotent replay: this report's revision-1 verdict already exists exactly as
+          // stored (a retry after an earlier attempt committed it but crashed before the
+          // session row). ensureInitialVerdict is called directly with the adopted row's own
+          // fields, not through draftVerdictForReport below -- that function always re-renders
+          // a fresh agent-drafted payload, which would disagree with a payload built by an
+          // earlier version of this code and fail VerdictIntegrityError on a genuine retry.
+          await ensureInitialVerdict({ id: verdictId, reportId, ...adoptVerdict(existingVerdict) }, tx);
+        } else {
+          const proposedStillAuthorized =
+            !proposed.reproductionTarget ||
+            (await targetStillAuthorized(tx, reportId, proposed.reproductionTarget));
+          const decided = proposedStillAuthorized ? proposed : analysisNotRunDecision(verdictId);
+
+          // decideFreshVerdict still decides outcome/summary on its own (unchanged); only how
+          // that decision becomes a persisted verdict changes here. Routing it through
+          // draftVerdictForReport -- the same schema-validated, re-authorized, server-rendered
+          // path a real agent's draft will use once the driver rewrite lands -- exercises that
+          // new path end to end today, before any agent ever drafts anything. findings stay
+          // empty: this deterministic pipeline doesn't produce structured findings.
+          const drafted = await draftVerdictForReport(
             reportId,
-            outcome: decided.outcome,
-            summary: decided.summary,
-            evidence: decided.evidence,
-            payload: decided.payload,
-          },
-          tx,
-        );
+            verdictId,
+            { outcome: decided.outcome, summary: decided.summary, findings: [] },
+            tx,
+          );
+          if (!drafted.ok) {
+            throw new Error(
+              `ensureSession: draftVerdictForReport refused report ${reportId}'s own decided verdict: ${drafted.reason}`,
+            );
+          }
+        }
         shouldCreateSession = true;
       });
 

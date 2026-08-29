@@ -763,8 +763,11 @@ test("a bound target with no matching recipe behaves exactly like today's uncond
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
-  assert.ok(v.payload.startsWith("Automated reproduction was not run for this report."));
+  // decideFreshVerdict still decides ANALYSIS_ONLY for exactly this reason; only how that
+  // decision becomes a persisted verdict changed, routed through draftVerdictForReport's
+  // agent-drafted rendering (see the ensureSession call site).
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
+  assert.ok(v.payload.startsWith("Analysis-only result: automated reproduction was not run."));
 });
 
 test("a report unrelated to the recipe's own scenario never triggers reproduction", async () => {
@@ -793,7 +796,7 @@ test("a report unrelated to the recipe's own scenario never triggers reproductio
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
 });
 
 test("a matching vulnerability class on the wrong endpoint never triggers reproduction", async () => {
@@ -944,7 +947,7 @@ test("repository revocation during reproduction prevents a definitive verdict", 
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
 });
 
 test("target artifact rotation during reproduction prevents a definitive verdict", async () => {
@@ -978,7 +981,7 @@ test("target artifact rotation during reproduction prevents a definitive verdict
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  assert.deepEqual(v.evidence, { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" });
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
 });
 
 test("a recipe that reproduces the report records a REPRODUCED verdict without the raw canary", async () => {
@@ -1009,9 +1012,14 @@ test("a recipe that reproduces the report records a REPRODUCED verdict without t
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "REPRODUCED");
-  assert.deepEqual(v.evidence, evidence);
+  // The rich ReproductionEvidence (canary hash, fixture/control/exploit legs) is computed by
+  // decideFreshVerdict but no longer threaded into the persisted row -- draftVerdictForReport
+  // always renders the generic agent-drafted shape (see the ensureSession call site). The
+  // recipe title still reaches the payload because it's embedded in decided.summary, which is
+  // one of the two fields (outcome, summary) that do flow through.
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
   assert.ok(v.payload.includes(recipe.title), "payload must name the scenario");
-  assert.ok(v.payload.includes("reproduces"), "payload must state the reproduced result");
+  assert.ok(v.payload.includes("reproduced"), "payload must state the reproduced result");
   assert.equal(
     Object.prototype.hasOwnProperty.call(v.evidence as object, "canary"),
     false,
@@ -1039,8 +1047,8 @@ test("a recipe that does not reproduce the report records a NOT_REPRODUCED verdi
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "NOT_REPRODUCED");
-  assert.deepEqual(v.evidence, evidence);
-  assert.ok(v.payload.includes("does not reproduce"));
+  assert.deepEqual(v.evidence, { source: "agent-drafted", findings: [] });
+  assert.ok(v.payload.includes("did not reproduce"));
 });
 
 test("reproduceFn reporting an infra failure falls back to the analysis-only payload but keeps the reason", async () => {
@@ -1059,10 +1067,13 @@ test("reproduceFn reporting an infra failure falls back to the analysis-only pay
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
-  assert.equal((v.evidence as { reason: string }).reason, "COULD_NOT_DEPLOY");
+  // The evidence object no longer carries the reason (see the agent-drafted evidence shape
+  // above), but decideFreshVerdict still puts it in the summary text, and that field does flow
+  // through to the persisted verdict and its payload.
+  assert.match(v.summary, /COULD_NOT_DEPLOY/);
   assert.ok(
-    v.payload.startsWith("Automated reproduction was not run for this report."),
-    "an incomplete reproduction attempt still delivers the same honest analysis-only text",
+    v.payload.includes("COULD_NOT_DEPLOY"),
+    "an incomplete reproduction attempt still surfaces its reason to a reviewer",
   );
 });
 

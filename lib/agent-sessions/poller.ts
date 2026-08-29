@@ -1,4 +1,5 @@
 import { and, db, eq, report, verdict } from "@/lib/db";
+import { draftVerdictFromPendingCall, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
 import { transition } from "@/lib/reports/lifecycle";
 import {
   createTrueForgeClient,
@@ -41,13 +42,16 @@ async function refuseUnresolvablePending(
   return lease.id;
 }
 
-function extractCapability(argumentsJson: string): string | null {
-  let parsed: unknown;
+function parseJson(argumentsJson: string): unknown {
   try {
-    parsed = JSON.parse(argumentsJson);
+    return JSON.parse(argumentsJson);
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+function extractCapability(argumentsJson: string): string | null {
+  const parsed = parseJson(argumentsJson);
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
   const capability = (parsed as Record<string, unknown>).capability;
   return typeof capability === "string" ? capability : null;
@@ -174,6 +178,32 @@ async function handleVerifiedPendingCall(
   return lease.id;
 }
 
+/**
+ * A pending call whose arguments already carry the full agent-drafted shape (outcome, summary,
+ * findings), not just a capability token. Mints or confirms the report's verdict from those
+ * fields before falling through to the same handleVerifiedPendingCall approval-recording flow
+ * a capability-only call uses -- the drafting step is the only part that's new.
+ *
+ * Nothing in the live agent manifest or turn message asks for this shape yet (that lands with
+ * the driver rewrite), so this branch is unreachable in production today; it exists so the
+ * poller-side half of the new schema is exercised and provable ahead of that later PR.
+ */
+async function handleAgentDraftedPendingCall(
+  lease: AgentSessionLease,
+  call: PendingToolCall,
+  input: { capability: string; outcome: string; summary: string; findings: unknown[] },
+): Promise<string> {
+  const drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
+    outcome: input.outcome,
+    summary: input.summary,
+    findings: input.findings,
+  });
+  if (!drafted.ok) {
+    return refuseUnresolvablePending(lease, `publish_verdict draft refused: ${drafted.reason}`);
+  }
+  return handleVerifiedPendingCall(lease, call);
+}
+
 async function handleAwaitingApproval(
   lease: AgentSessionLease,
   pending: PendingToolCall[],
@@ -191,6 +221,22 @@ async function handleAwaitingApproval(
       lease,
       `unsupported pending tool call: ${call.toolName} (toolInfoType ${call.toolInfoType})`,
     );
+  }
+
+  // Today's tool schema and turn message only ever hand back {capability}; a full draft is
+  // what a future, investigating agent will send instead once the driver rewrite starts asking
+  // for one. Trying the fuller shape first, and falling back to the capability-only shape, lets
+  // both keep working from the same pending-call parsing without the poller having to guess
+  // which one a given deployment's agent manifest currently produces.
+  const fullDraft = publishVerdictInputSchema.safeParse(parseJson(call.argumentsJson));
+  if (fullDraft.success) {
+    if (fullDraft.data.capability !== lease.capabilityToken) {
+      return refuseUnresolvablePending(
+        lease,
+        "publish_verdict capability argument does not match this session's capability token",
+      );
+    }
+    return handleAgentDraftedPendingCall(lease, call, fullDraft.data);
   }
 
   const capability = extractCapability(call.argumentsJson);

@@ -119,6 +119,58 @@ function publishVerdictCall(capability: string, overrides: Partial<PendingToolCa
   };
 }
 
+function draftedPublishVerdictCall(
+  capability: string,
+  draft: { outcome?: string; summary?: string; findings?: unknown[] } = {},
+  overrides: Partial<PendingToolCall> = {},
+): PendingToolCall {
+  return {
+    threadId: "thread-1",
+    toolCallId: "call-1",
+    toolName: "publish_verdict",
+    toolInfoType: "mcp",
+    argumentsJson: JSON.stringify({
+      capability,
+      outcome: draft.outcome ?? "ANALYSIS_ONLY",
+      summary: draft.summary ?? "drafted summary",
+      findings: draft.findings ?? [],
+    }),
+    ...overrides,
+  };
+}
+
+/** A session with no verdict pre-seeded, unlike seedSession above: the whole point of the
+ * agent-drafted branch under test is that it mints that first verdict row itself. */
+async function seedSessionWithoutVerdict(
+  opts: { reportState?: "TRIAGING" | "REPRODUCING" } = {},
+) {
+  seq += 1;
+  const n = seq;
+
+  const [r] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "github",
+      sourceRef: `github:2:issue:${n}`,
+      title: `report ${n}`,
+      body: "body",
+      state: opts.reportState ?? "TRIAGING",
+    })
+    .returning({ id: dbm.report.id });
+
+  const [s] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: r.id,
+      capabilityToken: `draft-cap-${n}`,
+      sessionId: `draft-session-${n}`,
+      turnId: `turn-${n}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  return { reportId: r.id, agentSessionId: s.id, capabilityToken: `draft-cap-${n}` };
+}
+
 async function sessionRow(id: string) {
   const [row] = await dbm.db
     .select({
@@ -424,6 +476,66 @@ test("pollOnce rejects a lease that cannot reach its first heartbeat", async () 
     poller.pollOnce("w-too-short", { leaseSeconds: 0.05 }),
     /leaseSeconds must exceed the 50 ms heartbeat floor/,
   );
+});
+
+test("a pending call carrying a full agent-drafted payload mints the verdict and moves the report", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "ANALYSIS_ONLY",
+        summary: "the agent's own drafted conclusion",
+        findings: [],
+      }),
+    ],
+  });
+
+  const id = await poller.pollOnce("w-drafted", { client });
+  assert.equal(id, fixture.agentSessionId);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "AWAITING_APPROVAL");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "AWAITING_APPROVAL_HARNESS");
+  assert.ok(row.pendingVerdictId, "a verdict must have been minted for this report");
+
+  const [verdictRow] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome, summary: dbm.verdict.summary })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
+  assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
+});
+
+test("a full draft claiming REPRODUCED for a report with no bound target is refused, and no verdict is created", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "REPRODUCED",
+        summary: "the agent claims this reproduces",
+      }),
+    ],
+  });
+
+  await poller.pollOnce("w-drafted-unauthorized", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /publish_verdict draft refused/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "TRIAGING");
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0);
 });
 
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
