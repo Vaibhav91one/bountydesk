@@ -6,7 +6,6 @@ import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { Highlighter } from "@/components/ui/highlighter";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,23 +47,13 @@ function paragraphs(payload: string): string[] {
 /** The sign-off the delivery worker appends to every payload. */
 const SIGNATURE = /^Signed via BountyDesk\.?$/;
 
-/**
- * **bold** and nothing else. The payloads this product writes use no other markup.
- *
- * The bold run is drawn as a marker stroke rather than as weight, because it is the sentence
- * the whole decision turns on and a reviewer skimming should not be able to miss it. What
- * counts as important is the payload's own emphasis, not a phrase picked out here: nothing
- * chooses on the reader's behalf.
- *
- * The colour is a literal. rough-notation paints into SVG presentation attributes, where a
- * CSS variable does not resolve, so a token reference would silently draw nothing.
- */
+/** **bold** and nothing else. The payloads this product writes use no other markup. */
 function emphasise(block: string): React.ReactNode[] {
   return block.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
     part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
-      <Highlighter key={index} action="highlight" color="oklch(0.8 0.15 75)" padding={3}>
-        <span className="font-medium text-background">{part.slice(2, -2)}</span>
-      </Highlighter>
+      <strong key={index} className="font-medium">
+        {part.slice(2, -2)}
+      </strong>
     ) : (
       part
     ),
@@ -223,17 +212,10 @@ export function VerdictCard({
         </span>
 
         <span className="flex items-center gap-2">
-          {/* Both outcomes stay reachable. The conversation was going to be how a reviewer
-              said no, and with it parked, denying needs a button of its own: a gate that only
-              opens one way is not a gate. */}
-          <Button size="sm" variant="ghost" onClick={deny} loading={denying} disabled={disabled}>
-            <RollingIcon icon={Prohibit} className="size-4" /> Deny
-          </Button>
-
           {/* Not approving is meant to be a conversation, and the conversation is not built.
               Parked rather than removed: the panel behind it works, but nothing a reviewer
               typed would reach the harness, so offering it would promise a channel that does
-              not exist. Deny still lives on the panel below the page's own gate. */}
+              not exist. It sits apart from the pair that decide. */}
           <Button size="sm" variant="outline" onClick={onChat} disabled title="Not built yet">
             {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
                 should look like it. */}
@@ -244,6 +226,20 @@ export function VerdictCard({
             />
             Chat with Agent Bounty
             <span className="text-meta text-muted-foreground">soon</span>
+          </Button>
+
+          {/* Both outcomes stay reachable, and next to each other. The conversation was going
+              to be how a reviewer said no; with it parked, denying needs a button of its own,
+              because a gate that only opens one way is not a gate. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={deny}
+            loading={denying}
+            disabled={disabled}
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          >
+            <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
           <Button size="sm" onClick={approve} loading={approving} disabled={disabled}>
             <RollingIcon icon={CheckCircle} className="size-4" /> Approve
