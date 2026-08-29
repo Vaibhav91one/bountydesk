@@ -17,7 +17,10 @@ const COLUMNS = [
   { key: "repository", label: "Repository", width: "1.6fr" },
   { key: "target", label: "Bound target", width: "1fr" },
   { key: "status", label: "Status", width: "1fr" },
-  { key: "action", label: "", width: "0.7fr", align: "end" as const },
+  // A fixed track, not a fraction. Reconfigure and Remove repository measure 111 and 156
+  // with an 8 gap, and a proportional column dropped below that at this table's width and
+  // stacked them. The table scrolls sideways rather than the buttons wrapping.
+  { key: "action", label: "", width: "20rem", align: "end" as const },
 ];
 
 /**
@@ -203,6 +206,7 @@ export function ConnectionTabs({
               onFilter={setGroup}
               rows={rows}
               label="Connected repositories"
+              minWidth={880}
               empty={<>No repository matches.</>}
             />
           </div>

@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
-import { PhaseDot } from "@/components/phase-dot";
+import { PhaseBadge, PhaseDot } from "@/components/phase-dot";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
@@ -48,8 +48,10 @@ const OUTCOME: Record<string, string> = {
 
 const COLUMNS = [
   { key: "report", label: "Report", width: "1.6fr" },
-  { key: "origin", label: "Source", width: "1fr" },
-  { key: "state", label: "Status", width: "1fr" },
+  { key: "origin", label: "Source", width: "0.9fr" },
+  // Wider than the rest: the status pill and the outcome beside it are two pieces of text,
+  // and the outcome was clipping to Reproduc…
+  { key: "state", label: "Status", width: "1.4fr" },
   { key: "updated", label: "Last change", width: "0.9fr", align: "end" as const },
 ];
 
@@ -122,10 +124,14 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         <span key="origin" className="min-w-0 truncate text-muted-foreground">
           {row.sourceLabel} · {row.origin}
         </span>,
-        <span key="state" className="flex min-w-0 items-center gap-2 text-muted-foreground">
-          <span className="truncate">{STATE_LABEL[row.state] ?? row.state}</span>
+        <span key="state" className="flex min-w-0 items-center gap-2">
+          <PhaseBadge phase={row.phase}>{STATE_LABEL[row.state] ?? row.state}</PhaseBadge>
+          {/* The outcome stays plain. Two coloured pills side by side would compete, and the
+              state is the one a reviewer scans this column for. */}
           {row.outcome ? (
-            <span className="shrink-0 text-meta">{OUTCOME[row.outcome] ?? row.outcome}</span>
+            <span className="truncate text-meta text-muted-foreground">
+              {OUTCOME[row.outcome] ?? row.outcome}
+            </span>
           ) : null}
         </span>,
         <span key="updated" className="truncate text-meta text-muted-foreground">

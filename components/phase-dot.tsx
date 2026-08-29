@@ -29,6 +29,49 @@ const INK: Record<string, string> = {
 };
 
 /**
+ * The same six colours as a filled pill: the phase as ink on a dark mix of itself.
+ *
+ * Written out in full for the reason the other two maps are. A template built from the phase
+ * key compiles to nothing, because Tailwind reads source for literal class names.
+ */
+const FILL: Record<string, string> = {
+  triaging: "bg-phase-triaging/15 text-phase-triaging",
+  reproducing: "bg-phase-reproducing/15 text-phase-reproducing",
+  "analysis-only": "bg-phase-analysis/15 text-phase-analysis",
+  "awaiting-approval": "bg-phase-approval/15 text-phase-approval",
+  delivered: "bg-phase-delivered/15 text-phase-delivered",
+  closed: "bg-phase-closed/15 text-phase-closed",
+};
+
+/**
+ * A state, in its phase's colour.
+ *
+ * Unlike PhaseDot this carries the words, so it is not aria-hidden: it is the label, not a
+ * decoration beside one.
+ */
+export function PhaseBadge({
+  phase,
+  children,
+  className,
+}: {
+  phase: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-md px-2 py-1 text-meta font-medium",
+        FILL[phase] ?? FILL.closed,
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+/**
  * A spinner in the phase's colour, for a report something is actively doing.
  *
  * It replaces the dot rather than joining it. A spinner already says "in progress", and a
