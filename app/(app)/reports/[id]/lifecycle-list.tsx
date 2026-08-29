@@ -12,6 +12,8 @@ export type LifecycleStep = {
   label: string;
   note: string;
   state: StepState;
+  /** Inline SVG for the mascot standing in for this phase, id-prefixed by the page. */
+  mascot: string;
   events: { seq: number; type: string; at: string }[];
 };
 
@@ -51,6 +53,17 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
               className="flex w-full items-center gap-3 px-4 py-4 text-left enabled:hover:bg-muted/40 disabled:cursor-default"
             >
               <StepBadge state={step.state} index={index + 1} />
+
+              {/* Agent Bounty doing the thing the row names. A phase nobody reached is drawn
+                  faint rather than swapped for a placeholder: it is the same step, not yet. */}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "size-12 shrink-0 [&>svg]:block [&>svg]:size-full",
+                  step.state === "pending" && "opacity-40",
+                )}
+                dangerouslySetInnerHTML={{ __html: step.mascot }}
+              />
 
               <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
                 {step.label}

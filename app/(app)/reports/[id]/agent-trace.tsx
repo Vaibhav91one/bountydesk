@@ -69,7 +69,10 @@ export function AgentTrace({ rows }: { rows: TraceRow[] }) {
         onClick={() => setOpen((current) => !current)}
         className="-mx-1.5 flex w-fit items-center gap-2 rounded-md px-1.5 py-1 hover:bg-muted/40"
       >
-        <Sparkle weight="fill" aria-hidden="true" className="size-4 text-muted-foreground" />
+        {/* Blue for the agent's own marks, green for what finished, the same pair the rest
+            of the console uses. Phase tokens rather than raw colours, so the dialog cannot
+            drift away from the board. */}
+        <Sparkle weight="fill" aria-hidden="true" className="size-4 text-phase-triaging" />
         <span className="text-body font-medium text-foreground">
           {rows.length === 0
             ? "Nothing recorded"
@@ -101,7 +104,7 @@ export function AgentTrace({ rows }: { rows: TraceRow[] }) {
                   <Check
                     weight="bold"
                     aria-hidden="true"
-                    className="size-3 shrink-0 text-muted-foreground"
+                    className="size-3 shrink-0 text-phase-delivered"
                   />
                   <span className="min-w-0 flex-1 truncate text-meta text-foreground">
                     {row.type}

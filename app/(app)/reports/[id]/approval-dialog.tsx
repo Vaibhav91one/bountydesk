@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -47,6 +48,8 @@ export function ApprovalDialog({
   destination,
   targetName,
   reproductionRan,
+  speaker,
+  chatMascot,
   events,
 }: {
   reportId: string;
@@ -60,6 +63,9 @@ export function ApprovalDialog({
   destination: string;
   targetName: string | null;
   reproductionRan: boolean;
+  /** Agent Bounty, inline SVG, id-prefixed by the page so two copies cannot collide. */
+  speaker: string;
+  chatMascot: string;
   events: TraceRow[];
 }) {
   const [chatting, setChatting] = useState(false);
@@ -129,12 +135,12 @@ export function ApprovalDialog({
             size="sm"
             className="relative animate-approval-halo bg-phase-approval text-background hover:bg-phase-approval/85 motion-reduce:animate-none"
           >
-            <Signature weight="fill" className="size-4" /> Approval needed
+            <RollingIcon icon={Signature} weight="fill" className="size-4" /> Approval needed
           </Button>
         }
       />
 
-      <DialogContent className="max-h-[85vh] gap-0 overflow-y-auto p-0 sm:max-w-3xl">
+      <DialogContent className="no-scrollbar max-h-[85vh] gap-0 overflow-y-auto p-0 sm:max-w-3xl">
         <DialogHeader className="border-b border-border/50 p-5">
           <DialogTitle>Sign the verdict</DialogTitle>
           <DialogDescription>
@@ -180,9 +186,13 @@ export function ApprovalDialog({
                 revision={revision}
                 contentHash={contentHash}
                 destination={destination}
+                speaker={speaker}
+                chatMascot={chatMascot}
                 onChat={() => setChatting(true)}
                 approve={() => decide("allow")}
                 approving={acting === "allow"}
+                deny={() => decide("deny")}
+                denying={acting === "deny"}
                 disabled={acting !== null}
               />
 

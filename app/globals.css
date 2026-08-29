@@ -345,3 +345,17 @@
   animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
   animation-iteration-count: infinite;
 }
+
+/**
+ * A scroll container without the bar.
+ *
+ * Only for panels that already say they scroll some other way, like a dialog whose content
+ * runs under a pinned footer. Taking the bar off something that looks finished hides the fact
+ * that there is more below it.
+ */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

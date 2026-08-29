@@ -1,9 +1,12 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
-import { CaretDown } from "@phosphor-icons/react/ssr";
+import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import { Highlighter } from "@/components/ui/highlighter";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +23,53 @@ const EVIDENCE: Record<string, { bars: number; tone: string; label: string }> = 
   INCONCLUSIVE: { bars: 1, tone: "bg-phase-approval", label: "Inconclusive" },
   ANALYSIS_ONLY: { bars: 1, tone: "bg-phase-approval", label: "Analysis only, nothing ran" },
 };
+
+/**
+ * The comment split into paragraphs, minus the delivery marker.
+ *
+ * The marker is an HTML comment the delivery worker uses to recognise its own past comment, so
+ * GitHub never shows it and neither does this. Everything else is passed through untouched: a
+ * markdown feature this does not know about renders as its own source, which is wrong-looking
+ * but honest, and better than quietly dropping a line.
+ */
+function paragraphs(payload: string): string[] {
+  return payload
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .trim()
+    .split(/\n{2,}/)
+    // The stored payload is hard-wrapped at roughly 95 columns, which is right for a raw
+    // markdown file and wrong for a column of this width: it breaks mid-sentence wherever the
+    // author's editor happened to. Markdown joins those lines anyway, so this does too, and
+    // each block becomes the one paragraph GitHub will render.
+    .map((block) => block.replace(/\s*\n\s*/g, " ").trim())
+    .filter(Boolean);
+}
+
+/** The sign-off the delivery worker appends to every payload. */
+const SIGNATURE = /^Signed via BountyDesk\.?$/;
+
+/**
+ * **bold** and nothing else. The payloads this product writes use no other markup.
+ *
+ * The bold run is drawn as a marker stroke rather than as weight, because it is the sentence
+ * the whole decision turns on and a reviewer skimming should not be able to miss it. What
+ * counts as important is the payload's own emphasis, not a phrase picked out here: nothing
+ * chooses on the reader's behalf.
+ *
+ * The colour is a literal. rough-notation paints into SVG presentation attributes, where a
+ * CSS variable does not resolve, so a token reference would silently draw nothing.
+ */
+function emphasise(block: string): React.ReactNode[] {
+  return block.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+    part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
+      <Highlighter key={index} action="highlight" color="oklch(0.8 0.15 75)" padding={3}>
+        <span className="font-medium text-background">{part.slice(2, -2)}</span>
+      </Highlighter>
+    ) : (
+      part
+    ),
+  );
+}
 
 function Meter({ bars, tone }: { bars: number; tone: string }) {
   return (
@@ -49,9 +99,13 @@ export function VerdictCard({
   revision,
   contentHash,
   destination,
+  speaker,
+  chatMascot,
   onChat,
   approve,
   approving,
+  deny,
+  denying,
   disabled,
 }: {
   payload: string;
@@ -60,9 +114,14 @@ export function VerdictCard({
   revision: number;
   contentHash: string;
   destination: string;
+  /** Agent Bounty, inline SVG. The comment is what it drafted, so it says so. */
+  speaker: string;
+  chatMascot: string;
   onChat: () => void;
   approve: () => void;
   approving: boolean;
+  deny: () => void;
+  denying: boolean;
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -75,10 +134,40 @@ export function VerdictCard({
           Post this comment to the issue?
         </span>
 
-        {/* The exact bytes, plain. A rendering of them is not them. */}
-        <pre className="max-h-56 overflow-auto rounded-md border border-border/50 bg-background p-4 text-body whitespace-pre-wrap text-foreground">
-          {payload}
-        </pre>
+        {/* Attributed, because a reviewer approving a comment should be able to see at a
+            glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
+        <div className="flex gap-3">
+          <span
+            aria-hidden="true"
+            className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+            dangerouslySetInnerHTML={{ __html: speaker }}
+          />
+
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <span className="flex items-center gap-1.5">
+              <span className="text-meta text-foreground">Agent Bounty</span>
+              <span className="text-meta text-muted-foreground">drafted this reply</span>
+            </span>
+
+        {/* Shown the way the issue will show it, because that is what the reporter reads.
+            The bytes underneath are unchanged and the hash in the drawer is what approving
+            binds, so a preview that renders differently cannot change what gets posted. */}
+        <div className="flex flex-col gap-3 text-body text-foreground">
+          {paragraphs(payload).map((block, index) =>
+            SIGNATURE.test(block) ? (
+              // The comment signs itself off, so the mark goes on the signature rather than
+              // beside the name. It is the same line the issue will carry, drawn.
+              <span key={index} className="flex items-center gap-2 text-muted-foreground">
+                <Image src="/logo-small.svg" alt="" width={16} height={16} />
+                {block}
+              </span>
+            ) : (
+              <p key={index}>{emphasise(block)}</p>
+            ),
+          )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="border-t border-border/50">
@@ -125,19 +214,39 @@ export function VerdictCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-card px-4 py-3">
+      {/* Pinned: the comment can be long enough to scroll the decision off the screen, and a
+          reviewer should never have to hunt for the button they came here to press. */}
+      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-card px-4 py-3">
         <span className="flex items-center gap-2">
           <Meter bars={evidence.bars} tone={evidence.tone} />
           <span className="text-meta text-muted-foreground">{evidence.label}</span>
         </span>
 
         <span className="flex items-center gap-2">
-          {/* Not approving is a conversation, not a second button that fires immediately. */}
-          <Button size="sm" variant="outline" onClick={onChat} disabled={disabled}>
-            Chat with agent
+          {/* Both outcomes stay reachable. The conversation was going to be how a reviewer
+              said no, and with it parked, denying needs a button of its own: a gate that only
+              opens one way is not a gate. */}
+          <Button size="sm" variant="ghost" onClick={deny} loading={denying} disabled={disabled}>
+            <RollingIcon icon={Prohibit} className="size-4" /> Deny
+          </Button>
+
+          {/* Not approving is meant to be a conversation, and the conversation is not built.
+              Parked rather than removed: the panel behind it works, but nothing a reviewer
+              typed would reach the harness, so offering it would promise a channel that does
+              not exist. Deny still lives on the panel below the page's own gate. */}
+          <Button size="sm" variant="outline" onClick={onChat} disabled title="Not built yet">
+            {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
+                should look like it. */}
+            <span
+              aria-hidden="true"
+              className="-my-1 size-6 shrink-0 [&>svg]:block [&>svg]:size-full"
+              dangerouslySetInnerHTML={{ __html: chatMascot }}
+            />
+            Chat with Agent Bounty
+            <span className="text-meta text-muted-foreground">soon</span>
           </Button>
           <Button size="sm" onClick={approve} loading={approving} disabled={disabled}>
-            Approve
+            <RollingIcon icon={CheckCircle} className="size-4" /> Approve
           </Button>
         </span>
       </div>

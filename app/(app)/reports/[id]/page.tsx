@@ -6,15 +6,15 @@ import { PhaseDot } from "@/components/phase-dot";
 import { SandboxDiagram, type NodeStatus } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { formatStamp } from "@/lib/format";
 import { requireReviewer } from "@/lib/auth/dal";
-import { readCase, type CaseEvent, type CaseFile } from "@/lib/reports/case";
+import { readCase, type CaseFile } from "@/lib/reports/case";
+import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
 import { ApprovalDialog } from "./approval-dialog";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
+import type { StepState } from "./lifecycle-step";
 import { StatusCard } from "./status-card";
-import { SignVerdict } from "./sign-verdict";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -61,19 +61,6 @@ function Panel({
     </section>
   );
 }
-
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap justify-between gap-x-6 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0">
-      <span className="shrink-0 text-meta text-muted-foreground">{label}</span>
-      {/* A digest and a JSON blob are single unbreakable tokens, and without break-all they
-          set the row's minimum width and push the whole panel past a phone viewport. */}
-      <span className="min-w-0 break-all text-body text-foreground">{children}</span>
-    </div>
-  );
-}
-
 /**
  * The pipeline, and how far this report got through it.
  *
@@ -98,6 +85,30 @@ const EVENT_PHASE: Record<string, string> = {
   delivery: "delivery",
   target: "reproduction",
 };
+
+/**
+ * Which mascot stands for a lifecycle row.
+ *
+ * Keyed to the row and to what the record says happened in it, so a reproduction that never
+ * ran and one that is running do not draw the same picture. Two rows borrow a neighbouring
+ * state's artwork because no mascot exists for them yet: drafting a verdict uses scanning, and
+ * a signed approval uses canary-found.
+ */
+function stepMascot(
+  key: string,
+  state: StepState,
+  file: CaseFile,
+): Parameters<typeof mascotState>[0] {
+  if (key === "intake") return "ingest";
+  if (key === "reproduction") {
+    return state === "current" ? "reproducing" : state === "skipped" ? "infra-hiccup" : "scanning";
+  }
+  if (key === "verdict") return "scanning";
+  if (key === "approval") {
+    return file.approval?.decision === "DENIED" ? "denied" : "awaiting-approval";
+  }
+  return state === "done" ? "celebrating" : "delivered";
+}
 
 function lifecycle(file: CaseFile) {
   const terminal = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
@@ -162,25 +173,6 @@ function lifecycle(file: CaseFile) {
     },
   ];
 }
-
-
-function EventRow({ event }: { event: CaseEvent }) {
-  return (
-    <li className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0">
-      <time
-        dateTime={event.at.toISOString()}
-        className="w-20 shrink-0 font-mono text-meta text-muted-foreground"
-      >
-        {event.at.toISOString().slice(11, 19)}
-      </time>
-      <Badge variant="outline" className="shrink-0 font-mono">
-        {event.channel}
-      </Badge>
-      <span className="text-body text-foreground">{event.type}</span>
-    </li>
-  );
-}
-
 /**
  * A link out to GitHub, or the same text unlinked.
  *
@@ -279,10 +271,17 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     eventsByStep.set(key, bucket);
   }
 
-  const steps: LifecycleStep[] = lifecycle(file).map((step) => ({
-    ...step,
-    events: eventsByStep.get(step.key) ?? [],
-  }));
+  const steps: LifecycleStep[] = lifecycle(file).map((step) => {
+    const mascot = mascotState(stepMascot(step.key, step.state, file));
+    return {
+      ...step,
+      // Two rows can land on the same mascot, and the artwork carries ids. Without a per-row
+      // prefix the second copy's gradients resolve against the first one's defs and it draws
+      // wrong, which is the same trap status-card.tsx works around.
+      mascot: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${step.key}__`),
+      events: eventsByStep.get(step.key) ?? [],
+    };
+  });
 
   /**
    * Which sandbox stages this report can show actually happened.
@@ -292,6 +291,12 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
    * sandbox, PoC runner and oracle have never run at all, so none of them is marked and
    * nothing spins. When reproduction ships and writes its own events, this fills in on its own.
    */
+  // Same id-prefix trap as the lifecycle rows: several mascots share one page.
+  const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
+    const mascot = mascotState(key);
+    return mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${slot}__`);
+  };
+
   const nodeStatus: Record<string, NodeStatus> = {
     repo: file.repositoryFullName ? "done" : "idle",
     controller: file.events.length > 0 ? "done" : "idle",
@@ -393,6 +398,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
               targetName={file.target?.name ?? null}
               reproductionRan={!drafted}
+              speaker={prefixed("awaiting-approval", "speaker")}
+              chatMascot={prefixed("greeting", "chat")}
               events={file.events.map((event) => ({
                 seq: event.seq,
                 type: event.type,
@@ -425,110 +432,6 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
 
-        <div>
-          <Panel title="Reporter input">
-            {/* The reporter's own words, rendered as plain text. Never as markdown or HTML:
-                this is attacker-controlled input, and the whole product treats it as data. */}
-            <pre className="max-h-80 overflow-auto rounded-md bg-background p-4 text-body whitespace-pre-wrap text-foreground">
-              {file.body}
-            </pre>
-            <p className="text-meta text-muted-foreground">
-              Reporter text and any proof of concept in it stay untrusted hints. Nothing here
-              decides the verdict.
-            </p>
-          </Panel>
-
-        </div>
-
-        <div>
-          {/* Reproduction is not built, so there is no canary, no negative control and no
-              oracle result to weigh. The panel keeps its place and says that, rather than
-              leaving a gap that reads like a value which failed to load. The topology it used
-              to describe is the diagram at the top of the page. */}
-          <Panel title="Evidence and analysis" aside={<Badge variant="outline">Not run</Badge>}>
-            <p className="text-body text-muted-foreground">
-              No canary was seeded, no negative control ran and no oracle was consulted, so
-              there is no evidence to weigh. When reproduction ships, the verdict comes from
-              the oracle observing a fresh canary outside the sandbox, never from the model.
-            </p>
-            <div className="flex flex-col">
-              <Row label="Recorded evidence">
-                <span className="font-mono text-meta">
-                  {file.verdict ? JSON.stringify(file.verdict.evidence) : "—"}
-                </span>
-              </Row>
-            </div>
-          </Panel>
-        </div>
-
-        <Panel
-          title="Execution log"
-          aside={
-            <span className="text-meta text-muted-foreground">
-              {file.events.length} {file.events.length === 1 ? "event" : "events"}
-            </span>
-          }
-        >
-          {file.events.length === 0 ? (
-            <p className="text-body text-muted-foreground">Nothing has been recorded yet.</p>
-          ) : (
-            <ol className="flex flex-col">
-              {file.events.map((event) => (
-                <EventRow key={event.seq} event={event} />
-              ))}
-            </ol>
-          )}
-        </Panel>
-
-        <Panel
-          title="Exact outbound verdict"
-          aside={
-            file.verdict ? (
-              <Badge variant="outline">Revision {file.verdict.revision}</Badge>
-            ) : null
-          }
-        >
-          {!file.verdict ? (
-            <p className="text-body text-muted-foreground">
-              No verdict has been drafted. There is nothing to approve.
-            </p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <span className="text-heading text-foreground">
-                  {OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
-                </span>
-                <span className="text-body text-muted-foreground">{file.verdict.summary}</span>
-              </div>
-
-              {/* The exact bytes that would be posted. Plain text, never rendered as
-                  markdown: a reviewer has to approve what actually goes out. */}
-              <pre className="max-h-96 overflow-auto rounded-md bg-background p-4 text-body whitespace-pre-wrap text-foreground">
-                {file.verdict.payload}
-              </pre>
-
-              {file.approval ? (
-                <p className="text-body text-muted-foreground">
-                  {file.approval.decision === "APPROVED" ? "Approved" : "Denied"} by{" "}
-                  {file.approval.reviewer} on{" "}
-                  {formatStamp(file.approval.decidedAt)}.
-                  {file.approval.note ? ` Note: ${file.approval.note}` : ""}
-                </p>
-              ) : file.awaitingVerdictId ? (
-                <SignVerdict
-                  reportId={file.id}
-                  verdictId={file.awaitingVerdictId}
-                  contentHash={file.verdict.contentHash}
-                />
-              ) : (
-                <p className="text-body text-muted-foreground">
-                  This verdict is not awaiting a decision. Approval only opens while the harness
-                  is holding a pending publish_verdict call.
-                </p>
-              )}
-            </>
-          )}
-        </Panel>
       </div>
     </main>
   );
