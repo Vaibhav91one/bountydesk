@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import test from "node:test";
 
 import { getRecipesForTarget } from "./recipes";
@@ -8,6 +9,10 @@ const CONFIG = {
   searchPath: "/rest/products/search",
   canaryRegistrationPath: "/api/Users/",
 };
+
+function freshCanary(): string {
+  return `${randomBytes(12).toString("base64url")}@bountydesk.test`;
+}
 
 test("an unrecognized target name gets no recipes", () => {
   assert.deepEqual(getRecipesForTarget({ name: "some-other-target", config: CONFIG }), []);
@@ -23,11 +28,6 @@ test("a recognized target name with an unrecognized config shape gets no recipes
 });
 
 test("juice-shop-v17.3.0 returns exactly the one recipe whose oracle is fully provable today", () => {
-  // juice-shop-login-bypass is intentionally withheld: its oracleCheck can only inspect the
-  // login response itself, and hasAuthToken returns true for any minted token, including an
-  // unrelated login that never touched the injection. The frozen spec's real oracle needs a
-  // second, token-authenticated GET /api/Users call the current (response, canary) -> boolean
-  // signature can't express. See the comment on getRecipesForTarget in recipes.ts.
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
@@ -71,46 +71,45 @@ test("sqli-search negative control and exploit match decisions.md Q18 exactly", 
 
 test("sqli-search oracle: canary in the injected email field (returned as \"name\") is true", async () => {
   const [sqli] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
+  const canary = freshCanary();
   const body = JSON.stringify({
     status: "success",
     data: [
       { id: 1, name: "Apple Juice", description: "Real product, no canary here" },
-      { id: 2, name: "canary-abc123@bountydesk.test", description: "$2a$hashedpassword" },
+      { id: 2, name: canary, description: "$2a$hashedpassword" },
     ],
   });
 
-  assert.equal(await sqli.oracleCheck({ status: 200, body }, "canary-abc123@bountydesk.test"), true);
+  assert.equal(await sqli.oracleCheck({ status: 200, body }, canary), true);
 });
 
 test("sqli-search oracle: canary absent from every row is false", async () => {
   const [sqli] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
+  const canary = freshCanary();
   const body = JSON.stringify({
     status: "success",
     data: [{ id: 1, name: "Apple Juice", description: "nothing here" }],
   });
 
-  assert.equal(await sqli.oracleCheck({ status: 200, body }, "canary-abc123@bountydesk.test"), false);
+  assert.equal(await sqli.oracleCheck({ status: 200, body }, canary), false);
 });
 
 test("sqli-search oracle: canary as a coincidental substring outside the name field is false", async () => {
   const [sqli] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
+  const canary = freshCanary();
   // The canary shows up verbatim in the response -- in the injected password column (which the
   // UNION returns under "description", not "name") and in a top-level field entirely outside
   // any row. A substring search over the raw body would wrongly call this reproduced.
   const body = JSON.stringify({
     status: "success",
-    data: [{ id: 1, name: "Apple Juice", description: "canary-abc123@bountydesk.test" }],
-    debugNote: "canary-abc123@bountydesk.test",
+    data: [{ id: 1, name: "Apple Juice", description: canary }],
+    debugNote: canary,
   });
 
-  assert.equal(await sqli.oracleCheck({ status: 200, body }, "canary-abc123@bountydesk.test"), false);
+  assert.equal(await sqli.oracleCheck({ status: 200, body }, canary), false);
 });
 
 test("sqli-search oracle: a non-JSON body does not throw and is false", async () => {
   const [sqli] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.equal(await sqli.oracleCheck({ status: 500, body: "<html>not json</html>" }, "canary"), false);
 });
-
-// login-bypass's own oracle behavior (hasAuthToken) has no coverage here on purpose: the recipe
-// is no longer exported by getRecipesForTarget (see that test above), and hasAuthToken is a
-// module-private function with no other caller to reach it through.

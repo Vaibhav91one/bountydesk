@@ -1,6 +1,5 @@
 import type {
   GetRecipesForTargetFn,
-  ReproductionProbeResult,
   ReproductionRecipe,
   ReproductionRequest,
 } from "@/lib/reproduction/types";
@@ -130,73 +129,8 @@ function sqliSearchRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
-const LOGIN_PATH = "/rest/user/login";
-
-/**
- * Necessary but not sufficient for the auth-bypass claim: decisions.md Q18's frozen oracle for
- * this scenario is that this response's token, used against `GET /api/Users`, returns a dump
- * containing the run's canary email. The login query always matches the first row in the Users
- * table (the seeded admin, id 1) ahead of the canary user, so the login response itself never
- * carries the canary -- only a second, token-authenticated request can show it. `oracleCheck`'s
- * (response, canary) -> boolean shape has no way to make that second call, so this only proves a
- * token was minted. Known limitation, flagged in the PR: the orchestrator needs to issue that
- * follow-up `GET /api/Users` call and check its body for the canary before this scenario can
- * produce a REPRODUCED verdict per spec.
- */
-function hasAuthToken(response: ReproductionProbeResult): boolean {
-  if (response.status !== 200) return false;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(response.body);
-  } catch {
-    return false;
-  }
-  if (typeof parsed !== "object" || parsed === null) return false;
-  const auth = (parsed as { authentication?: unknown }).authentication;
-  if (typeof auth !== "object" || auth === null) return false;
-  const token = (auth as Record<string, unknown>).token;
-  return typeof token === "string" && token.length > 0;
-}
-
-// Kept as a record of the intended scenario; not called from getRecipesForTarget (see the
-// comment there) until the oracle-check contract can express the required follow-up
-// authenticated request.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
-  return {
-    id: "juice-shop-login-bypass",
-    title: "Auth-bypass SQL injection in login",
-    keywords: [
-      "login bypass",
-      "auth bypass",
-      "authentication bypass",
-      "sql injection",
-      LOGIN_PATH,
-    ],
-    fixture: registrationFixture(config),
-    negativeControl: {
-      method: "POST",
-      path: LOGIN_PATH,
-      body: { email: CANARY_PLACEHOLDER, password: "definitely-the-wrong-password" },
-    },
-    exploit: {
-      method: "POST",
-      path: LOGIN_PATH,
-      body: { email: "' OR 1=1--", password: "x" },
-    },
-    oracleCheck: (response) => hasAuthToken(response),
-  };
-}
-
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
   if (target.name !== "juice-shop-v17.3.0") return [];
   if (!isJuiceShopConfig(target.config)) return [];
-  // loginBypassRecipe is defined above but withheld here: its oracleCheck signature is
-  // (response, canary) -> boolean, which can only inspect the login response itself. The frozen
-  // spec's actual oracle for this scenario needs a second, token-authenticated GET /api/Users
-  // call to check for the canary -- without it, hasAuthToken returns true for any successfully
-  // minted token, including an unrelated login that never touched the injection at all. That
-  // would let this scenario report REPRODUCED without ever proving the exploit. Return this
-  // recipe once the oracle-check contract can express a follow-up authenticated request.
   return [sqliSearchRecipe(target.config)];
 };
