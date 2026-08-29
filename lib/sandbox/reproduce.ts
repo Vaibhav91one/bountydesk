@@ -5,10 +5,12 @@
  * The oracle boundary from lib/reproduction/types.ts is the rule this file exists to hold:
  * the fixture, negative-control and exploit requests are direct HTTP calls this process makes
  * and reads itself, over the sandbox's per-port preview URL, never text daytona.ts's execute()
- * captured from inside the sandbox. execute() is used only for boot and build-identity checks,
- * never a verdict input: waitForAppReady launches the app and polls for it answering its own
- * port, per AGENTS.md's "READY means the target started and answered its health check", and
- * buildMarkerCheck (build-marker.ts) confirms which image actually booted. The pinned snapshot
+ * captured from inside the sandbox. execute() is used only for boot readiness, build-identity,
+ * and the egress self-check, never a verdict input: waitForAppReady launches the app and polls
+ * for it answering its own port, per AGENTS.md's "READY means the target started and answered
+ * its health check"; buildMarkerCheck (build-marker.ts) confirms which image actually booted;
+ * and verifyNoEgress reads only a probe's HTTP status against a known denial string, to confirm
+ * the sandbox's own network policy rather than anything from the target. The pinned snapshot
  * boots Daytona's own agent as PID 1 and does not run the image's own start command on its
  * own, confirmed live: nothing answers :3000 until this runs it explicitly.
  *
@@ -217,6 +219,11 @@ async function waitForAppReady(
   throw new Error(`sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms`);
 }
 
+/**
+ * The third place execute() is allowed to gate anything: confirming the sandbox's own network
+ * policy actually blocks egress, before any fixture/exploit request runs. The oracle input
+ * itself never comes from here -- only a probe's HTTP status against a known denial string.
+ */
 async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   if (!sandbox.networkBlockAll) {
@@ -232,8 +239,11 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
     throw new Error("curl is not available in the sandbox, so the egress probes prove nothing");
   }
 
+  // IP literals only, deliberately: networkBlockAll blocks DNS resolution too, not just the
+  // HTTP(S) request itself, so a by-hostname probe never reaches the interception proxy at
+  // all. An IP literal skips DNS entirely and reaches the proxy directly, which is what
+  // actually answers with the "Internet is restricted" 403 this loop checks for.
   const probes = [
-    "https://example.com",
     "http://1.1.1.1",
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
   ];
