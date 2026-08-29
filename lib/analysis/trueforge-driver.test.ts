@@ -636,13 +636,15 @@ test("ensureSession fails before remote creation when cleanup support is unavail
   });
   const reportId = await seedReport("TRIAGING");
   let createSessionCalls = 0;
-  const client = fakeClient({
+  const client = {
+    ...fakeClient({
     async createSession() {
       createSessionCalls++;
       return { sessionId: "truesession-no-cleanup" };
     },
+    }),
     deleteSession: undefined,
-  });
+  } as unknown as TrueForgeClient;
 
   await assert.rejects(
     () => driver.createTrueforgeAnalysisDriver(client).ensureSession(context(reportId)),

@@ -12,7 +12,7 @@ import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
  */
 export interface TrueForgeClient {
   createSession(opts?: { signal?: AbortSignal }): Promise<{ sessionId: string }>;
-  deleteSession?(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
+  deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
    * it has already reached a pending approval. Callers must poll `getTurn` to find out. */

@@ -169,6 +169,9 @@ function makeFakeClient(
     createSession: async () => {
       throw new Error("not used by submitApprovalOnce");
     },
+    deleteSession: async () => {
+      throw new Error("not used by submitApprovalOnce");
+    },
     createTurn: async (sessionId, input) => {
       calls.push({ sessionId, input });
       if (opts.createTurn) {
