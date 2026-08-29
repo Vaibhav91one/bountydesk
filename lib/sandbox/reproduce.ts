@@ -54,12 +54,20 @@ const START_APP_COMMAND = "cd /juice-shop && (nohup node build/app >/tmp/bountyd
  * driver and recipe pieces of Track B and isn't ours to widen. reproduce.test.ts overrides
  * both to a few milliseconds so its never-ready case doesn't sit through a real 90s wait.
  */
-const READINESS_TIMEOUT_MS = Number(process.env.BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS) || 90_000;
-const READINESS_POLL_MS = Number(process.env.BOUNTYDESK_REPRODUCE_READINESS_POLL_MS) || 3_000;
+export function positiveIntegerEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+const READINESS_TIMEOUT_MS = positiveIntegerEnv("BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS", 90_000);
+const READINESS_POLL_MS = positiveIntegerEnv("BOUNTYDESK_REPRODUCE_READINESS_POLL_MS", 3_000);
 
 /** Wall-clock ceiling on each direct HTTP call this process makes to the sandbox or to
  * Daytona's control plane. */
 const HTTP_TIMEOUT_MS = 15_000;
+const MAX_RESPONSE_BODY_BYTES = 1_000_000;
 
 /** Our ceiling on how long a reproduction sandbox lives, same order of magnitude as the spike
  * script's. Short: a run either finishes in a couple of minutes or something is wrong. */
@@ -67,6 +75,13 @@ const SANDBOX_TTL_MINUTES = 10;
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
+}
+
+class ResponseBodyTooLarge extends Error {
+  constructor(limit: number) {
+    super(`sandbox response exceeded ${limit} bytes`);
+    this.name = "ResponseBodyTooLarge";
+  }
 }
 
 function imageRefForProfile(imageName: string, imageDigest: string): string {
@@ -239,14 +254,33 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
       throw new Error(`egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`);
     }
 
-    const curlExit = Number(parsed[1]);
     const status = parsed[2] === "" || parsed[2] === "000" ? null : parsed[2];
     const body = /BODY (.*)/.exec(result.result)?.[1]?.trim() ?? "";
-    if (curlExit !== 0 && status === null) continue;
     if (status === "403" && body.includes(denial)) continue;
 
     throw new Error(`reproduction sandbox reached ${url} despite networkBlockAll`);
   }
+}
+
+async function readLimitedText(response: Response, limitBytes = MAX_RESPONSE_BODY_BYTES): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limitBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new ResponseBodyTooLarge(limitBytes);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
 }
 
 type SentRequest = { probe: ReproductionProbeResult; bodyEvidence: RequestBodyEvidence };
@@ -271,7 +305,7 @@ async function sendToSandbox(
     signal: timeoutSignal(signal),
   });
 
-  const text = await response.text();
+  const text = await readLimitedText(response);
   return {
     probe: { status: response.status, body: text },
     bodyEvidence: {
@@ -428,7 +462,9 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // assertSnapshotImage's control-plane check that createSandbox already ran above. This
     // reads a marker from the booted image before the target application starts, so a mismatched
     // tag-pinned snapshot cannot execute target code before being rejected.
-    if (!(await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER))) {
+    const markerMatches = await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER);
+    throwIfAborted(opts?.signal);
+    if (!markerMatches) {
       return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
     }
 
@@ -535,9 +571,15 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
   } finally {
     if (sandbox) {
-      // Best-effort by design (deleteSandbox already retries on 409); the provider TTL and
-      // the reconciler are what actually guarantee cleanup, not this call succeeding.
-      await deleteSandbox(sandbox.id).catch(() => undefined);
+      const sandboxId = sandbox.id;
+      await deleteSandbox(sandboxId).catch((error) => {
+        throw new Error(
+          `failed to delete reproduction sandbox ${sandboxId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error },
+        );
+      });
     }
   }
   };

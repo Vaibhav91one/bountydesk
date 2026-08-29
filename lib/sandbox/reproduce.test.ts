@@ -122,10 +122,32 @@ mock.module("./daytona", {
 });
 
 let reproduce: ReproduceFn;
+let positiveIntegerEnv: (name: string, fallback: number) => number;
 
 before(async () => {
-  const { createReproducer } = await import("./reproduce");
+  const reproduceModule = await import("./reproduce");
+  const { createReproducer } = reproduceModule;
+  positiveIntegerEnv = reproduceModule.positiveIntegerEnv;
   reproduce = createReproducer((input) => authorizeImpl(input));
+});
+
+test("positiveIntegerEnv falls back for invalid timing values", () => {
+  const key = "BOUNTYDESK_TEST_TIMING_VALUE";
+  const old = process.env[key];
+  try {
+    for (const value of ["0", "-1", "Infinity", "nope"]) {
+      process.env[key] = value;
+      assert.equal(positiveIntegerEnv(key, 123), 123);
+    }
+    process.env[key] = "456";
+    assert.equal(positiveIntegerEnv(key, 123), 456);
+  } finally {
+    if (old === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = old;
+    }
+  }
 });
 
 function resetSpies(): void {
@@ -292,7 +314,6 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
   );
   assert.deepEqual(outcome.evidence.requestBodyHashes.exploit, { dispatched: true, sha256: null });
 
-  // The raw canary must never appear anywhere in what gets recorded -- only its hash.
   assert.ok(!JSON.stringify(outcome.evidence).includes(canary!));
 
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "the sandbox must always be torn down");
@@ -598,6 +619,25 @@ test("an error response from an oracle leg is incomplete, not NOT_REPRODUCED", a
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
+test("an oversized oracle response is incomplete and does not stay buffered", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: () => "x".repeat(1_000_001),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.exploit?.ranToCompletion, false);
+  }
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
 test("a dirty negative control (canary already present) is never trusted, and the exploit never runs", async () => {
   resetSpies();
   const calls: FetchCall[] = [];
@@ -789,6 +829,44 @@ test("cancellation during readiness tears down the sandbox and rejects the run",
 
   await assert.rejects(() => reproduce(reproduceInput(), { signal: controller.signal }), reason);
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("cancellation during build marker check tears down and rejects the run", async () => {
+  resetSpies();
+  const controller = new AbortController();
+  const reason = new Error("lease lost");
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      controller.abort(reason);
+      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+    }
+    return defaultExecuteResult(command);
+  };
+
+  await assert.rejects(() => reproduce(reproduceInput(), { signal: controller.signal }), reason);
+  assert.ok(!executeCalls.some((command) => command.includes("nohup node build/app")));
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("teardown failure is surfaced with the sandbox id", async () => {
+  resetSpies();
+  deleteSandboxImpl = async (id) => {
+    throw new Error(`delete failed for ${id}`);
+  };
+  const calls: FetchCall[] = [];
+
+  await assert.rejects(
+    () =>
+      withFetch(
+        fetchStub(calls, {
+          negativeControlBody: () => JSON.stringify({ data: [] }),
+          exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+        }),
+        () => reproduce(reproduceInput()),
+      ),
+    /failed to delete reproduction sandbox sandbox-under-test/,
+  );
 });
 
 test("teardown still runs when an unexpected error happens after provisioning", async () => {
