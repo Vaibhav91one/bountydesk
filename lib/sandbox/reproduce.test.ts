@@ -1153,3 +1153,45 @@ test("negativeControlAcceptedStatuses: an undeclared non-2xx status is still an 
   );
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
+
+test("negativeControlAcceptedStatuses also widens the exploit's own dispatch when it shares the negative control's endpoint", async () => {
+  resetSpies();
+  const recipeWithAcceptedExploitStatus: ReproductionRecipe = {
+    ...recipeWithFollowUp,
+    negativeControlAcceptedStatuses: [401],
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return {
+      ok: true,
+      imageName: "ghcr.io/vaibhav91one/juice-shop",
+      imageDigest: "sha256:" + "a".repeat(64),
+      snapshotId: "snap",
+      appPort: 3000,
+      recipe: recipeWithAcceptedExploitStatus,
+    };
+  };
+  const calls: FetchCall[] = [];
+
+  // A login-style exploit that shares its endpoint with the negative control can be rejected the
+  // same legitimate way (401, no token) -- a real, complete answer, not a proxy hiccup.
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitStatus: 401,
+      exploitBody: () => JSON.stringify({ message: "Invalid email or password" }),
+      followUpBody: (canary) => JSON.stringify({ data: [{ email: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ recipe: recipeWithAcceptedExploitStatus })),
+  );
+
+  assert.equal(outcome.outcome, "NOT_REPRODUCED");
+  if (outcome.outcome === "NOT_REPRODUCED") {
+    assert.equal(outcome.evidence.exploit.ranToCompletion, true);
+  }
+  assert.ok(
+    !calls.some((c) => new URL(c.url).pathname === "/followup"),
+    "a rejected exploit mints no token, so no follow-up request should ever be sent",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});

@@ -72,12 +72,15 @@ export type ReproductionRecipe = {
   /** Must NOT trip the oracle. Run before the exploit, and must complete and stay clean before
    * the exploit leg is attempted at all: see decideOutcome below. */
   negativeControl: ReproductionRequest;
-  /** Extra HTTP status codes, beyond any 2xx, that count as the negative control completing
-   * legitimately rather than as an infrastructure failure. Needed when the negative control's
-   * correct outcome is itself a non-2xx response -- e.g. a login recipe's negative control is a
-   * deliberately wrong password, which the target correctly rejects with 401. Absent for a
-   * recipe whose negative control legitimately succeeds with 2xx (the search-SQLi recipe),
-   * which leaves that recipe's behaviour in the orchestrator's runLeg exactly as it is today. */
+  /** Extra HTTP status codes, beyond any 2xx, that count as completing legitimately rather than
+   * as an infrastructure failure. Needed when the correct outcome is itself a non-2xx response --
+   * e.g. a login recipe's negative control is a deliberately wrong password, which the target
+   * correctly rejects with 401. Applied to the negative control always, and to the exploit's own
+   * dispatch too when `exploitFollowUp` is present: a recipe whose exploit and negative control
+   * hit the same endpoint (the login-bypass recipe posts to the same login route for both) can
+   * see the same legitimate rejection on either leg. Absent for a recipe whose negative control
+   * legitimately succeeds with 2xx (the search-SQLi recipe), which leaves that recipe's
+   * behaviour in the orchestrator's runLeg exactly as it is today. */
   negativeControlAcceptedStatuses?: number[];
   exploit: ReproductionRequest;
   /**

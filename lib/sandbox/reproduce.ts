@@ -393,6 +393,14 @@ async function runLeg(
  * didn't mint a token this run) is a *complete* exploit leg with no proof: NOT_REPRODUCED, not
  * an infrastructure failure. A follow-up that fails to get a usable response is incomplete, the
  * same fail-closed treatment runLeg already gives any other broken leg.
+ *
+ * `isAcceptableStatus` gates only the exploit's own dispatch, matching runLeg's widened
+ * negative-control check: when the exploit hits the same endpoint as the negative control (the
+ * login-bypass recipe posts to the same login route for both), a legitimately-rejected attempt
+ * answers with the same non-2xx status the negative control can. Treating that as "leg didn't
+ * run" would misreport a correctly-blocked exploit as an infrastructure failure (ANALYSIS_ONLY)
+ * instead of a real, complete answer with no proof (NOT_REPRODUCED). The follow-up request's own
+ * status stays 2xx-only: nothing declares a legitimate non-2xx there.
  */
 async function runExploitWithFollowUp(
   preview: PortPreviewUrl,
@@ -400,13 +408,14 @@ async function runExploitWithFollowUp(
   followUp: NonNullable<ReproductionRecipe["exploitFollowUp"]>,
   canary: string,
   signal?: AbortSignal,
+  isAcceptableStatus: (status: number) => boolean = defaultIsAcceptableStatus,
 ): Promise<LegResult> {
   const at = new Date().toISOString();
   let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
   try {
     const sentExploit = await sendToSandbox(preview, exploitRequest, canary, signal);
     bodyEvidence = sentExploit.bodyEvidence;
-    if (!defaultIsAcceptableStatus(sentExploit.probe.status)) {
+    if (!isAcceptableStatus(sentExploit.probe.status)) {
       return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
     }
 
@@ -587,7 +596,14 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
         exploit = recipe.exploitFollowUp
-          ? await runExploitWithFollowUp(preview, recipe.exploit, recipe.exploitFollowUp, canary, opts?.signal)
+          ? await runExploitWithFollowUp(
+              preview,
+              recipe.exploit,
+              recipe.exploitFollowUp,
+              canary,
+              opts?.signal,
+              negativeControlIsAcceptable,
+            )
           : await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal);
       }
     }
