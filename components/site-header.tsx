@@ -14,15 +14,15 @@ import { Button } from "@/components/ui/button";
  */
 export function SiteHeader({ links = true }: { links?: boolean }) {
   return (
-    <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-md">
-      <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between gap-6 px-6">
+    <header className="sticky top-0 z-50 bg-background/70 backdrop-blur-md">
+      <div className="mx-auto flex h-18 w-full max-w-7xl items-center justify-between gap-6 px-6">
         <Link href="/" className="flex shrink-0 items-center" aria-label="BountyDesk home">
           <Image src="/logo-lockup.svg" alt="BountyDesk" width={158} height={24} priority />
         </Link>
 
         <nav className="flex items-center gap-1 sm:gap-2">
           {links ? (
-            <div className="mr-2 hidden items-center gap-6 md:flex">
+            <div className="mr-4 hidden items-center gap-8 md:flex lg:gap-10">
               <a href="#how" className="text-body text-muted-foreground hover:text-foreground">
                 How it works
               </a>
@@ -35,7 +35,7 @@ export function SiteHeader({ links = true }: { links?: boolean }) {
             </div>
           ) : null}
 
-          <Button size="sm" nativeButton={false} render={<Link href="/login" />}>
+          <Button size="sm" nativeButton={false} render={<Link href="/login" />} className="rounded-full px-4">
             <RollingIcon icon={GitHubLight} className="size-4" /> Sign in
           </Button>
         </nav>

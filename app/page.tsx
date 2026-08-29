@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { ArrowSquareOut, Check, Circle, Folder } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
@@ -90,61 +91,86 @@ export default function LandingPage() {
       <SiteHeader />
 
       <main className="flex flex-1 flex-col">
-        {/* Hero */}
-        <section className="mx-auto flex w-full max-w-6xl flex-col gap-12 px-6 pt-16 pb-20 lg:flex-row lg:items-center lg:gap-16 lg:pt-24">
-          <div className="flex min-w-0 flex-1 flex-col items-start gap-6">
-            <span className="flex items-center gap-3">
-              <span
-                aria-hidden="true"
-                className="size-12 shrink-0 [&>svg]:block [&>svg]:size-full"
-                dangerouslySetInnerHTML={{ __html: mascot.markup }}
-              />
-              <span className="text-heading text-brand-soft">Meet Agent Bounty</span>
-            </span>
+        {/* Hero. Centred rather than split: the reference puts the headline in the middle of
+            the page and the product underneath it on a backdrop, which gives the claim the
+            whole width and stops the panel competing with it for attention. */}
+        <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-14 text-center lg:pt-28">
+          <span className="flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+              dangerouslySetInnerHTML={{ __html: mascot.markup }}
+            />
+            <span className="text-heading text-brand-soft">Meet Agent Bounty</span>
+          </span>
 
-            {/* text-display is 64px with no responsive variant, and app/login/page.tsx already
-                records why that matters: a 64px headline on a phone is a scroll, not a hero.
-                Login hides its headline below lg; a landing page cannot, so this steps up and
-                carries the token's weight and tracking at the smaller sizes. */}
-            <h1 className="text-4xl leading-[1.08] font-semibold tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display">
-              Read every report.
-              <br />
-              Sign every verdict.
-            </h1>
+          {/* text-display is 64px with no responsive variant, and app/login/page.tsx already
+              records why that matters: a 64px headline on a phone is a scroll, not a hero.
+              Login hides its headline below lg; a landing page cannot, so this steps up and
+              carries the token's weight and tracking at the smaller sizes. */}
+          <h1 className="text-4xl leading-[1.06] font-semibold tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
+            Read every report.
+            <br />
+            Sign every verdict.
+          </h1>
 
-            <p className="max-w-[560px] text-lead text-muted-foreground">
-              BountyDesk authenticates a bug report, checks it against a target the server pins,
-              and drafts the reply. Nothing reaches the reporter until you approve the exact
-              words, and the tool refuses any payload whose hash moved.
-            </p>
+          <p className="max-w-[680px] text-lead text-balance text-muted-foreground">
+            BountyDesk authenticates a bug report, checks it against a target the server pins,
+            and drafts the reply. Nothing reaches the reporter until you approve the exact
+            words.
+          </p>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <Button size="lg" nativeButton={false} render={<Link href="/login" />}>
-                <RollingIcon icon={GitHubLight} className="size-4" /> Sign in with GitHub
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                nativeButton={false}
-                render={<a href={SOURCE} target="_blank" rel="noreferrer noopener" />}
-              >
-                <RollingIcon icon={ArrowSquareOut} className="size-4" /> View the source
-              </Button>
-            </div>
-
-            {/* Where the reference page puts its install command. Said once, plainly, and then
-                not repeated: the per-panel labels carry it from here. */}
-            <p className="text-meta text-muted-foreground">
-              Intake, the queue, the case file and the approval gate run today. The sandboxes and
-              the canary oracle are designed and not built, so every verdict is analysis only and
-              a person decides.
-            </p>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button
+              size="lg"
+              nativeButton={false}
+              render={<Link href="/login" />}
+              className="rounded-full px-6"
+            >
+              <RollingIcon icon={GitHubLight} className="size-4" /> Sign in with GitHub
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              nativeButton={false}
+              render={<a href={SOURCE} target="_blank" rel="noreferrer noopener" />}
+              className="rounded-full px-6"
+            >
+              <RollingIcon icon={ArrowSquareOut} className="size-4" /> View the source
+            </Button>
           </div>
 
-          <div className="w-full min-w-0 lg:w-[440px] lg:shrink-0">
+          {/* Where the reference puts its install command. Same shape, and the only thing worth
+              putting in it here is what actually runs. Said once, then carried by the per-panel
+              labels rather than repeated. */}
+          <p className="flex max-w-full flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-2xl border border-border/50 bg-card/60 px-5 py-2.5 sm:rounded-full text-meta text-muted-foreground">
+            <span className="text-phase-delivered">Runs today</span>
+            <span aria-hidden="true" className="text-muted-foreground/40">|</span>
+            intake, the queue, the case file and the approval gate
+          </p>
+        </section>
+
+        {/* The product on a backdrop, the way the reference seats its screenshot. The image is
+            decorative, so it carries an empty alt and the panel above it says everything. */}
+        <div className="relative isolate">
+          <div aria-hidden="true" className="absolute inset-0 overflow-hidden">
+            <Image
+              src="/backdrop/hero.webp"
+              alt=""
+              fill
+              priority
+              sizes="100vw"
+              className="object-cover object-center opacity-80"
+            />
+            {/* Fades the band into the page at both edges, so it reads as one surface rather
+                than a photo pasted between two dark blocks. */}
+            <div className="absolute inset-0 bg-gradient-to-b from-background via-background/20 to-background" />
+          </div>
+
+          <div className="relative mx-auto w-full max-w-5xl px-6 pt-14 pb-24 lg:pt-20">
             <ApprovalPanel />
           </div>
-        </section>
+        </div>
 
         {/* Intake channels. The reference puts a logo wall here; ours is the four ways a report
             can arrive, three of which are honestly unavailable. */}
