@@ -37,7 +37,8 @@ const FILTERS = [
 function inGroup(status: RepoStatus, key: string): boolean {
   if (key === "accepting") return status === "admissible";
   if (key === "unconfigured") return status === "not-configured";
-  if (key === "blocked") return ["archived", "disconnected", "suspended"].includes(status);
+  if (key === "blocked")
+    return ["archived", "disconnected", "suspended"].includes(status);
   return true;
 }
 
@@ -105,11 +106,16 @@ export function ConnectionTabs({
     hidden:
       !inGroup(repo.status, group) ||
       (needle.length > 0 &&
-        !`${repo.fullName} ${repo.label} ${repo.target ?? ""}`.toLowerCase().includes(needle)),
+        !`${repo.fullName} ${repo.label} ${repo.target ?? ""}`
+          .toLowerCase()
+          .includes(needle)),
     cells: [
       <span key="repository" className="flex min-w-0 items-center gap-2.5">
         <GitHubLight className="size-4 shrink-0" />
-        <span className="truncate font-medium text-foreground" title={repo.hint}>
+        <span
+          className="truncate font-medium text-foreground"
+          title={repo.hint}
+        >
           {repo.fullName}
         </span>
       </span>,
@@ -154,8 +160,8 @@ export function ConnectionTabs({
         {repositories.length === 0 ? (
           <div className="flex flex-col items-start gap-4 rounded-xl border border-border/50 bg-card p-8">
             <p className="max-w-2xl text-body text-muted-foreground">
-              No repository is connected. Installing the GitHub App is what grants access to a
-              repository; signing in only says who you are.
+              No repository is connected. Installing the GitHub App is what
+              grants access to a repository; signing in only says who you are.
             </p>
             <a
               href={installUrl}
@@ -168,17 +174,19 @@ export function ConnectionTabs({
           // The scroller is this container, which is what lets the search bar stick: sticky
           // positions against the nearest scrolling ancestor, so a bar outside it would just
           // scroll away with the page.
-          <div className="flex flex-col gap-3">
-            <div className="relative">
-              <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search repositories"
-                aria-label="Search repositories"
-                className="h-11 border-border/50 pl-9 text-body"
-              />
+          <div className="flex max-h-[70vh] flex-col overflow-y-auto">
+            <div className="sticky top-0 z-20 bg-background pb-3">
+              <div className="relative">
+                <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search repositories"
+                  aria-label="Search repositories"
+                  className="h-11 border-border/50 pl-9 text-body"
+                />
+              </div>
             </div>
 
             <FilterTable
@@ -187,11 +195,14 @@ export function ConnectionTabs({
                 key: option.key,
                 label: option.label,
                 dot: option.dot,
-                count: repositories.filter((repo) => inGroup(repo.status, option.key)).length,
+                count: repositories.filter((repo) =>
+                  inGroup(repo.status, option.key),
+                ).length,
               }))}
               active={group}
               onFilter={setGroup}
               rows={rows}
+              label="Connected repositories"
               empty={<>No repository matches.</>}
             />
           </div>

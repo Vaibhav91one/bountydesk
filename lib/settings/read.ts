@@ -9,6 +9,7 @@ import {
   report,
   targetProfile,
   verdict,
+  type Executor,
 } from "@/lib/db";
 
 /**
@@ -63,8 +64,8 @@ export type AuditAttempt = {
  * A profile with no repository is not an error. It is a target nothing has been pointed at
  * yet, and dropping it would hide half of what the guard would accept.
  */
-export async function readScope(): Promise<ScopeProfile[]> {
-  const rows = await db
+export async function readScope(tx: Executor = db): Promise<ScopeProfile[]> {
+  const rows = await tx
     .select({
       id: targetProfile.id,
       name: targetProfile.name,
@@ -101,8 +102,8 @@ export async function readScope(): Promise<ScopeProfile[]> {
 }
 
 /** Who signed what, newest first. The table refuses UPDATE and DELETE, so this is the record. */
-export async function readDecisions(): Promise<AuditDecision[]> {
-  return db
+export async function readDecisions(tx: Executor = db): Promise<AuditDecision[]> {
+  return tx
     .select({
       id: approvalDecision.id,
       reviewer: approvalDecision.reviewer,
@@ -122,8 +123,8 @@ export async function readDecisions(): Promise<AuditDecision[]> {
 }
 
 /** Every outbound attempt, successful or not. Also append-only. */
-export async function readAttempts(): Promise<AuditAttempt[]> {
-  return db
+export async function readAttempts(tx: Executor = db): Promise<AuditAttempt[]> {
+  return tx
     .select({
       id: deliveryAttempt.id,
       attempt: deliveryAttempt.attempt,
@@ -139,4 +140,27 @@ export async function readAttempts(): Promise<AuditAttempt[]> {
     .innerJoin(report, eq(outboundDelivery.reportId, report.id))
     .orderBy(desc(deliveryAttempt.finishedAt))
     .limit(AUDIT_LIMIT);
+}
+
+/**
+ * All three tabs from one snapshot.
+ *
+ * Sequential rather than Promise.all: one transaction is one connection, and concurrent
+ * queries on it would serialise anyway or error, depending on the driver. Read-only and
+ * repeatable read for the same reason the board is, so a decision landing between the scope
+ * read and the audit read cannot produce a page describing two different moments.
+ */
+export async function readSettings(): Promise<{
+  profiles: ScopeProfile[];
+  decisions: AuditDecision[];
+  attempts: AuditAttempt[];
+}> {
+  return db.transaction(
+    async (tx) => ({
+      profiles: await readScope(tx),
+      decisions: await readDecisions(tx),
+      attempts: await readAttempts(tx),
+    }),
+    { isolationLevel: "repeatable read", accessMode: "read only" },
+  );
 }

@@ -48,6 +48,7 @@ export function FilterTable({
   onFilter,
   rows,
   empty,
+  label,
   minWidth = 560,
 }: {
   columns: TableColumn[];
@@ -57,6 +58,8 @@ export function FilterTable({
   rows: TableRow[];
   /** Shown when every row is hidden. */
   empty: React.ReactNode;
+  /** Names the scroll region. "Table" tells a screen-reader user nothing about which one. */
+  label: string;
   minWidth?: number;
 }) {
   // An inline style, not a grid-cols-[...] class. Tailwind reads source for literal class
@@ -104,7 +107,7 @@ export function FilterTable({
       <div
         role="region"
         tabIndex={0}
-        aria-label="Table"
+        aria-label={label}
         className="no-scrollbar overflow-x-auto rounded-xl border border-border/50 bg-card"
       >
         <div style={{ minWidth }}>
@@ -130,6 +133,11 @@ export function FilterTable({
           {rows.map((row) => (
             <div
               key={row.id}
+              // inert, not just collapsed. A row at 0fr is still in the document, so without
+              // this its button stays focusable and a keyboard user tabs through rows the
+              // filter is hiding, into a control they cannot see.
+              inert={row.hidden ? true : undefined}
+              aria-hidden={row.hidden ? true : undefined}
               className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]"
               style={{
                 gridTemplateRows: row.hidden ? "0fr" : "1fr",

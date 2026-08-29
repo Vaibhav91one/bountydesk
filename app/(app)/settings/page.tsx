@@ -1,5 +1,5 @@
 import { requireReviewer } from "@/lib/auth/dal";
-import { readAttempts, readDecisions, readScope } from "@/lib/settings/read";
+import { readSettings } from "@/lib/settings/read";
 
 import { SettingsTabs } from "./settings-tabs";
 
@@ -17,11 +17,7 @@ export const metadata = { title: "Settings · BountyDesk" };
  */
 export default async function SettingsPage() {
   const session = await requireReviewer();
-  const [profiles, decisions, attempts] = await Promise.all([
-    readScope(),
-    readDecisions(),
-    readAttempts(),
-  ]);
+  const { profiles, decisions, attempts } = await readSettings();
 
   return (
     <main className="flex flex-1 flex-col">

@@ -84,9 +84,11 @@ export function ArtifactsPanel({
         </p>
       ) : (
         <ul className="flex flex-col">
-          {artifacts.map((artifact) => (
+          {artifacts.map((artifact, index) => (
             <li
-              key={artifact.name}
+              // Name and index: a driver recording two files with the same name is not a
+              // reason for the second one to vanish, which is what a duplicate key does.
+              key={`${artifact.name}-${index}`}
               className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0"
             >
               <span className="flex min-w-0 items-center gap-2">

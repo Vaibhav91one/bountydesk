@@ -76,6 +76,40 @@ export type CaseFile = {
   events: CaseEvent[];
 };
 
+/**
+ * Whether an oracle decided this verdict.
+ *
+ * Positive evidence only. The old test was the inverse, treating anything that was not the
+ * single AUTOMATED_REPRODUCTION_NOT_RUN reason as oracle-decided, so an empty or unrecognised
+ * evidence object would have had the page attribute a model-authored outcome to an external
+ * canary check. That is the one claim this product must never make on its own.
+ *
+ * Nothing writes an oracle result yet, so this is false everywhere today, and it starts
+ * returning true on its own the day a driver records one.
+ */
+export function oracleDecided(evidence: unknown): boolean {
+  if (typeof evidence !== "object" || evidence === null) return false;
+  const oracle = (evidence as { oracle?: unknown }).oracle;
+  if (typeof oracle !== "object" || oracle === null) return false;
+
+  return typeof (oracle as { result?: unknown }).result === "string";
+}
+
+/**
+ * Whether a string could be a report id at all.
+ *
+ * Checked before the query rather than after: report.id is a uuid column, so a comparison
+ * against a malformed string is a Postgres error, and a reviewer following a stale link would
+ * get a 500 where a not-found page is the honest answer. Group lengths are pinned, because a
+ * pattern that only counts characters accepts thirty-six hyphens.
+ */
+const REPORT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isReportId(value: string): boolean {
+  return REPORT_ID.test(value);
+}
+
 /** "github:123456:issue:482" is what intake writes. */
 function issueNumber(sourceRef: string): string | null {
   return /^github:\d+:issue:(\d+)$/.exec(sourceRef)?.[1] ?? null;
@@ -118,7 +152,32 @@ export async function readCase(id: string): Promise<CaseFile | null> {
 
       if (!row) return null;
 
-      // Latest revision. A verdict is revised by inserting the next one, never by editing.
+      // The pending tuple is read before the verdict, because it decides which verdict this
+      // page is allowed to show.
+      const [session] = await tx
+        .select({
+          pendingVerdictId: agentSession.pendingVerdictId,
+          pendingThreadId: agentSession.pendingThreadId,
+        })
+        .from(agentSession)
+        .where(eq(agentSession.reportId, id));
+
+      // Both halves of the pending tuple are required, the same test app/review/page.tsx
+      // makes: a verdict id with no thread is not a call anyone can answer.
+      const awaitingVerdictId =
+        row.state === "AWAITING_APPROVAL" && session?.pendingThreadId
+          ? session.pendingVerdictId
+          : null;
+
+      /**
+       * The verdict a reviewer is being shown.
+       *
+       * When a call is pending it is that exact verdict, never the latest one. The gate
+       * approves the id in the pending tuple, so showing the newest revision beside an Approve
+       * button that binds an older one would let somebody sign text they never read. The two
+       * are usually the same row; when a revision lands after the tool call was prepared they
+       * are not, and that is exactly when it matters.
+       */
       const [latest] = await tx
         .select({
           id: verdict.id,
@@ -131,7 +190,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           createdAt: verdict.createdAt,
         })
         .from(verdict)
-        .where(eq(verdict.reportId, id))
+        .where(awaitingVerdictId ? eq(verdict.id, awaitingVerdictId) : eq(verdict.reportId, id))
         .orderBy(desc(verdict.revision))
         .limit(1);
 
@@ -147,25 +206,20 @@ export async function readCase(id: string): Promise<CaseFile | null> {
             .where(eq(approvalDecision.verdictId, latest.id))
         : [];
 
-      const [dispatch] = await tx
-        .select({
-          state: outboundDelivery.state,
-          attempts: outboundDelivery.attempts,
-          lastError: outboundDelivery.lastError,
-          target: outboundDelivery.target,
-        })
-        .from(outboundDelivery)
-        .where(eq(outboundDelivery.reportId, id));
-
-      // Both halves of the pending tuple are required, the same test app/review/page.tsx
-      // makes: a verdict id with no thread is not a call anyone can answer.
-      const [session] = await tx
-        .select({
-          pendingVerdictId: agentSession.pendingVerdictId,
-          pendingThreadId: agentSession.pendingThreadId,
-        })
-        .from(agentSession)
-        .where(eq(agentSession.reportId, id));
+      // Keyed on the verdict, not the report. A report can carry a delivery per revision, and
+      // a report-only predicate returns whichever row the planner reached first, so the page
+      // could show revision 2's verdict beside revision 1's delivery and its errors.
+      const [dispatch] = latest
+        ? await tx
+            .select({
+              state: outboundDelivery.state,
+              attempts: outboundDelivery.attempts,
+              lastError: outboundDelivery.lastError,
+              target: outboundDelivery.target,
+            })
+            .from(outboundDelivery)
+            .where(eq(outboundDelivery.verdictId, latest.id))
+        : [];
 
       const events = await tx
         .select({
@@ -206,10 +260,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         verdict: latest ?? null,
         approval: decision ?? null,
         delivery: dispatch ?? null,
-        awaitingVerdictId:
-          row.state === "AWAITING_APPROVAL" && session?.pendingThreadId
-            ? session.pendingVerdictId
-            : null,
+        awaitingVerdictId,
         events: events.map((e) => ({ ...e, channel: e.type.split(".")[0] })),
       };
     },

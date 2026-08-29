@@ -182,6 +182,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         active={filter}
         onFilter={setFilter}
         rows={tableRows}
+        label="Reports"
         empty={
           <>
             Nothing matches. {rows.length} {rows.length === 1 ? "report" : "reports"} in total.

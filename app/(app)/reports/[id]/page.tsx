@@ -8,7 +8,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
 import { formatStamp } from "@/lib/format";
-import { readCase, type CaseFile } from "@/lib/reports/case";
+import { isReportId, oracleDecided, readCase, type CaseFile } from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
@@ -248,9 +248,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   const { id } = await params;
 
   // A uuid that does not exist and a string that is not a uuid are the same answer to a
-  // reviewer, and letting the malformed one reach the database only produces a 500.
-  const looksLikeId = /^[0-9a-f-]{36}$/i.test(id);
-  const file = looksLikeId ? await readCase(id) : null;
+  // reviewer, and letting the malformed one reach the database only produces a 500. The
+  // shape has to be checked properly: the old pattern counted characters, so thirty-six
+  // hyphens passed it and reached Postgres as a uuid comparison.
+  const file = isReportId(id) ? await readCase(id) : null;
   if (!file) notFound();
 
   const phase = phaseOf(file.state);
@@ -308,14 +309,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     build: file.events.some((e) => e.channel === "sandbox") ? "done" : "idle",
     target: file.state === "REPRODUCING" ? "running" : "idle",
     poc: file.events.some((e) => e.channel === "repro") ? "done" : "idle",
-    // Only an oracle result marks the oracle. The reason string every verdict carries today
-    // says the opposite in as many words.
-    oracle:
-      file.verdict &&
-      (file.verdict.evidence as { reason?: string } | null)?.reason !==
-        "AUTOMATED_REPRODUCTION_NOT_RUN"
-        ? "done"
-        : "idle",
+    // Only a recorded oracle result marks the oracle. A tick here would say a canary was
+    // observed, which is the one claim the UI must never make on the model's behalf.
+    oracle: file.verdict && oracleDecided(file.verdict.evidence) ? "done" : "idle",
   };
 
   /**
@@ -327,10 +323,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
    * verdict comes from the canary and the model never narrates it, so the label is derived
    * rather than written down, and it changes by itself when the evidence changes.
    */
-  const drafted =
-    !file.verdict ||
-    (file.verdict.evidence as { reason?: string } | null)?.reason ===
-      "AUTOMATED_REPRODUCTION_NOT_RUN";
+  // Fail closed: only a recorded oracle result earns the oracle's name on the label. Anything
+  // else, including evidence nobody recognises, is Agent Bounty speaking for itself.
+  const drafted = !file.verdict || !oracleDecided(file.verdict.evidence);
   const verdictLabel = drafted ? "Agent Bounty says" : "The oracle says";
 
   return (

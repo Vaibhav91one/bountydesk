@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-import { LoaderGrid, ShimmerLabel } from "../reports/[id]/agent-trace";
+import { LoaderGrid, ShimmerLabel } from "./[id]/agent-trace";
 import { reportSheet, type ReportSheetData } from "./actions";
 
 const STATE_LABEL: Record<string, string> = {
@@ -219,7 +219,7 @@ export function ReportSheet({
               >
                 <div className="grid grid-cols-2 gap-3">
                   <Stat label="Recorded events">{data.eventCount}</Stat>
-                  <Stat label="Verdict revision">{data.verdict?.revision ?? "—"}</Stat>
+                  <Stat label="Verdict revision">{data.verdict?.revision ?? "None"}</Stat>
                 </div>
 
                 {/* Only what the record holds. No canary, no duration, no resource use: no

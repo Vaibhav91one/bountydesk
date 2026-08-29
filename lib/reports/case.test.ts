@@ -274,3 +274,132 @@ test("every report state maps to a mascot that exists", async () => {
   // Agent Bounty doing one thing on the queue and another on the report.
   assert.equal(Object.keys(MASCOT_FOR_STATE).length, all.length);
 });
+
+test("the case shows the verdict the gate would approve, not merely the newest one", async () => {
+  const id = await seedReport("AWAITING_APPROVAL");
+
+  const [pending] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "ANALYSIS_ONLY",
+      summary: "the revision the tool call was prepared for",
+      payload: "the comment the reviewer is signing",
+      contentHash: `pending-${id}`,
+      revision: 1,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    pendingThreadId: "thread-1",
+    pendingToolCallId: "call-1",
+    pendingVerdictId: pending.id,
+    pendingApprovedContentHash: `pending-${id}`,
+  });
+
+  // A newer revision lands after the tool call was prepared. Approving still binds revision 1,
+  // so showing revision 2 beside that button would let somebody sign text they never read.
+  await dbm.db.insert(dbm.verdict).values({
+    reportId: id,
+    outcome: "REPRODUCED",
+    summary: "a later revision nobody was asked about",
+    payload: "different words entirely",
+    contentHash: `newer-${id}`,
+    revision: 2,
+  });
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.awaitingVerdictId, pending.id);
+  assert.equal(file?.verdict?.id, pending.id, "the page must show the pending revision");
+  assert.equal(file?.verdict?.revision, 1);
+  assert.equal(file?.verdict?.contentHash, `pending-${id}`);
+  // What is displayed and what is submitted have to be the same row, or the approval gate is
+  // approving something the human did not read.
+  assert.equal(file?.verdict?.id, file?.awaitingVerdictId);
+});
+
+test("delivery is read for the verdict on screen, not for whichever row the report has", async () => {
+  const id = await seedReport("DELIVERED");
+
+  const revisions = [];
+  for (const revision of [1, 2] as const) {
+    const [row] = await dbm.db
+      .insert(dbm.verdict)
+      .values({
+        reportId: id,
+        outcome: "ANALYSIS_ONLY",
+        summary: `revision ${revision}`,
+        payload: `payload ${revision}`,
+        contentHash: `delivery-hash-${id}-${revision}`,
+        revision,
+      })
+      .returning({ id: dbm.verdict.id });
+    revisions.push(row.id);
+  }
+
+  // One delivery per revision, inserted oldest first so a report-only predicate is likely to
+  // return the wrong one.
+  for (const [index, verdictId] of revisions.entries()) {
+    await dbm.db.insert(dbm.outboundDelivery).values({
+      reportId: id,
+      verdictId,
+      target: `https://github.com/acme/juice-shop/issues/${index + 1}`,
+      approvedContentHash: `delivery-hash-${id}-${index + 1}`,
+      idempotencyKey: `delivery-${id}-${index}`,
+      attempts: index + 1,
+    });
+  }
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.verdict?.revision, 2);
+  assert.equal(file?.delivery?.attempts, 2, "the delivery must belong to the verdict shown");
+});
+
+test("only a recorded oracle result is attributed to the oracle", async () => {
+  const { oracleDecided } = cases;
+
+  // Everything a driver could plausibly leave behind before the oracle ships.
+  for (const evidence of [
+    null,
+    undefined,
+    {},
+    { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    { reason: "SOMETHING_NOBODY_HAS_SEEN" },
+    { oracle: null },
+    { oracle: "confirmed" },
+    { oracle: {} },
+    "REPRODUCED",
+  ]) {
+    assert.equal(
+      oracleDecided(evidence),
+      false,
+      `${JSON.stringify(evidence)} must not be read as an oracle verdict`,
+    );
+  }
+
+  // The one shape that earns it. Nothing writes this yet; the page lights up on its own the
+  // day something does.
+  assert.equal(oracleDecided({ oracle: { result: "CANARY_OBSERVED" } }), true);
+});
+
+test("a report id has to be a uuid, not thirty-six characters from its alphabet", () => {
+  assert.equal(cases.isReportId("61395817-9dc9-4054-893c-0dbe43e87df9"), true);
+  assert.equal(cases.isReportId("61395817-9DC9-4054-893C-0DBE43E87DF9"), true);
+
+  // The old check counted characters, so every one of these reached Postgres as a uuid
+  // comparison and returned a 500 where not-found is the honest answer.
+  for (const value of [
+    "-".repeat(36),
+    "0".repeat(36),
+    "61395817-9dc9-4054-893c-0dbe43e87df",
+    "61395817-9dc9-4054-893c-0dbe43e87df99",
+    "6139581779dc994054e893c40dbe43e87df9",
+    "'; drop table report; --",
+    "",
+  ]) {
+    assert.equal(cases.isReportId(value), false, `${value} must not be treated as an id`);
+  }
+});

@@ -2,7 +2,7 @@
 
 import { requireReviewer } from "@/lib/auth/dal";
 import { formatStamp } from "@/lib/format";
-import { readCase } from "@/lib/reports/case";
+import { isReportId, readCase } from "@/lib/reports/case";
 
 /**
  * What the report sheet shows.
@@ -39,6 +39,11 @@ export async function reportSheet(id: string): Promise<ReportSheetData | null> {
   // The session is checked here as well as on the page. A server action is its own entry
   // point: whatever rendered the button that calls it is not what authorises the read.
   await requireReviewer();
+
+  // The id arrives from the browser, so it is checked here as well as on the page. A malformed
+  // one compared against a uuid column is a Postgres error, which would surface as a failed
+  // sheet rather than the "no longer exists" it actually means.
+  if (!isReportId(id)) return null;
 
   const file = await readCase(id);
   if (!file) return null;
