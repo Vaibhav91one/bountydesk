@@ -1,7 +1,7 @@
 import type { Executor } from "@/lib/db";
 import { db, eq, targetProfile } from "@/lib/db";
 
-import { defaultScopeState, sanitizeScopeState, Scope, type ScopeState } from "./scope";
+import { sanitizeScopeState, Scope, type ScopeState } from "./scope";
 
 /**
  * Drizzle-backed adapter between the DB-agnostic `Scope` class and
@@ -76,9 +76,12 @@ async function resolveProfile(executor: Executor, forUpdate: boolean): Promise<R
 }
 
 function stateFromRaw(scopeRules: unknown): ScopeState {
+  // sanitizeScopeState already falls back to DEFAULT_ALLOW when nothing valid survives (an
+  // empty scope_rules column, or one that quarantines everything), so there is nothing left
+  // to default here.
   const { allow, temporary } = parseScopeRules(scopeRules);
   const { state } = sanitizeScopeState({ allow, temporary, updatedAt: new Date().toISOString() });
-  return state.allow.length > 0 || state.temporary.length > 0 ? state : defaultScopeState();
+  return state;
 }
 
 /**
