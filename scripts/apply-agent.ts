@@ -13,8 +13,8 @@ import { fileURLToPath } from "node:url";
 import { TrueForge, TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { appBaseUrl } from "@/lib/auth/oauth";
-import { mcpServerSecret, trueforgeApiKey, trueforgeUrl } from "@/lib/env";
-import { buildMcpServerManifest } from "@/lib/trueforge/agent-config";
+import { mcpServerSecret, requireEnv, scopeGuardToken, trueforgeApiKey, trueforgeUrl } from "@/lib/env";
+import { buildMcpServerManifest, buildScopeGuardServerManifest } from "@/lib/trueforge/agent-config";
 
 async function main(): Promise<void> {
   const client = new TrueForge({
@@ -28,6 +28,16 @@ async function main(): Promise<void> {
     manifest: buildMcpServerManifest(baseUrl, mcpServerSecret()),
   });
   console.log(`MCP connector "bountydesk" registered at ${mcpUrl}`);
+
+  // Registers the connector itself. No agent manifest lists it yet - the reproduction agent
+  // that would call scope-guard's tools isn't built (see AGENTS.md), so there is nothing to
+  // set requireApprovalForTools on until that agent's manifest exists. Registering the
+  // connector now means that manifest edit is the only thing left to do later.
+  const scopeGuardUrl = requireEnv("SCOPE_GUARD_URL");
+  await client.settings.mcpServers.createOrUpdate({
+    manifest: buildScopeGuardServerManifest(scopeGuardUrl, scopeGuardToken()),
+  });
+  console.log(`MCP connector "scope-guard" registered at ${scopeGuardUrl}/api/mcp/scope-guard`);
 
   const dir = path.dirname(fileURLToPath(import.meta.url));
   const manifestPath = path.join(dir, "..", "agent", "bountydesk.agent.json");
