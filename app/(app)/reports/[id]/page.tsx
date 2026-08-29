@@ -52,7 +52,7 @@ function Panel({
       className={`flex min-w-0 flex-col gap-4 rounded-xl border border-border/50 bg-card p-5 ${className ?? ""}`}
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-label text-muted-foreground uppercase">{title}</h2>
+        <h2 className="text-label tracking-normal text-muted-foreground">{title}</h2>
         {aside}
       </header>
       {children}
@@ -391,15 +391,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         {/* The pipeline beside the shape it runs through. Equal height on purpose: they are
             two views of the same run, and one of them ending early reads as unfinished. */}
         <div className="grid items-stretch gap-4 lg:grid-cols-2">
-          <Panel
-            title="Lifecycle"
-            className="p-0"
-            aside={
-              <span className="px-5 text-meta text-muted-foreground">
-                Stored state: {file.state}
-              </span>
-            }
-          >
+          <Panel title="Lifecycle" className="p-0">
             <LifecycleList steps={steps} />
           </Panel>
 

@@ -319,7 +319,7 @@ export function SandboxDiagram({
             className="absolute flex cursor-grab flex-col gap-1.5 active:cursor-grabbing"
             style={{ left, top, width: cardWidth, zIndex: dragging === node.id ? 2 : 1 }}
           >
-            <span className="text-label uppercase">
+            <span className="text-[10px] leading-none font-medium tracking-normal">
               <span className={cn("inline-block rounded-md px-2 py-1", TONE[node.tone])}>
                 {node.kind}
               </span>
