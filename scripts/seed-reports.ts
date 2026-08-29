@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   agentSession,
+  and,
   connectedRepository,
   db,
   eq,
@@ -74,13 +75,24 @@ async function ensureRepository(targetProfileId: string): Promise<string> {
 
   if (existingRepo) return existingRepo.id;
 
-  // Reuse whatever installation this database already has. There is no unique constraint on
-  // account_login, so always inserting a fixed installation_id gave a local database two rows
-  // for the same account, and the Integrations screen honestly reported both.
+  // Reuse this account's installation if the database already has one. There is no unique
+  // constraint on account_login, so always inserting a fixed installation_id gave a local
+  // database two rows for the same account, and the Integrations screen honestly reported both.
+  //
+  // Bound to the demo account and to a live installation on purpose. Any live one would attach
+  // Vaibhav91one/juice-shop to whatever account happened to be first, and a suspended one would
+  // seed a repository that intake and delivery both refuse at runtime, so the approval path
+  // this script exists to demonstrate would fail at the last step.
   const [existingInstallation] = await db
     .select({ id: githubInstallation.id })
     .from(githubInstallation)
-    .where(isNull(githubInstallation.deletedAt))
+    .where(
+      and(
+        eq(githubInstallation.accountLogin, "Vaibhav91one"),
+        isNull(githubInstallation.deletedAt),
+        isNull(githubInstallation.suspendedAt),
+      ),
+    )
     .limit(1);
 
   const installationRowId =

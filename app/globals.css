@@ -139,6 +139,18 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /*
+   * The phase palette, darkened for a light background. The product ships one theme and forces
+   * dark on <html>, so nothing renders these today, but every other token in this file is
+   * defined on both and a half-defined one resolves to nothing rather than to a fallback.
+   */
+  --phase-triaging: oklch(0.52 0.17 250);
+  --phase-reproducing: oklch(0.55 0.13 195);
+  --phase-analysis: oklch(0.53 0.2 330);
+  --phase-approval: oklch(0.62 0.15 75);
+  --phase-delivered: oklch(0.52 0.15 150);
+  --phase-closed: oklch(0.55 0 0);
 }
 
 .dark {

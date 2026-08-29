@@ -1,4 +1,14 @@
-import { db, desc, eq, inArray, report, sql, targetProfile, type Executor } from "@/lib/db";
+import {
+  db,
+  desc,
+  eq,
+  inArray,
+  notInArray,
+  report,
+  sql,
+  targetProfile,
+  type Executor,
+} from "@/lib/db";
 import { TERMINAL_STATES } from "@/lib/reports/states";
 import type { ReportState } from "@/lib/reports/states";
 
@@ -204,7 +214,8 @@ export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
   const rows = await db
     .select({ id: report.id, title: report.title, state: report.state })
     .from(report)
-    .where(sql`${report.state} not in ${TERMINAL_STATES}`)
+    // Spread because TERMINAL_STATES is a readonly tuple and the operator takes a mutable array.
+    .where(notInArray(report.state, [...TERMINAL_STATES]))
     .orderBy(sql`(${report.state} = 'AWAITING_APPROVAL') desc`, desc(report.updatedAt))
     .limit(limit);
 

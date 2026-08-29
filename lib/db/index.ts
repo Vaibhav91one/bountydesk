@@ -63,4 +63,4 @@ export type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[
 
 // Re-exported so tests and workers can build their own predicates without each reaching into
 // drizzle-orm separately.
-export { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+export { and, desc, eq, inArray, isNotNull, isNull, notInArray, sql } from "drizzle-orm";
