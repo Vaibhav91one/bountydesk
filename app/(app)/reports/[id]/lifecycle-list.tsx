@@ -30,7 +30,9 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
 
   return (
-    <ol className="flex flex-col">
+    // h-full and justify-between: the panel is stretched to the diagram beside it, and rows
+    // bunched at the top under half a panel of nothing reads as a list that failed to load.
+    <ol className="flex h-full flex-col justify-between">
       {steps.map((step, index) => {
         const expandable = step.events.length > 0;
         const isOpen = expandable && (open[step.key] ?? false);
@@ -46,7 +48,7 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
               disabled={!expandable}
               aria-expanded={expandable ? isOpen : undefined}
               onClick={() => setOpen((current) => ({ ...current, [step.key]: !isOpen }))}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left enabled:hover:bg-muted/40 disabled:cursor-default"
+              className="flex w-full items-center gap-3 px-4 py-4 text-left enabled:hover:bg-muted/40 disabled:cursor-default"
             >
               <StepBadge state={step.state} index={index + 1} />
 

@@ -288,3 +288,60 @@
   animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
   animation-fill-mode: both;
 }
+
+/* A label that reads as busy: a bright band travelling across the text itself, clipped to the
+   glyphs. Paired with an elapsed timer, it says "still going" without a spinner. */
+@keyframes shimmer-text {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@utility animate-shimmer-text {
+  animation-name: shimmer-text;
+  animation-duration: 1.4s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* The wavefront in the pixel-grid loader. Each cell runs the same fade on its own delay, so
+   the front appears to travel across the grid. */
+@keyframes grid-pulse {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@utility animate-grid-pulse {
+  animation-name: grid-pulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* The approval button's halo. Attention without a spinner, because nothing is spinning: the
+   run has stopped and is waiting on a person. */
+@keyframes approval-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--phase-approval);
+    opacity: 0.9;
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+    opacity: 1;
+  }
+}
+
+@utility animate-approval-halo {
+  animation-name: approval-halo;
+  animation-duration: 2s;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  animation-iteration-count: infinite;
+}

@@ -11,6 +11,7 @@ import { requireReviewer } from "@/lib/auth/dal";
 import { readCase, type CaseEvent, type CaseFile } from "@/lib/reports/case";
 import { phaseOf } from "@/lib/reports/queue";
 
+import { ApprovalDialog } from "./approval-dialog";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import { StatusCard } from "./status-card";
 import { SignVerdict } from "./sign-verdict";
@@ -333,7 +334,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         </Link>
 
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-col gap-2.5">
+          <div className="flex min-w-0 flex-1 flex-col gap-2.5">
             {/* GitHub's shape: the title, then its number in the same line at lower
                 contrast. The number is part of the identity, not a separate field. */}
             <h1 className="text-title text-foreground">
@@ -376,6 +377,26 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               ) : null}
             </p>
           </div>
+
+          {/* Only where there is a pending call an approval could answer. A report sitting in
+              AWAITING_APPROVAL with nothing pending would open a dialog whose buttons refuse. */}
+          {file.awaitingVerdictId && file.verdict ? (
+            <ApprovalDialog
+              reportId={file.id}
+              verdictId={file.awaitingVerdictId}
+              contentHash={file.verdict.contentHash}
+              payload={file.verdict.payload}
+              outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
+              summary={file.verdict.summary}
+              targetName={file.target?.name ?? null}
+              reproductionRan={!drafted}
+              events={file.events.map((event) => ({
+                seq: event.seq,
+                type: event.type,
+                at: event.at.toISOString().slice(11, 19),
+              }))}
+            />
+          ) : null}
         </div>
       </header>
 
