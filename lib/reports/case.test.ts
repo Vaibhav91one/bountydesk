@@ -245,3 +245,32 @@ test("a reporter is only linked when the handle could actually be a GitHub login
   assert.equal(emailed?.reporterAvatarUrl, null);
   assert.equal(emailed?.issueNumber, null);
 });
+
+test("every report state maps to a mascot that exists", async () => {
+  const { MASCOT_FOR_STATE, MASCOT_STATES } = await import("@/lib/mascot/states");
+  const { TERMINAL_STATES } = await import("./states");
+
+  const all = [
+    "TRIAGING",
+    "REPRODUCING",
+    "ANALYSIS_ONLY",
+    "AWAITING_APPROVAL",
+    "DELIVERING",
+    ...TERMINAL_STATES,
+  ];
+
+  for (const state of all) {
+    const mascot = MASCOT_FOR_STATE[state];
+    assert.ok(mascot, `${state} has no mascot`);
+    // The splitter writes one file per name in MASCOT_STATES. A name outside that list would
+    // throw at render, on the page, in front of whoever opened the report.
+    assert.ok(
+      (MASCOT_STATES as readonly string[]).includes(mascot),
+      `${state} maps to ${mascot}, which is not a mascot the splitter produces`,
+    );
+  }
+
+  // The board and the case file both read this map, so a state missing from it would show
+  // Agent Bounty doing one thing on the queue and another on the report.
+  assert.equal(Object.keys(MASCOT_FOR_STATE).length, all.length);
+});

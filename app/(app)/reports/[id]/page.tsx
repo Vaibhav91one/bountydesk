@@ -1,26 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  ArrowLeft,
-  ArrowSquareOut,
-  Clock,
-  GitBranch,
-  ListChecks,
-  Target,
-  Tray,
-} from "@phosphor-icons/react/ssr";
+import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
 import { PhaseDot } from "@/components/phase-dot";
-import { SandboxDiagram } from "@/components/sandbox-diagram";
+import { SandboxDiagram, type NodeStatus } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
-import { mascotState } from "@/lib/mascot/states";
 import { readCase, type CaseEvent, type CaseFile } from "@/lib/reports/case";
 import { phaseOf } from "@/lib/reports/queue";
 
-import { StepBadge } from "./lifecycle-step";
+import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
+import { StatusCard } from "./status-card";
 import { SignVerdict } from "./sign-verdict";
 
 export const metadata = { title: "Case file · BountyDesk" };
@@ -69,33 +60,6 @@ function Panel({
   );
 }
 
-/**
- * One fact about the report: an icon, a label, and the value.
- *
- * The value is always something the database holds. Where there is nothing, the tile says so
- * in words rather than showing an empty slot, which reads as a value that failed to load.
- */
-function Metric({
-  icon,
-  label,
-  children,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-card text-muted-foreground">
-        {icon}
-      </span>
-      <span className="flex min-w-0 flex-col">
-        <span className="text-label text-muted-foreground uppercase">{label}</span>
-        <span className="truncate text-body text-foreground">{children}</span>
-      </span>
-    </div>
-  );
-}
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -115,6 +79,24 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * column, and inventing one that could drift from the report's own state would make the
  * picture and the truth two different things.
  */
+/**
+ * Which lifecycle step an event belongs to, by the prefix its type carries.
+ *
+ * Anything unrecognised falls to the step the report is currently in rather than being
+ * dropped. An event nobody placed is still an event that happened, and a log that quietly
+ * loses lines is worse than one with a line in the wrong place.
+ */
+const EVENT_PHASE: Record<string, string> = {
+  intake: "intake",
+  sandbox: "reproduction",
+  repro: "reproduction",
+  analysis: "verdict",
+  verdict: "verdict",
+  approval: "approval",
+  delivery: "delivery",
+  target: "reproduction",
+};
+
 function lifecycle(file: CaseFile) {
   const terminal = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
   const past = (states: string[]) => states.includes(file.state);
@@ -263,24 +245,6 @@ function Reporter({
   );
 }
 
-/**
- * Agent Bounty at the size of an icon, for the tile that speaks in his voice.
- *
- * Inlined rather than an <img> for the usual reason: the animation is a <style> block inside
- * the file. The id prefix is fixed because this renders once on the page.
- */
-function MascotBadge() {
-  const mascot = mascotState("greeting");
-  return (
-    <span
-      aria-hidden="true"
-      className="size-11 [&>svg]:block [&>svg]:size-full"
-      dangerouslySetInnerHTML={{
-        __html: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__verdict__`),
-      }}
-    />
-  );
-}
 
 export default async function CaseFilePage({ params }: { params: Promise<{ id: string }> }) {
   await requireReviewer();
@@ -293,7 +257,54 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   if (!file) notFound();
 
   const phase = phaseOf(file.state);
-  const steps = lifecycle(file);
+
+  // Events, grouped onto the step they belong to. The fallback step is the one matching the
+  // report's own state, so an unknown prefix lands somewhere a reader would look for it.
+  const fallback =
+    file.state === "TRIAGING"
+      ? "intake"
+      : file.state === "REPRODUCING"
+        ? "reproduction"
+        : file.state === "DELIVERING" || file.state === "DELIVERED"
+          ? "delivery"
+          : "verdict";
+
+  const eventsByStep = new Map<string, LifecycleStep["events"]>();
+  for (const event of file.events) {
+    const key = EVENT_PHASE[event.channel] ?? fallback;
+    const bucket = eventsByStep.get(key) ?? [];
+    bucket.push({ seq: event.seq, type: event.type, at: event.at.toISOString().slice(11, 19) });
+    eventsByStep.set(key, bucket);
+  }
+
+  const steps: LifecycleStep[] = lifecycle(file).map((step) => ({
+    ...step,
+    events: eventsByStep.get(step.key) ?? [],
+  }));
+
+  /**
+   * Which sandbox stages this report can show actually happened.
+   *
+   * Two, today. The repository resolved to a commit and the controller processed the report,
+   * both of which leave rows behind. The target is bound but has never booted, and the build
+   * sandbox, PoC runner and oracle have never run at all, so none of them is marked and
+   * nothing spins. When reproduction ships and writes its own events, this fills in on its own.
+   */
+  const nodeStatus: Record<string, NodeStatus> = {
+    repo: file.repositoryFullName ? "done" : "idle",
+    controller: file.events.length > 0 ? "done" : "idle",
+    build: file.events.some((e) => e.channel === "sandbox") ? "done" : "idle",
+    target: file.state === "REPRODUCING" ? "running" : "idle",
+    poc: file.events.some((e) => e.channel === "repro") ? "done" : "idle",
+    // Only an oracle result marks the oracle. The reason string every verdict carries today
+    // says the opposite in as many words.
+    oracle:
+      file.verdict &&
+      (file.verdict.evidence as { reason?: string } | null)?.reason !==
+        "AUTOMATED_REPRODUCTION_NOT_RUN"
+        ? "done"
+        : "idle",
+  };
 
   /**
    * Whose verdict this is.
@@ -368,56 +379,37 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       </header>
 
       <div className="flex flex-col gap-4 p-8">
-        {/* The overview: what this report is on the left, the shape reproduction will take on
-            the right. The diagram is architecture, not a run, and says so on the canvas. */}
-        <div className="grid items-center gap-8 lg:grid-cols-2">
-          <div className="grid gap-x-6 gap-y-10 sm:grid-cols-2">
-            <Metric icon={<Tray className="size-5" />} label="Status">
-              {STATE_LABEL[file.state] ?? file.state}
-            </Metric>
-            <Metric icon={<Target className="size-5" />} label="Bound target">
-              {file.target?.name ?? "None bound"}
-            </Metric>
-            <Metric icon={<GitBranch className="size-5" />} label="Intake">
-              {file.repositoryFullName ?? file.channel}
-            </Metric>
-            <Metric icon={<ListChecks className="size-5" />} label="Recorded events">
-              {file.events.length === 0
-                ? "None yet"
-                : `${file.events.length} ${file.events.length === 1 ? "event" : "events"}`}
-            </Metric>
-            <Metric icon={<MascotBadge />} label={verdictLabel}>
-              {file.verdict
-                ? `${OUTCOME[file.verdict.outcome] ?? file.verdict.outcome} · revision ${file.verdict.revision}`
-                : "Nothing drafted yet"}
-            </Metric>
-            <Metric icon={<Clock className="size-5" />} label="Last change">
-              <time dateTime={file.updatedAt.toISOString()}>
-                {file.updatedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-              </time>
-            </Metric>
-          </div>
+        <StatusCard
+          file={file}
+          stateLabel={STATE_LABEL[file.state] ?? file.state}
+          verdictLabel={verdictLabel}
+          outcomeLabel={
+            file.verdict ? (OUTCOME[file.verdict.outcome] ?? file.verdict.outcome) : null
+          }
+        />
 
-          <SandboxDiagram targetName={file.target?.name ?? null} />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-3">
+        {/* The pipeline beside the shape it runs through. Equal height on purpose: they are
+            two views of the same run, and one of them ending early reads as unfinished. */}
+        <div className="grid items-stretch gap-4 lg:grid-cols-2">
           <Panel
-            title="Reporter input"
-            className="lg:col-span-2"
+            title="Lifecycle"
+            className="p-0"
             aside={
-              file.issueUrl ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  nativeButton={false}
-                  render={<a href={file.issueUrl} target="_blank" rel="noreferrer" />}
-                >
-                  Open on GitHub <ArrowSquareOut className="size-3.5" />
-                </Button>
-              ) : null
+              <span className="px-5 text-meta text-muted-foreground">
+                Stored state: {file.state}
+              </span>
             }
           >
+            <LifecycleList steps={steps} />
+          </Panel>
+
+          <Panel title="Sandbox architecture" aside={<Badge variant="outline">Not run</Badge>}>
+            <SandboxDiagram targetName={file.target?.name ?? null} status={nodeStatus} />
+          </Panel>
+        </div>
+
+        <div>
+          <Panel title="Reporter input">
             {/* The reporter's own words, rendered as plain text. Never as markdown or HTML:
                 this is attacker-controlled input, and the whole product treats it as data. */}
             <pre className="max-h-80 overflow-auto rounded-md bg-background p-4 text-body whitespace-pre-wrap text-foreground">
@@ -429,61 +421,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </p>
           </Panel>
 
-          <Panel title="Current run" aside={<Badge variant="outline">{file.channel}</Badge>}>
-            <div className="flex flex-col">
-              <Row label="Report">
-                <span className="font-mono">{file.id.slice(0, 8)}</span>
-              </Row>
-              <Row label="Opened">
-                <time dateTime={file.createdAt.toISOString()}>
-                  {file.createdAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-                </time>
-              </Row>
-              <Row label="Last change">
-                <time dateTime={file.updatedAt.toISOString()}>
-                  {file.updatedAt.toISOString().replace("T", " ").slice(0, 16)} UTC
-                </time>
-              </Row>
-              <Row label="Bound target">{file.target?.name ?? "none bound"}</Row>
-            </div>
-          </Panel>
         </div>
-
-        <Panel
-          title="Lifecycle"
-          aside={
-            <span className="text-meta text-muted-foreground">
-              Display phases. Stored state: {file.state}.
-            </span>
-          }
-        >
-          {/* Horizontal and scrollable rather than a wrapping grid: the pipeline has an
-              order, and a grid that reflows to two rows on a narrow screen breaks it. The
-              connector is the same hairline the sandbox diagram draws, so the two read as one
-              language. */}
-          <ol className="-mx-1 flex overflow-x-auto px-1 pb-1">
-            {steps.map((step, index) => (
-              <li
-                key={step.key}
-                className="animate-step-in relative flex w-40 shrink-0 flex-col items-center gap-2 px-2 text-center motion-reduce:animate-none"
-                style={{ animationDelay: `${index * 70}ms` }}
-              >
-                {/* Runs from the previous badge's centre to this one's. The items are equal
-                    width, so half of one plus half of the next is exactly that span. */}
-                {index > 0 ? (
-                  <span
-                    aria-hidden="true"
-                    className="absolute top-3.5 right-1/2 -left-1/2 h-px bg-border/50"
-                  />
-                ) : null}
-
-                <StepBadge state={step.state} index={index + 1} />
-                <span className="text-body font-medium text-foreground">{step.label}</span>
-                <span className="text-meta text-muted-foreground">{step.note}</span>
-              </li>
-            ))}
-          </ol>
-        </Panel>
 
         <div>
           {/* Reproduction is not built, so there is no canary, no negative control and no

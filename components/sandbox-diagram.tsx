@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { Docker, GitHubLight, NextJs } from "developer-icons";
-import { MagnifyingGlass, Terminal } from "@phosphor-icons/react/ssr";
+import { Check, CircleNotch, MagnifyingGlass, Terminal } from "@phosphor-icons/react/ssr";
 
 import { cn } from "@/lib/utils";
 
@@ -27,18 +27,32 @@ type Node = {
   y: number;
   kind: string;
   title: string;
-  caption: string;
   icon: React.ReactNode;
   /** Ties the node to a phase colour, so the diagram reads like the rest of the console. */
   tone: "triaging" | "reproducing" | "analysis" | "delivered";
 };
 
-const TONE: Record<Node["tone"], { dot: string; pill: string }> = {
-  triaging: { dot: "bg-phase-triaging", pill: "text-phase-triaging" },
-  reproducing: { dot: "bg-phase-reproducing", pill: "text-phase-reproducing" },
-  analysis: { dot: "bg-phase-analysis", pill: "text-phase-analysis" },
-  delivered: { dot: "bg-phase-delivered", pill: "text-phase-delivered" },
+/**
+ * The pill above each node: the phase colour as ink, on a dark mix of itself as ground.
+ *
+ * Written out rather than built from the tone key, because Tailwind reads source for literal
+ * class names and a template would compile to nothing.
+ */
+const TONE: Record<Node["tone"], string> = {
+  triaging: "bg-phase-triaging/15 text-phase-triaging",
+  reproducing: "bg-phase-reproducing/15 text-phase-reproducing",
+  analysis: "bg-phase-analysis/15 text-phase-analysis",
+  delivered: "bg-phase-delivered/15 text-phase-delivered",
 };
+
+/**
+ * Whether a stage has happened, is happening, or has not.
+ *
+ * The page works these out from the report, and every one of them has to be something the
+ * database can show. A tick on the oracle would say a canary was observed, which is the claim
+ * this product must never make without an oracle having made it.
+ */
+export type NodeStatus = "done" | "running" | "idle";
 
 /**
  * The dynamic tier, as the board draws it: connected repo, controller resolves an exact
@@ -65,7 +79,14 @@ const clamp = (value: number, low: number, high: number) =>
 /** Estimated for the first paint, replaced by measurement immediately after. */
 const ESTIMATED_HEIGHT = 74;
 
-export function SandboxDiagram({ targetName }: { targetName: string | null }) {
+export function SandboxDiagram({
+  targetName,
+  status,
+}: {
+  targetName: string | null;
+  /** Per node, worked out by the page from what the report can actually show. */
+  status: Record<string, NodeStatus>;
+}) {
   const nodes: Node[] = [
     {
       id: "repo",
@@ -73,7 +94,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       y: 0.04,
       kind: "Connected repo",
       title: "Exact commit",
-      caption: "Resolved by the controller, never by the sandbox.",
       icon: <GitHubLight className="size-4" />,
       tone: "triaging",
     },
@@ -83,7 +103,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       y: 0.04,
       kind: "Trusted controller",
       title: "BountyDesk",
-      caption: "Mints the token, seeds the canary, owns teardown.",
       icon: <NextJs className="size-4" />,
       tone: "triaging",
     },
@@ -93,7 +112,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       y: 0.36,
       kind: "Untrusted build",
       title: "Build sandbox",
-      caption: "Runs the customer's code. Narrow egress, no secrets.",
       icon: <Docker className="size-4" />,
       tone: "reproducing",
     },
@@ -104,7 +122,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       kind: "Target runtime",
       // The one node with something real behind it: the target this report is bound to.
       title: targetName ?? "no target bound",
-      caption: "The immutable build. Offline, one port open.",
       icon: <Docker className="size-4" />,
       tone: "reproducing",
     },
@@ -114,7 +131,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       y: 0.68,
       kind: "PoC runner",
       title: "Approved plan",
-      caption: "Reaches the target's endpoint and nothing else.",
       icon: <Terminal className="size-4" />,
       tone: "analysis",
     },
@@ -124,7 +140,6 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
       y: 0.68,
       kind: "External oracle",
       title: "Canary check",
-      caption: "Outside the PoC. Decides. Never trusts its output.",
       icon: <MagnifyingGlass className="size-4" />,
       tone: "delivered",
     },
@@ -304,18 +319,30 @@ export function SandboxDiagram({ targetName }: { targetName: string | null }) {
             className="absolute flex cursor-grab flex-col gap-1.5 active:cursor-grabbing"
             style={{ left, top, width: cardWidth, zIndex: dragging === node.id ? 2 : 1 }}
           >
-            <span className="flex items-center gap-1.5 text-label uppercase">
-              <span className={cn("size-1.5 shrink-0 rounded-full", TONE[node.tone].dot)} />
-              <span className={cn("truncate", TONE[node.tone].pill)}>{node.kind}</span>
+            <span className="text-label uppercase">
+              <span className={cn("inline-block rounded-md px-2 py-1", TONE[node.tone])}>
+                {node.kind}
+              </span>
             </span>
-            <div className="flex gap-2.5 rounded-xl border border-border/50 bg-card p-3">
-              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
+            <div className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card p-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-background">
                 {node.icon}
               </span>
-              <span className="flex min-w-0 flex-col gap-1">
-                <span className="truncate text-body font-medium text-foreground">{node.title}</span>
-                <span className="text-meta text-muted-foreground">{node.caption}</span>
+              <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
+                {node.title}
               </span>
+              {status[node.id] === "done" ? (
+                <Check
+                  weight="bold"
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 text-phase-delivered"
+                />
+              ) : status[node.id] === "running" ? (
+                <CircleNotch
+                  aria-hidden="true"
+                  className="size-3.5 shrink-0 animate-spin text-phase-approval motion-reduce:animate-none"
+                />
+              ) : null}
             </div>
           </div>
         );

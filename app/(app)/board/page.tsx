@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
 import { listQueue, phaseOf, type QueueCard, type QueueColumn } from "@/lib/reports/queue";
-import { mascotState, type MascotState } from "@/lib/mascot/states";
+import { MASCOT_FOR_STATE, mascotState, type MascotState } from "@/lib/mascot/states";
 
 export const metadata = { title: "Review queue · BountyDesk" };
 
@@ -41,17 +41,15 @@ const STATE_LABEL: Record<string, string> = {
 const RUNNING = new Set(["TRIAGING", "REPRODUCING", "DELIVERING"]);
 
 /**
- * Which mascot stands in for a state something is doing.
+ * Which mascot appears on a card, and only for the states something is actively doing.
  *
- * Only the running three. Agent Bounty appearing on a finished report would be watching
+ * The names come from the shared map so the board and the case file cannot disagree, but the
+ * board shows Agent Bounty on far fewer cards: he on a finished report would be watching
  * something that already stopped, and on one awaiting approval he would be doing the waiting
- * rather than the reviewer.
+ * instead of the reviewer.
  */
-const MASCOT: Record<string, "ingest" | "reproducing" | "delivered"> = {
-  TRIAGING: "ingest",
-  REPRODUCING: "reproducing",
-  DELIVERING: "delivered",
-};
+const MASCOT_ON_CARD = new Set(["TRIAGING", "REPRODUCING", "DELIVERING"]);
+
 
 /** What a card in flight is doing, in the present tense, because it is still happening. */
 const RUNNING_LABEL: Record<string, string> = {
@@ -268,8 +266,8 @@ export default async function BoardPage() {
   const present = new Set(columns.flatMap((c) => c.cards.map((card) => card.state)));
   const mascots = new Map(
     [...present]
-      .filter((state) => state in MASCOT)
-      .map((state) => [state, mascotState(MASCOT[state])] as const),
+      .filter((state) => MASCOT_ON_CARD.has(state))
+      .map((state) => [state, mascotState(MASCOT_FOR_STATE[state])] as const),
   );
 
   // Numbered across the board rather than within a column, so the drifts stay spread out even
