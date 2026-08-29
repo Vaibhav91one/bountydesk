@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight } from "@phosphor-icons/react/ssr";
+import { Sparkle } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,7 @@ export function SiteHeader({ links = true }: { links?: boolean }) {
           ) : null}
 
           <Button size="sm" nativeButton={false} render={<Link href="/login" />} className="rounded-full px-4">
-            Get started <RollingIcon icon={ArrowRight} className="size-4" />
+            <RollingIcon icon={Sparkle} weight="fill" className="size-4" /> Get started
           </Button>
         </nav>
       </div>

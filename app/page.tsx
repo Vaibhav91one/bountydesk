@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Check, Circle, Folder } from "@phosphor-icons/react/ssr";
+import { Check, Circle, Folder, Sparkle } from "@phosphor-icons/react/ssr";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 
 import { PhaseBadge } from "@/components/phase-dot";
@@ -10,7 +10,6 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { mascotState } from "@/lib/mascot/states";
 
 import { INTEGRATIONS, type IntegrationIcon } from "./(app)/integrations/catalog";
 import { Faq } from "./faq";
@@ -81,11 +80,6 @@ const DESIGNED = [
  * contradicting its own argument. The labels are the product working.
  */
 export default function LandingPage() {
-  // One mascot, not the marquee. mascotStates() reads 1.4MB of animated SVG and the marquee
-  // renders the list twice; login can afford that because somebody chose to go there, and a
-  // page a stranger lands on cannot.
-  const mascot = mascotState("idle");
-
   return (
     <div className="flex min-h-full flex-1 flex-col">
       <SiteHeader />
@@ -94,19 +88,12 @@ export default function LandingPage() {
         {/* Hero. Centred rather than split: the reference puts the headline in the middle of
             the page and the product underneath it on a backdrop, which gives the claim the
             whole width and stops the panel competing with it for attention. */}
-        <section className="mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-10 text-center lg:pt-24">
+        <section className="relative z-10 mx-auto flex w-full max-w-4xl flex-col items-center gap-7 px-6 pt-20 pb-10 text-center lg:pt-24">
           {/* text-display is 64px with no responsive variant, and app/login/page.tsx already
               records why that matters: a 64px headline on a phone is a scroll, not a hero.
               Login hides its headline below lg; a landing page cannot, so this steps up and
               carries the token's weight and tracking at the smaller sizes. */}
           <h1 className="text-4xl leading-[1.06] font-normal tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
-            {/* Sized in em so it tracks the headline through every breakpoint, and
-                aria-hidden because the sentence reads the same without it. */}
-            <span
-              aria-hidden="true"
-              className="mr-3 inline-block size-[0.82em] align-[-0.1em] [&>svg]:block [&>svg]:size-full"
-              dangerouslySetInnerHTML={{ __html: mascot.markup }}
-            />
             Read every report.
             <br />
             Sign every verdict.
@@ -123,7 +110,7 @@ export default function LandingPage() {
               render={<Link href="/login" />}
               className="rounded-full px-6"
             >
-              Get started <RollingIcon icon={ArrowRight} className="size-4" />
+              <RollingIcon icon={Sparkle} weight="fill" className="size-4" /> Get started
             </Button>
             <Button
               size="lg"
@@ -140,7 +127,7 @@ export default function LandingPage() {
         {/* The product on a backdrop, the way the reference seats its screenshot. The image is
             decorative, so it carries an empty alt and the panel above it says everything. */}
         <div className="relative isolate">
-          <div aria-hidden="true" className="absolute inset-x-0 -top-12 bottom-0 overflow-hidden">
+          <div aria-hidden="true" className="absolute inset-x-0 -top-44 bottom-0 overflow-hidden">
             <Image
               src="/backdrop/hero.webp"
               alt=""
