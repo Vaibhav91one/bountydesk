@@ -5,11 +5,12 @@
  * The oracle boundary from lib/reproduction/types.ts is the rule this file exists to hold:
  * the fixture, negative-control and exploit requests are direct HTTP calls this process makes
  * and reads itself, over the sandbox's per-port preview URL, never text daytona.ts's execute()
- * captured from inside the sandbox. execute() is used only in waitForAppReady, to launch the
- * app and poll for it answering its own port -- a boot check, not a verdict input, per
- * AGENTS.md's "READY means the target started and answered its health check". The pinned
- * snapshot boots Daytona's own agent as PID 1 and does not run the image's own start command
- * on its own, confirmed live: nothing answers :3000 until this runs it explicitly.
+ * captured from inside the sandbox. execute() is used only for boot and build-identity checks,
+ * never a verdict input: waitForAppReady launches the app and polls for it answering its own
+ * port, per AGENTS.md's "READY means the target started and answered its health check", and
+ * buildMarkerCheck (build-marker.ts) confirms which image actually booted. The pinned snapshot
+ * boots Daytona's own agent as PID 1 and does not run the image's own start command on its
+ * own, confirmed live: nothing answers :3000 until this runs it explicitly.
  *
  * daytona.ts deliberately doesn't expose the per-port preview endpoint (it isn't one of the
  * five calls the reproduction-sandbox lifecycle needs), so this file calls it directly. It is
@@ -32,6 +33,7 @@ import type {
   ReproductionRequest,
 } from "@/lib/reproduction/types";
 import { imageRefFor } from "@/lib/targets/configure";
+import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, deleteSandbox, execute, getSnapshot, type Sandbox } from "./daytona";
 
 const DAYTONA_API = "https://app.daytona.io/api";
@@ -224,7 +226,8 @@ async function runLeg(
  * ever called with one), which rules out NO_BOUND_TARGET, POLICY_REFUSED and
  * INTAKE_PARSE_FAILED -- those belong to earlier pipeline stages -- and COULD_NOT_BUILD, which
  * belongs to the dynamic build tier this pinned-image path never runs. What is left is a
- * three-way split: the sandbox itself never came up (COULD_NOT_DEPLOY), it came up but never
+ * three-way split: the sandbox itself never came up, or came up on the wrong build
+ * (COULD_NOT_DEPLOY -- see build-marker.ts for the second case), it came up but never
  * answered or a request to it failed in flight (TARGET_UNAVAILABLE), or both legs of the
  * oracle ran but produced a run decideOutcome refuses to trust -- an incomplete leg or a
  * negative control that itself found the canary -- which is a statement about the oracle
@@ -274,6 +277,14 @@ export const reproduce: ReproduceFn = async (input, opts) => {
       await waitForAppReady(sandbox, READINESS_TIMEOUT_MS);
     } catch {
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
+    }
+
+    // A second, independent proof of build identity (see build-marker.ts), on top of
+    // assertSnapshotImage's control-plane check that createSandbox already ran above. A
+    // mismatch here is the same class of failure as a snapshot that never came up correctly,
+    // so it shares COULD_NOT_DEPLOY rather than adding a new reason to the frozen union.
+    if (!(await buildMarkerCheck(sandbox, input.imageDigest))) {
+      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
     }
 
     const canary = generateCanary();

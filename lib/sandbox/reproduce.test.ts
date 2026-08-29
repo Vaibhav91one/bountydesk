@@ -46,6 +46,12 @@ let createSandboxCalls: SandboxSpec[] = [];
 let deleteSandboxCalls: string[] = [];
 let executeCalls: string[] = [];
 
+/** Every test in this file passes `imageDigest: "sha256:" + "a".repeat(64)` (or the equivalent
+ * derived from FAKE_SNAPSHOT), so the default execute() stub answers the build-marker read
+ * with a resolved digest that matches it -- otherwise every existing test in this file would
+ * start failing at the new buildMarkerCheck gate instead of testing what it already tests. */
+const MATCHING_RESOLVED_DIGEST_HEX = "a".repeat(64);
+
 /** Overridable per test: lets a test make provisioning, readiness or teardown fail without
  * touching the shared default. */
 let createSandboxImpl: (spec: SandboxSpec) => Promise<Sandbox> = async (spec) => {
@@ -54,6 +60,9 @@ let createSandboxImpl: (spec: SandboxSpec) => Promise<Sandbox> = async (spec) =>
 };
 let executeImpl: (sandbox: Sandbox, command: string) => Promise<ExecResult> = async (_sandbox, command) => {
   executeCalls.push(command);
+  if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
+    return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${MATCHING_RESOLVED_DIGEST_HEX}:daytona\n` };
+  }
   // Any status starting with 2 satisfies waitForAppReady's readiness regex; the start-app
   // call's result is never inspected, so the same canned answer covers both execute() calls.
   return { exitCode: 0, result: "200" };
@@ -87,6 +96,9 @@ function resetSpies(): void {
   };
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
+    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
+      return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${MATCHING_RESOLVED_DIGEST_HEX}:daytona\n` };
+    }
     return { exitCode: 0, result: "200" };
   };
   deleteSandboxImpl = async (id) => {
@@ -198,6 +210,45 @@ test("a clean negative control and a found canary reproduces, with hashed eviden
   assert.ok(!JSON.stringify(outcome.evidence).includes(canary!));
 
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "the sandbox must always be torn down");
+  assert.ok(
+    executeCalls.some((c) => c.includes("DAYTONA_SANDBOX_SNAPSHOT")),
+    "a matching build marker must not skip the check -- it has to actually run and pass",
+  );
+});
+
+test("a mismatched build marker reports COULD_NOT_DEPLOY, tears down, and never reaches the oracle", async () => {
+  resetSpies();
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) {
+      return { exitCode: 0, result: `cr.app.daytona.io/sbox/daytona-${"0".repeat(64)}:daytona\n` };
+    }
+    return { exitCode: 0, result: "200" };
+  };
+
+  // No fetch stub installed: if the marker check failed to short-circuit the flow, the next
+  // step (the real preview-url lookup) would hit the network and this test would fail loudly
+  // rather than quietly passing on the wrong path.
+  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id], "a marker mismatch still tears the sandbox down");
+});
+
+test("an execute() failure while reading the build marker fails closed, same as a mismatch", async () => {
+  resetSpies();
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes("DAYTONA_SANDBOX_SNAPSHOT")) throw new Error("toolbox unreachable");
+    return { exitCode: 0, result: "200" };
+  };
+
+  const outcome = await reproduce({ imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap", recipe });
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "COULD_NOT_DEPLOY");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
 test("a clean negative control and no canary found does not reproduce", async () => {
