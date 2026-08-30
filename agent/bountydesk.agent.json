@@ -9,7 +9,22 @@
         "name": "bountydesk",
         "requireApprovalForTools": ["publish_verdict"],
         "preload": true
+      },
+      {
+        "name": "scope-guard",
+        "requireApprovalForTools": [
+          "request_intrusive_approval",
+          "scope_add",
+          "scope_remove",
+          "scope_add_temporary"
+        ],
+        "preload": true
       }
-    ]
+    ],
+    "config": {
+      "sandbox": { "enabled": true },
+      "dynamic_sub_agents": { "enabled": true },
+      "iteration_limit": 60
+    }
   }
 }
