@@ -56,7 +56,7 @@ const IMAGE_REF_RE = /^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$/;
 const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const IMAGE_NAME_RE = /^[A-Za-z0-9._/-]+$/;
 
-export function readProbeConfig(argv: string[], env: NodeJS.ProcessEnv): ProbeConfig {
+export function readProbeConfig(argv: string[], env: Record<string, string | undefined>): ProbeConfig {
   const options = parseArgs(argv);
 
   requireRealValue("DAYTONA_API_KEY", env.DAYTONA_API_KEY, { secret: true });
@@ -93,7 +93,7 @@ export function readProbeConfig(argv: string[], env: NodeJS.ProcessEnv): ProbeCo
 
 function resolveExpectedImageRef(
   options: Map<string, string>,
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
 ): string {
   const explicitRef = option(options, "expected-image-ref") ?? env.DAYTONA_PROBE_EXPECTED_IMAGE_REF;
   if (explicitRef) {
