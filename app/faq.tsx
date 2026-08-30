@@ -18,11 +18,11 @@ import { cn } from "@/lib/utils";
 const QUESTIONS: { q: string; a: string }[] = [
   {
     q: "Does reproduction run today?",
-    a: "No. The sandbox topology and the canary oracle are designed, reviewed and not built. Every report therefore stops at an analysis packet and a person decides. The rule that will not change when they do ship: a target with no defender-authored fixture and oracle cannot return a reproduced verdict, whatever the proof of concept printed.",
+    a: "Yes, for the one pinned target. A TrueForge agent investigates the report in an isolated sandbox and drafts its own outcome, summary and findings. What still won't change: a report with no authorized target, or one whose repository grant has since been revoked, cannot come back reproduced or not reproduced, whatever the agent concluded. That report stays an analysis packet, and a person decides.",
   },
   {
     q: "How would you know a bug is real?",
-    a: "A fresh, unpredictable canary is seeded through a trusted fixture before the run, and the oracle that checks whether it reached the sink runs outside the sandbox. A negative control runs first. The model never reads the result out of HTTP text or a log and calls it a verdict.",
+    a: "The agent's own investigation is the source: it works the report against its authorized target inside a sandbox, using scope-guard and its skills, and reaches its own conclusion. Two things keep that conclusion honest. A person has to approve the exact drafted text before anything reaches the reporter, so nothing ships unseen. And the server re-checks authorization before a reproduced or not-reproduced claim becomes a verdict: a report with no bound target, or one whose grant has been revoked, is refused regardless of what the agent asserts.",
   },
   {
     q: "What exactly am I approving?",
