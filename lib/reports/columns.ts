@@ -11,19 +11,22 @@ import type { ReportState } from "@/lib/reports/states";
 /**
  * The board's columns, and the lifecycle states each one holds.
  *
- * Six rather than the wireframe's five. The wireframe predates the frozen enum in
- * docs/decisions.md, which has a state it does not: ANALYSIS_ONLY is not awaiting approval,
- * because there is no verdict to sign. A report reaches it when reproduction could not run at
- * all, and a human decides what happens next. Folding it into another column would misstate
- * that, so it gets its own.
+ * REPRODUCING has no column of its own. It is a dead state under the agent-authored model:
+ * the driver goes TRIAGING, then the agent turn, then AWAITING_APPROVAL, and nothing ever
+ * moves a report into REPRODUCING (the case file documents the same thing). A dedicated
+ * column for it would sit empty on every real board, so it folds in with the Analysis only
+ * column, which is the post-triage investigation phase a stalled report actually rests in.
+ * A stray REPRODUCING report would still show there rather than vanish.
+ *
+ * ANALYSIS_ONLY is reachable and stays. A report lands in it when reproduction could not run
+ * at all, and a human decides what happens next.
  *
  * Every one of the ten states appears exactly once. A report that fell through the gaps would
  * be a report nobody can see.
  */
 export const COLUMNS: { key: string; label: string; states: ReportState[] }[] = [
   { key: "triaging", label: "Triaging", states: ["TRIAGING"] },
-  { key: "reproducing", label: "Reproducing", states: ["REPRODUCING"] },
-  { key: "analysis-only", label: "Analysis only", states: ["ANALYSIS_ONLY"] },
+  { key: "analysis-only", label: "Analysis only", states: ["REPRODUCING", "ANALYSIS_ONLY"] },
   { key: "awaiting-approval", label: "Awaiting approval", states: ["AWAITING_APPROVAL"] },
   { key: "delivered", label: "Delivered", states: ["DELIVERING", "DELIVERED"] },
   {
