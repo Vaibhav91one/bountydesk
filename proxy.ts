@@ -1,9 +1,17 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { SOURCE_URL, shouldRedirectToSource } from "@/lib/deployment/landing-redirect";
+import {
+  SOURCE_URL,
+  landingRedirectEnabled,
+  shouldRedirectToSource,
+} from "@/lib/deployment/landing-redirect";
 
 export function proxy(request: NextRequest) {
+  if (!landingRedirectEnabled()) {
+    return NextResponse.next();
+  }
+
   if (!shouldRedirectToSource(request.nextUrl.pathname)) {
     return NextResponse.next();
   }

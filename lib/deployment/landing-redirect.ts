@@ -13,6 +13,12 @@ const passthroughPaths = new Set([
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];
 
+type LandingRedirectEnv = Record<string, string | undefined>;
+
+export function landingRedirectEnabled(env: LandingRedirectEnv = process.env) {
+  return env.VERCEL === "1" || env.BOUNTYDESK_LANDING_REDIRECT === "1";
+}
+
 export function shouldRedirectToSource(pathname: string) {
   if (passthroughPaths.has(pathname)) return false;
 
