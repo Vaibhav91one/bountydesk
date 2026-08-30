@@ -62,7 +62,7 @@ Caveat to keep on the record: "canary reached the trusted sink" is evidence, not
 Demo runs on Daytona cloud (shared-kernel container, benign inputs only). Production runs a Kata microVM (Cloud Hypervisor / Firecracker backend) or E2B self-hosted, with host-side egress hardening. OpenSandbox rejected. This split is documented on the Threat Model board page.
 
 ### Q6 — Demo happy path
-One pinned deliberately-vulnerable target (see Q18), SQLi confirmed by a per-run canary. **Amended 2026-08-27:** the planned target source is the owner's connected fork `Vaibhav91one/juice-shop` (repository id 1347703889) at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. That proves source equivalence, not runtime-artifact provenance. The existing scenario evidence came from the upstream image recorded in Q18. The connected-fork image must be built and both scenarios re-verified against its generated digest before the demo can call it frozen. Flow after that gate passes: GitHub issue → boot the **prebuilt pinned image** (no runtime clone, no install, no network at reproduction time) → seed a fresh unpredictable canary through the trusted fixture → negative control → run PoC → the out-of-sandbox oracle confirms the canary reached the trusted sink → evidence packet → human approves.
+One pinned deliberately-vulnerable target (see Q18), SQLi confirmed by a per-run canary. **Amended 2026-08-27:** the planned target source is the owner's connected fork `Vaibhav91one/juice-shop` (repository id 1347703889) at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's. That proves source equivalence, not runtime-artifact provenance. **Amended 2026-08-30:** the SQLi scenario was proven live on 2026-08-29 against the connected-fork target through the deterministic canary pipeline. That proof predates Q22's agent-authored redesign and must not be cited as proof that the current TrueForge agent-authored path has run live. The login-bypass scenario is implemented in current code but not live-proven. Flow for a deterministic proof: GitHub issue → boot the **prebuilt pinned image** (no runtime clone, no install, no network at reproduction time) → seed a fresh unpredictable canary through the trusted fixture → negative control → run PoC → the out-of-sandbox oracle confirms the canary reached the trusted sink → evidence packet → human approves.
 
 ### Backup (demo resilience)
 Three layers: (A) analysis fallback live — demo it as a feature when reproduction can't run; (B) pre-recorded run for total network/Daytona failure; (C) **a second scenario inside the same pinned target** — never a second target or a second architecture. Plus pre-warm: provision the sandbox and pre-pull the image before presenting.
@@ -149,7 +149,7 @@ enum defined in Q14; `DEAD_LETTER` is never a report state.
 
 ### Q18 — The pinned demo target
 
-**FROZEN: OWASP Juice Shop v17.3.0 (amd64), UNION SQLi in product search.** Validated live on 2026-08-25. Data-exfiltration path (not an auth bypass), so a seeded canary is directly observable in the HTTP response. One request, deterministic, no login.
+**FROZEN: OWASP Juice Shop v17.3.0 (amd64), UNION SQLi in product search.** The vulnerability was validated directly on 2026-08-25, and the BountyDesk deterministic canary pipeline proved it live on 2026-08-29. Data-exfiltration path (not an auth bypass), so a seeded canary is directly observable in the HTTP response. One request, deterministic, no login.
 
 | Field | Value | Verified |
 | --- | --- | --- |
@@ -189,18 +189,18 @@ The second demo scenario lives inside this same target (Juice Shop has several i
 - **Demo (one Daytona sandbox):** PoC, target and fixture share the sandbox; the PoC reaches the target on loopback and only sees the HTTP response. The fixture seeds the canary through the app's own registration API and the oracle reads the search response — the PoC never touches the DB or the oracle channel. This is what was validated. Honest caveat: they share a filesystem, so a PoC that broke out of the HTTP layer could read the canary directly; the demo does not exclude that.
 - **Production:** separate containers — PoC container → target-only network endpoint → target container (protected state) → a host-side controller that seeds/resets/reads the oracle. The PoC has no path to the target DB, the fixture API, canary storage, or the oracle channel. Only then is "canary reached the trusted sink" proof rather than evidence.
 
-**Scenario 2 (live backup, same pinned target) — auth-bypass SQLi in login.** Frozen and validated live 2026-08-25 against the same v17.3.0 amd64 image.
+**Scenario 2 (backup, same pinned target): auth-bypass SQLi in login.** Frozen as the backup scenario and implemented in current code, but not live-proven through BountyDesk. The basic Juice Shop behavior was checked directly on 2026-08-25 against the same v17.3.0 amd64 image.
 
 | Field | Value | Verified |
 | --- | --- | --- |
-| Endpoint | `POST /rest/user/login` | ✅ |
-| Exploit request | `{"email":"' OR 1=1--","password":"x"}` | ✅ minted a JWT |
-| Result | token for `id:1 / admin@juice-sh.op` (first user = admin) | ✅ decoded |
-| Oracle condition | the injection's token opens an admin-only endpoint (`GET /api/Users` → 200), checked **outside** the sandbox — never the PoC's self-report | ✅ HTTP 200 |
-| Per-run strengthening | register a canary user first; the admin-token `/api/Users` dump must contain that run's canary — ties the proof to a value the PoC can't precompute | recommended |
-| Negative control | same login with a wrong password and no injection → `Invalid email or password` (401) | ✅ rejected |
+| Endpoint | `POST /rest/user/login` | implemented |
+| Exploit request | `{"email":"' OR 1=1--","password":"x"}` | direct check minted a JWT |
+| Result | token for `id:1 / admin@juice-sh.op` (first user = admin) | direct check decoded |
+| Oracle condition | the injection's token opens an admin-only endpoint (`GET /api/Users` → 200), checked **outside** the sandbox, never the PoC's self-report | implemented |
+| Per-run strengthening | register a canary user first; the admin-token `/api/Users` dump must contain that run's canary, tying the proof to a value the PoC cannot precompute | implemented |
+| Negative control | same login with a wrong password and no injection → `Invalid email or password` (401) | implemented |
 
-Both scenarios run against the one pinned image; Scenario 2 is the live Backup C in the runbook. This is auth-bypass (a token you shouldn't get), where Scenario 1 is data-exfiltration (rows you shouldn't see) — two different vuln classes, one target, both deterministic.
+Both scenarios run against the one pinned image; Scenario 2 is Backup C in the runbook, not a second live-verified path. This is auth-bypass (a token you should not get), where Scenario 1 is data-exfiltration (rows you should not see): two different vuln classes, one target, both deterministic.
 
 **Why the canary is a seeded row and not a static string:** the PoC author knows Juice Shop's schema and could hardcode a plausible-looking email. An unpredictable per-run value they cannot guess, seeded by our fixture and checked by our instrument, is what makes "reproduced" unforgeable.
 
@@ -319,7 +319,7 @@ content-hash bound as it already is.
 | Separate build and reproduction sandboxes | two sandboxes per dynamic run, artifact crosses | designed |
 | Mandatory egress enforcement | provider network policy, verified per run from inside | designed; the demo relies on the image needing no network, which is not the same thing |
 | Server-validated agent proposals | schema and policy validation before human approval | designed |
-| Hash-bound approval | `publish_verdict` refuses a differing content hash | schema built, logic unbuilt |
+| Hash-bound approval | `publish_verdict` refuses a differing content hash | built for the current approval path |
 | External oracle | controller-side, outside the PoC environment | designed |
 | No secrets in the hostile runtime | neither sandbox receives any platform credential | designed |
 | Resource limits | CPU, memory, process, disk, wall clock, teardown by TTL plus reconciler | designed |
@@ -375,12 +375,14 @@ or expired through the existing lifecycle, but cannot claim delivery.
 Written down because several of the sections above describe intent, and intent read as status
 is how a demo dies.
 
-Not built: a Daytona provisioning client, the real `AnalysisDriver`, any email or upload
-route, the dynamic build pipeline, the external oracle. `DAYTONA_TARGET_SNAPSHOT_ID` is still
-a placeholder and must not be described as configured until a real immutable identifier has
-been verified. TrueForge's Daytona provider showing `ready` proves a provider is configured;
-it proves nothing about image pinning, offline execution, snapshot selection, or that the
-BountyDesk target snapshot exists.
+Current status: the Daytona provisioning client, the TrueForge-backed `AnalysisDriver`, the
+approval path and the worker daemon are built. Email and upload routes, the dynamic build
+pipeline, and the production external-oracle topology remain unbuilt. A configured
+`DAYTONA_TARGET_SNAPSHOT_ID` is only meaningful when paired with a real
+`DAYTONA_TARGET_IMAGE_DIGEST` and the target binding scripts have accepted both. TrueForge's
+Daytona provider showing `ready` proves a provider is configured; it proves nothing about
+image pinning, offline execution, snapshot selection, or that the BountyDesk target snapshot
+exists.
 
 Known code gaps that this architecture collides with. `report.target_profile_id` is nullable,
 but `ensureReport()` and GitHub intake currently require a profile, so targetless intake needs
@@ -401,15 +403,16 @@ snapshot's digest-pinned `imageName` checked at provisioning time.
 
 #### Analysis driver gate
 
-Do not add a real `AnalysisDriver` until a provisioning spike passes. The spike must prove that
-BountyDesk can provision the environment; that a `TargetProfile` selects the exact snapshot;
-that the connected commit corresponds to the built artifact; that the amd64 digest verifies;
-that the target starts with no runtime downloads; that build egress is restricted and
-reproduction egress is blocked; that cloud metadata endpoints are unreachable; that resource
-limits hold; that TTL and reconciliation destroy abandoned sandboxes; that the agent can reach
-only the provisioned target; and that the controller can seed and evaluate the oracle without
-exposing that channel to the PoC. A failure at any gate produces `ANALYSIS_ONLY` with an
-infrastructure reason, never `NOT_REPRODUCED`.
+The provisioning spike gate is passed, and the real `AnalysisDriver` now starts a TrueForge
+session instead of handing back a deterministic answer. The remaining gates still matter for
+every claim about reproduction: BountyDesk must provision the environment; a `TargetProfile`
+must select the exact snapshot; the connected commit must correspond to the built artifact;
+the target must start with no runtime downloads; reproduction egress must be blocked; cloud
+metadata endpoints must be unreachable; resource limits must match the snapshot record; TTL
+and reconciliation must clean up abandoned sandboxes; the agent must reach only the
+provisioned target; and any deterministic canary proof must seed and evaluate the oracle
+without exposing that channel to the PoC. A failure at any gate produces `ANALYSIS_ONLY` with
+an infrastructure reason, never `NOT_REPRODUCED`.
 
 #### Spike result, 2026-08-27
 
@@ -464,9 +467,10 @@ fixed now.
 `createSandbox` takes a new required `imageRef`, a `registry/name@sha256:<64 hex>` reference,
 and refuses both a spec whose reference is not digest-pinned and a snapshot whose `imageName`
 does not equal it exactly, before provisioning. A missing `imageName` counts as a mismatch, the
-same way a missing resource limit does. There is still no real digest-pinned image to check
-against: the connected fork has not been built yet, so this closes the gap in the client rather
-than in the deployed target.
+same way a missing resource limit does. PR #55 records the Daytona limitation that snapshots
+currently accept the tag-pinned `ghcr.io/vaibhav91one/juice-shop:v17.3.0-bountydesk-sandbox`
+reference rather than a digest-pinned `image@sha256` reference, so the target binding still
+needs the explicit `DAYTONA_TARGET_IMAGE_DIGEST`, snapshot id and in-sandbox build-marker check.
 
 `configureJuiceShopTarget` refuses to bind a repository to a profile with different pinned
 settings than the one already stored, which is correct as a guard against accidental drift but
@@ -525,7 +529,7 @@ Every older page was rewritten to the decided architecture, then scanned for ret
 **UML — full model.** Added InboundJob, TargetProfile, ScopeRule, DeliveryAttempt, SessionEvent, Artifact, VerdictRevision, ApprovalDecision, ReporterReply (cloned from the existing table component so styling matches). Report gained `tenant_id`, `trust_level`, `target_profile_id`; Verdict gained `state`; Report→Session and Report→DedupeIndex corrected to 1 : 0..n. Added a legend explaining what each new table is for.
 
 **Round 3 — second-audit reconciliation (Codex).** Confirmed the submission is BountyDesk (Sentinel was a throwaway prototype; BountyDesk starts fresh with Qodo PRs from commit one, which resolves the eligibility gate). Applied:
-- **Q18 target FROZEN and live-verified** — Juice Shop v17.3.0 amd64, digest, endpoint, 9-column UNION payload, canary via registration API, oracle, negative control — all validated on hardware 2026-08-25. Runbook's target reference reconciled.
+- **Q18 target FROZEN and live-verified for deterministic SQLi** — Juice Shop v17.3.0 amd64, endpoint, 9-column UNION payload, canary via registration API, oracle, and negative control were validated directly on 2026-08-25 and proven through BountyDesk's deterministic canary path on 2026-08-29. This is not evidence that the post-Q22 agent-authored path has completed a live run.
 - **Canary topology** documented — demo (shared sandbox, honest caveat) vs production (separated PoC/target/oracle).
 - **Prebuilt ≠ offline** corrected on Deployment + Threat Model: a prebuilt image removes the NEED for network; it does not block it. TrueForge enforces no egress (verified) — Daytona egress is demo-validated, not trusted.
 - **Fallback wired into the flow** — Sandbox Runner now shows NOT_AUTOMATABLE / TARGET_UNAVAILABLE → ANALYSIS_ONLY → evidence packet → human. Obsolete "What ships" subtitle deleted from the Analysis Fallback page.
