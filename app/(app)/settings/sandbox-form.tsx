@@ -45,8 +45,9 @@ export function SandboxForm({ sandbox }: { sandbox: SandboxView | null }) {
             // Base UI warns about and which leaves the box showing the pre-save number.
             <label key={`${field.name}-${value}`} className="flex flex-col gap-1.5">
               <span className="text-meta text-muted-foreground">{field.label}</span>
-              {/* required, so a cleared box is refused here rather than reaching the action,
-                  where an empty string would become a zero that disables cleanup. */}
+              {/* Both layers refuse a blank, this one so a cleared box reads as a field
+                  error beside the input rather than a failed save. Zero is a real value
+                  here and disables the interval, so blank must never become one. */}
               <Input name={field.name} type="number" required min={field.min} defaultValue={value} />
             </label>
           );
