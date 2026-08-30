@@ -8,6 +8,9 @@ import {
   useTransform,
 } from "motion/react";
 
+/** useScroll's own offset type, so this stays right if motion changes it. */
+type ScrollOffset = NonNullable<Parameters<typeof useScroll>[0]>["offset"];
+
 /**
  * A backdrop that drifts against the page as it scrolls.
  *
@@ -22,29 +25,33 @@ import {
  * Callers size the child with headroom in the markup, and `from` and `to` stay inside it. Get
  * that wrong and the drift pulls an edge of the image into the frame, which is the one way this
  * looks broken rather than absent.
+ *
+ * `offset` matters more than it looks. Whatever progress the element is at when the page loads
+ * has to be the progress the server rendered, or the picture paints at `from` and then snaps to
+ * its real position the moment this hydrates. The default suits a frame that starts below the
+ * fold, which is at progress 0 on load. A frame already on screen needs one whose progress is 0
+ * where it actually sits.
  */
 export function Parallax({
   from,
   to,
+  offset = ["start end", "end start"],
   className,
   children,
 }: {
-  /** Offset at the moment the frame enters the viewport. */
+  /** Offset at progress 0. */
   from: string;
-  /** Offset as it leaves. */
+  /** Offset at progress 1. */
   to: string;
+  /** Where the drift starts and ends, in useScroll's terms. */
+  offset?: ScrollOffset;
   className?: string;
   children: React.ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const reduced = useReducedMotion();
 
-  // start end to end start: the whole time any part of the frame is on screen, rather than
-  // beginning once it is already halfway up.
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ["start end", "end start"],
-  });
+  const { scrollYProgress } = useScroll({ target: ref, offset });
   const y = useTransform(scrollYProgress, [0, 1], [from, to]);
 
   return (

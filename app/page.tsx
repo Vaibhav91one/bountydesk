@@ -6,6 +6,10 @@ import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import { RollingIcon } from "@/components/rolling-icon";
 import { MASCOT_ON_CARD } from "@/components/queue-board";
 import { Parallax } from "@/components/parallax";
+import { Reveal } from "@/components/reveal";
+import { SmoothScroll } from "@/components/smooth-scroll";
+import { TopBar } from "@/components/top-bar";
+import { TextAnimate } from "@/components/ui/text-animate";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
@@ -47,6 +51,25 @@ const AT = new Date("2026-08-29T14:23:00Z");
  * Narrower than a real desktop, because the frame is taller than it is wide and a 1280px
  * layout scaled to fit that width would leave most of the height empty.
  */
+/**
+ * The order the page introduces itself in, in seconds.
+ *
+ * Kept in one table because the whole point is the sequence, and a set of delays scattered
+ * across five elements is a sequence nobody can read. The heading is first and the furniture
+ * is last: the claim arrives, then the proof, then the navigation.
+ *
+ * Everything but the heading rides CSS, so it animates off the prerendered HTML instead of
+ * waiting for hydration.
+ */
+const ENTRANCE = {
+  headingSecondLine: 0.25,
+  subheading: 0.45,
+  buttons: 0.65,
+  backdrop: 0.85,
+  /** The header's own delay lives in site-header.tsx, since it owns the class. */
+  cardStep: 0.09,
+} as const;
+
 const DESIGN_WIDTH = 700;
 
 /** The height every preview fills, which is the frame's content box at desktop. */
@@ -323,7 +346,11 @@ export default function LandingPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <SiteHeader />
+      <SmoothScroll />
+
+      <TopBar>
+        <SiteHeader sticky={false} entrance />
+      </TopBar>
 
       <main className="flex flex-1 flex-col">
         {/* Hero. Centred rather than split: the reference puts the headline in the middle of
@@ -334,18 +361,48 @@ export default function LandingPage() {
               records why that matters: a 64px headline on a phone is a scroll, not a hero.
               Login hides its headline below lg; a landing page cannot, so this steps up and
               carries the token's weight and tracking at the smaller sizes. */}
+          {/* Two TextAnimate spans rather than one string with a break: it splits the text it
+              is given, and a newline is not a line break to it. Each line keeps its own
+              accessible copy, so the h1 still reads as one sentence. startOnView is off
+              because this is the first beat of the load sequence, not something scrolled to. */}
           <h1 className="text-4xl leading-[1.06] font-normal tracking-[-0.03em] text-balance text-foreground sm:text-5xl lg:text-display xl:text-[4.5rem]">
-            Read every report.
-            <br />
-            Sign every verdict.
+            <TextAnimate
+              as="span"
+              animation="slideLeft"
+              by="character"
+              startOnView={false}
+              once
+              duration={0.6}
+              className="block"
+            >
+              Read every report.
+            </TextAnimate>
+            <TextAnimate
+              as="span"
+              animation="slideLeft"
+              by="character"
+              startOnView={false}
+              once
+              duration={0.6}
+              delay={ENTRANCE.headingSecondLine}
+              className="block"
+            >
+              Sign every verdict.
+            </TextAnimate>
           </h1>
 
-          <p className="max-w-[760px] text-lead text-muted-foreground">
+          <p
+            className="animate-step-in max-w-[760px] text-lead text-muted-foreground motion-reduce:animate-none"
+            style={{ animationDelay: `${ENTRANCE.subheading}s` }}
+          >
             Every report authenticated and scope-checked. No verdict ships until
             you sign it.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-3">
+          <div
+            className="animate-step-in flex flex-wrap items-center justify-center gap-3 motion-reduce:animate-none"
+            style={{ animationDelay: `${ENTRANCE.buttons}s` }}
+          >
             <Button
               size="lg"
               nativeButton={false}
@@ -372,7 +429,10 @@ export default function LandingPage() {
 
         {/* The product on a backdrop, the way the reference seats its screenshot. The image is
             decorative, so it carries an empty alt and the panel above it says everything. */}
-        <div className="relative isolate">
+        <div
+          className="animate-step-in relative isolate motion-reduce:animate-none"
+          style={{ animationDelay: `${ENTRANCE.backdrop}s` }}
+        >
           <div
             aria-hidden="true"
             className="absolute inset-x-0 -top-44 bottom-0 overflow-hidden"
@@ -383,6 +443,10 @@ export default function LandingPage() {
             <Parallax
               from="0%"
               to="10%"
+              // This band is on screen the moment the page loads, so its progress at load has
+              // to be 0 or the server renders no transform and the picture snaps into place
+              // the instant motion hydrates. start-start is 0 exactly where it already sits.
+              offset={["start start", "end start"]}
               className="absolute inset-x-0 -top-[12%] h-[112%]"
             >
               <Image
@@ -411,12 +475,16 @@ export default function LandingPage() {
             Reports arrive from where they arrive
           </h2>
           <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {INTEGRATIONS.map((channel) => {
+            {INTEGRATIONS.map((channel, index) => {
               const Icon = CHANNEL_ICONS[channel.icon];
               const reason = `channel-${channel.id}`;
               return (
-                <li
+                // Reveal is the li rather than a wrapper inside it, so the grid still sees
+                // four children and the cards keep their equal heights.
+                <Reveal
                   key={channel.id}
+                  delay={index * ENTRANCE.cardStep}
+                  render="li"
                   className="flex flex-col gap-3 rounded-xl border border-border/50 bg-card p-5"
                 >
                   <span className="flex items-center justify-between gap-3">
@@ -463,14 +531,14 @@ export default function LandingPage() {
                   <span id={reason} className="text-meta text-muted-foreground">
                     {channel.tagline}
                   </span>
-                </li>
+                </Reveal>
               );
             })}
           </ul>
         </section>
 
         {/* How it works */}
-        <div id="how" className="scroll-mt-20" />
+        <div id="how" className="scroll-mt-28" />
 
         {/* Agent Bounty, introduced once. The carousel is the existing marquee, which is pure
             CSS: it duplicates the list and translates the track, so there is no client JS and
@@ -519,9 +587,15 @@ export default function LandingPage() {
               nothing. Spacing the text off the bottom of that box left a gap the eye reads as
               a mistake. */}
           <div className="-mt-28 flex max-w-2xl flex-col items-center gap-4 px-6 text-center">
-            <h2 className="text-4xl font-normal tracking-[-0.02em] text-foreground sm:text-5xl">
+            <TextAnimate
+              as="h2"
+              animation="scaleUp"
+              by="text"
+              once
+              className="text-4xl font-normal tracking-[-0.02em] text-foreground sm:text-5xl"
+            >
               Meet Agent Bounty
-            </h2>
+            </TextAnimate>
             <p className="text-lead text-muted-foreground">
               It reads every report, checks it against the target the server
               pins, and drafts the reply. What it never does is decide: the
@@ -598,7 +672,7 @@ export default function LandingPage() {
         {/* FAQ */}
         <section
           id="faq"
-          className="mx-auto grid w-full max-w-7xl scroll-mt-20 gap-10 px-6 py-24 lg:grid-cols-[320px_1fr]"
+          className="mx-auto grid w-full max-w-7xl scroll-mt-28 gap-10 px-6 py-24 lg:grid-cols-[320px_1fr]"
         >
           <div className="flex flex-col gap-3">
             <h2 className="text-title text-foreground">
