@@ -1,23 +1,30 @@
 # BountyDesk agent guide
 
-Automated bug-bounty triage. A report is authenticated, scope-checked, reproduced against a
-pinned target in an isolated sandbox with a defender-authored canary oracle, and shipped as a
-verdict only after a human approves the exact outbound comment. Built on the TrueForge agent
-harness.
+Automated bug-bounty triage. A report is authenticated, scope-checked, and investigated by a
+TrueForge agent against a pinned target in an isolated sandbox, and shipped as a verdict only
+after a human approves the agent's exact drafted comment. Built on the TrueForge agent harness.
 
 This file is the single source of project instructions. `CLAUDE.md` only does `@AGENTS.md`, so
 keep everything here.
 
 ## Architecture invariants (do not violate)
 
-The verdict comes from the canary, not the model. A fresh, per-run, unpredictable canary is
-seeded through a trusted fixture, and the oracle is evaluated outside the sandbox. Run a
-negative control first. The model never narrates the verdict.
+The verdict is the agent's own conclusion, not a pre-computed answer it relays. The TrueForge
+agent investigates a report against its authorised target using scope-guard, a sandbox, skills
+and subagents, then drafts its own outcome, summary and findings by calling `publish_verdict`.
+Nothing is delivered until a human approves the exact drafted text.
 
-No fixture, no `REPRODUCED`. A target profile without a defender-authored fixture, negative
-control and oracle adapter cannot produce a reproduced verdict, whatever the PoC printed and
-whatever the model read out of HTTP text, logs or status files. That run produces the
-analysis-only packet and a human decides.
+What stays fixed: the capability boundary decides which target and which tool authorisations
+the agent can reach, not what it is permitted to conclude. A claimed `REPRODUCED` or
+`NOT_REPRODUCED` for a report with no bound target, or one whose repository grant has since
+been revoked, is refused server-side before it ever becomes a verdict row, regardless of what
+the agent asserts.
+
+No bound target, no `REPRODUCED`. A report with no authorised target, or one whose repository
+grant has since been revoked, cannot produce a reproduced or not-reproduced verdict, whatever
+the agent's own investigation concluded; that run stays `ANALYSIS_ONLY` and a human decides. The
+defender-authored canary/fixture/negative-control pipeline is retained as a strictly stronger
+evidence source, not the sole gate on `REPRODUCED` (see `docs/decisions.md` Q22).
 
 A sandbox status file reports target readiness only. It is sandbox-controlled evidence and can
 never determine reproduction, severity or outbound content. `READY` means the target started
@@ -81,8 +88,10 @@ with narrow dependency egress and a reproduction sandbox with none, and only the
 crosses between them. The build sandbox is not trusted: it runs the customer's code. The demo
 target is the connected fork `Vaibhav91one/juice-shop` at commit
 `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, the `v17.3.0` tag. It must be built and verified
-ahead of the live run so reproduction can start an immutable snapshot offline. None of the
-sandbox work is built yet; see the implementation gates in `docs/decisions.md`.
+ahead of the live run so reproduction can start an immutable snapshot offline. The pinned
+target's snapshot is built and verified, and the sandbox pipeline has run live end to end
+against it; see `docs/decisions.md`'s implementation gates and `docs/plan.md`'s Phase 4 and
+Phase 5 status notes for what is proven and what is still open.
 
 ## Env
 

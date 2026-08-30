@@ -3,7 +3,7 @@
 ## Ground rules
 1. **PRs only.** Nothing lands on `main` without a pull request. Direct pushes are blocked by branch protection.
 2. **Qodo reviews every PR.** Address what Qodo Merge finds before merge, or reply explaining why a finding does not apply. Re-run `/review` after changes.
-3. **Security changes need tests + a note.** Anything touching scope enforcement, the approval / `publish_verdict` gate, delivery / outbox, or GitHub App connectivity needs tests in the PR and a sentence in the description about the threat model.
+3. **Security changes need tests + a note.** Anything touching scope enforcement, the agent's own sandboxed tool use against scope-guard, the approval / `publish_verdict` gate (including its draft-validation and authorization-recheck path), delivery / outbox, or GitHub App connectivity needs tests in the PR and a sentence in the description about the threat model.
 4. **No secrets.** Keys live in the environment / `.env` (gitignored), never committed. The GitHub App webhook secret is platform-owned.
 5. **Disclose AI assistance** in the PR description when AI tooling wrote substantial code.
 6. **Write like a person.** Comments, commit messages, PR descriptions and docs should read as though a human wrote them: plain verbs, no em dashes, no emoji or bolded mini-headings, headings in sentence case. Comments say why, not what. Agents working in this repo run the `humanizer` skill over prose before committing it. See the writing style section in [AGENTS.md](./AGENTS.md).
