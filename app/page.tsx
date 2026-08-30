@@ -513,7 +513,12 @@ export default function LandingPage() {
             </MarqueeAlongSvgPath>
           </div>
 
-          <div className="flex max-w-2xl flex-col items-center gap-4 px-6 text-center">
+          {/* Pulled up into the marquee's own empty lower half. The path arcs about 150px
+              higher in the middle than at its ends, so the box is tall enough for the mascots
+              that sit low near the edges while the region directly above this heading holds
+              nothing. Spacing the text off the bottom of that box left a gap the eye reads as
+              a mistake. */}
+          <div className="-mt-28 flex max-w-2xl flex-col items-center gap-4 px-6 text-center">
             <h2 className="text-4xl font-normal tracking-[-0.02em] text-foreground sm:text-5xl">
               Meet Agent Bounty
             </h2>
