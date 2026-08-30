@@ -1,12 +1,14 @@
 "use client";
 
-import Image from "next/image";
 import { useState } from "react";
 import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import type { Finding } from "@/lib/mcp/publish-verdict";
 import { cn } from "@/lib/utils";
+
+import { VerdictBody, VerdictDialog } from "./verdict-dialog";
 
 /**
  * How much evidence stands behind a verdict, and what to call it.
@@ -22,43 +24,6 @@ const EVIDENCE: Record<string, { bars: number; tone: string; label: string }> = 
   INCONCLUSIVE: { bars: 1, tone: "bg-phase-approval", label: "Inconclusive" },
   ANALYSIS_ONLY: { bars: 1, tone: "bg-phase-approval", label: "Analysis only, nothing ran" },
 };
-
-/**
- * The comment split into paragraphs, minus the delivery marker.
- *
- * The marker is an HTML comment the delivery worker uses to recognise its own past comment, so
- * GitHub never shows it and neither does this. Everything else is passed through untouched: a
- * markdown feature this does not know about renders as its own source, which is wrong-looking
- * but honest, and better than quietly dropping a line.
- */
-function paragraphs(payload: string): string[] {
-  return payload
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .trim()
-    .split(/\n{2,}/)
-    // The stored payload is hard-wrapped at roughly 95 columns, which is right for a raw
-    // markdown file and wrong for a column of this width: it breaks mid-sentence wherever the
-    // author's editor happened to. Markdown joins those lines anyway, so this does too, and
-    // each block becomes the one paragraph GitHub will render.
-    .map((block) => block.replace(/\s*\n\s*/g, " ").trim())
-    .filter(Boolean);
-}
-
-/** The sign-off the delivery worker appends to every payload. */
-const SIGNATURE = /^Signed via BountyDesk\.?$/;
-
-/** **bold** and nothing else. The payloads this product writes use no other markup. */
-function emphasise(block: string): React.ReactNode[] {
-  return block.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
-    part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
-      <strong key={index} className="font-medium">
-        {part.slice(2, -2)}
-      </strong>
-    ) : (
-      part
-    ),
-  );
-}
 
 function Meter({ bars, tone }: { bars: number; tone: string }) {
   return (
@@ -83,8 +48,11 @@ function Meter({ bars, tone }: { bars: number; tone: string }) {
  */
 export function VerdictCard({
   payload,
+  payloadArtifactId,
   outcome,
   outcomeLabel,
+  summary,
+  findings,
   revision,
   contentHash,
   destination,
@@ -98,9 +66,15 @@ export function VerdictCard({
   disabled,
   decision,
 }: {
+  /** The exact outbound comment body. Kept for the download's Blob fallback, not rendered raw. */
   payload: string;
+  /** The stored verdict-payload artifact, when one exists. */
+  payloadArtifactId: string | null;
   outcome: string;
   outcomeLabel: string;
+  /** The agent's own summary and findings, rendered as text (never as HTML) by VerdictBody. */
+  summary: string;
+  findings: Finding[];
   revision: number;
   contentHash: string;
   destination: string;
@@ -125,9 +99,19 @@ export function VerdictCard({
   return (
     <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <div className="flex flex-col gap-3 p-4">
-        <span className="text-body font-medium text-foreground">
-          {approve ? "Post this comment to the issue?" : "The comment on record"}
-        </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-body font-medium text-foreground">
+            {approve ? "Post this comment to the issue?" : "The comment on record"}
+          </span>
+          <VerdictDialog
+            outcomeLabel={outcomeLabel}
+            revision={revision}
+            summary={summary}
+            findings={findings}
+            payload={payload}
+            payloadArtifactId={payloadArtifactId}
+          />
+        </div>
 
         {/* Attributed, because a reviewer approving a comment should be able to see at a
             glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
@@ -144,23 +128,11 @@ export function VerdictCard({
               <span className="text-meta text-muted-foreground">drafted this reply</span>
             </span>
 
-        {/* Shown the way the issue will show it, because that is what the reporter reads.
-            The bytes underneath are unchanged and the hash in the drawer is what approving
-            binds, so a preview that renders differently cannot change what gets posted. */}
-        <div className="flex flex-col gap-3 text-body text-foreground">
-          {paragraphs(payload).map((block, index) =>
-            SIGNATURE.test(block) ? (
-              // The comment signs itself off, so the mark goes on the signature rather than
-              // beside the name. It is the same line the issue will carry, drawn.
-              <span key={index} className="flex items-center gap-2 text-muted-foreground">
-                <Image src="/logo-small.svg" alt="" width={16} height={16} />
-                {block}
-              </span>
-            ) : (
-              <p key={index}>{emphasise(block)}</p>
-            ),
-          )}
-            </div>
+            {/* Rendered from the structured summary and findings, not by parsing the markdown
+                payload: the bytes the hash in the drawer binds are unchanged, and rendering the
+                agent's fields as text is safe by construction where interpreting its markdown
+                would not be. */}
+            <VerdictBody summary={summary} findings={findings} />
           </div>
         </div>
       </div>

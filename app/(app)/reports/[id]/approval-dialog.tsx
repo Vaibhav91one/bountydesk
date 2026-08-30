@@ -42,6 +42,7 @@ export function ApprovalDialog({
   verdictId,
   contentHash,
   payload,
+  payloadArtifactId,
   outcome,
   outcomeLabel,
   summary,
@@ -58,6 +59,8 @@ export function ApprovalDialog({
   verdictId: string;
   contentHash: string;
   payload: string;
+  /** The stored verdict-payload artifact, when one exists. Threaded to the card's download. */
+  payloadArtifactId: string | null;
   outcome: string;
   outcomeLabel: string;
   summary: string;
@@ -191,8 +194,11 @@ export function ApprovalDialog({
 
               <VerdictCard
                 payload={payload}
+                payloadArtifactId={payloadArtifactId}
                 outcome={outcome}
                 outcomeLabel={outcomeLabel}
+                summary={summary}
+                findings={findings}
                 revision={revision}
                 contentHash={contentHash}
                 destination={destination}

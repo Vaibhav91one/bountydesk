@@ -1,3 +1,4 @@
+import { AutoRefresh } from "@/components/auto-refresh";
 import { requireReviewer } from "@/lib/auth/dal";
 import { listAllReports, phaseOf, INDEX_LIMIT } from "@/lib/reports/queue";
 
@@ -17,6 +18,7 @@ export default async function ReportsPage() {
 
   return (
     <main className="flex flex-1 flex-col">
+      <AutoRefresh />
       <header className="flex flex-wrap items-baseline justify-between gap-4 border-b border-border/50 px-8 py-7">
         <div className="flex flex-col gap-1">
           <h1 className="text-title text-foreground">Reports</h1>
