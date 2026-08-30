@@ -571,63 +571,80 @@ test("getTurnInput normalizes the exact approval input used for reconciliation",
   );
 });
 
-test("listToolCallDetails correlates each call with its tool.response, in call order", async () => {
-  // Oldest first, matching the `order: "asc"` this method sends. A call with a response, a call
-  // still awaiting one, and a response event whose call is on this page: the merge keys on
-  // tool_call_id, not position, and a call with no matching response keeps a null result.
-  const events = [
-    {
-      type: "model.message",
-      id: "evt_1",
-      created_at: "2026-01-01T00:00:00.5Z",
-      thread_id: "main",
-      content: null,
-      tool_calls: [
-        {
-          id: "call_1",
-          type: "function",
-          function: { name: "scope_check", arguments: JSON.stringify({ path: "/rest/products" }) },
-          tool_info: { type: "mcp", name: "scope_check", server_id: "srv_1", server_name: "bountydesk" },
-        },
-      ],
-    },
-    {
-      type: "tool.response",
-      id: "evt_2",
-      created_at: "2026-01-01T00:00:01Z",
-      thread_id: "main",
-      tool_call_id: "call_1",
-      content: "in scope",
-    },
-    {
-      type: "model.message",
-      id: "evt_3",
-      created_at: "2026-01-01T00:00:02Z",
-      thread_id: "main",
-      content: null,
-      tool_calls: [
-        {
-          id: "call_2",
-          type: "function",
-          function: { name: "http_probe", arguments: JSON.stringify({ path: "/rest/products/search" }) },
-          tool_info: { type: "mcp", name: "http_probe", server_id: "srv_1", server_name: "bountydesk" },
-        },
-      ],
-    },
-  ];
+/** A single turn's over-the-wire event list: one call answered by a tool.response, and one call
+ * still awaiting a response. Keyed on tool_call_id, not position, so the merge is order-agnostic
+ * and a call with no matching response keeps a null result. */
+const firstTurnEvents = [
+  {
+    type: "model.message",
+    id: "evt_1",
+    created_at: "2026-01-01T00:00:00.5Z",
+    thread_id: "main",
+    content: null,
+    tool_calls: [
+      {
+        id: "call_1",
+        type: "function",
+        function: { name: "scope_check", arguments: JSON.stringify({ path: "/rest/products" }) },
+        tool_info: { type: "mcp", name: "scope_check", server_id: "srv_1", server_name: "bountydesk" },
+      },
+    ],
+  },
+  {
+    type: "tool.response",
+    id: "evt_2",
+    created_at: "2026-01-01T00:00:01Z",
+    thread_id: "main",
+    tool_call_id: "call_1",
+    content: "in scope",
+  },
+  {
+    type: "model.message",
+    id: "evt_3",
+    created_at: "2026-01-01T00:00:02Z",
+    thread_id: "main",
+    content: null,
+    tool_calls: [
+      {
+        id: "call_2",
+        type: "function",
+        function: { name: "http_probe", arguments: JSON.stringify({ path: "/rest/products/search" }) },
+        tool_info: { type: "mcp", name: "http_probe", server_id: "srv_1", server_name: "bountydesk" },
+      },
+    ],
+  },
+];
 
+const rawTurn = (id: string, createdAt: string) => ({
+  id,
+  session_id: "sess_1",
+  previous_turn_id: null,
+  created_at: createdAt,
+  state: { status: "running" },
+});
+
+const turnEventsUrl = (turnId: string) => `/turns/${turnId}/`;
+
+test("listSessionToolCallDetails correlates each call with its tool.response, in call order", async () => {
   const requestedUrls: string[] = [];
   await withFetch(
     (async (input: RequestInfo | URL) => {
-      requestedUrls.push(String(input));
+      const url = String(input);
+      requestedUrls.push(url);
+      if (url.includes("/events")) {
+        return json({
+          data: firstTurnEvents,
+          pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+        });
+      }
       return json({
-        data: events,
+        data: [rawTurn("turn_1", "2026-01-01T00:00:00Z")],
         pagination: { limit: 100, next_page_token: null, previous_page_token: null },
       });
     }) as typeof fetch,
     async () => {
       const client = createTrueForgeClient();
-      const details = await client.listToolCallDetails?.("sess_1", "turn_1");
+      const details = await client.listSessionToolCallDetails?.("sess_1");
       assert.deepEqual(details, [
         {
           id: "call_1",
@@ -653,7 +670,64 @@ test("listToolCallDetails correlates each call with its tool.response, in call o
 
   assert.ok(
     requestedUrls.some((u) => u.includes("order=asc")),
-    "must read the turn oldest-first so calls render in the order they happened",
+    "must read each turn oldest-first so calls render in the order they happened",
+  );
+});
+
+test("listSessionToolCallDetails merges every turn, oldest first, not just the latest chained turn", async () => {
+  // The bug this guards: a call in an earlier turn (turn_1) must survive a later approval turn
+  // (turn_2) overwriting agent_session.turn_id. The two turns are returned newest-first by the
+  // turns list to prove the method sorts by created_at rather than trusting page order.
+  const secondTurnEvents = [
+    {
+      type: "model.message",
+      id: "evt_10",
+      created_at: "2026-01-01T00:01:00Z",
+      thread_id: "main",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_9",
+          type: "function",
+          function: { name: "publish_verdict", arguments: JSON.stringify({ capability: "cap_abc" }) },
+          tool_info: { type: "mcp", name: "publish_verdict", server_id: "srv_1", server_name: "bountydesk" },
+        },
+      ],
+    },
+  ];
+
+  await withFetch(
+    (async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes(turnEventsUrl("turn_1"))) {
+        return json({
+          data: firstTurnEvents,
+          pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+        });
+      }
+      if (url.includes(turnEventsUrl("turn_2"))) {
+        return json({
+          data: secondTurnEvents,
+          pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+        });
+      }
+      return json({
+        data: [
+          rawTurn("turn_2", "2026-01-01T00:00:30Z"),
+          rawTurn("turn_1", "2026-01-01T00:00:00Z"),
+        ],
+        pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+      });
+    }) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const details = await client.listSessionToolCallDetails?.("sess_1");
+      assert.deepEqual(
+        details?.map((d) => d.id),
+        ["call_1", "call_2", "call_9"],
+        "earlier turn's calls come first and are not dropped by the later turn",
+      );
+    },
   );
 });
 

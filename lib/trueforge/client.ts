@@ -67,17 +67,23 @@ export interface TrueForgeClient {
     opts?: { signal?: AbortSignal },
   ): Promise<string | null>;
   /**
-   * Full detail for every tool call in a turn: name, un-redacted arguments, and the tool's own
-   * response, correlated by id. This is the reviewer-facing read the case file renders live, not
-   * a poller path: unlike `listToolCalls` (whose output is mirrored into the durable, append-only
-   * `session_event` and so carries only an allowlisted argument preview), nothing here is
-   * persisted, which is exactly why the full arguments and result are safe to return. They stay
-   * in TrueForge, which already holds the whole transcript, and reach the reviewer's page and no
-   * further. Optional so a fake client built only for the approval path need not implement it.
+   * Full detail for every tool call across a whole session: name, un-redacted arguments, and the
+   * tool's own response, correlated by id, merged chronologically over every turn and deduped by
+   * tool-call id. It reads the whole session, not one turn, because approval submission and the
+   * driver overwrite `agent_session.turn_id` with each chained turn (see
+   * lib/approval-submission/worker.ts and lib/analysis/trueforge-driver.ts), so a single stored
+   * turn id is only the latest turn and would drop every call the investigation made before an
+   * approval.
+   *
+   * This is the reviewer-facing read the case file renders live, not a poller path: unlike
+   * `listToolCalls` (whose output is mirrored into the durable, append-only `session_event` and so
+   * carries only an allowlisted argument preview), nothing here is persisted, which is exactly why
+   * the full arguments and result are safe to return. They stay in TrueForge, which already holds
+   * the whole transcript, and reach the reviewer's page and no further. Optional so a fake client
+   * built only for the approval path need not implement it.
    */
-  listToolCallDetails?(
+  listSessionToolCallDetails?(
     sessionId: string,
-    turnId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<ToolCallDetail[]>;
 }
@@ -334,17 +340,39 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       return null;
     },
 
-    async listToolCallDetails(sessionId, turnId, requestOpts) {
-      // Oldest first here, unlike the poller's paths: this reads the whole turn once to build a
-      // complete, ordered picture for a reviewer, so there is no `since` cutoff to stop early
-      // for, and chronological order is the order a reviewer reads the investigation in.
-      const page = await client.sessions.listTurnEvents(
-        sessionId,
-        turnId,
-        { order: "asc" },
-        { abortSignal: requestOpts?.signal },
-      );
-      return collectToolCallDetails(page);
+    async listSessionToolCallDetails(sessionId, requestOpts) {
+      // Enumerate the session's turns, then read each one's events. listTurns has no order
+      // parameter and its default is unspecified, so the turns are sorted by creation time here;
+      // that is the order the investigation happened in, and it makes the concatenation below
+      // chronological without depending on the server's page order.
+      const turnsPage = await client.sessions.listTurns(sessionId, undefined, {
+        abortSignal: requestOpts?.signal,
+      });
+      const turns: { id: string; createdAt: string }[] = [];
+      for await (const turn of turnsPage) turns.push({ id: turn.id, createdAt: turn.createdAt });
+      turns.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+
+      // Deduped by tool-call id across turns: a call belongs to exactly one turn, but the id is
+      // the stable key everywhere else in this client, so guarding on it keeps a repeated event
+      // (a retried page, an id that recurs) from showing the same call twice.
+      const seen = new Set<string>();
+      const merged: ToolCallDetail[] = [];
+      for (const turn of turns) {
+        // Oldest first within the turn, unlike the poller's paths: this builds a complete, ordered
+        // picture for a reviewer, so there is no `since` cutoff to stop early for.
+        const page = await client.sessions.listTurnEvents(
+          sessionId,
+          turn.id,
+          { order: "asc" },
+          { abortSignal: requestOpts?.signal },
+        );
+        for (const detail of await collectToolCallDetails(page)) {
+          if (seen.has(detail.id)) continue;
+          seen.add(detail.id);
+          merged.push(detail);
+        }
+      }
+      return merged;
     },
   };
 }

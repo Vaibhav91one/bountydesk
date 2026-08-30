@@ -26,7 +26,6 @@ function pretty(argumentsJson: string): string {
   }
 }
 
-/** The HH:MM:SS of an ISO timestamp, or empty when there is none. */
 function stamp(iso: string | null): string {
   return iso ? iso.slice(11, 19) : "";
 }

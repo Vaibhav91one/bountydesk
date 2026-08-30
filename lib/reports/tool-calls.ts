@@ -29,11 +29,14 @@ export async function readToolCalls(reportId: string): Promise<ToolCallDetail[]>
     .where(eq(agentSession.reportId, reportId))
     .limit(1);
 
+  // turn_id is null only before the first turn starts, so a null here means nothing ran yet and
+  // there is no reason to call TrueForge. Once any turn has run it is non-null (approval chaining
+  // keeps overwriting it), and the read below spans every turn regardless of which one it holds.
   if (!session?.turnId) return [];
 
   try {
     const client = createTrueForgeClient();
-    const calls = await client.listToolCallDetails?.(session.sessionId, session.turnId, {
+    const calls = await client.listSessionToolCallDetails?.(session.sessionId, {
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     return calls ?? [];
