@@ -18,6 +18,7 @@ import {
 } from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
+import { readToolCalls } from "@/lib/reports/tool-calls";
 
 import { ApprovalDialog } from "./approval-dialog";
 import { ArtifactsPanel } from "./artifacts-panel";
@@ -26,6 +27,7 @@ import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import type { StepState } from "./lifecycle-step";
 import { StatusCard } from "./status-card";
+import { ToolCallDetailPanel } from "./tool-call-detail";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -273,6 +275,14 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   const file = isReportId(id) ? await readCase(id) : null;
   if (!file) notFound();
 
+  // Full tool-call detail, read live from TrueForge and never persisted (see
+  // lib/reports/tool-calls.ts). Resilient: returns [] when there is no session or the harness is
+  // unreachable, and the panel below falls back to the mirrored steps in that case.
+  const toolCalls = await readToolCalls(file.id);
+  const toolCallSteps = file.events
+    .filter((event) => event.channel === "agent")
+    .map((event) => ({ type: event.type, at: event.at.toISOString().slice(11, 19) }));
+
   const phase = phaseOf(file.state);
 
   // Events, grouped onto the step they belong to. The fallback step is the one matching the
@@ -450,6 +460,21 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             />
           </Panel>
         </div>
+
+        {toolCalls.length > 0 || toolCallSteps.length > 0 ? (
+          <Panel
+            title="Tool calls"
+            aside={
+              <Badge variant="outline">
+                {toolCalls.length > 0
+                  ? `${toolCalls.length} ${toolCalls.length === 1 ? "call" : "calls"}`
+                  : "Live detail unavailable"}
+              </Badge>
+            }
+          >
+            <ToolCallDetailPanel calls={toolCalls} fallback={toolCallSteps} />
+          </Panel>
+        ) : null}
 
         {file.finalSummary ? (
           <Panel title="Summary and next steps">

@@ -66,6 +66,20 @@ export interface TrueForgeClient {
     turnId: string,
     opts?: { signal?: AbortSignal },
   ): Promise<string | null>;
+  /**
+   * Full detail for every tool call in a turn: name, un-redacted arguments, and the tool's own
+   * response, correlated by id. This is the reviewer-facing read the case file renders live, not
+   * a poller path: unlike `listToolCalls` (whose output is mirrored into the durable, append-only
+   * `session_event` and so carries only an allowlisted argument preview), nothing here is
+   * persisted, which is exactly why the full arguments and result are safe to return. They stay
+   * in TrueForge, which already holds the whole transcript, and reach the reviewer's page and no
+   * further. Optional so a fake client built only for the approval path need not implement it.
+   */
+  listToolCallDetails?(
+    sessionId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ToolCallDetail[]>;
 }
 
 export type ObservedToolCall = {
@@ -74,6 +88,23 @@ export type ObservedToolCall = {
   id: string;
   toolName: string;
   argumentsJson: string;
+};
+
+/**
+ * One tool call and its outcome, as TrueForge recorded them. `result` is the tool's response
+ * text, or null when the turn has no `tool.response` for this call yet (still running, or the
+ * harness never produced one). Timestamps are the raw ISO strings from the events; the caller
+ * formats them.
+ */
+export type ToolCallDetail = {
+  id: string;
+  toolName: string;
+  /** "mcp" for a real MCP-server tool, "truefoundry-system" for a built-in, "unknown" if absent. */
+  toolInfoType: string;
+  argumentsJson: string;
+  result: string | null;
+  calledAt: string | null;
+  respondedAt: string | null;
 };
 
 export type TurnInput =
@@ -302,7 +333,61 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       }
       return null;
     },
+
+    async listToolCallDetails(sessionId, turnId, requestOpts) {
+      // Oldest first here, unlike the poller's paths: this reads the whole turn once to build a
+      // complete, ordered picture for a reviewer, so there is no `since` cutoff to stop early
+      // for, and chronological order is the order a reviewer reads the investigation in.
+      const page = await client.sessions.listTurnEvents(
+        sessionId,
+        turnId,
+        { order: "asc" },
+        { abortSignal: requestOpts?.signal },
+      );
+      return collectToolCallDetails(page);
+    },
   };
+}
+
+/**
+ * Correlate a turn's `model.message` tool calls with their `tool.response` events into full
+ * per-call detail, in chronological order. A response always follows its call, so responses are
+ * stashed by `toolCallId` on the single forward pass and merged onto the calls at the end; a
+ * call with no matching response keeps a null result, which is the honest record of one still
+ * running or one the harness answered without response text.
+ */
+async function collectToolCallDetails(
+  events: AsyncIterable<TrueForgeApi.SessionEvent>,
+): Promise<ToolCallDetail[]> {
+  const details: ToolCallDetail[] = [];
+  const responses = new Map<string, { content: string; createdAt: string }>();
+
+  for await (const event of events) {
+    if (event.type === "model.message") {
+      for (const call of event.toolCalls ?? []) {
+        details.push({
+          id: call.id,
+          toolName: call.function.name,
+          toolInfoType: call.toolInfo?.type ?? "unknown",
+          argumentsJson: call.function.arguments,
+          result: null,
+          calledAt: event.createdAt ?? null,
+          respondedAt: null,
+        });
+      }
+    } else if (event.type === "tool.response") {
+      responses.set(event.toolCallId, { content: event.content, createdAt: event.createdAt });
+    }
+  }
+
+  for (const detail of details) {
+    const response = responses.get(detail.id);
+    if (response) {
+      detail.result = response.content;
+      detail.respondedAt = response.createdAt;
+    }
+  }
+  return details;
 }
 
 /**

@@ -571,6 +571,92 @@ test("getTurnInput normalizes the exact approval input used for reconciliation",
   );
 });
 
+test("listToolCallDetails correlates each call with its tool.response, in call order", async () => {
+  // Oldest first, matching the `order: "asc"` this method sends. A call with a response, a call
+  // still awaiting one, and a response event whose call is on this page: the merge keys on
+  // tool_call_id, not position, and a call with no matching response keeps a null result.
+  const events = [
+    {
+      type: "model.message",
+      id: "evt_1",
+      created_at: "2026-01-01T00:00:00.5Z",
+      thread_id: "main",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: { name: "scope_check", arguments: JSON.stringify({ path: "/rest/products" }) },
+          tool_info: { type: "mcp", name: "scope_check", server_id: "srv_1", server_name: "bountydesk" },
+        },
+      ],
+    },
+    {
+      type: "tool.response",
+      id: "evt_2",
+      created_at: "2026-01-01T00:00:01Z",
+      thread_id: "main",
+      tool_call_id: "call_1",
+      content: "in scope",
+    },
+    {
+      type: "model.message",
+      id: "evt_3",
+      created_at: "2026-01-01T00:00:02Z",
+      thread_id: "main",
+      content: null,
+      tool_calls: [
+        {
+          id: "call_2",
+          type: "function",
+          function: { name: "http_probe", arguments: JSON.stringify({ path: "/rest/products/search" }) },
+          tool_info: { type: "mcp", name: "http_probe", server_id: "srv_1", server_name: "bountydesk" },
+        },
+      ],
+    },
+  ];
+
+  const requestedUrls: string[] = [];
+  await withFetch(
+    (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return json({
+        data: events,
+        pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+      });
+    }) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const details = await client.listToolCallDetails?.("sess_1", "turn_1");
+      assert.deepEqual(details, [
+        {
+          id: "call_1",
+          toolName: "scope_check",
+          toolInfoType: "mcp",
+          argumentsJson: JSON.stringify({ path: "/rest/products" }),
+          result: "in scope",
+          calledAt: "2026-01-01T00:00:00.5Z",
+          respondedAt: "2026-01-01T00:00:01Z",
+        },
+        {
+          id: "call_2",
+          toolName: "http_probe",
+          toolInfoType: "mcp",
+          argumentsJson: JSON.stringify({ path: "/rest/products/search" }),
+          result: null,
+          calledAt: "2026-01-01T00:00:02Z",
+          respondedAt: null,
+        },
+      ]);
+    },
+  );
+
+  assert.ok(
+    requestedUrls.some((u) => u.includes("order=asc")),
+    "must read the turn oldest-first so calls render in the order they happened",
+  );
+});
+
 test("refuses a non-loopback TrueForge URL with no API key, before any network call", () => {
   process.env.TRUEFORGE_URL = "https://truforge.example.com";
   process.env.TRUEFORGE_API_KEY = "";
