@@ -470,6 +470,16 @@ export const agentSession = pgTable(
      * correctness backstop if this cursor ever lags a retry.
      */
     lastMirroredEventId: text("last_mirrored_event_id"),
+    /**
+     * The agent's own closing message for this session's investigation: the reproduction
+     * steps, the finding and the remediation it wrote at the end of its turn. Captured by the
+     * poller from the turn's last substantive model.message (see
+     * lib/agent-sessions/poller.ts), which TrueForge holds but bountydesk otherwise never
+     * persists, since only tool-call events are mirrored into session_event. Null until a turn
+     * produces one, and it stays the agent's own prose: the case file renders it as text, never
+     * as HTML, and it is never the outbound comment (that is verdict.payload).
+     */
+    finalSummary: text("final_summary"),
     pendingThreadId: text("pending_thread_id"),
     pendingToolCallId: text("pending_tool_call_id"),
     pendingVerdictId: uuid("pending_verdict_id").references(() => verdict.id),
@@ -606,5 +616,49 @@ export const scopeGuardGrant = pgTable(
     uniqueIndex("scope_guard_grant_token_consumed_key").on(t.token).where(sql`${t.event} = 'consumed'`),
     index("scope_guard_grant_token_idx").on(t.token),
     check("scope_guard_grant_event_check", sql`${t.event} in ('issued', 'consumed')`),
+  ],
+);
+
+/**
+ * A file a run left behind, addressed by its own hash.
+ *
+ * Two are produced today, both when a verdict is drafted (see lib/artifacts/record.ts): the
+ * investigation transcript, built from this session's mirrored tool-call events, and the
+ * outbound verdict payload. The bytes live in a private Supabase Storage bucket; this row holds
+ * the reference and the content address, never the file itself. `storagePath` is null when
+ * Storage is not configured, which records the artifact as produced-but-not-stored rather than
+ * dropping it, so the case file can say so plainly.
+ *
+ * Append-only, like verdict and session_event (the trigger is in the migration): an artifact is
+ * evidence, and evidence that can be edited after the fact is not evidence. The transcript is
+ * assembled only from the already-sanitised argument previews the poller stored, so it carries
+ * the same allowlisted subset and never a raw secret or capability token. `kind` is text, not an
+ * enum, so the retained canary pipeline can record its own artifact kinds later without a schema
+ * change.
+ */
+export const artifact = pgTable(
+  "artifact",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    verdictId: uuid("verdict_id").references(() => verdict.id, { onDelete: "restrict" }),
+    kind: text("kind").notNull(),
+    /** Path within the private bucket. Null when Storage is not configured, so the row still
+     * records what was produced. */
+    storagePath: text("storage_path"),
+    sha256: text("sha256").notNull(),
+    bytes: integer("bytes").notNull(),
+    contentType: text("content_type").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    // One artifact of a kind per verdict, so a retried verdict draft never doubles the rows.
+    // verdict_id is nullable, but every write path today carries one; a future kind with no
+    // verdict would rely on a different guard.
+    uniqueIndex("artifact_verdict_kind_key").on(t.verdictId, t.kind),
+    index("artifact_report_idx").on(t.reportId),
+    index("artifact_verdict_idx").on(t.verdictId),
   ],
 );

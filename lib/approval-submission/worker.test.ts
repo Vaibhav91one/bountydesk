@@ -423,6 +423,7 @@ test("turn handoff invalidates a poller lease that belongs to the old turn", asy
     pendingApprovedContentHash: leasedSession.pendingApprovedContentHash,
     sandboxId: leasedSession.sandboxId,
     lastMirroredEventId: leasedSession.lastMirroredEventId,
+    finalSummary: leasedSession.finalSummary,
     fence: leasedSession.fence,
     leaseOwner: "stale-poller",
   };

@@ -51,6 +51,21 @@ export interface TrueForgeClient {
     turnId: string,
     opts?: { signal?: AbortSignal; since?: string },
   ): Promise<{ calls: ObservedToolCall[]; cursor: string | null }>;
+  /**
+   * The agent's closing prose for a turn: the text of its newest `model.message` on the root
+   * thread that carries any, or null if none does. This is the reproduction steps, finding and
+   * remediation the agent wrote at the end of its investigation, which the poller persists into
+   * `agent_session.final_summary` (see lib/agent-sessions/poller.ts). Walks the turn's events
+   * newest-first and stops at the first message with text, so it never reads the whole history.
+   * A pure tool-call message (null content) is skipped, so the publish_verdict call itself does
+   * not shadow the summary that precedes it. Optional so a fake client built only for the
+   * approval path need not implement it.
+   */
+  getFinalSummary?(
+    sessionId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<string | null>;
 }
 
 export type ObservedToolCall = {
@@ -272,7 +287,42 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       );
       return collectToolCalls(page, requestOpts?.since);
     },
+
+    async getFinalSummary(sessionId, turnId, requestOpts) {
+      const page = await client.sessions.listTurnEvents(
+        sessionId,
+        turnId,
+        { order: "desc" },
+        { abortSignal: requestOpts?.signal },
+      );
+      for await (const event of page) {
+        if (event.type !== "model.message" || event.threadId !== "main") continue;
+        const text = messageText(event.content);
+        if (text) return text;
+      }
+      return null;
+    },
   };
+}
+
+/**
+ * The plain text of a model.message's content, or null when it has none. Content is either a
+ * string or an array of parts; only the text parts contribute, so a message that is all tool
+ * calls or a refusal returns null and the caller keeps looking.
+ */
+function messageText(content: TrueForgeApi.ModelMessageEventContent | null | undefined): string | null {
+  if (typeof content === "string") {
+    const trimmed = content.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  if (!Array.isArray(content)) return null;
+
+  const text = content
+    .filter((part): part is TrueForgeApi.ChatCompletionContentPartText => part.type === "text")
+    .map((part) => part.text)
+    .join("")
+    .trim();
+  return text.length > 0 ? text : null;
 }
 
 /**

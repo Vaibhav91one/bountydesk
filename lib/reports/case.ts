@@ -2,6 +2,7 @@ import {
   agentSession,
   and,
   approvalDecision,
+  artifact,
   connectedRepository,
   db,
   desc,
@@ -74,13 +75,35 @@ export type CaseFile = {
    * agentSession): RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION |
    * ERROR | CANCELLED. Null when no session exists yet for this report. */
   turnStatus: string | null;
+  /** The agent's own closing message for this investigation (reproduction steps, finding,
+   * remediation), captured by the poller. Null until a turn produces one. Rendered as text, never
+   * HTML, and never the outbound comment. */
+  finalSummary: string | null;
   target: { name: string; imageDigest: string } | null;
+  /** The Daytona sandbox this session's investigation actually ran against, if one was
+   * provisioned. Null when no target was bound or provisioning never happened, which is most
+   * reports today. Read from agent_session, where the driver records it. */
+  sandbox: { id: string; appPort: number | null } | null;
   verdict: CaseVerdict | null;
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
   delivery: { state: string; attempts: number; lastError: string | null; target: string } | null;
   /** The exact verdict a reviewer can answer right now, or null if there is no pending call. */
   awaitingVerdictId: string | null;
   events: CaseEvent[];
+  /** Files this report's run left behind, content-addressed. `stored` is false when the bytes
+   * were never uploaded (Storage unconfigured or the upload failed), so the case file shows the
+   * row as recorded-but-not-downloadable rather than a broken link. Newest first. */
+  artifacts: CaseArtifact[];
+};
+
+export type CaseArtifact = {
+  id: string;
+  kind: string;
+  sha256: string;
+  bytes: number;
+  contentType: string;
+  stored: boolean;
+  createdAt: Date;
 };
 
 /**
@@ -212,6 +235,9 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           pendingVerdictId: agentSession.pendingVerdictId,
           pendingThreadId: agentSession.pendingThreadId,
           turnStatus: agentSession.turnStatus,
+          finalSummary: agentSession.finalSummary,
+          sandboxId: agentSession.sandboxId,
+          appPort: agentSession.appPort,
         })
         .from(agentSession)
         .where(eq(agentSession.reportId, id));
@@ -316,6 +342,20 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .where(eq(sessionEvent.reportId, id))
         .orderBy(sessionEvent.seq);
 
+      const artifacts = await tx
+        .select({
+          id: artifact.id,
+          kind: artifact.kind,
+          sha256: artifact.sha256,
+          bytes: artifact.bytes,
+          contentType: artifact.contentType,
+          storagePath: artifact.storagePath,
+          createdAt: artifact.createdAt,
+        })
+        .from(artifact)
+        .where(eq(artifact.reportId, id))
+        .orderBy(desc(artifact.createdAt));
+
       const issue = issueNumber(row.sourceRef);
       // Only a GitHub report has a GitHub profile behind its handle, and only a handle that
       // could be a login is worth linking: anything else builds a URL to a 404 or, worse, to
@@ -328,6 +368,10 @@ export async function readCase(id: string): Promise<CaseFile | null> {
       return {
         ...row,
         turnStatus: session?.turnStatus ?? null,
+        finalSummary: session?.finalSummary ?? null,
+        sandbox: session?.sandboxId
+          ? { id: session.sandboxId, appPort: session.appPort ?? null }
+          : null,
         sourceLabel: caseSourceLabel(row.sourceRef, row.id),
         issueNumber: issue,
         issueUrl:
@@ -347,6 +391,10 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         delivery: dispatch ?? null,
         awaitingVerdictId,
         events: events.map((e) => ({ ...e, channel: e.type.split(".")[0] })),
+        artifacts: artifacts.map(({ storagePath, ...rest }) => ({
+          ...rest,
+          stored: storagePath !== null,
+        })),
       };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },

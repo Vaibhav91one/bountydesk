@@ -13,6 +13,7 @@ import {
   verdict,
   type Executor,
 } from "@/lib/db";
+import { recordVerdictArtifacts } from "@/lib/artifacts/record";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
@@ -173,6 +174,7 @@ export async function draftVerdictFromPendingCall(
   const draft = parsed.data;
 
   let sandboxToTearDown: string | null = null;
+  let reportForArtifacts: string | null = null;
 
   const result = await db.transaction(async (tx): Promise<DraftVerdictResult> => {
     const [session] = await tx
@@ -191,9 +193,20 @@ export async function draftVerdictFromPendingCall(
     const verdictId = existing?.id ?? randomUUID();
 
     const outcome = await persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
-    if (outcome.ok) sandboxToTearDown = session.sandboxId;
+    if (outcome.ok) {
+      sandboxToTearDown = session.sandboxId;
+      reportForArtifacts = session.reportId;
+    }
     return outcome;
   });
+
+  if (result.ok && reportForArtifacts) {
+    // After the commit, not inside it: producing the transcript re-reads session_event and the
+    // uploads are network calls, neither of which belongs inside the report's row lock. Uploading
+    // the bytes of a payload that has not committed would also be wrong. recordVerdictArtifacts is
+    // best-effort and never throws, so it cannot turn a successful publish into a failure.
+    await recordVerdictArtifacts(reportForArtifacts, result.verdictId);
+  }
 
   if (result.ok && sandboxToTearDown) {
     // cancellationInFlight: true always swallows a delete failure into a log line rather than
