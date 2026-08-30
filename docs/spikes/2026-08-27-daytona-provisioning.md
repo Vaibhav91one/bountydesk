@@ -160,12 +160,16 @@ scenarios against that image before calling it the demo target.
 ## Reproducing this
 
 ```
-npm run spike:daytona -- <snapshot-id-or-name>
+npm run spike:daytona -- <snapshot-id-or-name> <expected-image-ref>
 ```
 
 Creates one reproduction-class sandbox with no network and a ten-minute TTL, asserts each gate,
-and always attempts teardown. Every identifier comes from the argument or from the script;
-nothing is read from a report, and no platform secret enters the sandbox.
+and always attempts teardown. The expected image reference must be the value a `TargetProfile`
+would carry. Passing it explicitly matters: otherwise the spike would only compare the
+snapshot's image name to itself. The current script first mangles that reference and verifies
+the wrong image is refused before it provisions the correct one. Every identifier comes from
+the arguments or from the script; nothing is read from a report, and no platform secret enters
+the sandbox.
 
 `lib/sandbox/daytona.ts` provisions reproduction sandboxes and nothing else. There is no build
 class, because a build sandbox needs a dependency egress allow list and the only trustworthy
