@@ -1164,33 +1164,37 @@
         height: 100%;
         display: flex;
         flex-direction: column;
-        justify-content: flex-start;
-        gap: 42px;
-        padding: 148px 144px 0;
+        align-items: center;
+        justify-content: center;
+        gap: 56px;
+        padding: 0 144px;
         background: #07080d;
         color: #f7f4ec;
+        text-align: center;
       }
 
       .intake-section h2 {
         max-width: none;
         color: #f7f4ec;
-        font-size: 36px;
+        font-size: 66px;
         line-height: 1.12;
       }
 
       .intake-grid {
+        width: min(1720px, 100%);
         display: grid;
         grid-template-columns: repeat(4, 1fr);
-        gap: 18px;
+        gap: 22px;
         list-style: none;
+        text-align: left;
       }
 
       .intake-card {
-        min-height: 316px;
+        min-height: 382px;
         display: flex;
         flex-direction: column;
-        gap: 20px;
-        padding: 28px;
+        gap: 24px;
+        padding: 34px;
         border-radius: 16px;
         border: 1px solid rgba(255, 255, 255, 0.10);
         background: #111111;
@@ -1204,8 +1208,8 @@
       }
 
       .intake-icon {
-        width: 52px;
-        height: 52px;
+        width: 64px;
+        height: 64px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1215,41 +1219,41 @@
       }
 
       .intake-icon-svg {
-        width: 26px;
-        height: 26px;
+        width: 32px;
+        height: 32px;
       }
 
       .intake-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        height: 34px;
-        padding: 0 16px;
+        height: 40px;
+        padding: 0 18px;
         border-radius: 9px;
         background: rgba(52, 211, 153, 0.15);
         color: #7ee0a5;
-        font: 500 15px var(--font-sans);
+        font: 500 18px var(--font-sans);
       }
 
       .intake-name {
         color: #f7f4ec;
-        font-size: 20px;
+        font-size: 26px;
         line-height: 1.25;
       }
 
       .intake-button {
         width: 100%;
-        height: 52px;
+        height: 62px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
+        gap: 10px;
         padding: 0 16px;
         border-radius: 8px;
         border: 1px solid rgba(255, 255, 255, 0.13);
         background: transparent;
         color: #f7f4ec;
-        font: 500 18px var(--font-sans);
+        font: 500 21px var(--font-sans);
       }
 
       .intake-button:disabled {
@@ -1258,14 +1262,90 @@
       }
 
       .intake-button-icon {
-        width: 20px;
-        height: 20px;
+        width: 24px;
+        height: 24px;
       }
 
       .intake-tagline {
         color: #9f9aa8;
-        font-size: 18px;
+        font-size: 21px;
         line-height: 1.45;
+      }
+
+      .agent-bounty-section {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 28px;
+        padding-top: 0;
+        background: #07080d;
+        color: #f7f4ec;
+        overflow: hidden;
+        text-align: center;
+      }
+
+      .agent-mascot-mask {
+        width: 1920px;
+        height: 430px;
+        overflow: hidden;
+        mask-image: linear-gradient(to right, transparent, black 11%, black 89%, transparent);
+      }
+
+      .agent-mascot-track {
+        position: relative;
+        width: 3920px;
+        height: 430px;
+        left: 50%;
+        margin-left: -1960px;
+      }
+
+      .agent-mascot {
+        position: absolute;
+        width: 224px;
+        height: 224px;
+        will-change: transform, opacity;
+      }
+
+      .agent-mascot-0 { left: 120px; top: 186px; opacity: 0.12; }
+      .agent-mascot-1 { left: 390px; top: 156px; opacity: 0.22; }
+      .agent-mascot-2 { left: 660px; top: 118px; opacity: 0.42; }
+      .agent-mascot-3 { left: 930px; top: 80px; opacity: 0.68; }
+      .agent-mascot-4 { left: 1200px; top: 50px; opacity: 0.9; }
+      .agent-mascot-5 { left: 1470px; top: 30px; opacity: 1; }
+      .agent-mascot-6 { left: 1740px; top: 20px; opacity: 1; }
+      .agent-mascot-7 { left: 2010px; top: 20px; opacity: 1; }
+      .agent-mascot-8 { left: 2280px; top: 30px; opacity: 1; }
+      .agent-mascot-9 { left: 2550px; top: 50px; opacity: 0.9; }
+      .agent-mascot-10 { left: 2820px; top: 80px; opacity: 0.68; }
+      .agent-mascot-11 { left: 3090px; top: 118px; opacity: 0.42; }
+      .agent-mascot-12 { left: 3360px; top: 156px; opacity: 0.22; }
+      .agent-mascot-13 { left: 3630px; top: 186px; opacity: 0.12; }
+
+      .agent-copy {
+        max-width: 1280px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 32px;
+        margin-top: -54px;
+      }
+
+      .agent-copy h2 {
+        max-width: none;
+        color: #f7f4ec;
+        font-size: 118px;
+        line-height: 1.06;
+      }
+
+      .agent-copy p {
+        max-width: 1180px;
+        margin: 0;
+        color: #9f9aa8;
+        font-size: 38px;
+        line-height: 1.48;
       }
 
       .stack-panel,
@@ -1743,23 +1823,25 @@
     </style>
   </head>
   <body>
-    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="26" data-width="1920" data-height="1080" data-fps="60">
-      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="26" data-track-index="4"></section>
+    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="34" data-width="1920" data-height="1080" data-fps="60">
+      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="34" data-track-index="4"></section>
 
       <div data-hf-id="hf-bd-card" id="tour-card" class="tour-card">
         <div data-hf-id="hf-bd-s01" id="shot01" class="bd-shot" data-bd-shot="home"></div>
         <div data-hf-id="hf-bd-s02" id="shot02" class="bd-shot" data-bd-shot="intake"></div>
         <div data-hf-id="hf-bd-s03" id="shot03" class="bd-shot" data-bd-shot="landing"></div>
         <div data-hf-id="hf-bd-s04" id="shot04" class="bd-shot" data-bd-shot="channels"></div>
+        <div data-hf-id="hf-bd-s05" id="shot05" class="bd-shot" data-bd-shot="agent"></div>
       </div>
 
-      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="26" data-track-index="10" data-volume="1"></audio>
+      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="34" data-track-index="10" data-volume="1"></audio>
       <audio data-hf-id="hf-4bv1" id="whoosh01" src="assets/audio/whoosh.wav" data-start="4.0" data-duration="0.7" data-track-index="11" data-volume="0.45"></audio>
       <audio data-hf-id="hf-onif" id="whoosh02" src="assets/audio/whoosh.wav" data-start="8.0" data-duration="0.7" data-track-index="12" data-volume="0.45"></audio>
       <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="15.2" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
       <audio data-hf-id="hf-exit1" id="whoosh03" src="assets/audio/whoosh.wav" data-start="17.1" data-duration="0.7" data-track-index="13" data-volume="0.38"></audio>
+      <audio data-hf-id="hf-exit2" id="whoosh04" src="assets/audio/whoosh.wav" data-start="25.35" data-duration="0.7" data-track-index="14" data-volume="0.35"></audio>
 
-      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="26" data-track-index="6"></div>
+      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="34" data-track-index="6"></div>
     </div>
 
     <script>
@@ -1767,9 +1849,9 @@
       var G = "power3.out";
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
-      var totalDuration = 26;
-      var starts = [0, 4, 8, 18];
-      var durations = [4, 4, 10, 8];
+      var totalDuration = 34;
+      var starts = [0, 4, 8, 18, 26];
+      var durations = [4, 4, 10, 8, 8];
 
       starts.forEach(function(start, index) {
         var shot = "#shot" + String(index + 1).padStart(2, "0");
@@ -1797,11 +1879,18 @@
       tl.fromTo("#shot04 .intake-section h2", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, ease: G }, 18.35);
       tl.fromTo("#shot04 .intake-card", { y: 44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.09, ease: G }, 18.65);
       tl.fromTo("#shot04 .intake-icon", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.38, stagger: 0.09, ease: G }, 18.78);
+      tl.to("#shot04 .intake-section", { y: -170, opacity: 0, duration: 0.65, ease: "power2.in" }, 25.35);
+
+      tl.fromTo("#shot05 .agent-mascot-track", { x: 160, opacity: 0 }, { x: 0, opacity: 1, duration: 0.8, ease: G }, 26.25);
+      tl.fromTo("#shot05 .agent-mascot", { y: 30, scale: 0.88, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.58, stagger: 0.045, ease: G }, 26.4);
+      tl.fromTo("#shot05 .agent-copy h2", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, ease: G }, 27.0);
+      tl.fromTo("#shot05 .agent-copy p", { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, ease: G }, 27.25);
+      tl.to("#shot05 .agent-mascot-track", { x: -120, duration: 6.3, ease: "none" }, 27.1);
 
       tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: totalDuration, ease: "none" }, 0);
       tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: totalDuration, ease: "none" }, 0);
       tl.set("#bgm", { volume: 0.45 }, 0);
-      tl.to("#bgm", { volume: 0.2, duration: 2.5, ease: "power1.out" }, 23.2);
+      tl.to("#bgm", { volume: 0.2, duration: 2.5, ease: "power1.out" }, 31.2);
 
       window.__timelines["bountydesk-tour"] = tl;
     </script>
