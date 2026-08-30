@@ -44,13 +44,16 @@ function session(userId: number) {
   return { login: "someone", userId, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
 }
 
-async function repo({ active = true } = {}) {
+async function repo({
+  active = true,
+  fullName = "Vaibhav91one/juice-shop",
+}: { active?: boolean; fullName?: string } = {}) {
   ids += 1;
   const repoId = 66_000 + ids;
   await dbm.db.insert(dbm.connectedRepository).values({
     installationId: installationRowId,
     repoId,
-    fullName: `acme/repo-${ids}`,
+    fullName,
     active,
   });
   return repoId;
@@ -101,6 +104,48 @@ test("a reviewer can configure an active repository", async () => {
 
   assert.equal(result.ok, true);
   assert.ok(await boundTarget(repoId), "the repository is bound to a target");
+});
+
+test("configuring a repository for the wrong target profile is refused", async () => {
+  const repoId = await repo({ fullName: "acme/juice-shop-copy" });
+
+  const result = await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+
+  assert.equal(result.ok, false);
+  assert.equal(await boundTarget(repoId), null);
+});
+
+test("a reviewer can configure an explicitly selected registered target profile", async () => {
+  const repoId = await repo();
+
+  const result = await configure.configureRepositoryRequest(
+    session(REVIEWER_ID),
+    repoId,
+    "juice-shop-v17.3.0",
+  );
+
+  assert.equal(result.ok, true);
+  const targetProfileId = await boundTarget(repoId);
+  assert.ok(targetProfileId, "the repository is bound to the selected target");
+  const [row] = await dbm.db
+    .select({ name: dbm.targetProfile.name })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, targetProfileId));
+  assert.equal(row.name, "juice-shop-v17.3.0");
+});
+
+test("an unknown selected target profile is refused before touching the database", async () => {
+  const repoId = await repo();
+
+  const result = await configure.configureRepositoryRequest(
+    session(REVIEWER_ID),
+    repoId,
+    "unknown-target",
+  );
+
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /not registered/);
+  assert.equal(await boundTarget(repoId), null);
 });
 
 test("a repository the installation no longer grants is refused", async () => {
@@ -171,6 +216,27 @@ test("rotation requires a reviewer, same as configuring", async () => {
 
   // Every later test in this file assumes the shared profile is pinned to the default
   // digest set at the top of the file, since rotation is a real mutation of that one row.
+  await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
+});
+
+test("rotation derives the profile from the repository binding", async () => {
+  const repoId = await repo();
+  await configure.configureRepositoryRequest(session(REVIEWER_ID), repoId);
+
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"8".repeat(64)}`;
+  const result = await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
+  process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
+
+  assert.equal(result.ok, true);
+
+  const targetProfileId = await boundTarget(repoId);
+  assert.ok(targetProfileId);
+  const [row] = await dbm.db
+    .select({ imageDigest: dbm.targetProfile.imageDigest })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, targetProfileId));
+  assert.equal(row.imageDigest, `sha256:${"8".repeat(64)}`);
+
   await configure.rotateRepositoryTargetRequest(session(REVIEWER_ID), repoId);
 });
 

@@ -15,6 +15,7 @@ import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
+import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 
 const SESSION_CREATION_POLL_MS = 100;
@@ -312,7 +313,11 @@ export function createTrueforgeAnalysisDriver(
 
         if (existing && !existing.turnId) {
           const appPort = profileAppPort(context.targetConfig);
-          if (appPort !== null) {
+          const provisioning = targetProvisioningFromConfig(
+            targetInfo.name,
+            context.targetConfig,
+          );
+          if (appPort !== null && provisioning) {
             try {
               provisioned = await provision(
                 {
@@ -320,6 +325,7 @@ export function createTrueforgeAnalysisDriver(
                   imageDigest: targetInfo.imageDigest,
                   snapshotId: targetInfo.snapshotId,
                   targetProfileId: context.targetProfileId as string,
+                  ...provisioning,
                 },
                 appPort,
                 { signal },

@@ -45,7 +45,14 @@ export type WellKnownProviderType = (typeof WELL_KNOWN_PROVIDER_TYPES)[number];
  * loads.
  */
 const SKILL_REPO_URL = "https://github.com/Vaibhav91one/bountydesk";
-const SKILL_REPO_REF = "main";
+const DEFAULT_SKILL_REPO_REF = "main";
+
+// Overridable so skills can be registered from a feature branch for a test run; main is the
+// only ref the demo path uses. A newline in the value would corrupt the manifest, so reject it.
+function skillRepoRef(): string {
+  const value = process.env.BOUNTYDESK_SKILL_REPO_REF?.trim();
+  return value && !value.includes("\n") ? value : DEFAULT_SKILL_REPO_REF;
+}
 
 export type DesiredMcpServer = ReturnType<typeof buildMcpServerManifest>;
 
@@ -85,7 +92,7 @@ export function desiredSkills(skillsRoot = path.join(process.cwd(), "skills")): 
         name,
         description,
         url: SKILL_REPO_URL,
-        ref: SKILL_REPO_REF,
+        ref: skillRepoRef(),
         path: `skills/${entry.name}`,
       };
     });

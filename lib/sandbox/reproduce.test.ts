@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import test, { before, mock } from "node:test";
 
 import type { ReproduceFn, ReproductionRecipe } from "@/lib/reproduction/types";
-import { EXPECTED_BUILD_MARKER } from "@/lib/targets/configure";
+import { JUICE_SHOP_EXPECTED_BUILD_MARKER } from "@/lib/targets/registry";
 
 import type { ExecResult, Sandbox, SandboxSpec, SnapshotInfo } from "./daytona";
 
@@ -23,6 +23,10 @@ type TestReproductionAuthorization =
       snapshotId: string | null;
       appPort: number;
       recipe: ReproductionRecipe;
+      readinessPath: string;
+      expectedBuildMarker: string;
+      startCommand?: string;
+      snapshotImageRefOverride?: string;
     }
   | { ok: false; reason: "NO_BOUND_TARGET" | "NO_APPROVED_ORACLE" };
 
@@ -57,6 +61,7 @@ const FAKE_SNAPSHOT: SnapshotInfo = {
 };
 
 let createSandboxCalls: SandboxSpec[] = [];
+let createSandboxImageOverrides: Array<string | undefined> = [];
 let deleteSandboxCalls: string[] = [];
 let executeCalls: string[] = [];
 let authorizeCalls: { targetProfileId: string; recipeId: string }[] = [];
@@ -69,7 +74,7 @@ const BUILD_MARKER_COMMAND_FRAGMENT = "bountydesk-build-marker";
 
 function defaultExecuteResult(command: string): ExecResult {
   if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
-    return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+    return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
   }
   if (command.includes("command -v curl")) {
     return { exitCode: 0, result: "CURL_PRESENT\n" };
@@ -82,8 +87,12 @@ function defaultExecuteResult(command: string): ExecResult {
 
 /** Overridable per test: lets a test make provisioning, readiness or teardown fail without
  * touching the shared default. */
-let createSandboxImpl: (spec: SandboxSpec) => Promise<Sandbox> = async (spec) => {
+let createSandboxImpl: (
+  spec: SandboxSpec,
+  snapshotImageRefOverride?: string,
+) => Promise<Sandbox> = async (spec, snapshotImageRefOverride) => {
   createSandboxCalls.push(spec);
+  createSandboxImageOverrides.push(snapshotImageRefOverride);
   return FAKE_SANDBOX;
 };
 let getSandboxImpl: (id: string) => Promise<Sandbox> = async () => FAKE_SANDBOX;
@@ -101,19 +110,13 @@ let authorizeImpl: (input: {
   recipeId: string;
 }) => Promise<TestReproductionAuthorization> = async (input) => {
   authorizeCalls.push(input);
-  return {
-    ok: true,
-    imageName: "ghcr.io/vaibhav91one/juice-shop",
-    imageDigest: "sha256:" + "a".repeat(64),
-    snapshotId: "snap",
-    appPort: 3000,
-    recipe,
-  };
+  return authorizedTarget();
 };
 
 mock.module("./daytona", {
   namedExports: {
-    createSandbox: (spec: SandboxSpec) => createSandboxImpl(spec),
+    createSandbox: (spec: SandboxSpec, snapshotImageRefOverride?: string) =>
+      createSandboxImpl(spec, snapshotImageRefOverride),
     getSandbox: (id: string) => getSandboxImpl(id),
     execute: (sandbox: Sandbox, command: string) => executeImpl(sandbox, command),
     deleteSandbox: (id: string) => deleteSandboxImpl(id),
@@ -152,11 +155,13 @@ test("positiveIntegerEnv falls back for invalid timing values", () => {
 
 function resetSpies(): void {
   createSandboxCalls = [];
+  createSandboxImageOverrides = [];
   deleteSandboxCalls = [];
   executeCalls = [];
   authorizeCalls = [];
-  createSandboxImpl = async (spec) => {
+  createSandboxImpl = async (spec, snapshotImageRefOverride) => {
     createSandboxCalls.push(spec);
+    createSandboxImageOverrides.push(snapshotImageRefOverride);
     return FAKE_SANDBOX;
   };
   getSandboxImpl = async () => FAKE_SANDBOX;
@@ -169,14 +174,24 @@ function resetSpies(): void {
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe,
-    };
+    return authorizedTarget();
+  };
+}
+
+function authorizedTarget(
+  overrides: Partial<Extract<TestReproductionAuthorization, { ok: true }>> = {},
+): Extract<TestReproductionAuthorization, { ok: true }> {
+  return {
+    ok: true,
+    imageName: "ghcr.io/vaibhav91one/juice-shop",
+    imageDigest: "sha256:" + "a".repeat(64),
+    snapshotId: "snap",
+    appPort: 3000,
+    recipe,
+    readinessPath: "/",
+    expectedBuildMarker: JUICE_SHOP_EXPECTED_BUILD_MARKER,
+    startCommand: "cd /juice-shop && (nohup node build/app >/tmp/bountydesk-app.log 2>&1 &)",
+    ...overrides,
   };
 }
 
@@ -384,14 +399,10 @@ test("caller-supplied image and snapshot values are replaced by the bound target
   resetSpies();
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
+    return authorizedTarget({
       imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
       snapshotId: "authorized-snapshot",
-      appPort: 3000,
-      recipe,
-    };
+    });
   };
   const calls: FetchCall[] = [];
 
@@ -418,14 +429,10 @@ test("the authorized target profile port drives readiness and preview lookup", a
   resetSpies();
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
+    return authorizedTarget({
       imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1]!,
-      snapshotId: "snap",
       appPort: 8080,
-      recipe,
-    };
+    });
   };
   const calls: FetchCall[] = [];
 
@@ -440,6 +447,43 @@ test("the authorized target profile port drives readiness and preview lookup", a
   assert.equal(outcome.outcome, "REPRODUCED");
   assert.ok(executeCalls.some((command) => command.includes("http://localhost:8080/")));
   assert.ok(calls.some((call) => call.url.includes("/ports/8080/preview-url")));
+});
+
+test("the authorized target provisioning drives sandbox startup and build verification", async () => {
+  resetSpies();
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return authorizedTarget({
+      readinessPath: "/healthz",
+      expectedBuildMarker: "custom-target-build",
+      startCommand: "start-custom-target",
+      snapshotImageRefOverride: "ghcr.io/vaibhav91one/custom-target:verified",
+    });
+  };
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: "custom-target-build\n" };
+    }
+    return defaultExecuteResult(command);
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.equal(createSandboxImageOverrides[0], "ghcr.io/vaibhav91one/custom-target:verified");
+  assert.ok(executeCalls.includes("start-custom-target"));
+  assert.ok(
+    executeCalls.some((command) => command.includes("http://localhost:3000/healthz")),
+    "readiness must use the target profile's readiness path",
+  );
 });
 
 test("an already-aborted signal stops before authorization or provisioning", async () => {
@@ -491,14 +535,7 @@ test("recipe headers cannot override the Daytona preview token", async () => {
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: headerRecipe,
-    };
+    return authorizedTarget({ recipe: headerRecipe });
   };
   const calls: FetchCall[] = [];
 
@@ -705,14 +742,7 @@ test("a negative control that never completes stops the run before the exploit e
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: throwingRecipe,
-    };
+    return authorizedTarget({ recipe: throwingRecipe });
   };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -747,14 +777,7 @@ test("an exploit oracleCheck that throws never guesses REPRODUCED, but keeps the
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: throwingRecipe,
-    };
+    return authorizedTarget({ recipe: throwingRecipe });
   };
   const calls: FetchCall[] = [];
   const outcome = await withFetch(
@@ -830,14 +853,7 @@ test("a missing snapshot id short-circuits before touching the sandbox client at
   resetSpies();
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: null,
-      appPort: 3000,
-      recipe,
-    };
+    return authorizedTarget({ snapshotId: null });
   };
   const outcome = await reproduce(reproduceInput());
 
@@ -855,7 +871,7 @@ test("cancellation during readiness tears down the sandbox and rejects the run",
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
-      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+      return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
     }
     if (!command.includes("http://localhost")) return defaultExecuteResult(command);
     probes += 1;
@@ -875,7 +891,7 @@ test("cancellation during build marker check tears down and rejects the run", as
     executeCalls.push(command);
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
       controller.abort(reason);
-      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+      return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
     }
     return defaultExecuteResult(command);
   };
@@ -893,7 +909,7 @@ test("cancellation reason survives a teardown failure", async () => {
     executeCalls.push(command);
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
       controller.abort(reason);
-      return { exitCode: 0, result: `${EXPECTED_BUILD_MARKER}\n` };
+      return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
     }
     return defaultExecuteResult(command);
   };
@@ -970,14 +986,7 @@ test("teardown still runs when an unexpected error happens after provisioning", 
 function withFollowUpAuthorization() {
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: recipeWithFollowUp,
-    };
+    return authorizedTarget({ recipe: recipeWithFollowUp });
   };
 }
 
@@ -1085,14 +1094,7 @@ test("negativeControlAcceptedStatuses: a declared non-2xx status still completes
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: recipeWithAcceptedStatus,
-    };
+    return authorizedTarget({ recipe: recipeWithAcceptedStatus });
   };
   const calls: FetchCall[] = [];
 
@@ -1122,14 +1124,7 @@ test("negativeControlAcceptedStatuses: an undeclared non-2xx status is still an 
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: recipeWithAcceptedStatus,
-    };
+    return authorizedTarget({ recipe: recipeWithAcceptedStatus });
   };
   const calls: FetchCall[] = [];
 
@@ -1162,14 +1157,7 @@ test("negativeControlAcceptedStatuses also widens the exploit's own dispatch whe
   };
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);
-    return {
-      ok: true,
-      imageName: "ghcr.io/vaibhav91one/juice-shop",
-      imageDigest: "sha256:" + "a".repeat(64),
-      snapshotId: "snap",
-      appPort: 3000,
-      recipe: recipeWithAcceptedExploitStatus,
-    };
+    return authorizedTarget({ recipe: recipeWithAcceptedExploitStatus });
   };
   const calls: FetchCall[] = [];
 

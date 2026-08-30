@@ -41,9 +41,17 @@ mock.module("@/lib/sandbox/daytona", {
 
 type DbModule = typeof import("@/lib/db");
 type DriverModule = typeof import("./trueforge-driver");
+type ProvisionAuthorization = import("@/lib/sandbox/provision").ProvisionAuthorization;
 
 let dbm: DbModule;
 let driver: DriverModule;
+
+const TEST_PROVISIONING = {
+  readinessPath: "/",
+  expectedBuildMarker: "driver-test-build-marker",
+  startCommand: "start-driver-test-target",
+  snapshotImageRefOverride: "ghcr.io/vaibhav91one/juice-shop:v17.3.0-bountydesk-sandbox",
+};
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -98,7 +106,7 @@ async function seedTargetProfile(overrides: { name?: string } = {}): Promise<{
       imageName,
       imageDigest,
       snapshotId: "snapshot-1",
-      config: { baseUrl: "http://localhost:3000" },
+      config: { baseUrl: "http://localhost:3000", provisioning: TEST_PROVISIONING },
       scopeRules: [],
     })
     .returning({ id: dbm.targetProfile.id });
@@ -688,8 +696,10 @@ test("run() provisions the target before opening its row-locking transaction, an
       return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
     },
   });
-  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (_authorization, appPort) => {
+  let provisionAuthorization: ProvisionAuthorization | null = null;
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (authorization, appPort) => {
     order.push("provision");
+    provisionAuthorization = authorization;
     return { sandboxId: "sandbox-from-provisioning", appPort };
   };
 
@@ -698,6 +708,13 @@ test("run() provisions the target before opening its row-locking transaction, an
   await d.run(context(reportId));
 
   assert.deepEqual(order, ["provision", "createTurn"], "provisioning must run before the turn-creating transaction");
+  assert.deepEqual(provisionAuthorization, {
+    imageName: target.imageName,
+    imageDigest: target.imageDigest,
+    snapshotId: "snapshot-1",
+    targetProfileId: target.id,
+    ...TEST_PROVISIONING,
+  });
 
   const [session] = await dbm.db
     .select()

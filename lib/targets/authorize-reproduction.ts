@@ -1,14 +1,18 @@
 import type { AnalysisOnlyReason, ReproductionRecipe } from "@/lib/reproduction/types";
+import {
+  targetProvisioningFromConfig,
+  type TargetProvisioningConfig,
+} from "./registry";
 
 export type ReproductionAuthorization =
-  | {
+  | ({
       ok: true;
       imageName: string;
       imageDigest: string;
       snapshotId: string | null;
       appPort: number;
       recipe: ReproductionRecipe;
-    }
+    } & TargetProvisioningConfig)
   | { ok: false; reason: AnalysisOnlyReason };
 
 function defaultPort(protocol: string): number | null {
@@ -57,6 +61,8 @@ export async function authorizeReproductionTarget(input: {
   if (!profile.imageName) return { ok: false, reason: "COULD_NOT_DEPLOY" };
   const appPort = profileAppPort(profile.config);
   if (!appPort) return { ok: false, reason: "NO_APPROVED_ORACLE" };
+  const provisioning = targetProvisioningFromConfig(profile.name, profile.config);
+  if (!provisioning) return { ok: false, reason: "COULD_NOT_DEPLOY" };
 
   const recipe = getRecipesForTarget({ name: profile.name, config: profile.config }).find(
     (candidate) => candidate.id === input.recipeId,
@@ -70,5 +76,6 @@ export async function authorizeReproductionTarget(input: {
     snapshotId: profile.snapshotId,
     appPort,
     recipe,
+    ...provisioning,
   };
 }
