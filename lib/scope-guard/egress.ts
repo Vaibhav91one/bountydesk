@@ -35,24 +35,48 @@ function defaultPort(scheme: "http" | "https"): number {
   return scheme === "https" ? 443 : 80;
 }
 
+export interface AuthorizeOptions {
+  /** True for the write half of a probe (an HTTP POST, bytes written over TCP), false for a
+   * passive read. request_intrusive_approval's own description promises http_probe/tcp_probe
+   * "accept and enforce this token" for exactly this case; requiring it here is what actually
+   * keeps that promise, rather than a grant that only gets checked when a caller bothers to
+   * send one. */
+  requiresGrant?: boolean;
+  /** Overrides grants.verify. Production callers never pass this; tests use it so this file's
+   * suite stays free of a live database, the same way tcpProbeWithConnect takes an injectable
+   * connect function instead of always dialing a real socket. */
+  verifyGrantFn?: typeof grants.verify;
+}
+
 /**
- * Runs a fresh scope check (and, if a grant token is presented, consumes it) and returns the
- * pinned address to connect to. This is the single choke point both http_probe and tcp_probe
- * call immediately before opening a socket - "immediately before" is what keeps the check and
- * the connect from drifting apart in time the way scope_check-then-fetch-later would.
+ * Runs a fresh scope check, then a grant check, and returns the pinned address to connect to.
+ * This is the single choke point both http_probe and tcp_probe call immediately before opening
+ * a socket - "immediately before" is what keeps the check and the connect from drifting apart
+ * in time the way scope_check-then-fetch-later would.
  */
 export async function authorizeConnect(
   scope: Scope,
   target: string,
   grantToken?: string,
+  options: AuthorizeOptions = {},
 ): Promise<Authorization> {
   const verdict = await scope.check(target);
   if (!verdict.allowed || !verdict.connectAddress) {
     return { ok: false, reason: `scope denial: ${verdict.reason}`, host: "", port: 0, connectAddress: "" };
   }
+  if (options.requiresGrant && !grantToken) {
+    return {
+      ok: false,
+      reason: "grant denial: this is a write action and needs a grant from request_intrusive_approval first",
+      host: "",
+      port: 0,
+      connectAddress: "",
+    };
+  }
   if (grantToken) {
     const canonical = normalizeTargetValue(target) ?? target;
-    const g = await grants.verify(grantToken, canonical);
+    const verify = options.verifyGrantFn ?? grants.verify;
+    const g = await verify(grantToken, canonical);
     if (!g.valid) {
       return { ok: false, reason: `grant denial: ${g.reason}`, host: "", port: 0, connectAddress: "" };
     }
@@ -110,12 +134,15 @@ export async function httpProbe(scope: Scope, input: HttpProbeInput): Promise<Ht
     return { probed: false, error: "only http/https schemes allowed" };
   }
 
-  const auth = await authorizeConnect(scope, input.url, input.grantToken);
+  const method = (input.method ?? "GET").toUpperCase();
+  // GET/HEAD/OPTIONS stay passive-probe territory and need no grant; POST is the one write
+  // action this tool can perform, so it's the one that must have gone through
+  // request_intrusive_approval first.
+  const auth = await authorizeConnect(scope, input.url, input.grantToken, { requiresGrant: method === "POST" });
   if (!auth.ok) return { probed: false, error: auth.reason };
 
   const scheme = parsed.protocol === "https:" ? "https" : "http";
   const port = parsed.port ? Number(parsed.port) : defaultPort(scheme);
-  const method = (input.method ?? "GET").toUpperCase();
   const started = Date.now();
 
   // The outbound request's authority must come from the URL the scope check just validated,
@@ -226,7 +253,10 @@ export async function tcpProbeWithConnect(
   // string as a URL, and an unbracketed IPv6-with-port URL authority doesn't parse at all.
   const isBareIPv6 = input.host.includes(":") && !input.host.startsWith("[");
   const target = `${isBareIPv6 ? `[${input.host}]` : input.host}:${input.port}`;
-  const auth = await authorizeConnect(scope, target, input.grantToken);
+  // Connecting and reading is passive; writing bytes onto the wire is this tool's one active
+  // action, so that's the branch that needs a grant from request_intrusive_approval first.
+  const writesData = Boolean(input.dataBase64 && input.dataBase64.length > 0);
+  const auth = await authorizeConnect(scope, target, input.grantToken, { requiresGrant: writesData });
   if (!auth.ok) return { probed: false, error: auth.reason };
 
   const timeoutMs = (input.timeoutSeconds ?? 8) * 1000;

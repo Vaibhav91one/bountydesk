@@ -4,7 +4,7 @@ import { createServer as createHttpServer, type Server as HttpServer } from "nod
 import { createServer as createTcpServer, type Server as TcpServer, type Socket } from "node:net";
 import test from "node:test";
 
-import { httpProbe, tcpProbe, tcpProbeWithConnect } from "./egress";
+import { authorizeConnect, httpProbe, tcpProbe, tcpProbeWithConnect } from "./egress";
 import { defaultScopeState, Scope } from "./scope";
 
 /**
@@ -122,6 +122,93 @@ test("tcpProbe reports a pre-connect timeout as a failed probe, not a successful
   });
   assert.equal(result.probed, false);
   assert.match(result.error ?? "", /handshake/);
+});
+
+test("authorizeConnect requires and verifies a grant for a write action, but never bothers checking one for a passive one", async () => {
+  const scope = makeScope();
+  let verifyCalls = 0;
+  const fakeVerify = async (token: string) => {
+    verifyCalls++;
+    return token === "good-token"
+      ? { valid: true, reason: "ok" }
+      : { valid: false, reason: "bad token" };
+  };
+
+  const noToken = await authorizeConnect(scope, "127.0.0.1:1", undefined, {
+    requiresGrant: true,
+    verifyGrantFn: fakeVerify,
+  });
+  assert.equal(noToken.ok, false);
+  assert.match(noToken.reason, /grant denial/);
+  assert.equal(verifyCalls, 0, "a missing token is refused outright, never handed to verify");
+
+  const badToken = await authorizeConnect(scope, "127.0.0.1:1", "wrong-token", {
+    requiresGrant: true,
+    verifyGrantFn: fakeVerify,
+  });
+  assert.equal(badToken.ok, false);
+  assert.match(badToken.reason, /bad token/);
+
+  const goodToken = await authorizeConnect(scope, "127.0.0.1:1", "good-token", {
+    requiresGrant: true,
+    verifyGrantFn: fakeVerify,
+  });
+  assert.equal(goodToken.ok, true);
+
+  // A passive call (requiresGrant left false) never needs a token at all.
+  const passive = await authorizeConnect(scope, "127.0.0.1:1");
+  assert.equal(passive.ok, true);
+});
+
+test("httpProbe refuses a POST with no grant token before attempting any connection", async () => {
+  const scope = makeScope();
+  // Port 1 is never listened on in this test, so a "probed: false" result here can only come
+  // from the authorization check refusing to dial at all - not from a real connection failure.
+  const result = await httpProbe(scope, { url: "http://127.0.0.1:1/", method: "POST", body: "x" });
+  assert.equal(result.probed, false);
+  assert.match(result.error ?? "", /grant denial/);
+});
+
+test("httpProbe still allows a GET with no grant token, since GET is passive", async () => {
+  const scope = makeScope();
+  const server: HttpServer = createHttpServer((_req, res) => res.writeHead(200).end("ok"));
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+
+  try {
+    const result = await httpProbe(scope, { url: `http://127.0.0.1:${port}/` });
+    assert.equal(result.probed, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("tcpProbe refuses to write bytes with no grant token before attempting any connection", async () => {
+  const scope = makeScope();
+  const result = await tcpProbe(scope, {
+    host: "127.0.0.1",
+    port: 1,
+    dataBase64: Buffer.from("x").toString("base64"),
+  });
+  assert.equal(result.probed, false);
+  assert.match(result.error ?? "", /grant denial/);
+});
+
+test("tcpProbe still allows a connect-and-read with no grant token, since it writes nothing", async () => {
+  const server: TcpServer = createTcpServer((socket) => socket.end("hi"));
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = (server.address() as { port: number }).port;
+  const scope = makeScope();
+
+  try {
+    const result = await tcpProbe(scope, { host: "127.0.0.1", port });
+    assert.equal(result.probed, true);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("tcpProbe still reports a post-connect idle timeout as successful, with a note", async () => {
