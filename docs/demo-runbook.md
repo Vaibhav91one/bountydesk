@@ -70,14 +70,28 @@ Run these in order on the demo machine. Keep each long-running process in its ow
    The repo expects `TRUEFORGE_URL=http://localhost:8790`. Local TrueForge mode has no login by
    default, so do not put it on a public tunnel.
 
-5. Register the BountyDesk skills, MCP connectors and saved agent with that TrueForge instance.
+5. Give that TrueForge instance a model provider and a sandbox provider, at
+   `${APP_BASE_URL}/settings`.
+
+   A fresh harness has neither, and the saved agent needs both: its manifest pins
+   `openai/gpt-5-mini` and sets `config.sandbox.enabled`, so step 6 fails with a 422 saying
+   `Unknown model "openai/gpt-5-mini"` until they exist. On the Models tab, add the `openai`
+   provider (the catalog prefills its model list, and `gpt-5-mini` is added by id) with your
+   `OPENAI_API_KEY`. On the Sandbox tab, paste the Daytona key for TrueForge's own sandbox
+   account. That is a separate key from the `DAYTONA_API_KEY` BountyDesk uses to provision
+   reproduction sandboxes, and the sandbox tab's `status` is what tells you it was accepted.
+
+6. Register the BountyDesk skills, MCP connectors and saved agent with that TrueForge instance.
 
    ```bash
    npm run skills:apply
    npm run agent:apply
    ```
 
-6. Bind the connected demo repository to the pinned target. The repository id for
+   The Connectors, Skills and Agent tabs on the same screen do the same thing, on the same
+   code path, and list what is already registered.
+
+7. Bind the connected demo repository to the pinned target. The repository id for
    `Vaibhav91one/juice-shop` is `1347703889`.
 
    ```bash
@@ -90,13 +104,13 @@ Run these in order on the demo machine. Keep each long-running process in its ow
    npm run rotate:target -- 1347703889
    ```
 
-7. Start the durable worker loops.
+8. Start the durable worker loops.
 
    ```bash
    npm run worker:daemon
    ```
 
-8. Create the report issue.
+9. Create the report issue.
 
    ```bash
    cat >/tmp/bountydesk-sqli-issue.md <<'EOF'
@@ -116,14 +130,14 @@ Run these in order on the demo machine. Keep each long-running process in its ow
      --body-file /tmp/bountydesk-sqli-issue.md
    ```
 
-9. Approve only from the app. Open the board, sign in with an allowlisted GitHub account,
+10. Approve only from the app. Open the board, sign in with an allowlisted GitHub account,
    open the new case file, read the agent draft, then click Allow.
 
    ```bash
    open http://localhost:3000/board
    ```
 
-10. Check delivery and replay idempotency. First capture the issue number and delivery id.
+11. Check delivery and replay idempotency. First capture the issue number and delivery id.
     The delivery id is visible in the GitHub App delivery log for the issue webhook.
 
    ```bash

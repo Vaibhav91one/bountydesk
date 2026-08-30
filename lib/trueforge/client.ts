@@ -242,7 +242,15 @@ function sameTurnInput(left: TurnInput[], right: TurnInput[]): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): TrueForgeClient {
+/**
+ * The raw SDK client, pointed at the configured harness and carrying the loopback guard.
+ *
+ * Everything that talks to TrueForge builds it here rather than calling `new TrueForge`
+ * itself, so the guard cannot be skipped by a caller that only needed the settings surface.
+ * Local mode has no auth of its own, so `auth: false` is the deliberate choice for loopback
+ * and a bearer token is what a non-loopback endpoint must have instead.
+ */
+export function createSdkClient(opts: { fetchImpl?: typeof fetch } = {}): TrueForge {
   const baseUrl = trueforgeUrl();
   const apiKey = trueforgeApiKey();
 
@@ -252,11 +260,15 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
     throw new Error(`refusing to connect to non-loopback TrueForge at ${baseUrl} with no API key`);
   }
 
-  const client = new TrueForge({
+  return new TrueForge({
     baseUrl,
     ...(apiKey ? { token: apiKey } : { auth: false as const }),
     ...(opts.fetchImpl ? { fetch: opts.fetchImpl } : {}),
   });
+}
+
+export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): TrueForgeClient {
+  const client = createSdkClient(opts);
 
   return {
     async createSession(requestOpts) {

@@ -1,44 +1,36 @@
 import { requireReviewer } from "@/lib/auth/dal";
-import { readSettings } from "@/lib/settings/read";
+import { readHarness } from "@/lib/trueforge/harness";
 
-import { SettingsTabs } from "./settings-tabs";
+import { HarnessTabs } from "./harness-tabs";
 
 export const metadata = { title: "Settings · BountyDesk" };
 
 /**
- * One settings screen, three tabs.
+ * Settings is the TrueForge harness: the five things it holds, on one screen.
  *
- * Scope and Audit had a sidebar entry each and no route behind either, which is three ways to
- * find out that nothing is there. They are one page now, and each tab reads the tables that
- * actually exist rather than showing a placeholder.
+ * A fresh harness needs a model provider and a sandbox provider before `npm run agent:apply`
+ * will take the saved manifest, which pins `openai/gpt-5-mini` and enables the sandbox. Both
+ * are set here, so the harness can be brought up without leaving this app.
  *
- * Integrations and Connections are deliberately not here. They are what a person sets up on
- * their first day, not something they go looking for under settings.
+ * `readHarness` never throws: each section carries its own error, so a harness that is down
+ * shows five explanations instead of a blank page.
  */
 export default async function SettingsPage() {
-  const session = await requireReviewer();
-  const { profiles, decisions, attempts } = await readSettings();
+  await requireReviewer();
+  const snapshot = await readHarness();
 
   return (
     <main className="flex flex-1 flex-col">
       <header className="flex flex-col gap-1 border-b border-border/50 px-8 py-7">
         <h1 className="text-title text-foreground">Settings</h1>
         <p className="text-meta text-muted-foreground">
-          What the guard enforces, what has been signed, and who you are signed in as.
+          What the TrueForge instance behind this console is configured with, and what
+          BountyDesk registers on it.
         </p>
       </header>
 
       <div className="p-8">
-        <SettingsTabs
-          profiles={profiles}
-          decisions={decisions.map((row) => ({ ...row, decidedAt: row.decidedAt.toISOString() }))}
-          attempts={attempts.map((row) => ({
-            ...row,
-            finishedAt: row.finishedAt.toISOString(),
-          }))}
-          login={session.login}
-          userId={session.userId}
-        />
+        <HarnessTabs snapshot={snapshot} />
       </div>
     </main>
   );
