@@ -27,7 +27,7 @@ import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import type { StepState } from "./lifecycle-step";
 import { StatusCard } from "./status-card";
-import { ToolCallDetailPanel } from "./tool-call-detail";
+import type { ToolCallView } from "./tool-call-detail";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -277,11 +277,22 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
   // Full tool-call detail, read live from TrueForge and never persisted (see
   // lib/reports/tool-calls.ts). Resilient: returns [] when there is no session or the harness is
-  // unreachable, and the panel below falls back to the mirrored steps in that case.
+  // unreachable, and a step with no matching detail simply renders without a hover.
   const toolCalls = await readToolCalls(file.id);
-  const toolCallSteps = file.events
-    .filter((event) => event.channel === "agent")
-    .map((event) => ({ type: event.type, at: event.at.toISOString().slice(11, 19) }));
+  const detailById = new Map(toolCalls.map((call) => [call.id, call] as const));
+
+  // A mirrored tool-call event carries its TrueForge tool-call id on its idempotency key as
+  // "agent.tool_call:<id>" (lib/agent-sessions/poller.ts); ToolCallDetail.id is that same id, so
+  // this matches a lifecycle step to the un-redacted arguments and result behind it. Anything
+  // without a live match is undefined, and the row shows no hover.
+  const detailFor = (eventKey: string | null): ToolCallView | undefined => {
+    const prefix = "agent.tool_call:";
+    if (!eventKey?.startsWith(prefix)) return undefined;
+    const detail = detailById.get(eventKey.slice(prefix.length));
+    return detail
+      ? { toolName: detail.toolName, argumentsJson: detail.argumentsJson, result: detail.result }
+      : undefined;
+  };
 
   const phase = phaseOf(file.state);
 
@@ -300,7 +311,12 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   for (const event of file.events) {
     const key = EVENT_PHASE[event.channel] ?? fallback;
     const bucket = eventsByStep.get(key) ?? [];
-    bucket.push({ seq: event.seq, type: event.type, at: event.at.toISOString().slice(11, 19) });
+    bucket.push({
+      seq: event.seq,
+      type: event.type,
+      at: event.at.toISOString().slice(11, 19),
+      detail: detailFor(event.eventKey),
+    });
     eventsByStep.set(key, bucket);
   }
 
@@ -317,6 +333,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   });
 
   const findings = verdictFindings(file.verdict?.evidence);
+
+  // The stored exact-comment artifact, when the post-commit recorder managed to write it. The
+  // download prefers its signed URL and falls back to the payload text when it is absent.
+  const payloadArtifactId =
+    file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null;
 
   // Same id-prefix trap as the lifecycle rows: several mascots share one page.
   const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
@@ -408,6 +429,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               verdictId={file.awaitingVerdictId}
               contentHash={file.verdict.contentHash}
               payload={file.verdict.payload}
+              payloadArtifactId={payloadArtifactId}
               outcome={file.verdict.outcome}
               outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
               summary={file.verdict.summary}
@@ -422,6 +444,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                 seq: event.seq,
                 type: event.type,
                 at: event.at.toISOString().slice(11, 19),
+                detail: detailFor(event.eventKey),
               }))}
             />
           ) : null}
@@ -461,21 +484,6 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           </Panel>
         </div>
 
-        {toolCalls.length > 0 || toolCallSteps.length > 0 ? (
-          <Panel
-            title="Tool calls"
-            aside={
-              <Badge variant="outline">
-                {toolCalls.length > 0
-                  ? `${toolCalls.length} ${toolCalls.length === 1 ? "call" : "calls"}`
-                  : "Live detail unavailable"}
-              </Badge>
-            }
-          >
-            <ToolCallDetailPanel calls={toolCalls} fallback={toolCallSteps} />
-          </Panel>
-        ) : null}
-
         {file.finalSummary ? (
           <Panel title="Summary and next steps">
             {/* The agent's own closing message, captured from its turn. Rendered as text, never
@@ -496,8 +504,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         {file.verdict && !file.awaitingVerdictId ? (
           <VerdictCard
             payload={file.verdict.payload}
+            payloadArtifactId={payloadArtifactId}
             outcome={file.verdict.outcome}
             outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
+            summary={file.verdict.summary}
+            findings={findings}
             revision={file.verdict.revision}
             contentHash={file.verdict.contentHash}
             destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}

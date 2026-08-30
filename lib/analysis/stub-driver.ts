@@ -9,7 +9,7 @@ import {
 } from "@/lib/reports/lifecycle";
 import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 
-const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces. A person still needs to review this before any next step.`;
+const ANALYSIS_MESSAGE = `Automated reproduction was not run for this report. What follows is an analysis-only read of the report as submitted, not a check of whether the issue actually reproduces.`;
 
 function buildPayload(verdictId: string): string {
   return `${ANALYSIS_MESSAGE}\n\n<!-- bountydesk-delivery:${verdictId} -->`;

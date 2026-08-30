@@ -508,7 +508,7 @@ test("draftVerdictFromPendingCall accepts ANALYSIS_ONLY with no bound target and
       },
     ],
   });
-  assert.ok(row.payload.startsWith("Outcome: ANALYSIS_ONLY"));
+  assert.ok(row.payload.startsWith("## Outcome: ANALYSIS_ONLY"));
   assert.ok(row.payload.includes("Nothing conclusive found from a read of the report alone."));
   assert.ok(row.payload.includes("Reflected parameter in search"));
   assert.ok(row.payload.includes("MEDIUM"));
@@ -603,5 +603,5 @@ test("buildAgentDraftedPayload states the outcome on its own line, independent o
     findings: [],
   });
 
-  assert.ok(payload.startsWith("Outcome: REPRODUCED"));
+  assert.ok(payload.startsWith("## Outcome: REPRODUCED"));
 });

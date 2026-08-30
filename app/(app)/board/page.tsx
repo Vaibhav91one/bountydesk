@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { requireReviewer } from "@/lib/auth/dal";
 import { Column, MASCOT_ON_CARD } from "@/components/queue-board";
 import { listQueue } from "@/lib/reports/queue";
@@ -31,6 +32,7 @@ export default async function BoardPage() {
 
   return (
     <main className="flex flex-1 flex-col">
+      <AutoRefresh />
       <header className="flex flex-wrap items-center gap-3 border-b border-border/50 px-8 py-7">
         <h1 className="text-title text-foreground">Review queue</h1>
         <Badge variant="outline">{total}</Badge>
