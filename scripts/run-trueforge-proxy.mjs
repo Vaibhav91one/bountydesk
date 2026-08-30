@@ -5,6 +5,10 @@ import https from "node:https";
 const upstream = new URL(process.env.TRUEFORGE_UPSTREAM_URL ?? "http://127.0.0.1:8790");
 const secret = process.env.TRUEFORGE_API_KEY?.trim();
 const port = Number(process.env.TRUEFORGE_PROXY_PORT ?? 8791);
+const hosts = (process.env.TRUEFORGE_PROXY_HOSTS ?? process.env.TRUEFORGE_PROXY_HOST ?? "127.0.0.1")
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
 
 if (!secret) {
   console.error("TRUEFORGE_API_KEY must be set for the TrueForge proxy");
@@ -13,6 +17,16 @@ if (!secret) {
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   console.error("TRUEFORGE_PROXY_PORT must be an integer between 1 and 65535");
+  process.exit(1);
+}
+
+if (hosts.length === 0) {
+  console.error("TRUEFORGE_PROXY_HOSTS must include at least one bind host");
+  process.exit(1);
+}
+
+if (hosts.some((host) => host === "0.0.0.0" || host === "::")) {
+  console.error("TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces");
   process.exit(1);
 }
 
@@ -120,16 +134,21 @@ async function proxyRequest(req, res) {
   });
 }
 
-const server = createServer((req, res) => {
-  proxyRequest(req, res).catch((error) => {
-    console.error(error instanceof Error ? error.stack ?? error.message : error);
-    if (!res.headersSent) {
-      res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-    }
-    res.end("bad gateway");
+function createProxyServer() {
+  return createServer((req, res) => {
+    proxyRequest(req, res).catch((error) => {
+      console.error(error instanceof Error ? error.stack ?? error.message : error);
+      if (!res.headersSent) {
+        res.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+      }
+      res.end("bad gateway");
+    });
   });
-});
+}
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`TrueForge proxy listening on ${port}`);
-});
+for (const host of hosts) {
+  const server = createProxyServer();
+  server.listen(port, host, () => {
+    console.log(`TrueForge proxy listening on ${host}:${port}`);
+  });
+}

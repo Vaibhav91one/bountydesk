@@ -174,6 +174,10 @@ The `zerops.yml` file sets `TRUEFORGE_URL=http://trueforge:8791` for the worker.
 `trueforge` service subdomain. The only caller should be `bdworker` over the Zerops private network,
 using `TRUEFORGE_API_KEY` as a bearer token.
 
+The TrueForge proxy refuses wildcard bind hosts. In Zerops the proxy binds to `127.0.0.1` for
+readiness and bootstrap, plus the service container's concrete interface address so `bdworker` can
+use the private `trueforge` hostname without opening the proxy on every interface.
+
 With the current `zcli`, service secrets are easiest to set at project creation time with
 `envSecrets` in a private import stream, or later through the Zerops dashboard bulk editor. Do not
 commit a secret-bearing import file.

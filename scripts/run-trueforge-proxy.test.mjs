@@ -83,6 +83,27 @@ async function stopChild(child) {
   await Promise.race([once(child, "exit"), delay(3000).then(() => child.kill("SIGKILL"))]);
 }
 
+test("TrueForge proxy refuses wildcard bind hosts", async () => {
+  const child = spawn(process.execPath, ["scripts/run-trueforge-proxy.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      TRUEFORGE_API_KEY: "test-secret",
+      TRUEFORGE_PROXY_HOSTS: "127.0.0.1,0.0.0.0",
+    },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  const [code] = await once(child, "exit");
+
+  assert.equal(code, 1);
+  assert.match(stderr, /TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces/);
+});
+
 test("TrueForge proxy rejects missing and invalid bearer tokens before forwarding", async () => {
   const upstream = await startUpstream();
   const proxyPort = await freePort();
