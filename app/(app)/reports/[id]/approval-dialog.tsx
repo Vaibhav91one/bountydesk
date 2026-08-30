@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
+import type { Finding } from "@/lib/mcp/publish-verdict";
 
 import { AgentChat, type ChatTurn } from "./agent-chat";
 import { AgentTrace, type TraceRow } from "./agent-trace";
@@ -48,6 +49,7 @@ export function ApprovalDialog({
   destination,
   targetName,
   reproductionRan,
+  findings,
   speaker,
   chatMascot,
   events,
@@ -63,6 +65,8 @@ export function ApprovalDialog({
   destination: string;
   targetName: string | null;
   reproductionRan: boolean;
+  /** What the agent's own investigation found, beyond the summary. May be empty. */
+  findings: Finding[];
   /** Agent Bounty, inline SVG, id-prefixed by the page so two copies cannot collide. */
   speaker: string;
   chatMascot: string;
@@ -80,24 +84,30 @@ export function ApprovalDialog({
    * What the agent answers with.
    *
    * Assembled from this report's own record, never invented, and keyed to whichever tab is
-   * open. A canned line claiming the bug was reproduced would be the model narrating a verdict,
-   * which is the one thing it must never do, so every sentence restates something already on
-   * this screen and the no-reproduction case says exactly that.
+   * open. Every sentence restates something already on this screen: the findings list, the
+   * summary, or (when one exists) a recorded oracle result. Nothing here is a fresh claim.
    */
   function reply(): string {
     if (topic === "Target") {
       return targetName
-        ? `This report is bound to the pinned target ${targetName}. Reproduction would run against that image and nothing else; the scope guard takes the target from the server-held profile, not from anything I wrote.`
-        : "No target profile is bound to this report, so there is nothing to reproduce against. That is why the run stopped at analysis only.";
+        ? `This report is bound to the pinned target ${targetName}. My investigation ran against that image and nothing else; the scope guard takes the target from the server-held profile, not from anything I wrote.`
+        : "No target profile is bound to this report, so there was nothing authorised to investigate. That is why the run stopped at analysis only.";
     }
 
     if (topic === "What approving binds") {
       return `Approving records your decision against revision ${revision} and hash ${contentHash.slice(0, 12)}. The submission worker relays that to the harness, and publish_verdict refuses any payload whose hash differs. It does not close the issue, and it does not change the verdict.`;
     }
 
-    return reproductionRan
-      ? `The oracle observed this run's canary outside the sandbox, and that is what decided the outcome. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`
-      : `No sandbox was provisioned and no canary was seeded, so nothing was reproduced. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
+    if (reproductionRan) {
+      return `The oracle observed this run's canary outside the sandbox, and that is what decided the outcome. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
+    }
+
+    if (findings.length === 0) {
+      return `My own investigation is what decided this, not an external oracle. I found nothing beyond what the summary already says: ${summary}`;
+    }
+
+    const list = findings.map((finding) => `${finding.title} (${finding.severity})`).join(", ");
+    return `My own investigation is what decided this, not an external oracle. What I found: ${list}. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
   }
 
   function send(text: string) {

@@ -12,6 +12,7 @@ import {
   targetProfile,
   verdict,
 } from "@/lib/db";
+import { findingSchema, type Finding } from "@/lib/mcp/publish-verdict";
 import type { ReportState } from "@/lib/reports/states";
 
 /**
@@ -21,10 +22,11 @@ import type { ReportState } from "@/lib/reports/states";
  * its own rows when a reviewer clicks, so nothing here is a permission: a page that says
  * "awaiting approval" is describing the moment it was rendered.
  *
- * What is absent matters as much as what is here. There is no sandbox, no canary result, no
- * artifact and no resource use, because none of that is built. verdict.evidence carries a
- * single reason string. The page says so rather than leaving a gap that reads like a value
- * that failed to load.
+ * verdict.evidence is jsonb and its shape depends on how the verdict was drafted. The live path
+ * writes `{source: "agent-drafted", findings: Finding[]}`, the agent's own claims from its
+ * sandboxed investigation. An older row, or a report that never reached a target, may carry
+ * something else entirely (a bare reason string, or nothing usable at all). Every reader here
+ * is defensive about the shape for exactly that reason.
  */
 
 export type CaseEvent = {
@@ -78,15 +80,15 @@ export type CaseFile = {
 };
 
 /**
- * Whether an oracle decided this verdict.
+ * Whether a canary oracle, not just the agent's own reasoning, decided this verdict.
  *
  * True only for evidence that positively records one: an `oracle` object carrying a string
- * `result`. Anything else, including an empty or unrecognised evidence object, is not an
- * oracle verdict, and saying otherwise would attribute a model-authored outcome to an external
- * canary check. That is the one claim this product must never make on its own.
- *
- * Nothing writes an oracle result yet, so this is false everywhere today, and it starts
- * returning true on its own the day a driver records one.
+ * `result`. The agent's own drafted investigation is the primary and permanent source of a
+ * verdict today (see docs/decisions.md Q22); the canary/fixture/negative-control pipeline in
+ * lib/sandbox/reproduce.ts is retained as a strictly stronger, optional evidence source, not
+ * yet wired into the live path. Anything else, including an empty or unrecognised evidence
+ * object, means this verdict is the agent's own conclusion, and saying otherwise would attribute
+ * it to a check that never ran.
  */
 export function oracleDecided(evidence: unknown): boolean {
   if (typeof evidence !== "object" || evidence === null) return false;
@@ -94,6 +96,27 @@ export function oracleDecided(evidence: unknown): boolean {
   if (typeof oracle !== "object" || oracle === null) return false;
 
   return typeof (oracle as { result?: unknown }).result === "string";
+}
+
+/**
+ * The agent's own drafted findings off a verdict's evidence, if it recorded any.
+ *
+ * Defensive about the shape because evidence is jsonb and pre-redesign rows, or a report that
+ * never reached a target, may carry something else entirely. Reuses the same `findingSchema`
+ * `publish_verdict` validates a draft against, so a finding renders here exactly if it would
+ * have been accepted there.
+ */
+export function verdictFindings(evidence: unknown): Finding[] {
+  if (typeof evidence !== "object" || evidence === null) return [];
+  const value = (evidence as { source?: unknown; findings?: unknown }).findings;
+  if ((evidence as { source?: unknown }).source !== "agent-drafted" || !Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    const parsed = findingSchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  });
 }
 
 /**

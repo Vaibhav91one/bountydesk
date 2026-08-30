@@ -11,13 +11,13 @@ import { cn } from "@/lib/utils";
 /**
  * How much evidence stands behind a verdict, and what to call it.
  *
- * Three bars is the oracle having decided. Everything else is fewer, and analysis only is one,
- * because no sandbox ran and nobody observed anything. The meter is a reading of the record,
- * not a confidence the model reported: there is no such number, and inventing one to fill a
- * meter would be the model grading its own work.
+ * Three bars is the agent's own investigation reaching a positive result; two is a run that
+ * completed and found nothing; one is no investigation having happened at all. The meter is a
+ * reading of the record, not a confidence the model reported: there is no such number, and
+ * inventing one to fill a meter would be the model grading its own work.
  */
 const EVIDENCE: Record<string, { bars: number; tone: string; label: string }> = {
-  REPRODUCED: { bars: 3, tone: "bg-phase-delivered", label: "Oracle observed the canary" },
+  REPRODUCED: { bars: 3, tone: "bg-phase-delivered", label: "Agent's own investigation" },
   NOT_REPRODUCED: { bars: 2, tone: "bg-phase-analysis", label: "Ran, did not reproduce" },
   INCONCLUSIVE: { bars: 1, tone: "bg-phase-approval", label: "Inconclusive" },
   ANALYSIS_ONLY: { bars: 1, tone: "bg-phase-approval", label: "Analysis only, nothing ran" },

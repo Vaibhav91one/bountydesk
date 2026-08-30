@@ -8,12 +8,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
 import { formatStamp } from "@/lib/format";
-import { isReportId, oracleDecided, readCase, type CaseFile } from "@/lib/reports/case";
+import { isReportId, oracleDecided, readCase, verdictFindings, type CaseFile } from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
 import { ApprovalDialog } from "./approval-dialog";
 import { ArtifactsPanel, verdictArtifacts } from "./artifacts-panel";
+import { FindingsPanel } from "./findings-panel";
 import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
 import type { StepState } from "./lifecycle-step";
@@ -295,6 +296,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
    * nothing spins. When reproduction ships and writes its own events, this fills in on its own.
    */
   const artifacts = verdictArtifacts(file.verdict?.evidence);
+  const findings = verdictFindings(file.verdict?.evidence);
 
   // Same id-prefix trap as the lifecycle rows: several mascots share one page.
   const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
@@ -316,11 +318,13 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   /**
    * Whose verdict this is.
    *
-   * Agent Bounty drafts it today, because reproduction is not built and no oracle has ever
-   * run: verdict.evidence says as much, in the one reason string it carries. The moment an
-   * oracle does decide, this stops being Agent Bounty's to claim. The invariant is that the
-   * verdict comes from the canary and the model never narrates it, so the label is derived
-   * rather than written down, and it changes by itself when the evidence changes.
+   * Agent Bounty drafts every verdict today: its own sandboxed investigation, using scope-guard,
+   * a sandbox, skills and subagents against the authorised target, is the primary and permanent
+   * source (docs/decisions.md Q22), not a stand-in for something else. The canary/oracle
+   * pipeline in lib/sandbox/reproduce.ts is retained as a strictly stronger, optional evidence
+   * source; when a verdict's evidence positively records one, the label credits it instead. The
+   * label is derived from the evidence rather than written down, so it changes by itself when
+   * the evidence does.
    */
   // Fail closed: only a recorded oracle result earns the oracle's name on the label. Anything
   // else, including evidence nobody recognises, is Agent Bounty speaking for itself.
@@ -402,6 +406,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
               targetName={file.target?.name ?? null}
               reproductionRan={!drafted}
+              findings={findings}
               speaker={prefixed("awaiting-approval", "speaker")}
               chatMascot={prefixed("greeting", "chat")}
               events={file.events.map((event) => ({
@@ -435,6 +440,19 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             <SandboxDiagram targetName={file.target?.name ?? null} status={nodeStatus} />
           </Panel>
         </div>
+
+        {file.verdict ? (
+          <Panel
+            title="Findings"
+            aside={
+              <Badge variant="outline">
+                {findings.length === 0 ? "None drafted" : `${findings.length} drafted`}
+              </Badge>
+            }
+          >
+            <FindingsPanel findings={findings} />
+          </Panel>
+        ) : null}
 
         {/* Once the gate has closed there is no dialog to open, and the comment that went out
             would otherwise be nowhere on this page. The same card, with the decision in place

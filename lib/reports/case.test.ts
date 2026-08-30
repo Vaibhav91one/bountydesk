@@ -385,6 +385,31 @@ test("only a recorded oracle result is attributed to the oracle", async () => {
   assert.equal(oracleDecided({ oracle: { result: "CANARY_OBSERVED" } }), true);
 });
 
+test("findings render only from an agent-drafted verdict, and only the entries that parse", async () => {
+  const { verdictFindings } = cases;
+
+  for (const evidence of [
+    null,
+    undefined,
+    {},
+    { reason: "AUTOMATED_REPRODUCTION_NOT_RUN" },
+    { oracle: { result: "CANARY_OBSERVED" } },
+    { source: "agent-drafted" },
+    { source: "agent-drafted", findings: "not an array" },
+    { findings: [{ title: "no source tag", severity: "high", description: "x", evidenceRef: "x" }] },
+  ]) {
+    assert.deepEqual(verdictFindings(evidence), [], `${JSON.stringify(evidence)} must render no findings`);
+  }
+
+  const good = { title: "Reflected in search", severity: "high", description: "d", evidenceRef: "ref-1" };
+  const malformed = { title: "missing severity", description: "d", evidenceRef: "ref-2" };
+  assert.deepEqual(
+    verdictFindings({ source: "agent-drafted", findings: [good, malformed] }),
+    [good],
+    "a malformed entry is dropped, not thrown on, and a valid sibling still renders",
+  );
+});
+
 test("a report id has to be a uuid, not thirty-six characters from its alphabet", () => {
   assert.equal(cases.isReportId("61395817-9dc9-4054-893c-0dbe43e87df9"), true);
   assert.equal(cases.isReportId("61395817-9DC9-4054-893C-0DBE43E87DF9"), true);

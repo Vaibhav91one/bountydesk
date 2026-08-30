@@ -5,13 +5,15 @@ import { Badge } from "@/components/ui/badge";
 /**
  * What a run left behind, and what it did not.
  *
- * Reproduction is designed and not built, so no run has produced an artifact: no PoC script,
- * no build attestation, no oracle transcript, no negative-control log. The panel says that in
- * as many words rather than showing an empty list, which reads as a fetch that failed.
+ * The agent's own investigation is live today, but it records its claims as findings (see
+ * findings-panel.tsx), not as content-addressed artifacts: no PoC script, no build attestation,
+ * no oracle transcript, no negative-control log, since the canary/fixture pipeline that would
+ * produce those is retained but not yet wired into the live path (docs/decisions.md Q22). The
+ * panel says so rather than showing an empty list, which reads as a fetch that failed.
  *
  * verdict.evidence is where a driver will record artifact references, so this renders whatever
- * is there. The day reproduction ships and writes them, they appear without a code change, and
- * until then nothing is invented to fill the space.
+ * is there. The day the canary pipeline is wired in and writes them, they appear without a code
+ * change, and until then nothing is invented to fill the space.
  */
 
 export type Artifact = { name: string; kind?: string; sha256?: string; bytes?: number };
