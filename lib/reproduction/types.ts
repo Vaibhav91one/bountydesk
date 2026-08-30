@@ -64,6 +64,17 @@ export type ReproductionRecipe = {
    * scenario or endpoint keyword, so recipe authors should include both kinds. A class-only
    * match, such as "sql injection", is not enough to run an endpoint-specific recipe. */
   keywords: string[];
+  /**
+   * Whether this recipe's oracle can actually deliver a trustworthy verdict against the running
+   * orchestrator. Omitted means ready, which is why juice-shop's frozen recipes carry nothing
+   * here. Set to false for a recipe whose oracle would silently misjudge the target today, e.g.
+   * one that sends JSON to a form-encoded endpoint, puts the canary in a GET path the
+   * orchestrator never substitutes, or judges an out-of-band vulnerability from the in-band
+   * response. authorizeReproductionTarget treats a not-ready recipe as NO_APPROVED_ORACLE, so
+   * the run resolves ANALYSIS_ONLY and a false REPRODUCED is structurally impossible until the
+   * gap named in docs/additional-targets.md is closed and this is flipped back to ready.
+   */
+  oracleReady?: boolean;
   /** Registers the canary through a trusted fixture call. `request.body` should reference
    * "{{canary}}" wherever the fresh value belongs. A non-2xx response here means the canary was
    * never actually seeded, so the orchestrator must treat that as incomplete, not proceed to the

@@ -15,6 +15,16 @@ export type ReproductionAuthorization =
     } & TargetProvisioningConfig)
   | { ok: false; reason: AnalysisOnlyReason };
 
+/**
+ * Whether a recipe's oracle can deliver a trustworthy verdict against the running orchestrator.
+ * Omitted means ready (juice-shop's frozen recipes), false means the oracle would misjudge the
+ * target today. Kept as a pure function so the gate below is tested without a database. See the
+ * oracleReady doc in lib/reproduction/types.ts.
+ */
+export function recipeOracleReady(recipe: ReproductionRecipe): boolean {
+  return recipe.oracleReady !== false;
+}
+
 function defaultPort(protocol: string): number | null {
   if (protocol === "http:") return 80;
   if (protocol === "https:") return 443;
@@ -68,6 +78,11 @@ export async function authorizeReproductionTarget(input: {
     (candidate) => candidate.id === input.recipeId,
   );
   if (!recipe) return { ok: false, reason: "NO_APPROVED_ORACLE" };
+  // Fail closed: a recipe whose oracle cannot yet deliver a trustworthy verdict is treated as if
+  // there were no approved oracle at all, so the run resolves ANALYSIS_ONLY rather than risking a
+  // false REPRODUCED. This is what makes the four onboarding targets safe before their
+  // orchestrator gaps are closed (docs/additional-targets.md).
+  if (!recipeOracleReady(recipe)) return { ok: false, reason: "NO_APPROVED_ORACLE" };
 
   return {
     ok: true,
