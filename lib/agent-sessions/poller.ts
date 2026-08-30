@@ -374,8 +374,11 @@ export async function pollOnce(
 
   switch (snapshot.status) {
     case "running":
+      // This poll has directly observed the turn still going, which the initial RUNNING set
+      // by the driver right after createTurn cannot claim: the agent is now genuinely mid
+      // investigation, not just started.
       await release(lease, {
-        turnStatus: "RUNNING",
+        turnStatus: "INVESTIGATING",
         nextPollAt: inFuture(POLL_BACKOFF_MS),
       });
       return lease.id;

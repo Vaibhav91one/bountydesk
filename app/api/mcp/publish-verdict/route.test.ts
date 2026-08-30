@@ -88,6 +88,12 @@ async function reportState(reportId: string): Promise<string> {
   return row.state;
 }
 
+/**
+ * The tool's schema now requires the full agent-drafted shape, not just capability, so every
+ * call needs valid outcome/summary/findings to pass the MCP server's own argument validation
+ * even where the fixture below is already at AWAITING_APPROVAL and the handler itself only
+ * reads capability back out.
+ */
 function toolCallRequest(capability: string, headers: Record<string, string>): Request {
   return new Request("https://bountydesk.test/api/mcp/publish-verdict", {
     method: "POST",
@@ -100,7 +106,10 @@ function toolCallRequest(capability: string, headers: Record<string, string>): R
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "publish_verdict", arguments: { capability } },
+      params: {
+        name: "publish_verdict",
+        arguments: { capability, outcome: "ANALYSIS_ONLY", summary: "test draft", findings: [] },
+      },
     }),
   });
 }
@@ -139,4 +148,32 @@ test("a correct bearer header reaches publishVerdict and the report is moved to 
   assert.equal(body.result?.isError, undefined);
   assert.match(body.result?.content?.[0]?.text ?? "", /published/);
   assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("a call missing the drafted verdict fields is refused by the tool's own schema", async () => {
+  const fixture = await seedPublishableFixture();
+
+  const request = new Request("https://bountydesk.test/api/mcp/publish-verdict", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      authorization: `Bearer ${SECRET}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      // The legacy capability-only shape: nothing this route's schema accepts, now that a
+      // real tool-calling model has no way to omit the fields it declares as required.
+      params: { name: "publish_verdict", arguments: { capability: fixture.capabilityToken } },
+    }),
+  });
+
+  const response = await POST(request);
+
+  assert.equal(response.status, 200, "an invalid tool call is a JSON-RPC/tool error, not an HTTP failure");
+  const body = (await response.json()) as { result?: { isError?: boolean }; error?: unknown };
+  assert.ok(body.result?.isError || body.error, "a schema-invalid call must never look like success");
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL", "an invalid call must not publish anything");
 });
