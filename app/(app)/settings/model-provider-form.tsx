@@ -2,8 +2,10 @@
 
 import { useActionState, useState } from "react";
 
-import { Check, Plus, Trash } from "@phosphor-icons/react/ssr";
+import { Anthropic, DeepSeek, Gemini, OpenAI } from "developer-icons";
+import { Brain, Check, Plus, Trash } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,17 +20,21 @@ import type { CatalogProviderView, ModelProviderView, ModelView } from "@/lib/tr
 
 import { saveModelProvider, type ActionResult } from "./actions";
 
-/** `items` is what teaches the trigger to print the label rather than the stored value. */
+/**
+ * `items` is what teaches the trigger to print the label rather than the stored value.
+ * developer-icons has a mark for some of these and not others, so `icon` falls back to the
+ * generic model icon rather than leaving a picker row half a size shorter than its neighbours.
+ */
 const PROVIDERS = [
-  { value: "openai", label: "openai" },
-  { value: "anthropic", label: "anthropic" },
-  { value: "google-gemini", label: "google-gemini" },
-  { value: "fireworks", label: "fireworks" },
-  { value: "zai", label: "zai" },
-  { value: "moonshot", label: "moonshot" },
-  { value: "together", label: "together" },
-  { value: "alibaba", label: "alibaba" },
-  { value: "custom", label: "custom (OpenAI-compatible)" },
+  { value: "openai", label: "openai", icon: OpenAI },
+  { value: "anthropic", label: "anthropic", icon: Anthropic },
+  { value: "google-gemini", label: "google-gemini", icon: Gemini },
+  { value: "fireworks", label: "fireworks", icon: Brain },
+  { value: "zai", label: "zai", icon: Brain },
+  { value: "moonshot", label: "moonshot", icon: Brain },
+  { value: "together", label: "together", icon: Brain },
+  { value: "alibaba", label: "alibaba", icon: Brain },
+  { value: "custom", label: "custom (OpenAI-compatible)", icon: DeepSeek },
 ];
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
@@ -115,6 +121,7 @@ export function ModelProviderForm({
               <SelectContent>
                 {PROVIDERS.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
+                    <option.icon className="size-4" />
                     {option.label}
                   </SelectItem>
                 ))}
@@ -167,7 +174,7 @@ export function ModelProviderForm({
                 title={lastModel ? "A provider must keep at least one model." : undefined}
                 onClick={() => setModels(models.filter((other) => other.name !== model.name))}
               >
-                <Trash data-icon="inline-start" />
+                <RollingIcon icon={Trash} className="size-4" />
                 Remove
               </Button>
             </li>
@@ -190,7 +197,7 @@ export function ModelProviderForm({
             />
           </Field>
           <Button type="button" size="sm" variant="outline" onClick={addDraft}>
-            <Plus data-icon="inline-start" />
+            <RollingIcon icon={Plus} className="size-4" />
             Add model
           </Button>
         </div>
@@ -198,7 +205,7 @@ export function ModelProviderForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="sm" loading={pending}>
-          {provider ? <Check data-icon="inline-start" /> : <Plus data-icon="inline-start" />}
+          <RollingIcon icon={provider ? Check : Plus} className="size-4" />
           {provider ? "Save provider" : "Add provider"}
         </Button>
         {result?.ok ? <Badge variant="outline">Saved</Badge> : null}

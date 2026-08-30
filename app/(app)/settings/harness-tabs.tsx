@@ -1,11 +1,25 @@
 "use client";
 
-import { useActionState } from "react";
-import { ArrowsClockwise, Brain, Cube, Lightning, PlugsConnected, Robot } from "@phosphor-icons/react/ssr";
+import { useActionState, type ComponentType } from "react";
+import { Anthropic, DeepSeek, Gemini, OpenAI } from "developer-icons";
+import {
+  ArrowsClockwise,
+  Brain,
+  CheckCircle,
+  CircleDashed,
+  Clock,
+  Cube,
+  Info,
+  Lightning,
+  PlugsConnected,
+  Robot,
+  WarningCircle,
+} from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RollingIcon } from "@/components/rolling-icon";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
@@ -13,6 +27,23 @@ import { Empty, Panel, Row } from "./panel";
 import { applyManagedResources, type ActionResult } from "./actions";
 import { ModelProviderForm } from "./model-provider-form";
 import { SandboxForm } from "./sandbox-form";
+
+/**
+ * developer-icons carries a brand mark for some providers and not others, so this is a lookup
+ * with a fallback rather than a required field: an unlisted provider gets the generic model
+ * icon instead of a blank space. A custom provider is matched on its name, which is the only
+ * thing that says which upstream it points at.
+ */
+const BRAND: Record<string, ComponentType<{ className?: string }>> = {
+  openai: OpenAI,
+  anthropic: Anthropic,
+  "google-gemini": Gemini,
+  deepseek: DeepSeek,
+};
+
+function brandFor(provider: { name: string; type: string }) {
+  return BRAND[provider.type] ?? BRAND[provider.name.toLowerCase()] ?? Brain;
+}
 
 /**
  * One route, five tabs. Not five routes: each section already carries its own error, so
@@ -55,10 +86,20 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
                   {providers.map((provider) => (
                     <li key={provider.name} className="rounded-md border border-border/50 bg-background p-4">
                       <div className="flex flex-wrap items-center gap-2.5 pb-3">
+                        {(() => {
+                          const Brand = brandFor(provider);
+                          return <Brand className="size-5" />;
+                        })()}
                         <span className="text-body font-medium text-foreground">{provider.name}</span>
                         <Badge variant="outline">{provider.type}</Badge>
                         <Badge variant="outline">
                           {provider.models.length} {provider.models.length === 1 ? "model" : "models"}
+                        </Badge>
+                        {/* Configured, not connected: unlike the sandbox provider, TrueForge
+                            stores a model key without calling the upstream to check it. */}
+                        <Badge variant="success">
+                          <CheckCircle />
+                          Configured
                         </Badge>
                       </div>
                       <SectionBody section={snapshot.catalog}>
@@ -102,7 +143,19 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
                           <Row label="URL">
                             <span className="font-mono text-meta break-all">{row.live.url}</span>
                           </Row>
-                          <Row label="Auth">{row.live.authStatus}</Row>
+                          <Row label="Auth">
+                            {row.live.authStatus === "authenticated" ? (
+                              <Badge variant="success">
+                                <CheckCircle />
+                                Authenticated
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline">
+                                <WarningCircle />
+                                {row.live.authStatus}
+                              </Badge>
+                            )}
+                          </Row>
                         </div>
                       ) : (
                         <Empty>Declared here but not registered on the harness yet.</Empty>
@@ -155,7 +208,7 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
           detail="TrueForge's own Daytona account, which is what config.sandbox.enabled and therefore every skill in the agent manifest runs on. It is not the reproduction sandbox BountyDesk provisions itself from DAYTONA_API_KEY: two Daytona configurations, two keys, and nothing on this screen touches the other one."
           aside={
             snapshot.sandbox.ok && snapshot.sandbox.value ? (
-              <Badge variant="outline">{snapshot.sandbox.value.status}</Badge>
+              <StatusBadge status={snapshot.sandbox.value.status} />
             ) : null
           }
         >
@@ -264,9 +317,57 @@ function Heading({ name, drift }: { name: string; drift: Drift }) {
  * control offering to break someone else's agent.
  */
 function DriftBadge({ drift }: { drift: Drift }) {
-  if (drift === "unmanaged") return <Badge variant="outline">Not managed here</Badge>;
-  if (drift === "missing") return <Badge variant="outline">Not applied</Badge>;
-  return <Badge variant="outline">Registered</Badge>;
+  if (drift === "unmanaged") {
+    return (
+      <Badge variant="outline">
+        <Info />
+        Not managed here
+      </Badge>
+    );
+  }
+  if (drift === "missing") {
+    return (
+      <Badge variant="destructive">
+        <CircleDashed />
+        Not applied
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="success">
+      <CheckCircle />
+      Registered
+    </Badge>
+  );
+}
+
+/**
+ * The sandbox provider's own status, which is TrueForge's answer after it called Daytona with
+ * the stored key. Colour and icon both carry it, so it does not depend on seeing green.
+ */
+function StatusBadge({ status }: { status: string }) {
+  if (status === "ready") {
+    return (
+      <Badge variant="success">
+        <CheckCircle />
+        Connected
+      </Badge>
+    );
+  }
+  if (status === "failed") {
+    return (
+      <Badge variant="destructive">
+        <WarningCircle />
+        Failed
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline">
+      <Clock />
+      {status}
+    </Badge>
+  );
 }
 
 function ApplyButton({ scope, label }: { scope: "connectors" | "skills" | "agent"; label: string }) {
@@ -279,7 +380,7 @@ function ApplyButton({ scope, label }: { scope: "connectors" | "skills" | "agent
     <form action={action} className="flex flex-col items-end gap-1.5">
       <input type="hidden" name="scope" value={scope} />
       <Button type="submit" size="sm" loading={pending}>
-        <ArrowsClockwise data-icon="inline-start" />
+        <RollingIcon icon={ArrowsClockwise} className="size-4" />
         {label}
       </Button>
       {result?.ok ? <Badge variant="outline">Applied</Badge> : null}
