@@ -353,9 +353,13 @@ export function createTrueforgeAnalysisDriver(
       // A provisioned-but-not-yet-persisted sandbox is a different kind of orphan: nothing
       // durable points at it yet, so neither this driver's own retry nor the poller's teardown
       // paths (lib/agent-sessions/poller.ts) can ever find it again once this call returns.
-      // The outer try/catch exists for exactly that window -- cancellation, a createTurn
-      // failure, or any other error thrown before the write above commits -- and tears the
-      // sandbox down itself rather than leaving it live until its TTL backstop.
+      // lostRace and the outer try/catch exist for exactly that window -- losing the race,
+      // cancellation, a createTurn failure, or any other error thrown before the write below
+      // commits -- and tear the sandbox down once the transaction is no longer open. Teardown
+      // is a Daytona network call and never runs while this transaction still holds the
+      // agent_session row locked: a slow delete blocking every other update to that row for its
+      // duration would be its own new cost, not a cleanup.
+      let lostRace = false;
       try {
         await db.transaction(async (tx) => {
           const [session] = await tx
@@ -380,9 +384,9 @@ export function createTrueforgeAnalysisDriver(
           // regardless of how that turn is doing. If this losing attempt already provisioned a
           // sandbox before losing the race, it's this attempt's own to clean up -- nothing else
           // ever learns its id, since only the winner's write below persists one onto the row.
+          // The teardown itself waits until after this transaction commits (see lostRace below).
           if (session.turnId) {
-            if (provisioned) await teardownSandbox(provisioned.sandboxId, true);
-            provisioned = null;
+            lostRace = true;
             return;
           }
 
@@ -416,11 +420,10 @@ export function createTrueforgeAnalysisDriver(
             .where(eq(agentSession.id, session.id));
         });
       } catch (error) {
-        // provisioned is cleared above once its cleanup has already happened (the race-loss
-        // branch), so this only fires for a sandbox that's still genuinely unaccounted for.
         if (provisioned) await teardownSandbox(provisioned.sandboxId, true);
         throw error;
       }
+      if (lostRace && provisioned) await teardownSandbox(provisioned.sandboxId, true);
 
       if (signal.aborted) throw signal.reason;
     },

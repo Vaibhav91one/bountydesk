@@ -32,9 +32,53 @@ after(async () => {
 
 let seq = 0;
 
-async function seedSession(overrides: { sandboxId?: string | null; appPort?: number | null } = {}): Promise<string> {
+/**
+ * By default seeds a report bound to a target profile with no connected repository -- the
+ * pinned-target case hasActiveRepositoryGrant treats as always active, matching production's
+ * one demo target. `revoked: true` instead binds a connected repository whose grant is already
+ * inactive, for the tests that prove probeTarget refuses to serve a session past that point.
+ */
+async function seedSession(
+  overrides: { sandboxId?: string | null; appPort?: number | null; noTargetProfile?: boolean; revoked?: boolean } = {},
+): Promise<string> {
   seq += 1;
   const n = seq;
+
+  let targetProfileId: string | null = null;
+  let connectedRepositoryId: string | null = null;
+
+  if (!overrides.noTargetProfile) {
+    const [t] = await dbm.db
+      .insert(dbm.targetProfile)
+      .values({
+        name: `juice-shop-${n}`,
+        imageName: "ghcr.io/vaibhav91one/juice-shop",
+        imageDigest: "sha256:" + "a".repeat(64),
+        config: { baseUrl: "http://localhost:3000" },
+        scopeRules: [],
+      })
+      .returning({ id: dbm.targetProfile.id });
+    targetProfileId = t.id;
+
+    if (overrides.revoked) {
+      const [installation] = await dbm.db
+        .insert(dbm.githubInstallation)
+        .values({ installationId: n, accountLogin: `acct-${n}`, accountId: n, accountType: "User" })
+        .returning({ id: dbm.githubInstallation.id });
+      const [repo] = await dbm.db
+        .insert(dbm.connectedRepository)
+        .values({
+          installationId: installation.id,
+          repoId: n,
+          fullName: `owner/repo-${n}`,
+          targetProfileId,
+          // Inactive: hasActiveRepositoryGrant requires active === true, so this alone revokes it.
+          active: false,
+        })
+        .returning({ id: dbm.connectedRepository.id });
+      connectedRepositoryId = repo.id;
+    }
+  }
 
   const [r] = await dbm.db
     .insert(dbm.report)
@@ -44,6 +88,8 @@ async function seedSession(overrides: { sandboxId?: string | null; appPort?: num
       title: `report ${n}`,
       body: "body",
       state: "REPRODUCING",
+      targetProfileId,
+      connectedRepositoryId,
     })
     .returning({ id: dbm.report.id });
 
@@ -196,12 +242,29 @@ test("refuses cleanly when the preview-url lookup fails", async () => {
   if (!result.ok) assert.match(result.reason, /could not reach the sandbox/);
 });
 
+test("refuses a session whose report never had a bound target profile, even with a sandboxId present", async () => {
+  const capability = await seedSession({ sandboxId: "sandbox-orphaned", appPort: 3000, noTargetProfile: true });
+
+  const result = await probeTargetModule.probeTarget({ capability, method: "GET", path: "/" });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /authorization has been revoked/);
+});
+
+test("refuses a session whose connected repository's grant has since been revoked", async () => {
+  const capability = await seedSession({ sandboxId: "sandbox-revoked", appPort: 3000, revoked: true });
+
+  const result = await probeTargetModule.probeTarget({ capability, method: "GET", path: "/" });
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /authorization has been revoked/);
+});
+
 /**
  * POST is gated one layer up (app/api/mcp/publish-verdict/route.ts registers it only under the
  * separate probe_target_write tool name, which the harness's own requireApprovalForTools pauses
  * for a human Allow/Deny before this function is ever called with approvedForWrite: true). These
- * tests exercise this function's own fail-closed backstop for that split -- see probeTarget's
- * doc comment for why a scope-guard grant was tried here first and abandoned.
+ * tests exercise this function's own fail-closed backstop for that split.
  */
 test("refuses a POST with no opts at all, before ever touching the network", async () => {
   const capability = await seedSession({ sandboxId: "sandbox-write", appPort: 3000 });

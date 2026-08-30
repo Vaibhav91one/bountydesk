@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { agentSession, db, eq } from "@/lib/db";
 import { getPortPreviewUrl, readLimitedText, ResponseBodyTooLarge } from "@/lib/sandbox/provision";
+import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 
 /**
  * The tool that lets the agent reach the target this session actually got provisioned, without
@@ -20,13 +21,18 @@ import { getPortPreviewUrl, readLimitedText, ResponseBodyTooLarge } from "@/lib/
  * (app/api/mcp/scope-guard/route.ts): those handlers run no additional in-function check either,
  * because requireApprovalForTools already stops the call from reaching any handler before a
  * human has approved it -- "gated by the harness's own human-approval checkpoint before this
- * call executes" is those tools' own description text.
+ * call executes" is those tools' own description text. A scope-checked, target-address-bound
+ * grant (the mechanism request_intrusive_approval/http_probe use) does not fit here: this tool's
+ * actual destination is a per-run Daytona preview URL, never a host the agent knows to name or
+ * that a scope entry would match, so the harness's own tool-level pause is the gate instead.
  *
- * A scope-guard single-use grant (mint via request_intrusive_approval, verify here) was tried
- * first and abandoned: grants are minted against a target profile's scope-checked network
- * address, resolved by matching real allow-listed hosts, and this tool's actual destination -- a
- * per-run Daytona preview URL -- is never a host the agent knows to name or that any scope entry
- * would ever match. Gating the tool call itself sidesteps that mismatch entirely.
+ * Every call, whatever the method, re-checks that the report's bound target is still
+ * server-authorized (hasActiveRepositoryGrant), the same live check
+ * persistAgentDraftedVerdict and the driver's turn message already make: a session's
+ * agent_session row can carry a sandboxId from before a repository was disconnected, archived,
+ * repointed, or its installation suspended, and none of those revocations touch that row. This
+ * is what actually stops probing after such a revocation; the sandbox itself has no opinion on
+ * it.
  *
  * Wall-clock ceiling per request, matching reproduce.ts's own HTTP_TIMEOUT_MS for calls this
  * process makes to the sandbox.
@@ -128,7 +134,7 @@ export async function probeTarget(input: ProbeTargetInput, opts: ProbeTargetOpti
   }
 
   const [session] = await db
-    .select({ sandboxId: agentSession.sandboxId, appPort: agentSession.appPort })
+    .select({ sandboxId: agentSession.sandboxId, appPort: agentSession.appPort, reportId: agentSession.reportId })
     .from(agentSession)
     .where(eq(agentSession.capabilityToken, input.capability))
     .limit(1);
@@ -136,6 +142,16 @@ export async function probeTarget(input: ProbeTargetInput, opts: ProbeTargetOpti
   if (!session) return { ok: false, reason: "unknown capability" };
   if (!session.sandboxId || !session.appPort) {
     return { ok: false, reason: "no sandbox is provisioned for this session; there is nothing to probe" };
+  }
+
+  // A sandboxId on the row proves a target was authorized when the driver provisioned it, not
+  // that it still is. Revocation (a disconnected/archived repository, a repointed target, a
+  // suspended or deleted installation) never touches this row, so this is the check that
+  // actually stops probing after one -- re-checked fresh on every call, the same live snapshot
+  // persistAgentDraftedVerdict and the driver's own turn message read.
+  const grant = await loadRepositoryGrantSnapshot(session.reportId, db);
+  if (!grant || !hasActiveRepositoryGrant(grant)) {
+    return { ok: false, reason: "this report's target authorization has been revoked; there is nothing to probe" };
   }
 
   let preview: { url: string; token: string };
