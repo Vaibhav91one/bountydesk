@@ -19,11 +19,13 @@ export function QueuePreview({
   traveller,
   mascots,
   drift,
+  linkPrefetch = true,
 }: {
   columns: QueueColumn[];
   traveller: QueueCard;
   mascots: Map<string, MascotState>;
   drift: Map<string, number>;
+  linkPrefetch?: boolean;
 }) {
   const { column: at, phase, still } = useTravellingCard();
 
@@ -56,6 +58,7 @@ export function QueuePreview({
                   showState={false}
                   mascot={mascots.get(state)}
                   index={drift.get("moving") ?? 0}
+                  linkPrefetch={linkPrefetch}
                 />
               </TravellingRow>
             ) : null}
@@ -67,6 +70,7 @@ export function QueuePreview({
                 showState={false}
                 mascot={mascots.get(card.state)}
                 index={drift.get(card.id) ?? 0}
+                linkPrefetch={linkPrefetch}
               />
             ))}
           </section>

@@ -115,11 +115,13 @@ export function Card({
   showState,
   mascot,
   index,
+  linkPrefetch = true,
 }: {
   card: QueueCard;
   showState: boolean;
   mascot?: MascotState;
   index: number;
+  linkPrefetch?: boolean;
 }) {
   const phase = phaseOf(card.state);
   const running = RUNNING.has(card.state);
@@ -150,6 +152,7 @@ export function Card({
               guessing. */}
           <Link
             href={`/reports/${card.id}`}
+            prefetch={linkPrefetch}
             title={card.title}
             className="line-clamp-2 cursor-pointer text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
           >
@@ -225,7 +228,7 @@ export function Card({
           size="sm"
           variant="outline"
           nativeButton={false}
-          render={<Link href={`/reports/${card.id}`} />}
+          render={<Link href={`/reports/${card.id}`} prefetch={linkPrefetch} />}
           className="mt-1 w-full justify-center"
         >
           Review evidence <RollingIcon icon={ArrowRight} className="size-3.5" />
@@ -239,10 +242,12 @@ export function Column({
   column,
   mascots,
   drift,
+  linkPrefetch = true,
 }: {
   column: QueueColumn;
   mascots: Map<string, MascotState>;
   drift: Map<string, number>;
+  linkPrefetch?: boolean;
 }) {
   const hidden = column.total - column.cards.length;
 
@@ -272,6 +277,7 @@ export function Column({
             index={drift.get(card.id) ?? 0}
             showState={column.states.length > 1}
             mascot={mascots.get(card.state)}
+            linkPrefetch={linkPrefetch}
           />
         ))}
       </ul>

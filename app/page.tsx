@@ -7,7 +7,6 @@ import { RollingIcon } from "@/components/rolling-icon";
 import { MASCOT_ON_CARD } from "@/components/queue-board";
 import { Parallax } from "@/components/parallax";
 import { Reveal } from "@/components/reveal";
-import { SmoothScroll } from "@/components/smooth-scroll";
 import { TopBar } from "@/components/top-bar";
 import { TextAnimate } from "@/components/ui/text-animate";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
@@ -353,10 +352,8 @@ export default function LandingPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <SmoothScroll />
-
       <TopBar>
-        <SiteHeader sticky={false} entrance />
+        <SiteHeader sticky={false} entrance appLinkPrefetch={false} />
       </TopBar>
 
       <main className="flex flex-1 flex-col">
@@ -413,7 +410,7 @@ export default function LandingPage() {
             <Button
               size="lg"
               nativeButton={false}
-              render={<Link href="/login" />}
+              render={<Link href="/login" prefetch={false} />}
               className="rounded-full px-6"
             >
               <RollingIcon icon={Sparkle} weight="fill" className="size-4" />{" "}
@@ -514,7 +511,7 @@ export default function LandingPage() {
                       size="sm"
                       variant="outline"
                       nativeButton={false}
-                      render={<Link href="/login" />}
+                      render={<Link href="/login" prefetch={false} />}
                       className="w-full justify-center"
                     >
                       <RollingIcon icon={GitHubLight} className="size-4" />{" "}
@@ -570,6 +567,7 @@ export default function LandingPage() {
               slowdownOnHover
               draggable
               grabCursor
+              enableRollingZIndex={false}
               className="relative left-1/2 w-[2200px] -translate-x-1/2"
             >
               {MASCOTS.map((state) => (
@@ -657,6 +655,7 @@ export default function LandingPage() {
                       }
                       mascots={queueMascots}
                       drift={queueDrift}
+                      linkPrefetch={false}
                     />
                   </div>
                 </Inert>
@@ -698,7 +697,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <SiteFooter />
+      <SiteFooter appLinkPrefetch={false} />
     </div>
   );
 }

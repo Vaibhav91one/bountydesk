@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { SiteBanner } from "@/components/site-banner";
 import { cn } from "@/lib/utils";
@@ -36,10 +36,17 @@ const SETTLE = 80;
 export function TopBar({ children }: { children: React.ReactNode }) {
   const [dismissed, setDismissed] = useState(false);
   const [hidden, setHidden] = useState(false);
+  const hiddenRef = useRef(false);
 
   useEffect(() => {
     let last = window.scrollY;
     let travelled = 0;
+
+    function updateHidden(next: boolean) {
+      if (hiddenRef.current === next) return;
+      hiddenRef.current = next;
+      setHidden(next);
+    }
 
     function onScroll() {
       const y = window.scrollY;
@@ -51,9 +58,9 @@ export function TopBar({ children }: { children: React.ReactNode }) {
       if (step > 0 !== travelled > 0) travelled = 0;
       travelled += step;
 
-      if (y <= SETTLE) setHidden(false);
-      else if (travelled > TRAVEL) setHidden(true);
-      else if (travelled < -TRAVEL) setHidden(false);
+      if (y <= SETTLE) updateHidden(false);
+      else if (travelled > TRAVEL) updateHidden(true);
+      else if (travelled < -TRAVEL) updateHidden(false);
     }
 
     window.addEventListener("scroll", onScroll, { passive: true });
