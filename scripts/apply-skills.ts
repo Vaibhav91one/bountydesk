@@ -21,7 +21,12 @@ import { TrueForge } from "@truefoundry/trueforge-sdk";
 import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
 
 const SKILL_REPO_URL = "https://github.com/Vaibhav91one/bountydesk";
-const SKILL_REPO_REF = "main";
+const DEFAULT_SKILL_REPO_REF = "main";
+
+function skillRepoRef(): string {
+  const value = process.env.BOUNTYDESK_SKILL_REPO_REF?.trim();
+  return value && !value.includes("\n") ? value : DEFAULT_SKILL_REPO_REF;
+}
 
 function parseFrontmatter(content: string): { name: string; description: string } {
   const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
@@ -56,7 +61,7 @@ async function main(): Promise<void> {
         name,
         description,
         url: SKILL_REPO_URL,
-        ref: SKILL_REPO_REF,
+        ref: skillRepoRef(),
         path: `skills/${dirName}`,
       },
     });

@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 
 import agentDefinition from "@/agent/bountydesk.agent.json";
+import targetOnboardingAgentDefinition from "@/agent/target-onboarding.agent.json";
 
 import { buildMcpServerManifest, SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "./agent-config";
 import { parseFrontmatterName } from "./skill-frontmatter";
@@ -48,7 +49,7 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
   assert.equal(agentDefinition.manifest.config.dynamic_sub_agents.enabled, true);
 });
 
-test("the manifest wires in exactly the 11 ported skills, each backed by a real SKILL.md", () => {
+test("the BountyDesk agent wires in exactly the 11 report skills, each backed by a real SKILL.md", () => {
   const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
   assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
 
@@ -61,6 +62,21 @@ test("the manifest wires in exactly the 11 ported skills, each backed by a real 
     const content = readFileSync(skillPath, "utf8");
     assert.equal(parseFrontmatterName(content), name);
   }
+});
+
+test("the target onboarding agent only has the manifest proposal skill", () => {
+  assert.equal(targetOnboardingAgentDefinition.name, "bountydesk-target-onboarding");
+  assert.deepEqual(targetOnboardingAgentDefinition.manifest.skills, [
+    { name: "bountydesk-target-onboarding" },
+  ]);
+  assert.equal(targetOnboardingAgentDefinition.manifest.config.sandbox.enabled, true);
+  assert.equal(targetOnboardingAgentDefinition.manifest.config.dynamic_sub_agents.enabled, false);
+
+  const content = readFileSync(
+    path.join(process.cwd(), "skills", "target-onboarding", "SKILL.md"),
+    "utf8",
+  );
+  assert.equal(parseFrontmatterName(content), "bountydesk-target-onboarding");
 });
 
 test("the MCP connector points at the authenticated publish-verdict route", () => {
