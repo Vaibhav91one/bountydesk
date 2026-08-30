@@ -30,8 +30,18 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
 
 // Zero disables an auto-stop, auto-archive or auto-delete interval, which is a real setting.
 // The exec timeout has no such meaning and TrueForge refuses it with "expected number to be >0".
-const interval = z.coerce.number().int().nonnegative();
-const timeout = z.coerce.number().int().positive();
+//
+// A cleared number input submits "", and z.coerce.number() reads that as 0, which on these
+// three fields is indistinguishable from deliberately disabling cleanup. The PUT replaces the
+// whole manifest, so an empty box would persist a sandbox that never stops or is never
+// deleted. Demanding a non-empty string before the number is what stops blank meaning zero.
+const filled = z
+  .string()
+  .trim()
+  .min(1, "Every interval needs a number. Zero is how you disable one.")
+  .transform(Number);
+const interval = filled.pipe(z.number().int().nonnegative());
+const timeout = filled.pipe(z.number().int().positive());
 
 function parseJson(raw: string): unknown {
   try {

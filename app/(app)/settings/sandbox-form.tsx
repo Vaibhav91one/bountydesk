@@ -37,17 +37,20 @@ export function SandboxForm({ sandbox }: { sandbox: SandboxView | null }) {
   return (
     <form action={action} className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-2">
-        {FIELDS.map((field) => (
-          <label key={field.name} className="flex flex-col gap-1.5">
-            <span className="text-meta text-muted-foreground">{field.label}</span>
-            <Input
-              name={field.name}
-              type="number"
-              min={field.min}
-              defaultValue={sandbox ? sandbox[field.name] : DEFAULTS[field.name]}
-            />
-          </label>
-        ))}
+        {FIELDS.map((field) => {
+          const value = sandbox ? sandbox[field.name] : DEFAULTS[field.name];
+          return (
+            // Keyed on the value, so a save that revalidates this page remounts the input
+            // rather than changing an uncontrolled field's defaultValue underneath it, which
+            // Base UI warns about and which leaves the box showing the pre-save number.
+            <label key={`${field.name}-${value}`} className="flex flex-col gap-1.5">
+              <span className="text-meta text-muted-foreground">{field.label}</span>
+              {/* required, so a cleared box is refused here rather than reaching the action,
+                  where an empty string would become a zero that disables cleanup. */}
+              <Input name={field.name} type="number" required min={field.min} defaultValue={value} />
+            </label>
+          );
+        })}
 
         <label className="flex flex-col gap-1.5">
           <span className="text-meta text-muted-foreground">Daytona API key</span>
