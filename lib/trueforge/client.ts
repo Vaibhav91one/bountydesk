@@ -1,4 +1,4 @@
-import { TrueForge, type TrueForgeApi } from "@truefoundry/trueforge-sdk";
+import { TrueForge, TrueForgeApi } from "@truefoundry/trueforge-sdk";
 
 import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
 
@@ -140,6 +140,18 @@ export type TurnSnapshot =
   | { status: "done_no_action" }
   | { status: "error"; message: string }
   | { status: "cancelled" };
+
+export function isTrueForgeNotFoundError(error: unknown): boolean {
+  if (error instanceof TrueForgeApi.NotFoundError) return true;
+  if (typeof error !== "object" || error === null) return false;
+
+  const candidate = error as { name?: unknown; statusCode?: unknown; status?: unknown };
+  return (
+    candidate.name === "NotFoundError" ||
+    candidate.statusCode === 404 ||
+    candidate.status === 404
+  );
+}
 
 function isLoopback(url: string): boolean {
   try {

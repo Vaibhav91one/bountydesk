@@ -1,6 +1,8 @@
 # Deployment plan
 
-Status: designed, not built. Continue local development until the deployment gates below pass.
+Status: manifests added, not live-proven. PR #69 keeps the hosted Vercel deployment as a landing
+page only. This branch adds the private worker and TrueForge deployment shape, but the cloud run is
+not production-ready until the gates below pass against the real services.
 
 ## Local development
 
@@ -12,13 +14,25 @@ webhook testing needs a fresh tunnel URL because tunnel addresses are disposable
 The local worker entry point should exercise the same code that will run after deployment. Do not
 add deployment-specific HTTP hops to the local path.
 
-## Planned deployment
+## Cloud deployment
 
 Vercel is the public, stateless tier. It receives authenticated GitHub, email and file-upload
 intake, serves the reviewer UI, and hosts the authenticated `publish_verdict` MCP route. Supabase
 Postgres stores reports, jobs, leases, sessions, approvals, immutable verdicts and delivery intent.
 
-A Zerops project holds the persistent tier:
+A Zerops project holds the persistent tier. The committed files are:
+
+- `ops/zerops/project-import.yaml`, which creates a new project with `bdworker`, `trueforge` and
+  `tfdata`.
+- `ops/zerops/services-import.yaml`, which adds the same services to an existing project.
+- `ops/trueforge/package.json` and its lockfile, the pinned TrueForge runtime package.
+- `zerops.yml`, which builds and runs the two Node services.
+- `scripts/run-trueforge-proxy.mjs`, the bearer-auth proxy in front of TrueForge.
+- `scripts/bootstrap-trueforge.mjs`, the private self-bootstrap that configures TrueForge after
+  startup.
+- `scripts/worker-healthcheck.mjs`, a database health check for manual diagnostics.
+
+The services are:
 
 - A private BountyDesk worker service claims rows from Supabase and drives the four existing queues.
 - A private TrueForge service runs in standalone mode with SQLite on Zerops Local Storage. An
@@ -50,6 +64,10 @@ The worker does not start Next.js and does not curl the `/api/internal/**/tick` 
 remain bounded, authenticated adapters for local and manual diagnostics. Shared drain functions
 should keep their retry, deadline and sweep behavior aligned with the daemon.
 
+The worker exposes its own `/healthz` listener on `WORKER_HEALTH_PORT` for Zerops liveness checks.
+The health listener reports process liveness; the queue code still treats Supabase and TrueForge
+errors through leases and retries.
+
 Each loop needs a distinct owner id, idle backoff, jitter and a fixed concurrency limit. On
 `SIGTERM`, the process stops claiming new work and allows the lease protocol to recover anything it
 cannot finish.
@@ -71,3 +89,122 @@ Do not describe the Zerops topology as live or production-ready until all of the
 Start with one TrueForge replica and SQLite. Add Postgres and Valkey only for distributed TrueForge.
 Oracle Always Free is an optional disposable experiment, not the deployment target. Its capacity
 and allowance can change without changing this architecture.
+
+## Vercel
+
+PR #69 deliberately redirects every non-landing route on Vercel to the GitHub repository. Keep that
+behavior for the public landing page by leaving `BOUNTYDESK_LANDING_REDIRECT` unset, or by setting it
+to `1`.
+
+For a backend-enabled deployment, set `BOUNTYDESK_LANDING_REDIRECT=0` in Vercel after the database,
+GitHub App, worker and TrueForge are ready. The health endpoint `/api/health` is always allowed
+through the landing redirect so the public tier can be checked without exposing authenticated pages.
+
+Required Vercel environment:
+
+```bash
+DATABASE_URL=
+APP_BASE_URL=
+GITHUB_WEBHOOK_BASE_URL=
+AUTH_SECRET=
+REVIEWER_GITHUB_IDS=
+GITHUB_APP_ID=
+GITHUB_APP_SLUG=
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+GITHUB_APP_WEBHOOK_SECRET=
+GITHUB_APP_PRIVATE_KEY_BASE64=
+WORKER_INTERNAL_SECRET=
+MCP_SERVER_SECRET=
+SCOPE_GUARD_URL=
+SCOPE_GUARD_TOKEN=
+DAYTONA_API_KEY=
+DAYTONA_TARGET_SNAPSHOT_ID=
+DAYTONA_TARGET_IMAGE_DIGEST=
+BOUNTYDESK_LANDING_REDIRECT=0
+```
+
+Run BountyDesk migrations from a trusted machine or CI job, not from a Vercel function:
+
+```bash
+npm ci
+DIRECT_URL="<supabase-direct-or-session-pooler-url>" npm run db:migrate
+```
+
+## Zerops
+
+The local CLI is `zcli`. Create the private services from this repo:
+
+```bash
+zcli project project-import ops/zerops/project-import.yaml
+```
+
+If you already created a BountyDesk project by hand, import the services instead:
+
+```bash
+zcli project service-import ops/zerops/services-import.yaml -P <project-id>
+```
+
+Set these secrets on `bdworker` before the first deploy:
+
+```bash
+DATABASE_URL=
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY_BASE64=
+MCP_SERVER_SECRET=
+TRUEFORGE_API_KEY=
+DAYTONA_API_KEY=
+DAYTONA_TARGET_SNAPSHOT_ID=
+DAYTONA_TARGET_IMAGE_DIGEST=
+```
+
+Set this secret on `trueforge` before the first deploy:
+
+```bash
+TRUEFORGE_API_KEY=
+OPENAI_API_KEY=
+DAYTONA_API_KEY=
+APP_BASE_URL=
+MCP_SERVER_SECRET=
+SCOPE_GUARD_URL=
+SCOPE_GUARD_TOKEN=
+```
+
+The `zerops.yml` file sets `TRUEFORGE_URL=http://trueforge:8791` for the worker. Do not expose the
+`trueforge` service subdomain. The only caller should be `bdworker` over the Zerops private network,
+using `TRUEFORGE_API_KEY` as a bearer token.
+
+With the current `zcli`, service secrets are easiest to set at project creation time with
+`envSecrets` in a private import stream, or later through the Zerops dashboard bulk editor. Do not
+commit a secret-bearing import file.
+
+Deploy both private services after the secrets are present:
+
+```bash
+zcli push bdworker -P <project-id>
+zcli push trueforge -P <project-id>
+```
+
+Then configure the TrueForge instance from the private service or through a temporary private access
+path:
+
+```bash
+npm run skills:apply
+npm run agent:apply
+```
+
+Those commands need `TRUEFORGE_URL` to point at the authenticated proxy and `TRUEFORGE_API_KEY` to
+match the proxy secret.
+
+## First cloud run
+
+The first cloud run should use the connected Juice Shop fork from `env.example`. After the Daytona
+snapshot has been built and verified, bind the connected repository:
+
+```bash
+npm run seed:target -- 1347703889
+```
+
+Then create a GitHub issue with a reviewer-authored `/reproduce` command, approve only through the
+BountyDesk UI, and verify there is one verdict row, one outbound delivery and one GitHub comment with
+the BountyDesk delivery marker.

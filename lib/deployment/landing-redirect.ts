@@ -9,6 +9,7 @@ const passthroughPaths = new Set([
   "/logo-small.svg",
   "/logo-tick.svg",
   "/trix.svg",
+  "/api/health",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];
@@ -16,6 +17,9 @@ const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];
 type LandingRedirectEnv = Record<string, string | undefined>;
 
 export function landingRedirectEnabled(env: LandingRedirectEnv = process.env) {
+  const explicit = env.BOUNTYDESK_LANDING_REDIRECT?.trim().toLowerCase();
+  if (explicit) return ["1", "true", "yes", "on"].includes(explicit);
+
   return env.VERCEL === "1" || env.BOUNTYDESK_LANDING_REDIRECT === "1";
 }
 

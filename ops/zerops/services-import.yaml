@@ -1,0 +1,13 @@
+services:
+  - hostname: tfdata
+    type: local-storage:single@1
+
+  - hostname: trueforge
+    type: nodejs@22
+    minContainers: 1
+    maxContainers: 1
+
+  - hostname: bdworker
+    type: nodejs@22
+    minContainers: 1
+    maxContainers: 1

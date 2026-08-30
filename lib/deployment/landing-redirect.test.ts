@@ -11,6 +11,11 @@ test("enables the landing redirect only for Vercel or an explicit override", () 
   assert.equal(landingRedirectEnabled({}), false);
   assert.equal(landingRedirectEnabled({ VERCEL: "1" }), true);
   assert.equal(landingRedirectEnabled({ BOUNTYDESK_LANDING_REDIRECT: "1" }), true);
+  assert.equal(landingRedirectEnabled({ BOUNTYDESK_LANDING_REDIRECT: "true" }), true);
+  assert.equal(
+    landingRedirectEnabled({ VERCEL: "1", BOUNTYDESK_LANDING_REDIRECT: "0" }),
+    false,
+  );
 });
 
 test("keeps the landing page and its assets on Vercel", () => {
@@ -21,6 +26,7 @@ test("keeps the landing page and its assets on Vercel", () => {
     "/backdrop/hero.webp",
     "/mascot/idle.svg",
     "/_next/static/chunks/app.js",
+    "/api/health",
   ]) {
     assert.equal(shouldRedirectToSource(pathname), false, pathname);
   }

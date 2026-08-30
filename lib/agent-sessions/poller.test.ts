@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before, mock } from "node:test";
 
+import { TrueForgeApi } from "@truefoundry/trueforge-sdk";
+
 import type {
   ObservedToolCall,
   PendingToolCall,
@@ -578,6 +580,50 @@ test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONL
   assert.equal(row.turnStatus, "ERROR");
   assert.equal(row.lastError, "the model blew up");
   assert.equal(row.pendingThreadId, null);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
+test("a missing TrueForge session is marked terminal instead of retried forever", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({ status: "running" });
+  client.getTurn = async () => {
+    throw new TrueForgeApi.NotFoundError(
+      { error: { message: "Session not found: session-1" } },
+      undefined as never,
+    );
+  };
+
+  const id = await poller.pollOnce("w-missing-session", { client });
+  assert.equal(id, fixture.agentSessionId);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /TrueForge session or turn was not found/);
+  assert.equal(row.leaseOwner, null);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
+test("a 404-shaped TrueForge error is marked terminal even when it is not the SDK class", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({ status: "running" });
+  client.getTurn = async () => {
+    throw Object.assign(new Error("Session not found: session-2"), {
+      name: "NotFoundError",
+      statusCode: 404,
+    });
+  };
+
+  await poller.pollOnce("w-missing-session-plain", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /Session not found/);
 
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "ANALYSIS_ONLY");
