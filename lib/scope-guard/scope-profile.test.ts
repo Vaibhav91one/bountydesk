@@ -74,10 +74,11 @@ test("a persist call still writes normally when nothing else touched the row sin
     scopeRules: row.scopeRules,
     updatedAt: row.updatedAt,
   });
-  await persist({ allow: ["keep.example"], temporary: [], updatedAt: new Date().toISOString() });
+  await persist({ allow: ["keep.example", "added-by-persist.example"], temporary: [], updatedAt: new Date().toISOString() });
 
   const [after1] = await dbm.db.select().from(dbm.targetProfile).where(dbm.eq(dbm.targetProfile.id, row.id));
-  assert.notEqual(after1.updatedAt.getTime(), row.updatedAt.getTime(), "the write must have gone through");
+  const { allow } = scopeProfile.parseScopeRules(after1.scopeRules);
+  assert.ok(allow.includes("added-by-persist.example"), "the write must have gone through");
 });
 
 test("withScope(false, ...)'s temporaryList prune cannot clobber a withScope(true, ...) mutation that commits first", async () => {

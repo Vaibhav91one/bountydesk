@@ -119,6 +119,58 @@ function publishVerdictCall(capability: string, overrides: Partial<PendingToolCa
   };
 }
 
+function draftedPublishVerdictCall(
+  capability: string,
+  draft: { outcome?: string; summary?: string; findings?: unknown[] } = {},
+  overrides: Partial<PendingToolCall> = {},
+): PendingToolCall {
+  return {
+    threadId: "thread-1",
+    toolCallId: "call-1",
+    toolName: "publish_verdict",
+    toolInfoType: "mcp",
+    argumentsJson: JSON.stringify({
+      capability,
+      outcome: draft.outcome ?? "ANALYSIS_ONLY",
+      summary: draft.summary ?? "drafted summary",
+      findings: draft.findings ?? [],
+    }),
+    ...overrides,
+  };
+}
+
+/** A session with no verdict pre-seeded, unlike seedSession above: the whole point of the
+ * agent-drafted branch under test is that it mints that first verdict row itself. */
+async function seedSessionWithoutVerdict(
+  opts: { reportState?: "TRIAGING" | "REPRODUCING" } = {},
+) {
+  seq += 1;
+  const n = seq;
+
+  const [r] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "github",
+      sourceRef: `github:2:issue:${n}`,
+      title: `report ${n}`,
+      body: "body",
+      state: opts.reportState ?? "TRIAGING",
+    })
+    .returning({ id: dbm.report.id });
+
+  const [s] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: r.id,
+      capabilityToken: `draft-cap-${n}`,
+      sessionId: `draft-session-${n}`,
+      turnId: `turn-${n}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  return { reportId: r.id, agentSessionId: s.id, capabilityToken: `draft-cap-${n}` };
+}
+
 async function sessionRow(id: string) {
   const [row] = await dbm.db
     .select({
@@ -153,7 +205,7 @@ test("a running snapshot reschedules and never touches report state", async () =
   assert.equal(id, fixture.agentSessionId);
 
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnStatus, "INVESTIGATING");
   assert.equal(row.leaseOwner, null);
 
   const rep = await reportRow(fixture.reportId);
@@ -426,6 +478,95 @@ test("pollOnce rejects a lease that cannot reach its first heartbeat", async () 
   );
 });
 
+test("a pending call carrying a full agent-drafted payload mints the verdict and moves the report", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "ANALYSIS_ONLY",
+        summary: "the agent's own drafted conclusion",
+        findings: [],
+      }),
+    ],
+  });
+
+  const id = await poller.pollOnce("w-drafted", { client });
+  assert.equal(id, fixture.agentSessionId);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "AWAITING_APPROVAL");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "AWAITING_APPROVAL_HARNESS");
+  assert.ok(row.pendingVerdictId, "a verdict must have been minted for this report");
+
+  const [verdictRow] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome, summary: dbm.verdict.summary })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
+  assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
+});
+
+test("a full draft claiming REPRODUCED for a report with no bound target is refused, and no verdict is created", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "REPRODUCED",
+        summary: "the agent claims this reproduces",
+      }),
+    ],
+  });
+
+  await poller.pollOnce("w-drafted-unauthorized", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /publish_verdict draft refused/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "TRIAGING");
+  const verdicts = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(verdicts.length, 0);
+});
+
+test("a malformed draft attempt is refused rather than silently approved as the legacy shape", async () => {
+  await drainOthers();
+  // This session's pending verdict already exists (seedSession pre-seeds one), the same as a
+  // real deterministic-pipeline report. A pending call that carries draft-specific keys but
+  // fails validation must never fall through to the capability-only path and bind approval to
+  // that pre-existing verdict instead of reporting the validation failure.
+  const fixture = await seedSession();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [
+      draftedPublishVerdictCall(fixture.capabilityToken, {
+        outcome: "NOT_A_REAL_OUTCOME",
+        summary: "",
+        findings: [],
+      }),
+    ],
+  });
+
+  await poller.pollOnce("w-malformed-draft", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /publish_verdict arguments look like a drafted verdict but failed validation/);
+  assert.equal(row.pendingVerdictId, null, "no approval may be bound to the pre-existing verdict");
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "TRIAGING");
+});
+
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
   await drainOthers();
   const fixture = await seedSession();
@@ -467,5 +608,5 @@ test("pollOnce renews its lease while getTurn is slow, so an independent sweeper
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.leaseOwner, null);
-  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnStatus, "INVESTIGATING");
 });

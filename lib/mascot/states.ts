@@ -61,3 +61,32 @@ export function mascotStates(): MascotState[] {
 export function mascotState(key: (typeof MASCOT_STATES)[number]): MascotState {
   return { key, markup: read(key) };
 }
+
+/**
+ * Which mascot stands for a report in each state.
+ *
+ * One map rather than one per screen. The board and the case file both draw Agent Bounty from
+ * a report's state, and two tables would be two chances for the same report to be doing
+ * different things depending on which page you were looking at.
+ *
+ * ANALYSIS_ONLY gets scanning: the report was read and weighed, which is the part that did
+ * happen, and infra-hiccup is left for the lifecycle row where reproduction was skipped.
+ * Cancelled and expired get idle, because nothing happened to them and nothing is going to.
+ */
+export const MASCOT_FOR_STATE: Record<string, (typeof MASCOT_STATES)[number]> = {
+  TRIAGING: "ingest",
+  REPRODUCING: "reproducing",
+  ANALYSIS_ONLY: "scanning",
+  AWAITING_APPROVAL: "awaiting-approval",
+  DELIVERING: "delivered",
+  DELIVERED: "celebrating",
+  DENIED: "denied",
+  OUT_OF_SCOPE: "out-of-scope",
+  CANCELLED: "idle",
+  EXPIRED: "idle",
+};
+
+/** The mascot for a state, ready to inline. Falls back to idle for anything unmapped. */
+export function mascotForState(state: string): MascotState {
+  return mascotState(MASCOT_FOR_STATE[state] ?? "idle");
+}

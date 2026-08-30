@@ -29,6 +29,15 @@ function assertTrueForgeConfiguration() {
 assertTrueForgeConfiguration();
 
 const nextConfig: NextConfig = {
+  // Integrations and Connections used to live under /settings. They are what a person sets up
+  // on their first day rather than something they go looking for in settings, so they moved
+  // out; anyone holding an old link still lands on the right screen.
+  async redirects() {
+    return [
+      { source: "/settings/integrations", destination: "/integrations", permanent: false },
+      { source: "/settings/connections", destination: "/connections", permanent: false },
+    ];
+  },
   /* config options here */
 };
 

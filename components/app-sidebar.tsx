@@ -3,17 +3,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+
+import type { Icon } from "@phosphor-icons/react";
+import type { ActiveReport } from "@/lib/reports/queue";
 import {
   BookOpen,
   CaretUpDown,
-  ClockCounterClockwise,
   Files,
   Gear,
   House,
   PlugsConnected,
   ShareNetwork,
   SignOut,
-  Target,
   Tray,
 } from "@phosphor-icons/react/ssr";
 
@@ -24,6 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { PhaseDot } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import {
   Sidebar,
@@ -33,9 +35,11 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
@@ -43,22 +47,26 @@ import {
 /**
  * The console's navigation, following the route map in the design file.
  *
- * Routes that do not exist yet are listed and disabled rather than hidden. The map is the
- * product, and a reviewer who can see where the queue will live is better served than one who
- * meets it for the first time when it appears. `soon` is what keeps that honest.
+ * Every route here is built. An unbuilt one would be listed rather than hidden, disabled, and
+ * labelled the way every other unavailable control in this product is: Coming soon.
  */
-export const NAV = [
+export const NAV: { href: string; label: string; icon: Icon }[] = [
   { href: "/home", label: "Home", icon: House },
-  { href: "/board", label: "Review queue", icon: Tray, soon: true },
-  { href: "/reports", label: "Reports", icon: Files, soon: true },
-  { href: "/settings/integrations", label: "Integrations", icon: PlugsConnected },
-  { href: "/settings/connections", label: "Connections", icon: ShareNetwork },
-  { href: "/settings/scope", label: "Scope", icon: Target, soon: true },
-  { href: "/settings/audit", label: "Audit", icon: ClockCounterClockwise, soon: true },
-  { href: "/settings/general", label: "Settings", icon: Gear, soon: true },
+  { href: "/board", label: "Review queue", icon: Tray },
+  { href: "/reports", label: "Reports", icon: Files },
+  { href: "/integrations", label: "Integrations", icon: PlugsConnected },
+  { href: "/connections", label: "Connections", icon: ShareNetwork },
+  { href: "/settings", label: "Settings", icon: Gear },
 ];
 
-export function AppSidebar({ reviewer }: { reviewer: string }) {
+export function AppSidebar({
+  reviewer,
+  activeReports = [],
+}: {
+  reviewer: string;
+  /** Reports in flight, most urgent first. Empty until there are any. */
+  activeReports?: ActiveReport[];
+}) {
   const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
   // The sidebar provider persists across navigation, so a mobile tap that doesn't clear
@@ -106,9 +114,8 @@ export function AppSidebar({ reviewer }: { reviewer: string }) {
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     isActive={active}
-                    disabled={item.soon}
-                    tooltip={item.soon ? `${item.label} (not built yet)` : item.label}
-                    render={item.soon ? undefined : <Link href={item.href} onClick={closeMobileSheet} />}
+                    tooltip={item.label}
+                    render={<Link href={item.href} onClick={closeMobileSheet} />}
                   >
                     <RollingIcon
                       icon={item.icon}
@@ -117,8 +124,29 @@ export function AppSidebar({ reviewer }: { reviewer: string }) {
                     />
                     <span>{item.label}</span>
                   </SidebarMenuButton>
-                  {item.soon ? (
-                    <SidebarMenuBadge className="text-muted-foreground">soon</SidebarMenuBadge>
+
+                  {/* What is in the queue, not just that a queue exists. Only under the open
+                      route: five report titles under every nav item would be a second menu
+                      competing with the first. SidebarMenuSub hides itself on the rail. */}
+                  {item.href === "/board" && pathname === "/board" && activeReports.length > 0 ? (
+                    <SidebarMenuSub>
+                      {activeReports.map((report) => (
+                        <SidebarMenuSubItem key={report.id}>
+                          <SidebarMenuSubButton
+                            size="sm"
+                            render={
+                              <Link
+                                href={`/reports/${report.id}`}
+                                onClick={closeMobileSheet}
+                              />
+                            }
+                          >
+                            <PhaseDot phase={report.phase} />
+                            <span className="truncate">{report.title}</span>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      ))}
+                    </SidebarMenuSub>
                   ) : null}
                 </SidebarMenuItem>
                 );

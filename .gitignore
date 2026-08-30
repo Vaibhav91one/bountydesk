@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# HyperFrames demo local outputs
+videos/bountydesk-demo/node_modules/
+videos/bountydesk-demo/snapshots/
+videos/bountydesk-demo/renders/*
+!videos/bountydesk-demo/renders/
+!videos/bountydesk-demo/renders/bountydesk-demo-hyperframes.mp4

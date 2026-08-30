@@ -552,3 +552,32 @@ Every older page was rewritten to the decided architecture, then scanned for ret
 The Qodo-reviewed PR trail, target choice and two demo scenarios are frozen. The remaining work is
 ordered with explicit exit criteria in [`plan.md`](./plan.md); that plan supersedes the original
 session's immediate-action checklist.
+
+---
+
+### Q22 — Agent-authored verdicts (amendment to Q3, Q11, Q17)
+
+**2026-08-30.** The TrueForge agent's own sandboxed investigation and reasoning is now the
+verdict's primary source, reversing Q3's rule for `publish_verdict`'s main path.
+`trueforge-driver.ts` no longer runs a pipeline and hands the agent a pre-decided outcome; it
+describes the report and the bound target, then asks the agent to investigate with scope-guard,
+a sandbox, skills and subagents and to draft its own `outcome`, `summary` and `findings`. The
+draft is validated against a shared zod schema and, before it becomes a verdict row, re-checked
+against the same authorisation the old pipeline enforced up front: a claimed `REPRODUCED` or
+`NOT_REPRODUCED` for a report with no bound target, or one whose repository grant has since been
+revoked, is refused regardless of what the agent asserts (`lib/mcp/publish-verdict.ts`,
+`persistAgentDraftedVerdict`).
+
+Cross-references:
+
+- **Q3, superseded for the primary path.** The canary/fixture/negative-control pipeline
+  (`lib/sandbox/reproduce.ts`, `lib/reproduction/decide.ts`) is retained, not deleted. It sits
+  unused by the live path today, kept as strictly stronger evidence than an agent's own read of
+  a request/response pair, for a future PR that exposes `reproduce()` as an optional tool the
+  agent can call mid-turn.
+- **Q11, unchanged mechanically.** `publish_verdict` is still the same `@write` MCP tool caught
+  by `requireApprovalForTools`, still content-hash bound, still Allow/Deny only. What changed is
+  what the tool's arguments carry: a structured draft instead of a bare capability token.
+- **Q17, unchanged.** The session/turn lifecycle is the same: one session per report, the
+  initial turn ends on a pending `publish_verdict` call, and the human's decision is carried by a
+  new chained turn bound to `threadId` and `toolCallId`, never a resume of the original turn.

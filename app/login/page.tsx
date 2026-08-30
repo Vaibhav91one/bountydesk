@@ -95,7 +95,7 @@ export default async function LoginPage({
             </Button>
 
             <p id="google-unavailable" className={`text-center ${FINE_PRINT}`}>
-              Google sign-in is not available yet.
+              Google sign-in is coming soon.
             </p>
           </div>
 

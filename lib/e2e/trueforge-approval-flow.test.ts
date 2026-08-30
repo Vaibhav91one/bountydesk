@@ -130,10 +130,20 @@ function signedWebhook(deliveryId: string, payload: unknown): Request {
  * the capability the driver embeds in its opening user.message (rather than the test
  * inventing one), so the pending call it hands back to the poller carries the exact token
  * bountydesk itself generated, the same as the real harness would echo back.
+ *
+ * The pending call's arguments carry a full agent-drafted verdict, not just a capability: the
+ * driver no longer pre-decides one, so this is the only place in the whole flow a verdict
+ * comes from now, exactly like a real investigating agent's own publish_verdict call.
  */
 type ApprovalInput = Extract<TurnInput, { type: "user.tool_approval" }>;
 
-function fakeTrueForge(): TrueForgeClient & { submittedInputs: ApprovalInput[] } {
+function fakeTrueForge(
+  draft: { outcome: string; summary: string; findings: unknown[] } = {
+    outcome: "ANALYSIS_ONLY",
+    summary: "Analysis-only result: no authorized target to investigate against.",
+    findings: [],
+  },
+): TrueForgeClient & { submittedInputs: ApprovalInput[] } {
   const capabilityByTurn = new Map<string, string>();
   const submittedInputs: ApprovalInput[] = [];
   let turnCounter = 0;
@@ -149,7 +159,7 @@ function fakeTrueForge(): TrueForgeClient & { submittedInputs: ApprovalInput[] }
       const turnId = `trueturn-${turnCounter}`;
       const opening = input.find((item) => item.type === "user.message");
       if (opening && opening.type === "user.message") {
-        const match = opening.content.match(/capability set to exactly this string: (\S+)/);
+        const match = opening.content.match(/capability set to exactly this string:\s*(\S+)/);
         if (match) capabilityByTurn.set(turnId, match[1]);
       }
       const approval = input.find(
@@ -169,7 +179,7 @@ function fakeTrueForge(): TrueForgeClient & { submittedInputs: ApprovalInput[] }
             toolCallId: "call_1",
             toolName: "publish_verdict",
             toolInfoType: "mcp",
-            argumentsJson: JSON.stringify({ capability }),
+            argumentsJson: JSON.stringify({ capability, ...draft }),
           },
         ],
       };
@@ -229,14 +239,13 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
   // The driver stops at RUNNING; only the poller below is allowed to move it further.
   assert.equal(reportRow.state, "TRIAGING");
 
-  const [verdictRow] = await dbm.db
+  // No verdict exists yet: the driver no longer pre-decides one, so there is nothing to
+  // persist until the agent's own publish_verdict call is observed below.
+  const verdictsBeforePoll = await dbm.db
     .select()
     .from(dbm.verdict)
-    .where(dbm.eq(dbm.verdict.reportId, reportRow.id))
-    .limit(1);
-  assert.ok(verdictRow);
-  assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
-  assert.equal(verdictRow.contentHash, computeContentHash(verdictRow.payload));
+    .where(dbm.eq(dbm.verdict.reportId, reportRow.id));
+  assert.equal(verdictsBeforePoll.length, 0);
 
   const [session] = await dbm.db
     .select()
@@ -247,10 +256,11 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
   assert.equal(session.turnId, "trueturn-1");
 
   // The poller: the fake already captured the turn's capability during createTurn above, so
-  // this first poll goes straight to awaiting_approval. Confirms the atomic
+  // this first poll goes straight to awaiting_approval, carrying the agent's own drafted
+  // outcome/summary/findings. Confirms the atomic
   // TRIAGING -> ANALYSIS_ONLY -> AWAITING_APPROVAL transition happens here, not inside the
   // driver, and only once bounty-desk has independently verified a genuine pending
-  // publish_verdict call.
+  // publish_verdict call and turned its draft into the report's revision-1 verdict.
   const polled = await pollOnce("e2e-flow-poller", { client });
   assert.equal(polled, session.id);
 
@@ -260,6 +270,15 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
     .where(dbm.eq(dbm.report.id, reportRow.id))
     .limit(1);
   assert.equal(afterPoll.state, "AWAITING_APPROVAL");
+
+  const [verdictRow] = await dbm.db
+    .select()
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportRow.id))
+    .limit(1);
+  assert.ok(verdictRow, "the poll must have drafted the verdict from the agent's pending call");
+  assert.equal(verdictRow.outcome, "ANALYSIS_ONLY");
+  assert.equal(verdictRow.contentHash, computeContentHash(verdictRow.payload));
 
   const [pendingSession] = await dbm.db
     .select()
