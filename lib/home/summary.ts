@@ -43,8 +43,8 @@ export async function readHomeSummary(): Promise<HomeSummary> {
           open: sql<number>`count(*) filter (where ${report.state} not in (${terminal}))::int`,
           awaiting: sql<number>`count(*) filter (
             where ${report.state} = 'AWAITING_APPROVAL'
-              and ${agentSession.pendingThreadId} is not null
               and ${agentSession.pendingVerdictId} is not null
+              and ${agentSession.pendingApprovedContentHash} is not null
           )::int`,
         })
         .from(report)

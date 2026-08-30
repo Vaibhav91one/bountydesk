@@ -236,6 +236,37 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
 });
 
+test("a synthesized verdict with null thread markers is counted as awaiting on the board", async () => {
+  // The relaxed pending constraint allows a third shape: verdict/hash set with thread/tool-call
+  // null, the server-authored ANALYSIS_ONLY verdict a dead-end run mints. The board card must
+  // expose it as approvable, gating on the verdict rather than the thread.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "ANALYSIS_ONLY",
+      summary: "could not verify; needs human triage",
+      payload: "the exact comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `hash-${id}`,
+  });
+
+  const columns = await queue.listQueue();
+  const cards = column(columns, "awaiting-approval").cards;
+  assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
+});
+
 test("a card badges an agent that is actively investigating, and stops once a verdict lands", async () => {
   const { recordEvent } = await import("./lifecycle");
 

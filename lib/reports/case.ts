@@ -237,7 +237,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
       const [session] = await tx
         .select({
           pendingVerdictId: agentSession.pendingVerdictId,
-          pendingThreadId: agentSession.pendingThreadId,
+          pendingApprovedContentHash: agentSession.pendingApprovedContentHash,
           turnStatus: agentSession.turnStatus,
           finalSummary: agentSession.finalSummary,
           sandboxId: agentSession.sandboxId,
@@ -246,10 +246,14 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .from(agentSession)
         .where(eq(agentSession.reportId, id));
 
-      // Both halves of the pending tuple are required, the same test app/review/page.tsx
-      // makes: a verdict id with no thread is not a call anyone can answer.
+      // A verdict awaiting approval is gated on the verdict/hash pair, not the thread marker:
+      // a synthesized ANALYSIS_ONLY verdict (a dead-end run) has a verdict and hash to approve
+      // but no TrueForge call, so its thread/tool-call ids are null. Gating on the thread here
+      // would hide it from review and recreate the dead end this whole flow exists to close.
       const pendingVerdictId =
-        row.state === "AWAITING_APPROVAL" && session?.pendingThreadId
+        row.state === "AWAITING_APPROVAL" &&
+        session?.pendingVerdictId &&
+        session?.pendingApprovedContentHash
           ? session.pendingVerdictId
           : null;
 
