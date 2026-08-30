@@ -57,10 +57,9 @@ function renderFinding(finding: Finding, index: number): string {
 
 /**
  * Server-authored prose for an agent-drafted verdict: the only thing that turns the agent's
- * structured fields into the exact text a human approves and GitHub receives. Same reasoning
- * as trueforge-driver.ts's buildReproducedPayload -- the agent's raw words never reach the
- * outbound comment unrendered, which matters doubly here since the agent may have absorbed
- * prompt-injection content while probing an untrusted target.
+ * structured fields into the exact text a human approves and GitHub receives. The agent's raw
+ * words never reach the outbound comment unrendered, which matters doubly here since the
+ * agent may have absorbed prompt-injection content while probing an untrusted target.
  */
 export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft): string {
   const findingsBlock =
@@ -82,9 +81,12 @@ export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft)
  *
  * The authorization re-check is the load-bearing part: an agent claiming REPRODUCED or
  * NOT_REPRODUCED for a report with no bound target profile, or one whose repository grant has
- * since been revoked, is refused here before its claim ever becomes a verdict row, the same way
- * decideFreshVerdict refuses an unauthorized reproduction today. ANALYSIS_ONLY needs no live
- * authorization, since it never claims the sandboxed target actually confirmed anything.
+ * since been revoked, is refused here before its claim ever becomes a verdict row. This is the
+ * only place that enforcement happens now that trueforge-driver.ts no longer pre-decides
+ * anything; the turn message can describe a target as authorized, but this check is what
+ * actually stops an unauthorized claim from becoming a persisted verdict. ANALYSIS_ONLY needs
+ * no live authorization, since it never claims the sandboxed target actually confirmed
+ * anything.
  *
  * A report past the analysis stages is refused regardless of outcome: a revision-1 verdict is
  * this function's own idempotency key, so writing one for a cancelled, expired, delivered,
@@ -179,30 +181,6 @@ export async function draftVerdictFromPendingCall(
 
     return persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
   });
-}
-
-/**
- * Used only by trueforge-driver.ts's still-deterministic ensureSession, for a report that has
- * no agent session or capability token yet at the point its verdict is decided (session
- * creation happens later, once the verdict already exists -- see the comment at that call
- * site). draftVerdictFromPendingCall's capability-based lookup doesn't apply there, so the
- * driver calls this directly with the reportId and verdictId it already computed, reusing the
- * exact same validation, authorization re-check, and rendering.
- */
-export async function draftVerdictForReport(
-  reportId: string,
-  verdictId: string,
-  rawDraft: unknown,
-  tx: Executor,
-): Promise<DraftVerdictResult> {
-  const parsed = verdictDraftSchema.safeParse(rawDraft);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      reason: `invalid draft: ${parsed.error.issues.map((issue) => issue.message).join("; ")}`,
-    };
-  }
-  return persistAgentDraftedVerdict(reportId, verdictId, parsed.data, tx);
 }
 
 /**

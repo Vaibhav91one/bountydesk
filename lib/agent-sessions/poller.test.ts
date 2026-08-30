@@ -205,7 +205,7 @@ test("a running snapshot reschedules and never touches report state", async () =
   assert.equal(id, fixture.agentSessionId);
 
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnStatus, "INVESTIGATING");
   assert.equal(row.leaseOwner, null);
 
   const rep = await reportRow(fixture.reportId);
@@ -608,5 +608,5 @@ test("pollOnce renews its lease while getTurn is slow, so an independent sweeper
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.leaseOwner, null);
-  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnStatus, "INVESTIGATING");
 });

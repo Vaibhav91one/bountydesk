@@ -449,7 +449,7 @@ export const agentSession = pgTable(
     capabilityToken: text("capability_token").notNull(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
-    /** Local bookkeeping only, never a report state: RUNNING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
+    /** Local bookkeeping only, never a report state: RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
     turnStatus: text("turn_status").notNull().default("RUNNING"),
     pendingThreadId: text("pending_thread_id"),
     pendingToolCallId: text("pending_tool_call_id"),

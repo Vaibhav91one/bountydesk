@@ -4,12 +4,16 @@ import { agentSession, db, type Executor } from "@/lib/db";
 
 /**
  * Local bookkeeping only, never a report state (see lib/db/schema.ts on agentSession).
- * AWAITING_APPROVAL_HARNESS means TrueForge is holding a pending publish_verdict call, not
- * that the report has moved: the poller is what moves the report, once, when it first sees
- * that pending call (see poller.ts).
+ * RUNNING is set once, by the driver, the instant a turn is created and the agent hasn't
+ * called anything yet; INVESTIGATING is what the poller promotes it to once it has actually
+ * observed that same turn still going on a later poll, meaning the agent is genuinely mid
+ * investigation rather than just starting. AWAITING_APPROVAL_HARNESS means TrueForge is
+ * holding a pending publish_verdict call, not that the report has moved: the poller is what
+ * moves the report, once, when it first sees that pending call (see poller.ts).
  */
 export type TurnStatus =
   | "RUNNING"
+  | "INVESTIGATING"
   | "AWAITING_APPROVAL_HARNESS"
   | "DONE_NO_ACTION"
   | "ERROR"
