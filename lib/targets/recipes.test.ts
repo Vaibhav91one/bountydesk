@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import test from "node:test";
 
 import { getRecipesForTarget } from "./recipes";
+import { recipeOracleReady } from "./authorize-reproduction";
 
 const CONFIG = {
   baseUrl: "http://localhost:3000",
@@ -331,4 +332,22 @@ test("log4shell oracle: the in-band canary echo is true, a non-200 is false", as
   const canary = freshCanary();
   assert.equal(await log4shell.oracleCheck({ status: 200, body: `resolved ${canary}` }, canary), true);
   assert.equal(await log4shell.oracleCheck({ status: 500, body: canary }, canary), false);
+});
+
+// Oracle-readiness gate. A not-ready recipe must fall to the same no-approved-oracle path an
+// unknown recipe does, so a run against any of the four onboarding targets is provably
+// ANALYSIS_ONLY today and a false REPRODUCED is structurally impossible. authorizeReproduction-
+// Target applies recipeOracleReady after looking the recipe up; that lookup and this predicate
+// are exactly the gate, and both are exercised here without touching the database.
+test("the four onboarding recipes are gated not-oracle-ready", () => {
+  assert.equal(recipeOracleReady(onlyRecipe("dvwa", DVWA_CONFIG)), false);
+  assert.equal(recipeOracleReady(onlyRecipe("webgoat", WEBGOAT_CONFIG)), false);
+  assert.equal(recipeOracleReady(onlyRecipe("dsvw", DSVW_CONFIG)), false);
+  assert.equal(recipeOracleReady(onlyRecipe("log4shell-cve-lab", LOG4SHELL_CONFIG)), false);
+});
+
+test("juice-shop recipes stay oracle-ready", () => {
+  for (const recipe of getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG })) {
+    assert.equal(recipeOracleReady(recipe), true);
+  }
 });

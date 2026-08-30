@@ -27,7 +27,19 @@ build from, not the value written to the profile. DVWA and WebGoat have a well k
 image; DSVW is a single Python file with no canonical image, and the Log4Shell lab ships its own
 Dockerfile, so both of those are built from source.
 
-## Why the recipes do not run yet, beyond the missing image
+## These four cannot produce a verdict, by construction
+
+Documentation alone would not stop a future operator who builds a snapshot and seeds one of these
+profiles from getting a silently wrong verdict, so the block is structural rather than written.
+Each of the four recipes carries `oracleReady: false` (see the field's doc in
+`lib/reproduction/types.ts`), and `authorizeReproductionTarget` treats a not-ready recipe exactly
+as it treats a missing one: `NO_APPROVED_ORACLE`. Since authorization is the single gate every
+reproduction run passes through, a run against any of these four resolves `ANALYSIS_ONLY` today no
+matter what the app returns. A false `REPRODUCED` is impossible until someone deliberately removes
+the flag, and removing it is the same act as closing the gap below. juice-shop's recipes carry no
+flag, so they stay ready and unchanged.
+
+## Why each recipe is not ready yet, beyond the missing image
 
 juice-shop is a JSON API, and the reproduction orchestrator is built for one: it substitutes the
 run's fresh canary only inside a POST body, sends that body as `application/json`, and hands the
@@ -82,10 +94,12 @@ These mirror the juice-shop path and are not done for any of the four.
    profile name it is given, so no script change was needed to add these. Passing
    `BOUNTYDESK_TARGET_<PREFIX>_BUILD_MARKER` overrides the `PENDING_OPERATOR_BUILD` placeholder
    with the real commit, so the constant in the registry does not have to be edited by hand.
-6. Close the orchestrator gap the recipe names, if it needs one: form-encoded bodies for DVWA and
-   WebGoat, path or header canary substitution for DSVW and Log4Shell, and an out-of-band oracle
-   for Log4Shell. Until then a run against these targets stays `ANALYSIS_ONLY`, which is the
-   correct outcome for a target that cannot yet be proven.
+6. Close the orchestrator gap the recipe names: form-encoded bodies for DVWA and WebGoat, path or
+   header canary substitution for DSVW and Log4Shell, and an out-of-band oracle for Log4Shell.
+   Then, and only then, mark the recipe ready by removing its `oracleReady: false`. Until that
+   flag is gone the run stays `ANALYSIS_ONLY`, which is the correct outcome for a target that
+   cannot yet be proven. Flipping the flag without closing the gap is the one thing that would
+   reintroduce the false-verdict risk, so it is deliberately a separate, visible edit.
 
 Only after all of this can a report against one of these repositories produce a reproduced or
 not-reproduced verdict. Until then the capability boundary refuses it, exactly as it should.
