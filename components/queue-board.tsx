@@ -185,10 +185,17 @@ export function Card({
         ) : null}
       </div>
 
-      {showState ? (
-        <Badge variant={card.state === "DELIVERED" ? "success" : "outline"}>
-          {STATE_LABEL[card.state] ?? card.state}
-        </Badge>
+      {showState || card.investigating ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {showState ? (
+            <Badge variant={card.state === "DELIVERED" ? "success" : "outline"}>
+              {STATE_LABEL[card.state] ?? card.state}
+            </Badge>
+          ) : null}
+          {/* Nothing in the report's own state distinguishes "queued" from "an agent is
+              actively working this right now" -- this badge is that difference. */}
+          {card.investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
+        </div>
       ) : null}
 
       {/* A rule, because this line is a different kind of thing from the two above it: those

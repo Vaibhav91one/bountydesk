@@ -188,6 +188,124 @@ test("getTurn resolves a pending publish_verdict call by correlating source_even
   assert.ok(calls.some((u) => u.includes("/events")), "must resolve the pending call via listTurnEvents");
 });
 
+/** Newest first, matching the real server's answer to the `order: "desc"` request this client
+ * always sends -- the fixture below stands in for that server, not for the mock's own default. */
+const NEWEST_FIRST_EVENTS = [
+  {
+    type: "model.message",
+    id: "evt_3",
+    created_at: "2026-01-01T00:00:02Z",
+    thread_id: "main",
+    content: null,
+    tool_calls: [
+      {
+        id: "call_2",
+        type: "function",
+        function: { name: "http_probe", arguments: JSON.stringify({ path: "/rest/products/search" }) },
+        tool_info: { type: "mcp", name: "http_probe", server_id: "srv_1", server_name: "bountydesk" },
+      },
+    ],
+  },
+  // A plain text reply with no tool call at all: must not blow up on a missing tool_calls
+  // array, and must contribute nothing to the result.
+  {
+    type: "model.message",
+    id: "evt_2",
+    created_at: "2026-01-01T00:00:01Z",
+    thread_id: "main",
+    content: "thinking out loud",
+  },
+  {
+    type: "model.message",
+    id: "evt_1",
+    created_at: "2026-01-01T00:00:00.5Z",
+    thread_id: "main",
+    content: null,
+    tool_calls: [
+      {
+        id: "call_1",
+        type: "function",
+        function: { name: "scope_check", arguments: JSON.stringify({ path: "/rest/products" }) },
+        tool_info: { type: "mcp", name: "scope_check", server_id: "srv_1", server_name: "bountydesk" },
+      },
+    ],
+  },
+];
+
+test("listToolCalls collects every model.message event's tool calls, oldest first, and returns the newest event id as the cursor", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: NEWEST_FIRST_EVENTS,
+        pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const result = await client.listToolCalls?.("sess_1", "turn_1");
+      assert.deepEqual(result, {
+        calls: [
+          { id: "call_1", toolName: "scope_check", argumentsJson: JSON.stringify({ path: "/rest/products" }) },
+          {
+            id: "call_2",
+            toolName: "http_probe",
+            argumentsJson: JSON.stringify({ path: "/rest/products/search" }),
+          },
+        ],
+        cursor: "evt_3",
+      });
+    },
+  );
+});
+
+test("listToolCalls stops at `since` instead of re-walking the turn's whole history", async () => {
+  const requestedUrls: string[] = [];
+  await withFetch(
+    (async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input));
+      return json({
+        data: NEWEST_FIRST_EVENTS,
+        pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+      });
+    }) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      // Already caught up through evt_2: only evt_3's call_2 is new. evt_1's call_1 must not
+      // reappear, and the walk must stop instead of paging into history it already has.
+      const result = await client.listToolCalls?.("sess_1", "turn_1", { since: "evt_2" });
+      assert.deepEqual(result, {
+        calls: [
+          {
+            id: "call_2",
+            toolName: "http_probe",
+            argumentsJson: JSON.stringify({ path: "/rest/products/search" }),
+          },
+        ],
+        cursor: "evt_3",
+      });
+    },
+  );
+
+  assert.ok(
+    requestedUrls.some((u) => u.includes("order=desc")),
+    "must request newest-first so a since cutoff can stop early",
+  );
+});
+
+test("listToolCalls leaves the cursor unchanged when nothing new has happened", async () => {
+  await withFetch(
+    (async () =>
+      json({
+        data: NEWEST_FIRST_EVENTS,
+        pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+      })) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const result = await client.listToolCalls?.("sess_1", "turn_1", { since: "evt_3" });
+      assert.deepEqual(result, { calls: [], cursor: "evt_3" });
+    },
+  );
+});
+
 test("getTurn follows event pagination when the source event is on a later page", async () => {
   const turnResponse = {
     data: {

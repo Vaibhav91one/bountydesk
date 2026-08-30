@@ -1,0 +1,1 @@
+ALTER TABLE "agent_session" ADD COLUMN "last_mirrored_event_id" text;

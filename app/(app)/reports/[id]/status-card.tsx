@@ -2,10 +2,11 @@ import { GitHubLight } from "developer-icons";
 
 import { RollingIcon } from "@/components/rolling-icon";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
 import { mascotForState } from "@/lib/mascot/states";
-import type { CaseFile } from "@/lib/reports/case";
+import { isAgentInvestigating, type CaseFile } from "@/lib/reports/case";
 
 /** One fact. The value is always something the database holds. */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -36,11 +37,18 @@ export function StatusCard({
   outcomeLabel: string | null;
 }) {
   const mascot = mascotForState(file.state);
+  const hasToolCallEvents = file.events.some((e) => e.channel === "agent");
+  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, hasToolCallEvents);
 
   return (
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
-        <h2 className="text-heading text-foreground">Current run</h2>
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-heading text-foreground">Current run</h2>
+          {/* Nothing in stateLabel below distinguishes "queued" from "an agent is actively
+              working this right now" -- this badge is that difference. */}
+          {investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
+        </div>
         {file.issueUrl ? (
           <Button
             size="sm"

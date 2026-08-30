@@ -474,3 +474,40 @@ test("a pending verdict belonging to another report is not shown or approvable",
   // The call cannot be identified, so there is nothing here anybody may approve.
   assert.equal(file?.awaitingVerdictId, null);
 });
+
+test("the case file reads the session's own turn status", async () => {
+  const withoutSession = await seedReport("TRIAGING");
+  assert.equal((await cases.readCase(withoutSession))?.turnStatus, null);
+
+  const investigating = await seedReport("TRIAGING");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: investigating,
+    capabilityToken: `token-${investigating}`,
+    sessionId: `session-${investigating}`,
+    turnStatus: "INVESTIGATING",
+  });
+
+  assert.equal((await cases.readCase(investigating))?.turnStatus, "INVESTIGATING");
+});
+
+test("a report is investigating only while its turn is live, has observed a tool call, and no verdict has landed yet", () => {
+  const { isAgentInvestigating } = cases;
+
+  assert.equal(isAgentInvestigating("RUNNING", false, true), true);
+  assert.equal(isAgentInvestigating("INVESTIGATING", false, true), true);
+
+  // A turn that has just started has no observed activity yet: it must not read as
+  // investigating just because RUNNING was set the instant createTurn returned.
+  assert.equal(isAgentInvestigating("RUNNING", false, false), false);
+  assert.equal(isAgentInvestigating("INVESTIGATING", false, false), false);
+
+  // A verdict already exists: whatever the turn status still says, the investigation this
+  // page cares about is over.
+  assert.equal(isAgentInvestigating("RUNNING", true, true), false);
+  assert.equal(isAgentInvestigating("INVESTIGATING", true, true), false);
+
+  // Every other turn status, and no session at all, is not "investigating" either way.
+  for (const status of ["AWAITING_APPROVAL_HARNESS", "DONE_NO_ACTION", "ERROR", "CANCELLED", null]) {
+    assert.equal(isAgentInvestigating(status, false, true), false, `${status} must not read as investigating`);
+  }
+});

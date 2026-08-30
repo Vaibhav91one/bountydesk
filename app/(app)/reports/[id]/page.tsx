@@ -8,7 +8,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
 import { formatStamp } from "@/lib/format";
-import { isReportId, oracleDecided, readCase, verdictFindings, type CaseFile } from "@/lib/reports/case";
+import {
+  isAgentInvestigating,
+  isReportId,
+  oracleDecided,
+  readCase,
+  verdictFindings,
+  type CaseFile,
+} from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
@@ -81,13 +88,17 @@ function Panel({
  */
 const EVENT_PHASE: Record<string, string> = {
   intake: "intake",
-  sandbox: "reproduction",
-  repro: "reproduction",
+  sandbox: "investigation",
+  repro: "investigation",
+  // The poller's mirrored tool-call events (lib/agent-sessions/poller.ts), type
+  // "agent.tool_call:<toolName>". This is what actually populates the investigation step
+  // during a live run, ahead of any sandbox/repro events the deterministic pipeline would add.
+  agent: "investigation",
   analysis: "verdict",
   verdict: "verdict",
   approval: "approval",
   delivery: "delivery",
-  target: "reproduction",
+  target: "investigation",
 };
 
 /**
@@ -103,7 +114,7 @@ function stepMascot(
   file: CaseFile,
 ): Parameters<typeof mascotState>[0] {
   if (key === "intake") return "ingest";
-  if (key === "reproduction") {
+  if (key === "investigation") {
     // idle when it has not been reached: scanning belongs to the verdict row below, and two
     // rows carrying the same picture is what made this list read as one repeated step.
     return state === "current" ? "reproducing" : state === "skipped" ? "infra-hiccup" : "idle";
@@ -119,6 +130,14 @@ function lifecycle(file: CaseFile) {
   const terminal = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
   const past = (states: string[]) => states.includes(file.state);
 
+  // The step's own step log, not the dead REPRODUCING report state: nothing transitions into
+  // REPRODUCING under the agent-authored model, so a step fed from it would sit on "Coming
+  // soon" for every real run. Fed instead from the poller's mirrored tool-call events
+  // (EVENT_PHASE's "agent" entry) and the session's own turnStatus, both of which move during
+  // a live investigation.
+  const investigationEvents = file.events.filter((e) => e.channel === "agent");
+  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, investigationEvents.length > 0);
+
   return [
     {
       key: "intake",
@@ -127,21 +146,21 @@ function lifecycle(file: CaseFile) {
       state: "done" as const,
     },
     {
-      key: "reproduction",
-      label: "Reproduction",
-      // ANALYSIS_ONLY is precisely the state that means this did not happen.
-      note:
-        file.state === "ANALYSIS_ONLY"
-          ? "Did not run"
-          : file.state === "REPRODUCING"
-            ? "In progress"
-            : "Coming soon",
-      state:
-        file.state === "REPRODUCING"
+      key: "investigation",
+      label: "Investigation",
+      note: file.verdict
+        ? `${investigationEvents.length} ${investigationEvents.length === 1 ? "step" : "steps"} recorded`
+        : investigating
+          ? "In progress"
+          : "Not started",
+      // Done the moment a verdict exists: the live path mints revision 1 only once the agent
+      // calls publish_verdict, which is also the last thing that happens in its turn (see
+      // lib/mcp/publish-verdict.ts), so a verdict existing means the investigation is over.
+      state: file.verdict
+        ? ("done" as const)
+        : investigating
           ? ("current" as const)
-          : file.state === "TRIAGING"
-            ? ("pending" as const)
-            : ("skipped" as const),
+          : ("pending" as const),
     },
     {
       key: "verdict",
@@ -262,7 +281,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     file.state === "TRIAGING"
       ? "intake"
       : file.state === "REPRODUCING"
-        ? "reproduction"
+        ? "investigation"
         : file.state === "DELIVERING" || file.state === "DELIVERED"
           ? "delivery"
           : "verdict";
