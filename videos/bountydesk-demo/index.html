@@ -76,17 +76,14 @@
         inset: 0;
         z-index: 10;
         overflow: hidden;
-        background:
-          radial-gradient(circle at 78% 14%, rgba(247, 244, 236, 0.9), transparent 26%),
-          radial-gradient(circle at 62% 58%, rgba(132, 120, 255, 0.24), transparent 30%),
-          radial-gradient(circle at 40% 92%, rgba(62, 230, 173, 0.2), transparent 34%),
-          linear-gradient(145deg, #183b3f, #324e4a 48%, #481f35 100%);
+        background: var(--bg-page);
       }
 
       .recording-bg::before {
         content: "";
         position: absolute;
         inset: -120px;
+        display: none;
         opacity: 0.34;
         background:
           linear-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px),
@@ -99,6 +96,7 @@
         content: "";
         position: absolute;
         inset: 0;
+        display: none;
         opacity: 0.12;
         background-image:
           repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.12) 0 1px, transparent 1px 3px);
@@ -125,6 +123,12 @@
         height: 970px;
         border-radius: 34px;
         opacity: 0;
+      }
+
+      #tour-card {
+        background: transparent;
+        border-color: transparent;
+        box-shadow: none;
       }
 
       .bd-shot {
@@ -163,6 +167,15 @@
       .bd-chrome.bare {
         display: grid;
         place-items: center;
+        color: var(--ink);
+        background: var(--bg-page);
+      }
+
+      .bd-chrome.intro {
+        display: grid;
+        place-items: center;
+        color: var(--ink);
+        background: var(--bg-page);
       }
 
       .bd-chrome.portrait {
@@ -355,6 +368,72 @@
         height: 225px;
       }
 
+      .problem-shot {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        padding: 96px 112px;
+        text-align: center;
+      }
+
+      .problem-shot h1 {
+        max-width: 1040px;
+        margin: 0 auto;
+        font-size: 76px;
+        line-height: 0.98;
+      }
+
+      .brand-intro-shot {
+        width: 100%;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        align-content: center;
+        gap: 28px;
+        padding: 96px 112px;
+        text-align: center;
+      }
+
+      .brand-intro-shot h2 {
+        max-width: 980px;
+        font-size: 58px;
+        line-height: 1;
+        color: rgba(247, 244, 236, 0.72);
+      }
+
+      .brand-intro-lockup {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+      }
+
+      .brand-intro-logo {
+        width: 112px;
+        height: 112px;
+        display: block;
+        opacity: 0;
+        will-change: transform, opacity;
+      }
+
+      .brand-intro-shot h1 {
+        max-width: 1120px;
+        margin: 0 auto;
+        font-size: 92px;
+        line-height: 0.96;
+      }
+
+      .text-animate {
+        display: inline;
+      }
+
+      .text-animate-token {
+        display: inline-block;
+        opacity: 0;
+        will-change: transform, opacity;
+      }
+
       .stack-panel,
       .checks,
       .terminal-block,
@@ -481,7 +560,7 @@
         font-family: var(--font-mono);
         font-size: 17px;
         font-weight: 400;
-        color: var(--accent-2);
+        color: #20785a;
       }
 
       .packet {
@@ -592,12 +671,12 @@
 
       .scope-card span {
         font-family: var(--font-mono);
-        color: var(--accent-2);
+        color: #20785a;
         text-transform: uppercase;
       }
 
       .scope-card.out span {
-        color: var(--warning);
+        color: #8d6f36;
       }
 
       .scope-card strong {
@@ -639,13 +718,13 @@
       .status-file span,
       .status-file small {
         font-family: var(--font-mono);
-        color: var(--ink-muted);
+        color: #716e7a;
       }
 
       .status-file strong {
         font-size: 94px;
         font-weight: 400;
-        color: var(--accent-2);
+        color: #2b9f77;
       }
 
       .matches {
@@ -821,12 +900,13 @@
         background: var(--accent);
         transform-origin: 0 50%;
         z-index: 20;
+        opacity: 0;
       }
     </style>
   </head>
   <body>
-    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="110.5" data-width="1920" data-height="1080" data-fps="60">
-      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="110.5" data-track-index="4"></section>
+    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="96.5" data-width="1920" data-height="1080" data-fps="60">
+      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="96.5" data-track-index="4"></section>
 
       <div data-hf-id="hf-bd-card" id="tour-card" class="tour-card">
         <div data-hf-id="hf-bd-s01" id="shot01" class="bd-shot" data-bd-shot="home"></div>
@@ -849,7 +929,7 @@
         <div data-hf-id="hf-bd-s14" id="shot14" class="bd-shot" data-bd-shot="approval"></div>
       </div>
 
-      <section data-hf-id="hf-bd-caps" id="tour-caps" class="clip scene" data-start="0" data-duration="110.5" data-track-index="5" data-layout-allow-caption-zone="" style="z-index: 14">
+      <section data-hf-id="hf-bd-caps" id="tour-caps" class="clip scene" data-start="0" data-duration="96.5" data-track-index="5" data-layout-allow-caption-zone="" style="z-index: 14">
         <div data-hf-id="hf-bd-c01" id="tc01" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-9gry" class="dot"></span>“A triage agent that cannot declare victory by itself.” The canary, not the model, decides whether a report reproduced.</div>
         <div data-hf-id="hf-bd-c02" id="tc02" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zcc2" class="dot"></span>OAuth signs in the user. The GitHub App grants repo access. The server binds each delivery to the target profile.</div>
         <div data-hf-id="hf-bd-c03" id="tc03" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zqn3" class="dot"></span>No defender fixture, no reproduced verdict. The report becomes analysis only, and a human decides the next move.</div>
@@ -867,16 +947,16 @@
         <div data-hf-id="hf-bd-c15" id="tc15" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-l2lu" class="dot"></span>One approved comment ships. The token is discarded, and exact replays are ignored.</div>
       </section>
 
-      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="110.5" data-track-index="10" data-volume="1"></audio>
-      <audio data-hf-id="hf-4bv1" id="whoosh01" src="assets/audio/whoosh.wav" data-start="6.0" data-duration="0.7" data-track-index="11" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-onif" id="whoosh02" src="assets/audio/whoosh.wav" data-start="22.0" data-duration="0.7" data-track-index="12" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-od1x" id="whoosh03" src="assets/audio/whoosh.wav" data-start="40.0" data-duration="0.7" data-track-index="13" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-vqjq" id="whoosh04" src="assets/audio/whoosh.wav" data-start="61.0" data-duration="0.7" data-track-index="14" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-kli6" id="whoosh05" src="assets/audio/whoosh.wav" data-start="82.7" data-duration="0.7" data-track-index="15" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="48.6" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
-      <audio data-hf-id="hf-bfk6" id="ping02" src="assets/audio/ping.wav" data-start="105.0" data-duration="0.38" data-track-index="17" data-volume="0.65"></audio>
+      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="96.5" data-track-index="10" data-volume="1"></audio>
+      <audio data-hf-id="hf-4bv1" id="whoosh01" src="assets/audio/whoosh.wav" data-start="4.0" data-duration="0.7" data-track-index="11" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-onif" id="whoosh02" src="assets/audio/whoosh.wav" data-start="8.0" data-duration="0.7" data-track-index="12" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-od1x" id="whoosh03" src="assets/audio/whoosh.wav" data-start="26.0" data-duration="0.7" data-track-index="13" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-vqjq" id="whoosh04" src="assets/audio/whoosh.wav" data-start="47.0" data-duration="0.7" data-track-index="14" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-kli6" id="whoosh05" src="assets/audio/whoosh.wav" data-start="68.7" data-duration="0.7" data-track-index="15" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="34.6" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
+      <audio data-hf-id="hf-bfk6" id="ping02" src="assets/audio/ping.wav" data-start="91.0" data-duration="0.38" data-track-index="17" data-volume="0.65"></audio>
 
-      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="110.5" data-track-index="6"></div>
+      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="96.5" data-track-index="6"></div>
     </div>
 
     <script>
@@ -884,8 +964,8 @@
       var G = "power3.out";
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
-      var starts = [0, 6, 22, 28, 34.5, 40, 48, 54, 61, 67.5, 78.5, 82.7, 86.5, 96.5, 104.5];
-      var durations = [6, 16, 6, 6.5, 5.5, 8, 6, 7, 6.5, 11, 4.2, 3.8, 10, 8, 6];
+      var starts = [0, 4, 8, 14, 20.5, 26, 34, 40, 47, 53.5, 64.5, 68.7, 72.5, 82.5, 90.5];
+      var durations = [4, 4, 6, 6.5, 5.5, 8, 6, 7, 6.5, 11, 4.2, 3.8, 10, 8, 6];
 
       starts.forEach(function(start, index) {
         var shot = "#shot" + String(index + 1).padStart(2, "0");
@@ -895,19 +975,30 @@
           tl.set("#shot" + String(index).padStart(2, "0"), { opacity: 0 }, start);
         }
         tl.fromTo(shot + " .bd-chrome", { scale: 1.035 }, { scale: 1, duration: Math.min(1.2, durations[index] * 0.22), ease: G }, start);
-        tl.fromTo(cap, { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.42, ease: G }, start + 0.35);
-        tl.to(cap, { y: -22, opacity: 0, duration: 0.34, ease: G }, start + durations[index] - 0.55);
+        if (index > 1) {
+          tl.fromTo(cap, { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.42, ease: G }, start + 0.35);
+          tl.to(cap, { y: -22, opacity: 0, duration: 0.34, ease: G }, start + durations[index] - 0.55);
+        }
       });
 
-      tl.set("#tour-card", { opacity: 0 }, 96.5);
-      tl.set("#tour-card-p", { opacity: 1 }, 96.5);
-      tl.set("#tour-card-p", { opacity: 0 }, 104.5);
-      tl.set("#tour-card", { opacity: 1 }, 104.5);
+      tl.set("#tour-card", { backgroundColor: "#11131d", borderColor: "rgba(255, 255, 255, 0.14)", boxShadow: "0 34px 70px rgba(0, 0, 0, 0.48)" }, 8);
+      tl.set("#progress", { opacity: 1 }, 8);
+      tl.fromTo("#shot01 .text-animate-word", { y: 42, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.055, ease: G }, 0.55);
+      tl.to("#shot01 .text-animate-word", { y: -34, opacity: 0, duration: 0.34, stagger: 0.018, ease: "power2.in" }, 3.25);
+      tl.fromTo("#shot02 .brand-intro-logo", { x: -24, scale: 0.9, opacity: 0 }, { x: 0, scale: 1, opacity: 1, duration: 0.56, ease: G }, 4.42);
+      tl.fromTo("#shot02 .text-animate-character", { x: 28, opacity: 0 }, { x: 0, opacity: 1, duration: 0.34, stagger: 0.018, ease: G }, 4.58);
+      tl.to("#shot02 .brand-intro-logo", { x: -18, scale: 0.96, opacity: 0, duration: 0.34, ease: "power2.in" }, 7.35);
+      tl.to("#shot02 .text-animate-character", { x: -24, opacity: 0, duration: 0.3, stagger: 0.012, ease: "power2.in" }, 7.42);
 
-      tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: 110.5, ease: "none" }, 0);
-      tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: 110.5, ease: "none" }, 0);
+      tl.set("#tour-card", { opacity: 0 }, 82.5);
+      tl.set("#tour-card-p", { opacity: 1 }, 82.5);
+      tl.set("#tour-card-p", { opacity: 0 }, 90.5);
+      tl.set("#tour-card", { opacity: 1 }, 90.5);
+
+      tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: 96.5, ease: "none" }, 0);
+      tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: 96.5, ease: "none" }, 0);
       tl.set("#bgm", { volume: 0.45 }, 0);
-      tl.to("#bgm", { volume: 0.2, duration: 3, ease: "power1.out" }, 107);
+      tl.to("#bgm", { volume: 0.2, duration: 3, ease: "power1.out" }, 93);
 
       window.__timelines["bountydesk-tour"] = tl;
     </script>
