@@ -449,6 +449,16 @@ export const agentSession = pgTable(
     capabilityToken: text("capability_token").notNull(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
+    /** The Daytona sandbox provisioned for this session's investigation, and the app port it
+     * listens on -- both null when no target was bound or provisioning failed, which is most
+     * sessions today. Set once, before the turn starts (lib/analysis/trueforge-driver.ts), and
+     * read by probe_target (lib/mcp/probe-target.ts, registered on the publish-verdict MCP
+     * route) to reach it. Teardown (lib/sandbox/provision.ts's teardownSandbox, called from
+     * lib/mcp/publish-verdict.ts and lib/agent-sessions/poller.ts) deletes the Daytona sandbox
+     * itself; it does not clear these columns, which is deliberate -- they stay as a record of
+     * which sandbox this session used, not a liveness flag. */
+    sandboxId: text("sandbox_id"),
+    appPort: integer("app_port"),
     /** Local bookkeeping only, never a report state: RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
     turnStatus: text("turn_status").notNull().default("RUNNING"),
     /**
