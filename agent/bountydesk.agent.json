@@ -37,6 +37,7 @@
     "config": {
       "sandbox": { "enabled": true },
       "dynamic_sub_agents": { "enabled": true },
+      "ask_user_questions": { "enabled": false },
       "iteration_limit": 60
     }
   }
