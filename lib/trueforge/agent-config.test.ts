@@ -1,9 +1,25 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import agentDefinition from "@/agent/bountydesk.agent.json";
 
 import { buildMcpServerManifest, SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "./agent-config";
+import { parseFrontmatterName } from "./skill-frontmatter";
+
+const EXPECTED_SKILL_NAMES = [
+  "bountydesk-recon",
+  "bountydesk-challenges",
+  "bountydesk-validation",
+  "bountydesk-triage",
+  "bountydesk-api-security",
+  "bountydesk-payloads",
+  "bountydesk-dast",
+  "bountydesk-cve-lab-construction",
+  "bountydesk-firmware",
+  "bountydesk-mobile",
+];
 
 test("the BountyDesk agent preloads the approval-gated publish_verdict tool", () => {
   assert.equal(agentDefinition.name, "bountydesk");
@@ -31,9 +47,19 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
   assert.equal(agentDefinition.manifest.config.dynamic_sub_agents.enabled, true);
 });
 
-test("the manifest does not wire in skills yet (this PR is mechanics only)", () => {
-  const skills = (agentDefinition.manifest as { skills?: unknown[] }).skills;
-  assert.ok(skills === undefined || skills.length === 0);
+test("the manifest wires in exactly the 10 ported skills, each backed by a real SKILL.md", () => {
+  const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
+  assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
+
+  for (const name of skills) {
+    // bountydesk-<dir> is the naming convention skills.test.ts also enforces; deriving the
+    // directory from the name here (rather than hardcoding a second name/dir map) means the
+    // two checks can't silently drift on what "the skill directory" means.
+    const dirName = name.replace(/^bountydesk-/, "");
+    const skillPath = path.join(process.cwd(), "skills", dirName, "SKILL.md");
+    const content = readFileSync(skillPath, "utf8");
+    assert.equal(parseFrontmatterName(content), name);
+  }
 });
 
 test("the MCP connector points at the authenticated publish-verdict route", () => {

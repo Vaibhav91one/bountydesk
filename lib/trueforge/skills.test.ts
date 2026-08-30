@@ -3,6 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
+import { parseFrontmatterName } from "./skill-frontmatter";
+
 /**
  * Pure filesystem check, no DB and no TrueForge SDK: apply-skills.ts registers each
  * skills/*\/SKILL.md by the name in its frontmatter, and an agent manifest references that
@@ -10,11 +12,6 @@ import test from "node:test";
  * silently register the wrong name, so this catches the mismatch at test time instead of at
  * an `agent:apply` run someone forgets to re-check.
  */
-function parseFrontmatterName(content: string): string | undefined {
-  const frontmatter = content.match(/^---\n([\s\S]*?)\n---/);
-  return frontmatter?.[1].match(/^name:\s*(.+)$/m)?.[1]?.trim();
-}
-
 const skillsDir = path.join(process.cwd(), "skills");
 const skillDirNames = readdirSync(skillsDir, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
