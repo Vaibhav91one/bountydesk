@@ -11,6 +11,7 @@ import {
   type Executor,
 } from "@/lib/db";
 import { COLUMNS, phaseOf } from "@/lib/reports/columns";
+import { isAgentInvestigating } from "@/lib/reports/case";
 import { TERMINAL_STATES } from "@/lib/reports/states";
 
 export { COLUMNS, phaseOf };
@@ -46,6 +47,8 @@ export type QueueCard = {
   updatedAt: Date;
   /** The exact verdict a reviewer would answer. Only ever set in AWAITING_APPROVAL. */
   awaitingVerdictId: string | null;
+  /** Whether an agent is actively working this report right now (see isAgentInvestigating). */
+  investigating: boolean;
 };
 
 export type QueueColumn = {
@@ -95,6 +98,9 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
         where s.report_id = ${report.id} and s.pending_thread_id is not null
         limit 1
       )`,
+      turnStatus: sql<string | null>`(
+        select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
+      )`,
     })
     .from(report)
     .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
@@ -112,6 +118,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.pendingVerdictId : null,
+    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null),
   }));
 }
 
@@ -224,6 +231,9 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
         select s.pending_verdict_id from agent_session s
         where s.report_id = ${report.id} and s.pending_thread_id is not null
       )`,
+      turnStatus: sql<string | null>`(
+        select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
+      )`,
     })
     .from(report)
     .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
@@ -242,6 +252,7 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
     awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.awaitingVerdictId : null,
+    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null),
     origin: row.repositoryFullName ?? row.channel,
     createdAt: row.createdAt,
   }));

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
-import type { PendingToolCall, TrueForgeClient, TurnSnapshot } from "@/lib/trueforge/client";
+import type {
+  ObservedToolCall,
+  PendingToolCall,
+  TrueForgeClient,
+  TurnSnapshot,
+} from "@/lib/trueforge/client";
 
 /**
  * Real Postgres for the same reason as lib/delivery/worker.test.ts: the lease, the report
@@ -90,7 +95,10 @@ async function drainOthers() {
     .set({ turnStatus: "DONE_NO_ACTION", leaseOwner: null, leaseExpiresAt: null });
 }
 
-function fakeClient(snapshot: TurnSnapshot | (() => TurnSnapshot)): TrueForgeClient {
+function fakeClient(
+  snapshot: TurnSnapshot | (() => TurnSnapshot),
+  toolCalls: ObservedToolCall[] | (() => ObservedToolCall[]) = [],
+): TrueForgeClient {
   return {
     createSession: async () => {
       throw new Error("not used by pollOnce");
@@ -105,6 +113,7 @@ function fakeClient(snapshot: TurnSnapshot | (() => TurnSnapshot)): TrueForgeCli
     getTurnInput: async () => {
       throw new Error("not used by pollOnce");
     },
+    listToolCalls: async () => (typeof toolCalls === "function" ? toolCalls() : toolCalls),
   };
 }
 
@@ -210,6 +219,35 @@ test("a running snapshot reschedules and never touches report state", async () =
 
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "TRIAGING");
+});
+
+test("polling the same turn twice mirrors each tool call exactly once", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const toolCalls: ObservedToolCall[] = [
+    { id: "call-scope-1", toolName: "scope_check", argumentsJson: JSON.stringify({ path: "/rest/products" }) },
+    { id: "call-probe-1", toolName: "http_probe", argumentsJson: JSON.stringify({ path: "/rest/products" }) },
+  ];
+  const client = fakeClient({ status: "running" }, toolCalls);
+
+  await poller.pollOnce("w-mirror-1", { client });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-mirror-2", { client });
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, eventKey: dbm.sessionEvent.eventKey })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+
+  const mirrored = events.filter((e) => e.type.startsWith("agent.tool_call:"));
+  assert.equal(mirrored.length, 2, "each tool call is recorded once despite two polls");
+  assert.deepEqual(
+    mirrored.map((e) => e.type).sort(),
+    ["agent.tool_call:http_probe", "agent.tool_call:scope_check"],
+  );
 });
 
 test("a valid single publish_verdict call moves the report and records the pending markers", async () => {

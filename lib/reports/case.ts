@@ -70,6 +70,10 @@ export type CaseFile = {
   state: ReportState;
   createdAt: Date;
   updatedAt: Date;
+  /** Local agent-session bookkeeping, never a report state (see lib/db/schema.ts on
+   * agentSession): RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION |
+   * ERROR | CANCELLED. Null when no session exists yet for this report. */
+  turnStatus: string | null;
   target: { name: string; imageDigest: string } | null;
   verdict: CaseVerdict | null;
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
@@ -78,6 +82,20 @@ export type CaseFile = {
   awaitingVerdictId: string | null;
   events: CaseEvent[];
 };
+
+/**
+ * Whether the agent is actively working this report right now.
+ *
+ * True only while its harness turn is live (`RUNNING` or `INVESTIGATING`) and no verdict has
+ * been drafted yet: the live path mints a verdict only once the agent calls `publish_verdict`,
+ * the last thing it does in its turn (see lib/mcp/publish-verdict.ts), so a verdict already
+ * existing means whatever the turn status still says is stale or about to be. Used to badge
+ * "Agent investigating" on the board and the case-file, so a report an agent is mid-run on
+ * doesn't look identical to one sitting untouched.
+ */
+export function isAgentInvestigating(turnStatus: string | null, hasVerdict: boolean): boolean {
+  return !hasVerdict && (turnStatus === "RUNNING" || turnStatus === "INVESTIGATING");
+}
 
 /**
  * Whether a canary oracle, not just the agent's own reasoning, decided this verdict.
@@ -182,6 +200,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .select({
           pendingVerdictId: agentSession.pendingVerdictId,
           pendingThreadId: agentSession.pendingThreadId,
+          turnStatus: agentSession.turnStatus,
         })
         .from(agentSession)
         .where(eq(agentSession.reportId, id));
@@ -297,6 +316,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
 
       return {
         ...row,
+        turnStatus: session?.turnStatus ?? null,
         sourceLabel: caseSourceLabel(row.sourceRef, row.id),
         issueNumber: issue,
         issueUrl:

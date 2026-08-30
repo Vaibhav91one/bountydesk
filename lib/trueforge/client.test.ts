@@ -188,6 +188,69 @@ test("getTurn resolves a pending publish_verdict call by correlating source_even
   assert.ok(calls.some((u) => u.includes("/events")), "must resolve the pending call via listTurnEvents");
 });
 
+test("listToolCalls collects every model.message event's tool calls, in order", async () => {
+  const eventsResponse = {
+    data: [
+      {
+        type: "model.message",
+        id: "evt_1",
+        created_at: "2026-01-01T00:00:00.5Z",
+        thread_id: "main",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_1",
+            type: "function",
+            function: { name: "scope_check", arguments: JSON.stringify({ path: "/rest/products" }) },
+            tool_info: { type: "mcp", name: "scope_check", server_id: "srv_1", server_name: "bountydesk" },
+          },
+        ],
+      },
+      // A plain text reply with no tool call at all: must not blow up on a missing tool_calls
+      // array, and must contribute nothing to the result.
+      {
+        type: "model.message",
+        id: "evt_2",
+        created_at: "2026-01-01T00:00:01Z",
+        thread_id: "main",
+        content: "thinking out loud",
+      },
+      {
+        type: "model.message",
+        id: "evt_3",
+        created_at: "2026-01-01T00:00:02Z",
+        thread_id: "main",
+        content: null,
+        tool_calls: [
+          {
+            id: "call_2",
+            type: "function",
+            function: { name: "http_probe", arguments: JSON.stringify({ path: "/rest/products/search" }) },
+            tool_info: { type: "mcp", name: "http_probe", server_id: "srv_1", server_name: "bountydesk" },
+          },
+        ],
+      },
+    ],
+    pagination: { limit: 100, next_page_token: null, previous_page_token: null },
+  };
+
+  await withFetch(
+    (async () => json(eventsResponse)) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const calls = await client.listToolCalls?.("sess_1", "turn_1");
+      assert.deepEqual(calls, [
+        { id: "call_1", toolName: "scope_check", argumentsJson: JSON.stringify({ path: "/rest/products" }) },
+        {
+          id: "call_2",
+          toolName: "http_probe",
+          argumentsJson: JSON.stringify({ path: "/rest/products/search" }),
+        },
+      ]);
+    },
+  );
+});
+
 test("getTurn follows event pagination when the source event is on a later page", async () => {
   const turnResponse = {
     data: {

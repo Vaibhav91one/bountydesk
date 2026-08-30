@@ -234,6 +234,38 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
 });
 
+test("a card badges an agent that is actively investigating, and stops once a verdict lands", async () => {
+  const investigating = await seedReport("TRIAGING");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: investigating,
+    capabilityToken: `token-${investigating}`,
+    sessionId: `session-${investigating}`,
+    turnStatus: "INVESTIGATING",
+  });
+
+  // Same turn status, but a verdict already exists: the badge must not still claim the agent
+  // is working this report.
+  const verdicted = await seedReport("ANALYSIS_ONLY");
+  await dbm.db.insert(dbm.verdict).values({
+    reportId: verdicted,
+    outcome: "ANALYSIS_ONLY",
+    summary: "drafted",
+    payload: "the exact comment",
+    contentHash: `hash-${verdicted}`,
+  });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: verdicted,
+    capabilityToken: `token-${verdicted}`,
+    sessionId: `session-${verdicted}`,
+    turnStatus: "INVESTIGATING",
+  });
+
+  const columns = await queue.listQueue();
+  const cards = columns.flatMap((c) => c.cards);
+  assert.equal(cards.find((c) => c.id === investigating)?.investigating, true);
+  assert.equal(cards.find((c) => c.id === verdicted)?.investigating, false);
+});
+
 test("a column past the limit caps its cards but still reports the true total", async () => {
   const extra = queue.COLUMN_LIMIT + 5;
   for (let i = 0; i < extra; i += 1) await seedReport("EXPIRED");

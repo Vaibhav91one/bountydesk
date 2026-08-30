@@ -34,7 +34,28 @@ export interface TrueForgeClient {
     input: TurnInput[],
     opts?: { signal?: AbortSignal },
   ): Promise<{ turnId: string } | null>;
+  /**
+   * Every tool call the turn has made so far, in whatever order the turn's events return
+   * them. Unlike `PendingToolCall`, this is not limited to a call still awaiting approval: it
+   * is the poller's only way to see what the agent has actually done mid-investigation, for
+   * mirroring into `session_event` (see lib/agent-sessions/poller.ts). Optional so a fake
+   * client built only to exercise the approval path doesn't have to implement it.
+   */
+  listToolCalls?(
+    sessionId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ObservedToolCall[]>;
 }
+
+/** One call the model made during a turn, however far that turn has got. */
+export type ObservedToolCall = {
+  /** The tool call's own id, stable across repeated polls of the same turn -- the dedup key
+   * the poller mirrors events on. */
+  id: string;
+  toolName: string;
+  argumentsJson: string;
+};
 
 export type TurnInput =
   | { type: "user.message"; content: string }
@@ -233,7 +254,28 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       }
       return null;
     },
+
+    async listToolCalls(sessionId, turnId, requestOpts) {
+      const page = await client.sessions.listTurnEvents(sessionId, turnId, undefined, {
+        abortSignal: requestOpts?.signal,
+      });
+      return collectToolCalls(page);
+    },
   };
+}
+
+/** Every `model.message` event's tool calls, across however many pages the turn has. */
+async function collectToolCalls(
+  events: AsyncIterable<TrueForgeApi.SessionEvent>,
+): Promise<ObservedToolCall[]> {
+  const calls: ObservedToolCall[] = [];
+  for await (const event of events) {
+    if (event.type !== "model.message") continue;
+    for (const call of event.toolCalls ?? []) {
+      calls.push({ id: call.id, toolName: call.function.name, argumentsJson: call.function.arguments });
+    }
+  }
+  return calls;
 }
 
 async function snapshotFromTurn(

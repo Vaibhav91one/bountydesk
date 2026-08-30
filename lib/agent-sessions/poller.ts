@@ -1,8 +1,9 @@
 import { and, db, eq, report, verdict } from "@/lib/db";
 import { draftVerdictFromPendingCall, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
-import { transition } from "@/lib/reports/lifecycle";
+import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import {
   createTrueForgeClient,
+  type ObservedToolCall,
   type PendingToolCall,
   type TrueForgeClient,
 } from "@/lib/trueforge/client";
@@ -26,6 +27,36 @@ const AWAITING_APPROVAL_POLL_MS = 30_000;
 
 function inFuture(ms: number): Date {
   return new Date(Date.now() + ms);
+}
+
+/** Long enough to show what a call was for, short enough that a chatty tool argument never
+ * makes session_event a second copy of the payload it was called with. */
+const TOOL_ARGUMENTS_PREVIEW_LIMIT = 500;
+
+/**
+ * Mirror every tool call TrueForge has recorded for this turn into `session_event`, so a
+ * reviewer sees what the agent actually did rather than "ran 1 step" for every real run (see
+ * AGENTS.md's session-event tracing gap). Never the tool's result, only that it was called:
+ * the arguments are truncated, and a full result is never fetched in the first place, matching
+ * lib/reproduction/types.ts's rule that evidence never carries a raw secret or a canary value.
+ *
+ * Idempotent by construction: `recordEvent`'s `idempotencyKey` is unique per report, and the
+ * call's own id is stable across repeated polls of the same turn, so a poller that runs this
+ * every tick while a turn is RUNNING never inserts the same call twice.
+ */
+async function mirrorToolCalls(reportId: string, calls: ObservedToolCall[]): Promise<void> {
+  for (const call of calls) {
+    const argumentsPreview =
+      call.argumentsJson.length > TOOL_ARGUMENTS_PREVIEW_LIMIT
+        ? `${call.argumentsJson.slice(0, TOOL_ARGUMENTS_PREVIEW_LIMIT)}…`
+        : call.argumentsJson;
+    await recordEvent(
+      reportId,
+      `agent.tool_call:${call.toolName}`,
+      { toolName: call.toolName, argumentsPreview },
+      { idempotencyKey: `agent.tool_call:${call.id}` },
+    );
+  }
 }
 
 /**
@@ -365,12 +396,20 @@ export async function pollOnce(
   const turnId = lease.turnId;
 
   const client = opts.client ?? createTrueForgeClient();
-  const snapshot = await runWithHeartbeat(
+  const { snapshot, toolCalls } = await runWithHeartbeat(
     lease,
     leaseSeconds,
-    (signal) => client.getTurn(lease.sessionId, turnId, { signal }),
+    async (signal) => {
+      const snapshot = await client.getTurn(lease.sessionId, turnId, { signal });
+      const toolCalls = (await client.listToolCalls?.(lease.sessionId, turnId, { signal })) ?? [];
+      return { snapshot, toolCalls };
+    },
     opts.signal,
   );
+
+  // Mirrored regardless of the turn's status: a call already made is a call already made,
+  // whether the turn is still running, has errored, or is sitting on a pending approval.
+  await mirrorToolCalls(lease.reportId, toolCalls);
 
   switch (snapshot.status) {
     case "running":
