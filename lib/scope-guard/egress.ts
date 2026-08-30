@@ -64,16 +64,20 @@ export async function authorizeConnect(
   if (!verdict.allowed || !verdict.connectAddress) {
     return { ok: false, reason: `scope denial: ${verdict.reason}`, host: "", port: 0, connectAddress: "" };
   }
-  if (options.requiresGrant && !grantToken) {
-    return {
-      ok: false,
-      reason: "grant denial: this is a write action and needs a grant from request_intrusive_approval first",
-      host: "",
-      port: 0,
-      connectAddress: "",
-    };
-  }
-  if (grantToken) {
+  // A grant is single-use, so it's only ever checked (and thereby consumed) for the write half
+  // of a probe. A passive call that happens to be carrying a leftover token from an earlier
+  // approved action must leave it untouched, or the token could be burned on a GET before the
+  // POST it was actually minted for ever runs, forcing a second human approval for no reason.
+  if (options.requiresGrant) {
+    if (!grantToken) {
+      return {
+        ok: false,
+        reason: "grant denial: this is a write action and needs a grant from request_intrusive_approval first",
+        host: "",
+        port: 0,
+        connectAddress: "",
+      };
+    }
     const canonical = normalizeTargetValue(target) ?? target;
     const verify = options.verifyGrantFn ?? grants.verify;
     const g = await verify(grantToken, canonical);
@@ -85,7 +89,7 @@ export async function authorizeConnect(
   const { host, port } = splitHostPort(normalized);
   return {
     ok: true,
-    reason: grantToken ? "scope + grant verified at connect time" : "scope verified at connect time",
+    reason: options.requiresGrant ? "scope + grant verified at connect time" : "scope verified at connect time",
     host,
     port: port ? Number(port) : 0,
     connectAddress: verdict.connectAddress,

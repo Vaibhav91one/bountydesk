@@ -155,9 +155,23 @@ test("authorizeConnect requires and verifies a grant for a write action, but nev
   });
   assert.equal(goodToken.ok, true);
 
-  // A passive call (requiresGrant left false) never needs a token at all.
   const passive = await authorizeConnect(scope, "127.0.0.1:1");
   assert.equal(passive.ok, true);
+});
+
+test("authorizeConnect never verifies a token on a passive call, so a leftover grant can't be burned before the write it was minted for", async () => {
+  const scope = makeScope();
+  let verifyCalls = 0;
+  const fakeVerify = async () => {
+    verifyCalls++;
+    return { valid: true, reason: "ok" };
+  };
+
+  const result = await authorizeConnect(scope, "127.0.0.1:1", "leftover-token", {
+    verifyGrantFn: fakeVerify,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(verifyCalls, 0, "a single-use grant handed to a passive call must survive untouched for the write that actually needs it");
 });
 
 test("httpProbe refuses a POST with no grant token before attempting any connection", async () => {
