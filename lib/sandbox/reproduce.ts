@@ -32,6 +32,7 @@ import type {
   ReproductionEvidence,
   ReproductionOutcome,
   ReproductionProbeResult,
+  ReproductionRecipe,
   ReproductionRequest,
   RequestBodyEvidence,
 } from "@/lib/reproduction/types";
@@ -347,6 +348,14 @@ function notRun(at: string): LegResult {
   return { ranToCompletion: false, canaryFound: false, at, bodyEvidence: { dispatched: false, sha256: null } };
 }
 
+/** The default notion of "this leg's response is trustworthy enough to hand to oracleCheck".
+ * A redirect or an error status is treated as an infrastructure failure rather than data, which
+ * is what keeps a proxy hiccup or a confused-deputy redirect from ever reaching the oracle: see
+ * the "does not follow the target outside the preview origin" tests in reproduce.test.ts. */
+function defaultIsAcceptableStatus(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 /**
  * Run one negative-control or exploit leg: send it, hand the real response to the recipe's
  * own oracleCheck, and record what happened.
@@ -355,6 +364,11 @@ function notRun(at: string): LegResult {
  * be genuinely dispatched (sendToSandbox returns) and its body hash computed, and only then
  * have oracleCheck itself throw. That is a leg that didn't run to completion, but the request
  * really was sent, so the dispatch marker is kept.
+ *
+ * `isAcceptableStatus` defaults to 2xx-only, unchanged from before this parameter existed. A
+ * recipe whose negative control legitimately completes on a non-2xx status (a rejected login
+ * answering 401) passes a widened predicate instead; every other caller keeps the default and
+ * behaves exactly as before.
  */
 async function runLeg(
   preview: PortPreviewUrl,
@@ -362,16 +376,69 @@ async function runLeg(
   canary: string,
   oracleCheck: (response: ReproductionProbeResult, canary: string) => Promise<boolean> | boolean,
   signal?: AbortSignal,
+  isAcceptableStatus: (status: number) => boolean = defaultIsAcceptableStatus,
 ): Promise<LegResult> {
   const at = new Date().toISOString();
   let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
   try {
     const sent = await sendToSandbox(preview, request, canary, signal);
     bodyEvidence = sent.bodyEvidence;
-    if (sent.probe.status < 200 || sent.probe.status >= 300) {
+    if (!isAcceptableStatus(sent.probe.status)) {
       return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
     }
     const canaryFound = await oracleCheck(sent.probe, canary);
+    return { ranToCompletion: true, canaryFound, at, bodyEvidence };
+  } catch (error) {
+    rethrowIfAborted(error, signal);
+    return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
+  }
+}
+
+/**
+ * Runs an exploit leg whose oracle needs a second request: send the exploit, hand its response
+ * to `followUp.buildRequest` (e.g. to pull out a minted auth token), send whatever that builds,
+ * and let the follow-up's own oracleCheck -- never the exploit's response -- decide canaryFound.
+ *
+ * A `buildRequest` that declines to build anything (nothing to chase -- say, the injection
+ * didn't mint a token this run) is a *complete* exploit leg with no proof: NOT_REPRODUCED, not
+ * an infrastructure failure. A follow-up that fails to get a usable response is incomplete, the
+ * same fail-closed treatment runLeg already gives any other broken leg.
+ *
+ * `isAcceptableStatus` gates only the exploit's own dispatch, matching runLeg's widened
+ * negative-control check: when the exploit hits the same endpoint as the negative control (the
+ * login-bypass recipe posts to the same login route for both), a legitimately-rejected attempt
+ * answers with the same non-2xx status the negative control can. Treating that as "leg didn't
+ * run" would misreport a correctly-blocked exploit as an infrastructure failure (ANALYSIS_ONLY)
+ * instead of a real, complete answer with no proof (NOT_REPRODUCED). The follow-up request's own
+ * status stays 2xx-only: nothing declares a legitimate non-2xx there.
+ */
+async function runExploitWithFollowUp(
+  preview: PortPreviewUrl,
+  exploitRequest: ReproductionRequest,
+  followUp: NonNullable<ReproductionRecipe["exploitFollowUp"]>,
+  canary: string,
+  signal?: AbortSignal,
+  isAcceptableStatus: (status: number) => boolean = defaultIsAcceptableStatus,
+): Promise<LegResult> {
+  const at = new Date().toISOString();
+  let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
+  try {
+    const sentExploit = await sendToSandbox(preview, exploitRequest, canary, signal);
+    bodyEvidence = sentExploit.bodyEvidence;
+    if (!isAcceptableStatus(sentExploit.probe.status)) {
+      return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
+    }
+
+    const followUpRequest = followUp.buildRequest(sentExploit.probe);
+    if (!followUpRequest) {
+      return { ranToCompletion: true, canaryFound: false, at, bodyEvidence };
+    }
+
+    const sentFollowUp = await sendToSandbox(preview, followUpRequest, canary, signal);
+    if (!defaultIsAcceptableStatus(sentFollowUp.probe.status)) {
+      return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
+    }
+    const canaryFound = await followUp.oracleCheck(sentFollowUp.probe, canary);
     return { ranToCompletion: true, canaryFound, at, bodyEvidence };
   } catch (error) {
     rethrowIfAborted(error, signal);
@@ -523,16 +590,31 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     let exploit = notRun(fixtureAt);
 
     if (fixtureCompleted) {
+      const negativeControlIsAcceptable = recipe.negativeControlAcceptedStatuses
+        ? (status: number) =>
+            defaultIsAcceptableStatus(status) || recipe.negativeControlAcceptedStatuses!.includes(status)
+        : undefined;
+
       negativeControl = await runLeg(
         preview,
         recipe.negativeControl,
         canary,
         recipe.oracleCheck,
         opts?.signal,
+        negativeControlIsAcceptable,
       );
 
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
-        exploit = await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal);
+        exploit = recipe.exploitFollowUp
+          ? await runExploitWithFollowUp(
+              preview,
+              recipe.exploit,
+              recipe.exploitFollowUp,
+              canary,
+              opts?.signal,
+              negativeControlIsAcceptable,
+            )
+          : await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal);
       }
     }
 
