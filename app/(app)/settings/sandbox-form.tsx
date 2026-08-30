@@ -17,11 +17,13 @@ const DEFAULTS = {
   autoDeleteIntervalInMinutes: 7200,
 };
 
+// Zero disables an interval, which is a real setting. The exec timeout has no such meaning
+// and TrueForge refuses it, so its floor is one rather than zero.
 const FIELDS = [
-  { name: "execTimeoutMs", label: "Exec timeout (ms)" },
-  { name: "autoStopIntervalInMinutes", label: "Auto stop (minutes)" },
-  { name: "autoArchiveIntervalInMinutes", label: "Auto archive (minutes)" },
-  { name: "autoDeleteIntervalInMinutes", label: "Auto delete (minutes)" },
+  { name: "execTimeoutMs", label: "Exec timeout (ms)", min: 1 },
+  { name: "autoStopIntervalInMinutes", label: "Auto stop (minutes)", min: 0 },
+  { name: "autoArchiveIntervalInMinutes", label: "Auto archive (minutes)", min: 0 },
+  { name: "autoDeleteIntervalInMinutes", label: "Auto delete (minutes)", min: 0 },
 ] as const;
 
 export function SandboxForm({ sandbox }: { sandbox: SandboxView | null }) {
@@ -39,7 +41,7 @@ export function SandboxForm({ sandbox }: { sandbox: SandboxView | null }) {
             <Input
               name={field.name}
               type="number"
-              min={0}
+              min={field.min}
               defaultValue={sandbox ? sandbox[field.name] : DEFAULTS[field.name]}
             />
           </label>

@@ -28,7 +28,18 @@ export type ActionResult = { ok: true } | { ok: false; error: string };
  * its own, so the (app) layout's guard never runs for it.
  */
 
-const numeric = z.coerce.number().int().nonnegative();
+// Zero disables an auto-stop, auto-archive or auto-delete interval, which is a real setting.
+// The exec timeout has no such meaning and TrueForge refuses it with "expected number to be >0".
+const interval = z.coerce.number().int().nonnegative();
+const timeout = z.coerce.number().int().positive();
+
+function parseJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 const modelSchema = z.object({
   name: z.string().min(1),
@@ -45,8 +56,11 @@ const providerSchema = z
     apiKey: z.string(),
     // The whole model list travels as one field because the PUT is a full replace: sending
     // the models the provider should end up with is the only way to express a removal.
+    //
+    // A throw inside a transform escapes safeParse rather than becoming an issue, so tampered
+    // form data would reject the action instead of returning an error the form can show.
     models: z.string().transform((raw, ctx) => {
-      const parsed = modelSchema.array().safeParse(JSON.parse(raw));
+      const parsed = modelSchema.array().safeParse(parseJson(raw));
       if (!parsed.success) {
         ctx.addIssue({ code: "custom", message: "malformed model list" });
         return z.NEVER;
@@ -88,16 +102,16 @@ export async function saveModelProvider(
     return { ok: false, error: harnessError(error) };
   }
 
-  revalidatePath("/settings/harness");
+  revalidatePath("/settings");
   return { ok: true };
 }
 
 const sandboxSchema = z.object({
   apiKey: z.string(),
-  execTimeoutMs: numeric,
-  autoStopIntervalInMinutes: numeric,
-  autoArchiveIntervalInMinutes: numeric,
-  autoDeleteIntervalInMinutes: numeric,
+  execTimeoutMs: timeout,
+  autoStopIntervalInMinutes: interval,
+  autoArchiveIntervalInMinutes: interval,
+  autoDeleteIntervalInMinutes: interval,
 });
 
 export async function saveSandboxProvider(
@@ -118,7 +132,7 @@ export async function saveSandboxProvider(
     return { ok: false, error: harnessError(error) };
   }
 
-  revalidatePath("/settings/harness");
+  revalidatePath("/settings");
   return { ok: true };
 }
 
@@ -139,6 +153,6 @@ export async function applyManagedResources(
     return { ok: false, error: harnessError(error) };
   }
 
-  revalidatePath("/settings/harness");
+  revalidatePath("/settings");
   return { ok: true };
 }

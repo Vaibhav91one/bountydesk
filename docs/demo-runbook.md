@@ -71,12 +71,11 @@ Run these in order on the demo machine. Keep each long-running process in its ow
    default, so do not put it on a public tunnel.
 
 5. Give that TrueForge instance a model provider and a sandbox provider, at
-   `${APP_BASE_URL}/settings/harness`.
+   `${APP_BASE_URL}/settings`.
 
    A fresh harness has neither, and the saved agent needs both: its manifest pins
-   `openai/gpt-5-mini` and sets `config.sandbox.enabled`, so step 6 fails with
-   `Unknown model "openai/gpt-5-mini" — provider not configured` until they exist. On the
-   Models tab, add the `openai` provider (the catalog prefills its model list, and
+   `openai/gpt-5-mini` and sets `config.sandbox.enabled`, so step 6 fails with a 422 saying
+   `Unknown model "openai/gpt-5-mini"` until they exist. On the Models tab, add the `openai` provider (the catalog prefills its model list, and
    `gpt-5-mini` is added by id) with your `OPENAI_API_KEY`. On the Sandbox tab, paste the
    Daytona key for TrueForge's own sandbox account. That is a separate key from the
    `DAYTONA_API_KEY` BountyDesk uses to provision reproduction sandboxes, and the sandbox

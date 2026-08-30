@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
-import { Empty, Panel, Row } from "../panel";
+import { Empty, Panel, Row } from "./panel";
 import { applyManagedResources, type ActionResult } from "./actions";
 import { ModelProviderForm } from "./model-provider-form";
 import { SandboxForm } from "./sandbox-form";
@@ -232,7 +232,6 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
   );
 }
 
-/** A failed section renders its own reason where its content would have been. */
 function SectionBody<T>({
   section,
   children,
@@ -267,7 +266,7 @@ function Heading({ name, drift }: { name: string; drift: Drift }) {
 function DriftBadge({ drift }: { drift: Drift }) {
   if (drift === "unmanaged") return <Badge variant="outline">Not managed here</Badge>;
   if (drift === "missing") return <Badge variant="outline">Not applied</Badge>;
-  return <Badge variant="outline">Applied</Badge>;
+  return <Badge variant="outline">Registered</Badge>;
 }
 
 function ApplyButton({ scope, label }: { scope: "connectors" | "skills" | "agent"; label: string }) {

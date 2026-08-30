@@ -1,8 +1,4 @@
-/**
- * The three layout pieces both settings screens are built from. Extracted from
- * settings-tabs.tsx when the harness screen needed the same card, empty state and label row;
- * the markup is unchanged.
- */
+/** The card, empty state and label row the settings tabs are built from. */
 
 export function Panel({
   title,
@@ -33,7 +29,6 @@ export function Empty({ children }: { children: React.ReactNode }) {
   return <p className="text-body text-muted-foreground">{children}</p>;
 }
 
-/** A label and a value on one line, which is most of what these tabs are. */
 export function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0">
