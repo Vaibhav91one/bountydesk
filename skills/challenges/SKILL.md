@@ -21,8 +21,12 @@ loop.
 BountyDesk's scope-guard mints a single-use, target-bound grant per
 `request_intrusive_approval` call, always paused for a human Allow/Deny first;
 there is no autonomous multi-use lab mode. Request a fresh grant for each
-batch of work, confirm it with `verify_grant` before scanning, and embed it as
-`SCOPE_GUARD_GRANT=<token>` in every command of that batch.
+batch of work and embed it as `SCOPE_GUARD_GRANT=<token>` in every in-sandbox
+bash command of that batch (nothing re-checks it there, so one token can
+label a whole batch). If a step in the batch goes through `http_probe` or
+`tcp_probe` instead, that call spends the grant at connect time; request
+another for the next one. Don't call `verify_grant` on a token you're about
+to spend this way, since `verify_grant` itself consumes it.
 
 ## 2. Enumerate the app's OWN challenge set (don't hand-maintain lists)
 
