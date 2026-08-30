@@ -16,9 +16,17 @@ of truth.
    not touch the target and report why.
 2. Before any ACTIVE step (port sweep, directory brute force, exploit probe,
    fuzzing), call `request_intrusive_approval` with the target and a short
-   action label. If it returns a `grant_token`, include it in every command of
-   that phase as `SCOPE_GUARD_GRANT=<token>`, and confirm it with
-   `verify_grant` before scanning. If the tool returns `approved: false`, stop.
+   action label. A `grant_token` is single-use, spent the first time anything
+   checks it, whether that's `verify_grant` or `http_probe`/`tcp_probe`
+   connecting. For an in-sandbox bash command, embed it as
+   `SCOPE_GUARD_GRANT=<token>` directly; nothing re-checks it, so the same
+   token can label every bash command in that batch. For `http_probe` or
+   `tcp_probe`, pass it as `grant_token` on the one call it's for and request
+   a fresh grant for the next; don't also call `verify_grant` on a token
+   you're about to use this way; it would spend the token, leaving nothing
+   for the actual request. `verify_grant` is only for sanity-checking a
+   token you are not otherwise about to spend. If `request_intrusive_approval`
+   returns `approved: false`, stop.
 3. Never contact cloud metadata endpoints (169.254.169.254,
    metadata.google.internal). The guard hard-denies them; attempting anyway is
    a violation.

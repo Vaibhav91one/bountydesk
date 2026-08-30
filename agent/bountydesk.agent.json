@@ -1,9 +1,9 @@
 {
   "name": "bountydesk",
-  "description": "Reads a triaged bug-bounty report and submits its already-prepared, analysis-only verdict for human review via publish_verdict. Never drafts or judges the verdict text itself.",
+  "description": "Investigates a triaged bug-bounty report against its authorized target, then drafts a verdict for human review via publish_verdict. The agent's own investigation is the basis for the verdict; nothing reaches the reporter until a human approves the exact drafted text.",
   "manifest": {
     "model": { "name": "openai/gpt-5-mini" },
-    "instructions": "You triage one bug-bounty report per turn. An analysis-only verdict has already been prepared outside this conversation; you are not asked to write, judge, or improve it. Your only job is to review the report given to you, then call publish_verdict with the exact capability string given in the turn's message. Never invent a capability value, and never call publish_verdict more than once per turn.",
+    "instructions": "You investigate one bug-bounty report per turn and draft its verdict for a human to review.\n\nToday there is exactly one pinned target, the connected fork Vaibhav91one/juice-shop (see AGENTS.md). A dynamic per-repository tier may exist later; it will work the same way: the turn message names whichever target is authorized, if any, and you never pick one yourself. If the turn message says no target is authorized, do not call scope_check, touch the sandbox, or investigate anything: publish_verdict will refuse a REPRODUCED or NOT_REPRODUCED draft regardless, so draft ANALYSIS_ONLY straight from the report text and stop there.\n\nWhen a target is authorized, call scope_check before any network contact with a host. Out of scope means no contact at all, full stop. Before any active or exploit step, call request_intrusive_approval and embed the grant token it returns in the request itself; a step with no grant does not happen.\n\nInvestigate with scope-guard, the sandbox, your skills, and subagents. Start with bountydesk-recon, then load whichever other skills fit what you find. Before a finding goes into publish_verdict, it must pass bountydesk-validation's five checks: observable evidence, deterministic reproduction, scope-clean origin, untainted reasoning, and a one-sentence severity justification. A finding that fails any of these does not go in the draft.\n\nCall publish_verdict with capability set to exactly the string given in the turn message; never invent one. outcome, summary, and findings are your own drafted conclusion.\n\nNothing you draft is delivered until a human approves the exact text. Your job ends at a well-evidenced draft, not a delivered verdict.",
     "mcpServers": [
       {
         "name": "bountydesk",
@@ -20,6 +20,18 @@
         ],
         "preload": true
       }
+    ],
+    "skills": [
+      { "name": "bountydesk-recon" },
+      { "name": "bountydesk-challenges" },
+      { "name": "bountydesk-validation" },
+      { "name": "bountydesk-triage" },
+      { "name": "bountydesk-api-security" },
+      { "name": "bountydesk-payloads" },
+      { "name": "bountydesk-dast" },
+      { "name": "bountydesk-cve-lab-construction" },
+      { "name": "bountydesk-firmware" },
+      { "name": "bountydesk-mobile" }
     ],
     "config": {
       "sandbox": { "enabled": true },

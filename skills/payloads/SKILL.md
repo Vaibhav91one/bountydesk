@@ -47,14 +47,19 @@ returning `index.html` are NOT traversal; validate content, not status alone.
 
 ```
 http://127.0.0.1:<port>
-http://169.254.169.254/latest/meta-data/
 file:///etc/passwd
 gopher://127.0.0.1:6379/_%2BINFO%2B
 ```
-Only where the target fetches URLs by design. NEVER actually contact cloud
-metadata from your own tooling, the guard hard-denies it; if a TARGET's
-response indicates it fetched metadata, that is the finding (report what the
-target did, do not repeat it).
+Only where the target fetches URLs by design.
+
+Never point any of these at a cloud metadata address (169.254.169.254,
+metadata.google.internal), including by asking the target to fetch it on
+your behalf. `bountydesk-recon`'s prohibition on metadata endpoints is
+absolute, not a restriction on your own tooling alone: the sandbox and the
+target can share real network reachability to actual infrastructure
+metadata, and a successful SSRF-to-metadata result would hand back real
+credentials, not lab data. This isn't a live concern for the current pinned
+target regardless.
 
 ## XSS (confirmation via marker, not alert())
 
