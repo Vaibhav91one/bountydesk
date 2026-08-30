@@ -486,18 +486,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           </Panel>
         ) : null}
 
-        {file.verdict ? (
-          <Panel
-            title="Findings"
-            aside={
-              <Badge variant="outline">
-                {findings.length === 0 ? "None drafted" : `${findings.length} drafted`}
-              </Badge>
-            }
-          >
-            <FindingsPanel findings={findings} />
-          </Panel>
-        ) : null}
+        {/* No card around it. The table carries its own border, and a "Findings" header over a
+            column already headed Finding was chrome saying the same word twice. */}
+        {file.verdict ? <FindingsPanel findings={findings} /> : null}
 
         {/* Once the gate has closed there is no dialog to open, and the comment that went out
             would otherwise be nowhere on this page. The same card, with the decision in place
