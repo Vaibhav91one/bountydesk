@@ -32,7 +32,8 @@
       { "name": "bountydesk-cve-lab-construction" },
       { "name": "bountydesk-firmware" },
       { "name": "bountydesk-mobile" },
-      { "name": "bountydesk-demo-targets" }
+      { "name": "bountydesk-demo-targets" },
+      { "name": "bountydesk-serve-app" }
     ],
     "config": {
       "sandbox": { "enabled": true },
