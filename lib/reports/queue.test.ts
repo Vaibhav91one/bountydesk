@@ -489,3 +489,37 @@ test("a soft-hidden report drops off every list but still loads by its id", asyn
   // But the case file still opens it by direct id, so an existing link does not 404.
   assert.ok(await readCase(hidden), "a hidden report must still load by id");
 });
+
+test("a decision on a hidden report drops off the home decisions count", async () => {
+  const { readHomeSummary } = await import("@/lib/home/summary");
+
+  const id = await seedReport("DELIVERED");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "REPRODUCED",
+      summary: "s",
+      payload: "p",
+      contentHash: `dec-hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: v.id,
+    reviewer: "someone",
+    decision: "APPROVED",
+    payloadHash: `dec-hash-${id}`,
+  });
+
+  // The report aggregate already filters hidden rows; the decisions aggregate joins through
+  // verdict to report so it drops the same rows rather than staying inflated by test data.
+  const before = (await readHomeSummary()).decisions;
+
+  await dbm.db
+    .update(dbm.report)
+    .set({ hiddenAt: new Date() })
+    .where(dbm.eq(dbm.report.id, id));
+
+  const after = (await readHomeSummary()).decisions;
+  assert.equal(before - after, 1, "a decision on a hidden report must not count on the home card");
+});
