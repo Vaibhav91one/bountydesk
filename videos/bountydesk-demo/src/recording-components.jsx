@@ -9,12 +9,6 @@ const reports = [
   { title: "Missing headers on marketing site", state: "Out of scope", sev: "Low" },
 ];
 
-const stageRows = [
-  ["GitHub App", "Signed issue delivery", "ok"],
-  ["Target profile", "Vaibhav91one/juice-shop @ v17.3.0", "ok"],
-  ["Scope guard", "Server-bound repo and commit", "ok"],
-];
-
 const traceRows = [
   "negative control passed",
   "fresh canary seeded",
@@ -50,6 +44,25 @@ function StatusPill({ children, tone = "violet" }) {
   return <span className={`status ${tone}`}>{children}</span>;
 }
 
+function TextAnimate({ children, animation = "slideUp", by = "word", className = "" }) {
+  const text = String(children);
+  const segments = by === "character" ? Array.from(text) : by === "word" ? text.split(/(\s+)/) : [text];
+  const tokenClassName = by === "character" ? "text-animate-character" : "text-animate-word";
+
+  return (
+    <span className={`text-animate ${animation} by-${by} ${className}`} aria-hidden="true">
+      {segments.map((segment, index) => {
+        if (/^\s+$/.test(segment)) return segment;
+        return (
+          <span className={`text-animate-token ${tokenClassName}`} key={`${segment}-${index}`}>
+            {segment}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 function QueueCards() {
   return (
     <div className="queue-grid">
@@ -72,33 +85,31 @@ function Shot({ id }) {
     case "home":
       return (
         <Chrome bare>
-          <div className="hero-shot">
-            <div>
-              <div className="eyebrow">Automated triage, human gate</div>
-              <h1>A signed report becomes an evidence packet.</h1>
-              <p>BountyDesk checks scope, reproduces against a pinned target, and waits for approval before delivery.</p>
-            </div>
-            <div className="mascot-ring"><img src="assets/mascot-idle.svg" /></div>
+          <div className="problem-shot">
+            <h1 aria-label="Resolve bug reports, vulnerabilities, and CVEs in an isolated sandbox.">
+              <TextAnimate animation="slideUp" by="word">
+                Resolve bug reports, vulnerabilities, and CVEs in an isolated sandbox.
+              </TextAnimate>
+            </h1>
           </div>
         </Chrome>
       );
     case "intake":
       return (
-        <Chrome>
-          <div className="two-col">
-            <section>
-              <div className="eyebrow">Intake</div>
-              <h2>Identity is not repo access.</h2>
-              <p>OAuth identifies the user. The GitHub App grants the repo. The server binds the issue to the target profile.</p>
-            </section>
-            <div className="stack-panel">
-              {stageRows.map(([label, value, tone]) => (
-                <div className="row" key={label}>
-                  <span>{label}</span>
-                  <strong>{value}</strong>
-                  <StatusPill tone={tone}>bound</StatusPill>
-                </div>
-              ))}
+        <Chrome bare tone="intro">
+          <div className="brand-intro-shot">
+            <h2 aria-label="Introducing">
+              <TextAnimate animation="slideLeft" by="character">
+                Introducing
+              </TextAnimate>
+            </h2>
+            <div className="brand-intro-lockup">
+              <img className="brand-intro-logo" src="assets/logo-small.svg" alt="" />
+              <h1 aria-label="BountyDesk">
+                <TextAnimate animation="slideLeft" by="character">
+                  BountyDesk
+                </TextAnimate>
+              </h1>
             </div>
           </div>
         </Chrome>
