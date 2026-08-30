@@ -8,9 +8,9 @@ export const metadata = { title: "Settings · BountyDesk" };
 /**
  * Settings is the TrueForge harness: the five things it holds, on one screen.
  *
- * Skills, connectors and the agent had scripts; model providers and the sandbox provider had
- * nothing, so `npm run agent:apply` against a fresh harness fails with "Unknown model
- * openai/gpt-5-mini, provider not configured" and there was no way to fix that from here.
+ * A fresh harness needs a model provider and a sandbox provider before `npm run agent:apply`
+ * will take the saved manifest, which pins `openai/gpt-5-mini` and enables the sandbox. Both
+ * are set here, so the harness can be brought up without leaving this app.
  *
  * `readHarness` never throws: each section carries its own error, so a harness that is down
  * shows five explanations instead of a blank page.
