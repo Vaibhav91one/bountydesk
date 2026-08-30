@@ -235,6 +235,8 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
 });
 
 test("a card badges an agent that is actively investigating, and stops once a verdict lands", async () => {
+  const { recordEvent } = await import("./lifecycle");
+
   const investigating = await seedReport("TRIAGING");
   await dbm.db.insert(dbm.agentSession).values({
     reportId: investigating,
@@ -242,9 +244,21 @@ test("a card badges an agent that is actively investigating, and stops once a ve
     sessionId: `session-${investigating}`,
     turnStatus: "INVESTIGATING",
   });
+  await recordEvent(investigating, "agent.tool_call:scope_check");
 
-  // Same turn status, but a verdict already exists: the badge must not still claim the agent
-  // is working this report.
+  // A turn exists and is RUNNING, but the poller has not mirrored a single tool call yet: this
+  // is the instant right after createTurn, and must not read as "investigating" just because
+  // the turn status says so.
+  const justStarted = await seedReport("TRIAGING");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: justStarted,
+    capabilityToken: `token-${justStarted}`,
+    sessionId: `session-${justStarted}`,
+    turnStatus: "RUNNING",
+  });
+
+  // Same turn status and tool-call activity as `investigating`, but a verdict already exists:
+  // the badge must not still claim the agent is working this report.
   const verdicted = await seedReport("ANALYSIS_ONLY");
   await dbm.db.insert(dbm.verdict).values({
     reportId: verdicted,
@@ -259,10 +273,12 @@ test("a card badges an agent that is actively investigating, and stops once a ve
     sessionId: `session-${verdicted}`,
     turnStatus: "INVESTIGATING",
   });
+  await recordEvent(verdicted, "agent.tool_call:scope_check");
 
   const columns = await queue.listQueue();
   const cards = columns.flatMap((c) => c.cards);
   assert.equal(cards.find((c) => c.id === investigating)?.investigating, true);
+  assert.equal(cards.find((c) => c.id === justStarted)?.investigating, false);
   assert.equal(cards.find((c) => c.id === verdicted)?.investigating, false);
 });
 

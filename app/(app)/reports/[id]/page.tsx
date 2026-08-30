@@ -8,7 +8,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
 import { formatStamp } from "@/lib/format";
-import { isReportId, oracleDecided, readCase, verdictFindings, type CaseFile } from "@/lib/reports/case";
+import {
+  isAgentInvestigating,
+  isReportId,
+  oracleDecided,
+  readCase,
+  verdictFindings,
+  type CaseFile,
+} from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
@@ -129,9 +136,7 @@ function lifecycle(file: CaseFile) {
   // (EVENT_PHASE's "agent" entry) and the session's own turnStatus, both of which move during
   // a live investigation.
   const investigationEvents = file.events.filter((e) => e.channel === "agent");
-  const investigating =
-    (file.turnStatus === "RUNNING" || file.turnStatus === "INVESTIGATING") &&
-    investigationEvents.length > 0;
+  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, investigationEvents.length > 0);
 
   return [
     {

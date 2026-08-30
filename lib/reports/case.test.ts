@@ -490,19 +490,24 @@ test("the case file reads the session's own turn status", async () => {
   assert.equal((await cases.readCase(investigating))?.turnStatus, "INVESTIGATING");
 });
 
-test("a report is investigating only while its turn is live and no verdict has landed yet", () => {
+test("a report is investigating only while its turn is live, has observed a tool call, and no verdict has landed yet", () => {
   const { isAgentInvestigating } = cases;
 
-  assert.equal(isAgentInvestigating("RUNNING", false), true);
-  assert.equal(isAgentInvestigating("INVESTIGATING", false), true);
+  assert.equal(isAgentInvestigating("RUNNING", false, true), true);
+  assert.equal(isAgentInvestigating("INVESTIGATING", false, true), true);
+
+  // A turn that has just started has no observed activity yet: it must not read as
+  // investigating just because RUNNING was set the instant createTurn returned.
+  assert.equal(isAgentInvestigating("RUNNING", false, false), false);
+  assert.equal(isAgentInvestigating("INVESTIGATING", false, false), false);
 
   // A verdict already exists: whatever the turn status still says, the investigation this
   // page cares about is over.
-  assert.equal(isAgentInvestigating("RUNNING", true), false);
-  assert.equal(isAgentInvestigating("INVESTIGATING", true), false);
+  assert.equal(isAgentInvestigating("RUNNING", true, true), false);
+  assert.equal(isAgentInvestigating("INVESTIGATING", true, true), false);
 
   // Every other turn status, and no session at all, is not "investigating" either way.
   for (const status of ["AWAITING_APPROVAL_HARNESS", "DONE_NO_ACTION", "ERROR", "CANCELLED", null]) {
-    assert.equal(isAgentInvestigating(status, false), false, `${status} must not read as investigating`);
+    assert.equal(isAgentInvestigating(status, false, true), false, `${status} must not read as investigating`);
   }
 });

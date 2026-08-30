@@ -37,7 +37,8 @@ export function StatusCard({
   outcomeLabel: string | null;
 }) {
   const mascot = mascotForState(file.state);
-  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null);
+  const hasToolCallEvents = file.events.some((e) => e.channel === "agent");
+  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, hasToolCallEvents);
 
   return (
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">

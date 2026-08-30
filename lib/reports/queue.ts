@@ -101,6 +101,13 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
       )`,
+      // Same event log eventCount reads, filtered to the poller's mirrored tool-call events:
+      // the one signal isAgentInvestigating trusts that a RUNNING/INVESTIGATING turn has
+      // actually done something, not just started (see lib/reports/case.ts).
+      hasToolCallEvents: sql<boolean>`exists (
+        select 1 from session_event e
+        where e.report_id = ${report.id} and e.type like 'agent.tool_call:%'
+      )`,
     })
     .from(report)
     .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
@@ -118,7 +125,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.pendingVerdictId : null,
-    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null),
+    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
   }));
 }
 
@@ -234,6 +241,10 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
       )`,
+      hasToolCallEvents: sql<boolean>`exists (
+        select 1 from session_event e
+        where e.report_id = ${report.id} and e.type like 'agent.tool_call:%'
+      )`,
     })
     .from(report)
     .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
@@ -252,7 +263,7 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
     awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.awaitingVerdictId : null,
-    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null),
+    investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
     origin: row.repositoryFullName ?? row.channel,
     createdAt: row.createdAt,
   }));

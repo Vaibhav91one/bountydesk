@@ -95,9 +95,13 @@ async function drainOthers() {
     .set({ turnStatus: "DONE_NO_ACTION", leaseOwner: null, leaseExpiresAt: null });
 }
 
+type ToolCallsResult = { calls: ObservedToolCall[]; cursor: string | null };
+
 function fakeClient(
   snapshot: TurnSnapshot | (() => TurnSnapshot),
-  toolCalls: ObservedToolCall[] | (() => ObservedToolCall[]) = [],
+  toolCalls:
+    | ObservedToolCall[]
+    | ((opts: { since?: string }) => ToolCallsResult) = [],
 ): TrueForgeClient {
   return {
     createSession: async () => {
@@ -113,7 +117,12 @@ function fakeClient(
     getTurnInput: async () => {
       throw new Error("not used by pollOnce");
     },
-    listToolCalls: async () => (typeof toolCalls === "function" ? toolCalls() : toolCalls),
+    listToolCalls: async (_sessionId, _turnId, opts) => {
+      if (typeof toolCalls === "function") return toolCalls({ since: opts?.since });
+      // Static shorthand for tests that don't care about since-based filtering: hands back the
+      // same list every time, with a stable cursor derived from it.
+      return { calls: toolCalls, cursor: toolCalls.at(-1)?.id ?? null };
+    },
   };
 }
 
@@ -189,6 +198,7 @@ async function sessionRow(id: string) {
       pendingToolCallId: dbm.agentSession.pendingToolCallId,
       pendingVerdictId: dbm.agentSession.pendingVerdictId,
       pendingApprovedContentHash: dbm.agentSession.pendingApprovedContentHash,
+      lastMirroredEventId: dbm.agentSession.lastMirroredEventId,
       leaseOwner: dbm.agentSession.leaseOwner,
       fence: dbm.agentSession.fence,
     })
@@ -248,6 +258,94 @@ test("polling the same turn twice mirrors each tool call exactly once", async ()
     mirrored.map((e) => e.type).sort(),
     ["agent.tool_call:http_probe", "agent.tool_call:scope_check"],
   );
+});
+
+test("a second poll asks for tool calls only since the cursor the first poll persisted", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+
+  const sinceSeen: (string | undefined)[] = [];
+  const client = fakeClient({ status: "running" }, ({ since }) => {
+    sinceSeen.push(since);
+    if (since === undefined) {
+      return {
+        calls: [{ id: "call-1", toolName: "scope_check", argumentsJson: "{}" }],
+        cursor: "evt_1",
+      };
+    }
+    // Anything past the first poll's cursor is new; a poller that re-asked for the whole
+    // history (dropping the cursor) would pass `since: undefined` again here.
+    return {
+      calls: [{ id: "call-2", toolName: "http_probe", argumentsJson: "{}" }],
+      cursor: "evt_2",
+    };
+  });
+
+  await poller.pollOnce("w-cursor-1", { client });
+  const afterFirst = await sessionRow(fixture.agentSessionId);
+  assert.equal(afterFirst.lastMirroredEventId, "evt_1");
+
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-cursor-2", { client });
+  const afterSecond = await sessionRow(fixture.agentSessionId);
+  assert.equal(afterSecond.lastMirroredEventId, "evt_2");
+
+  assert.deepEqual(sinceSeen, [undefined, "evt_1"], "the second poll must pass the first poll's cursor");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+  assert.deepEqual(
+    events.map((e) => e.type).filter((t) => t.startsWith("agent.tool_call:")).sort(),
+    ["agent.tool_call:http_probe", "agent.tool_call:scope_check"],
+  );
+});
+
+test("mirrored tool-call arguments keep only allowlisted fields, dropping capability tokens and anything else unrecognised", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const toolCalls: ObservedToolCall[] = [
+    {
+      id: "call-probe-1",
+      toolName: "http_probe",
+      argumentsJson: JSON.stringify({
+        url: "/rest/products/search",
+        method: "GET",
+        capability: "super-secret-capability-token",
+        grant_token: "SCOPE_GUARD_GRANT-abc",
+        headers: { Authorization: "Bearer also-secret" },
+      }),
+    },
+    // publish_verdict's own shape: none of its fields are on the allowlist, so it must mirror
+    // with no arguments preview at all, not a truncated dump of its capability token.
+    {
+      id: "call-verdict-1",
+      toolName: "publish_verdict",
+      argumentsJson: JSON.stringify({ capability: "super-secret-capability-token", outcome: "ANALYSIS_ONLY" }),
+    },
+  ];
+  const client = fakeClient({ status: "running" }, toolCalls);
+
+  await poller.pollOnce("w-redact-1", { client });
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+
+  const probe = events.find((e) => e.type === "agent.tool_call:http_probe");
+  const verdict = events.find((e) => e.type === "agent.tool_call:publish_verdict");
+  assert.deepEqual(probe?.data, { toolName: "http_probe", argumentsPreview: JSON.stringify({ url: "/rest/products/search", method: "GET" }) });
+  assert.deepEqual(verdict?.data, { toolName: "publish_verdict" });
+
+  const raw = JSON.stringify(events);
+  assert.ok(!raw.includes("super-secret-capability-token"), "the capability token must never reach session_event");
+  assert.ok(!raw.includes("SCOPE_GUARD_GRANT-abc"), "a grant token must never reach session_event");
+  assert.ok(!raw.includes("also-secret"), "a header value must never reach session_event");
 });
 
 test("a valid single publish_verdict call moves the report and records the pending markers", async () => {
