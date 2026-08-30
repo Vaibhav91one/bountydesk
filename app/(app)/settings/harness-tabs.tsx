@@ -12,14 +12,24 @@ import {
   Info,
   Lightning,
   PlugsConnected,
+  FileText,
   Robot,
   WarningCircle,
 } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RollingIcon } from "@/components/rolling-icon";
+import { cn } from "@/lib/utils";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
@@ -184,15 +194,30 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
                   {rows.map((row) => (
                     <li
                       key={row.name}
-                      className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2.5 last:border-b-0"
+                      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border/50 py-2 last:border-b-0"
                     >
                       <span className="flex flex-wrap items-center gap-2.5">
                         <span className="text-body text-foreground">{row.name}</span>
                         <DriftBadge drift={row.drift} />
                       </span>
-                      <span className="text-meta text-muted-foreground">
-                        {row.live ? `${row.live.path ?? "/"} at ${row.live.ref}` : "not registered yet"}
-                      </span>
+                      {row.live ? (
+                        <DetailSheet
+                          label="Details"
+                          title={row.name}
+                          subtitle={<DriftBadge drift={row.drift} />}
+                        >
+                          <Row label="Repository">
+                            <span className="font-mono text-meta break-all">{row.live.url}</span>
+                          </Row>
+                          <Row label="Ref">{row.live.ref}</Row>
+                          <Row label="Path">{row.live.path ?? "repository root"}</Row>
+                          <p className="pt-4 text-body text-muted-foreground">
+                            {row.live.description}
+                          </p>
+                        </DetailSheet>
+                      ) : (
+                        <span className="text-meta text-muted-foreground">not registered yet</span>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -276,9 +301,16 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
           detail="agent/bountydesk.agent.json, exactly as it would be applied."
           aside={<Badge variant="outline">Read only</Badge>}
         >
-          <pre className="overflow-x-auto rounded-md border border-border/50 bg-background p-4 font-mono text-meta text-muted-foreground">
-            {snapshot.agentManifest}
-          </pre>
+          <DetailSheet
+            label="View manifest"
+            title="bountydesk.agent.json"
+            subtitle={<span className="text-meta">The committed artifact, not the server copy.</span>}
+            wide
+          >
+            <pre className="overflow-x-auto rounded-md border border-border/50 bg-background p-4 font-mono text-meta whitespace-pre-wrap text-muted-foreground">
+              {snapshot.agentManifest}
+            </pre>
+          </DetailSheet>
         </Panel>
       </TabsContent>
     </Tabs>
@@ -300,6 +332,46 @@ function SectionBody<T>({
     );
   }
   return <>{children(section.value)}</>;
+}
+
+/**
+ * Detail that would crowd a list row: a skill's git coordinates and description, or eighty
+ * lines of agent manifest. Uncontrolled and one per row, because there is no cross-row state
+ * to coordinate and everything it shows is already in the snapshot.
+ */
+function DetailSheet({
+  label,
+  title,
+  subtitle,
+  wide,
+  children,
+}: {
+  label: string;
+  title: string;
+  subtitle?: React.ReactNode;
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Sheet>
+      <SheetTrigger render={<Button variant="ghost" size="sm" />}>
+        <RollingIcon icon={FileText} className="size-4" />
+        {label}
+      </SheetTrigger>
+      <SheetContent
+        side="right"
+        className={cn("no-scrollbar gap-0 overflow-y-auto", wide ? "sm:max-w-2xl" : "sm:max-w-md")}
+      >
+        <SheetHeader className="gap-3 border-b border-border/50 p-6">
+          <SheetTitle className="text-title break-all">{title}</SheetTitle>
+          <SheetDescription render={<div />} className="flex flex-wrap items-center gap-2">
+            {subtitle}
+          </SheetDescription>
+        </SheetHeader>
+        <div className="flex flex-col p-6">{children}</div>
+      </SheetContent>
+    </Sheet>
+  );
 }
 
 function Heading({ name, drift }: { name: string; drift: Drift }) {
