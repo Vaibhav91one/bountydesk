@@ -8,9 +8,11 @@ import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
   createTrueForgeClient,
+  isTrueForgeNotFoundError,
   type ObservedToolCall,
   type PendingToolCall,
   type TrueForgeClient,
+  type TurnSnapshot,
 } from "@/lib/trueforge/client";
 
 import {
@@ -522,32 +524,51 @@ export async function pollOnce(
   const turnId = lease.turnId;
 
   const client = opts.client ?? createTrueForgeClient();
-  const { snapshot, toolCalls, cursor, finalSummary } = await runWithHeartbeat(
-    lease,
-    leaseSeconds,
-    async (signal) => {
-      const snapshot = await client.getTurn(lease.sessionId, turnId, { signal });
-      // since: only ask for what has happened past the last poll's cursor -- without it every
-      // poll of a long-running turn re-reads and re-processes its entire event history, cost
-      // growing with the turn's total call count rather than with how much is actually new.
-      const result = await client.listToolCalls?.(lease.sessionId, turnId, {
-        signal,
-        since: lease.lastMirroredEventId ?? undefined,
+  let pollResult: {
+    snapshot: TurnSnapshot;
+    toolCalls: ObservedToolCall[];
+    cursor: string | null;
+    finalSummary: string | null;
+  };
+  try {
+    pollResult = await runWithHeartbeat(
+      lease,
+      leaseSeconds,
+      async (signal) => {
+        const snapshot = await client.getTurn(lease.sessionId, turnId, { signal });
+        // since: only ask for what has happened past the last poll's cursor -- without it every
+        // poll of a long-running turn re-reads and re-processes its entire event history, cost
+        // growing with the turn's total call count rather than with how much is actually new.
+        const result = await client.listToolCalls?.(lease.sessionId, turnId, {
+          signal,
+          since: lease.lastMirroredEventId ?? undefined,
+        });
+        // The agent's closing summary exists only once the turn is done: on a pending
+        // publish_verdict call (the agent-authored path) or a turn that finished without one.
+        // Fetched once, inside the heartbeat like the calls above, and only while the turn is
+        // still running would it be premature or absent.
+        const captureSummary =
+          lease.finalSummary === null &&
+          (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
+        const finalSummary = captureSummary
+          ? ((await client.getFinalSummary?.(lease.sessionId, turnId, { signal })) ?? null)
+          : null;
+        return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
+      },
+      opts.signal,
+    );
+  } catch (error) {
+    if (isTrueForgeNotFoundError(error)) {
+      return finishWithoutApproval(lease, {
+        turnStatus: "ERROR",
+        lastError: `TrueForge session or turn was not found: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       });
-      // The agent's closing summary exists only once the turn is done: on a pending
-      // publish_verdict call (the agent-authored path) or a turn that finished without one.
-      // Fetched once, inside the heartbeat like the calls above, and only while the turn is
-      // still running would it be premature or absent.
-      const captureSummary =
-        lease.finalSummary === null &&
-        (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
-      const finalSummary = captureSummary
-        ? ((await client.getFinalSummary?.(lease.sessionId, turnId, { signal })) ?? null)
-        : null;
-      return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
-    },
-    opts.signal,
-  );
+    }
+    throw error;
+  }
+  const { snapshot, toolCalls, cursor, finalSummary } = pollResult;
 
   // Mirrored regardless of the turn's status: a call already made is a call already made,
   // whether the turn is still running, has errored, or is sitting on a pending approval.

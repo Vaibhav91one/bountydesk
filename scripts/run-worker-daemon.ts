@@ -14,6 +14,7 @@
  * expire for the next sweep, the same as an unhandled error would.
  */
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 
 import { createTrueforgeAnalysisDriver } from "@/lib/analysis/trueforge-driver";
 import { sweepExpiredLeases as sweepJobs } from "@/lib/jobs/queue";
@@ -29,9 +30,49 @@ import { createTrueForgeClient } from "@/lib/trueforge/client";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
 
 const LEASE_SECONDS = 60;
+const DEFAULT_WORKER_HEALTH_PORT = 8080;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
+}
+
+function workerHealthPort(): number {
+  const raw = process.env.WORKER_HEALTH_PORT ?? String(DEFAULT_WORKER_HEALTH_PORT);
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error("WORKER_HEALTH_PORT must be a TCP port number");
+  }
+  return port;
+}
+
+function startHealthServer(port: number, signal: AbortSignal): Server {
+  const server = createServer((req, res) => {
+    if (req.url === "/healthz") {
+      res.writeHead(200, {
+        "content-type": "application/json",
+        "cache-control": "no-store",
+      });
+      res.end(JSON.stringify({ ok: true, service: "bountydesk-worker" }));
+      return;
+    }
+
+    res.writeHead(404, { "content-type": "text/plain" });
+    res.end("not found");
+  });
+
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`worker health server listening on ${port}`);
+  });
+
+  signal.addEventListener(
+    "abort",
+    () => {
+      server.close();
+    },
+    { once: true },
+  );
+
+  return server;
 }
 
 async function main(): Promise<void> {
@@ -42,6 +83,8 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", () => onShutdownSignal("SIGINT"));
   process.once("SIGTERM", () => onShutdownSignal("SIGTERM"));
+
+  startHealthServer(workerHealthPort(), controller.signal);
 
   const analysis = createTrueforgeAnalysisDriver();
   const trueForgeClient = createTrueForgeClient();
