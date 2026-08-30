@@ -34,7 +34,6 @@ log() { echo "[dvwa] $*" >> "$LOG"; echo "[dvwa] $*" > "$STATUS"; }
 echo "[dvwa] $(date -Is) start" > "$STATUS"
 : > "$LOG"
 
-# 1. packages
 log "apt install php + mariadb"
 export DEBIAN_FRONTEND=noninteractive
 (apt-get update -qq \
@@ -69,7 +68,15 @@ for i in $(seq 1 24); do
   sleep 5
   CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 8 "http://127.0.0.1:$PORT/login.php" || true)
   if [ "$CODE" = "200" ]; then
-    curl -s "http://127.0.0.1:$PORT/setup.php" >/dev/null   # runs DVWA's own table setup
+    # setup.php only creates the tables on a POST carrying create_db plus a
+    # CSRF token that has to match the session, so a plain GET (which just
+    # renders the form) leaves the database empty. Scrape the token DVWA's
+    # own dvwaFormToken() embeds in that GET response, then POST it back.
+    JAR=/tmp/dvwa_cookies.txt
+    SETUP_PAGE=$(curl -s -c "$JAR" -m 8 "http://127.0.0.1:$PORT/setup.php")
+    TOKEN=$(echo "$SETUP_PAGE" | grep -oE "name='user_token' value='[^']*'" | sed -E "s/.*value='([^']*)'/\1/")
+    curl -s -b "$JAR" -c "$JAR" -m 8 -d "create_db=1" -d "user_token=$TOKEN" \
+      "http://127.0.0.1:$PORT/setup.php" >/dev/null
     echo "READY http://localhost:$PORT (login.php 200; admin/admin after setup)" > "$STATUS"
     exit 0
   fi
@@ -105,10 +112,17 @@ if ! command -v java >/dev/null 2>&1; then
   BF=$(basename "$ASSET_URL")
   curl -sSL --retry 3 -o "/tmp/$BF" "$ASSET_URL" >>"$LOG" 2>&1 || fail "JRE download failed"
   case "$BF" in
-    *.zip) unzip -q "/tmp/$BF" -d /opt/jre || fail "unzip failed" ;;
-    *) tar xf "/tmp/$BF" -C /opt/jre --strip-components=1 || fail "untar failed" ;;
+    # unzip keeps the archive's top-level jdk-*/ folder, so JAVA_HOME is a
+    # find away; --strip-components=1 on the tarball removes that folder
+    # during extraction, so JAVA_HOME is /opt/jre itself, not a subdirectory.
+    *.zip)
+      unzip -q "/tmp/$BF" -d /opt/jre || fail "unzip failed"
+      JAVA_HOME=$(find /opt/jre -maxdepth 1 -type d -name 'jdk*' | head -1) ;;
+    *)
+      tar xf "/tmp/$BF" -C /opt/jre --strip-components=1 || fail "untar failed"
+      JAVA_HOME=/opt/jre ;;
   esac
-  export JAVA_HOME=$(find /opt/jre -maxdepth 1 -type d -name 'jdk*' | head -1)
+  export JAVA_HOME
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
 command -v java >/dev/null 2>&1 || fail "java still missing after bootstrap"

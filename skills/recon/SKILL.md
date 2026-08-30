@@ -40,29 +40,19 @@ of truth.
 ## Phase 0: target resolution
 
 BountyDesk resolves exactly one authorized target per run through
-`scope_check`; there's no target list to bootstrap or enumerate, and you
-never pick a target yourself. What "deployed" means depends on which target
-that is:
+`scope_check`; there's no target list to bootstrap or enumerate. For a real
+report against the pinned Juice Shop target, deployment is server-side
+provisioning that this skill does not cover; call `scope_check` against it,
+confirm it's allowed, and move to Phase 1.
 
-- **The pinned Juice Shop target.** Deployment is server-side provisioning
-  that this skill does not cover. Call `scope_check` against it, confirm it's
-  allowed, and move to Phase 1.
-- **A real report naming a connected repository.** Nothing is deployed ahead
-  of time. Use `bountydesk-serve-app` to clone that repository yourself
-  inside your own sandbox, pin it to the commit or tag the report describes
-  if one is named, and serve it there before investigating.
-- **A DVWA or WebGoat demo mission.** Nothing is deployed ahead of time
-  either, and the generic runner doesn't cover PHP or Java. Use
-  `bountydesk-demo-targets`'s bespoke boot sequences instead.
-
-For the last two, once the target answers on your sandbox's own
-`localhost:<port>`, investigate it directly rather than through
-`scope_check` (both skills explain why: there's no capability boundary to
-cross when you booted the process yourself, in the sandbox you're already
-running in). This still doesn't mean BountyDesk picks or enumerates targets
-at intake; the report still names exactly one, and a dynamic
-per-repository target tier remains separate, larger work (see
-`docs/multi-target-expansion-plan.md`).
+For a DVWA or WebGoat demo mission specifically, nothing is deployed ahead of
+time: use `bountydesk-demo-targets` to boot the target yourself inside your
+own sandbox first, then investigate it directly rather than through
+`scope_check` (that skill explains why). Don't generalize this to other
+targets; it applies only to that demo case. A generic self-boot path for an
+arbitrary report-named repository is separate, larger work (see
+`docs/multi-target-expansion-plan.md`), not something this skill or
+`bountydesk-demo-targets` covers today.
 
 ## Phase 0b: black-box relay tools (when contact happens outside the sandbox)
 
