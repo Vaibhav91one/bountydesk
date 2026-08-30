@@ -128,7 +128,7 @@ Two MCP servers:
 - `publish-verdict` (`app/api/mcp/publish-verdict`) exposes the approval-gated `publish_verdict` tool the agent calls to draft its outcome, summary, and findings.
 - `scope-guard` (`app/api/mcp/scope-guard`) holds the authorized scope and exposes `probe_target`, the approval-gated `probe_target_write`, and the scope checks. It is ported and hardened from the Sentinel prototype.
 
-Twelve agent skills under `skills/`: recon, triage, validation, api-security, payloads, dast, challenges, cve-lab-construction, firmware, mobile, demo-targets, and target-onboarding. They are wired by `agent/bountydesk.agent.json` and registered with `npm run skills:apply` and `npm run agent:apply` before a run.
+Twelve agent skills under `skills/`: recon, triage, validation, api-security, payloads, dast, challenges, cve-lab-construction, firmware, mobile, and demo-targets are wired into the primary agent by `agent/bountydesk.agent.json`; target-onboarding is wired into its own agent by `agent/target-onboarding.agent.json`. All are registered with `npm run skills:apply` before `npm run agent:apply`.
 
 ## What is built
 
