@@ -434,6 +434,500 @@
         will-change: transform, opacity;
       }
 
+      .landing-hero-showcase,
+      .section-showcase,
+      .agent-showcase {
+        height: 100%;
+        padding: 76px 76px 76px 258px;
+        display: grid;
+        grid-template-columns: 0.92fr 1.08fr;
+        align-items: center;
+        gap: 58px;
+      }
+
+      .landing-hero-showcase {
+        grid-template-columns: 1fr;
+        align-content: start;
+        padding: 48px 92px 72px 258px;
+        text-align: center;
+      }
+
+      .site-header-mini {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 22px;
+        color: #6e6878;
+        font-family: var(--font-mono);
+        font-size: 14px;
+      }
+
+      .site-header-mini img {
+        width: 28px;
+        height: 28px;
+      }
+
+      .landing-copy {
+        display: grid;
+        justify-items: center;
+        gap: 28px;
+      }
+
+      .landing-copy h1 {
+        max-width: 1040px;
+        color: var(--ink-dark);
+        font-size: 76px;
+        line-height: 0.98;
+      }
+
+      .landing-copy h1 span {
+        display: block;
+      }
+
+      .landing-copy p {
+        margin: 0;
+        max-width: 780px;
+        color: #6e6878;
+      }
+
+      .hero-actions {
+        display: flex;
+        justify-content: center;
+        gap: 14px;
+      }
+
+      .hero-panel {
+        justify-self: center;
+        width: 780px;
+      }
+
+      .approval-card,
+      .channel-card,
+      .queue-column,
+      .reports-table,
+      .faq-list {
+        border-radius: 16px;
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.72);
+        box-shadow: 0 26px 70px rgba(0, 0, 0, 0.26);
+      }
+
+      .approval-card {
+        padding: 28px;
+        display: grid;
+        gap: 18px;
+        color: var(--ink-dark);
+      }
+
+      .approval-card.compact {
+        padding: 22px;
+        gap: 14px;
+        text-align: left;
+        background: rgba(247, 244, 236, 0.96);
+      }
+
+      .approval-top,
+      .approval-meta,
+      .approval-actions,
+      .filter-row,
+      .table-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+      }
+
+      .approval-top > span:last-child {
+        min-width: 0;
+        flex: 1;
+        font-size: 22px;
+        text-align: right;
+      }
+
+      .agent-reply {
+        display: grid;
+        grid-template-columns: 64px 1fr;
+        gap: 18px;
+        padding: 22px;
+        border-radius: 12px;
+        border: 1px solid rgba(21, 19, 31, 0.12);
+        background: #f7f4ec;
+      }
+
+      .agent-reply img {
+        width: 64px;
+        height: 64px;
+      }
+
+      .agent-reply span,
+      .approval-meta span,
+      .approval-meta strong,
+      .channel-card span,
+      .queue-card span,
+      .queue-card small,
+      .search-row,
+      .filter-row,
+      .table-row small {
+        font-family: var(--font-mono);
+      }
+
+      .agent-reply p {
+        margin: 8px 0 0;
+        color: #403b49;
+        font-size: 20px;
+        line-height: 1.36;
+      }
+
+      .agent-reply strong {
+        font-weight: 400;
+      }
+
+      .approval-meta {
+        padding-top: 4px;
+        color: #655f70;
+        font-size: 14px;
+      }
+
+      .approval-meta strong {
+        min-width: 0;
+        color: var(--ink-dark);
+        font-weight: 400;
+        overflow-wrap: anywhere;
+      }
+
+      .approval-actions {
+        justify-content: flex-end;
+        padding-top: 6px;
+      }
+
+      .channels-showcase,
+      .queue-landing-showcase,
+      .reports-showcase,
+      .faq-showcase {
+        grid-template-columns: 0.82fr 1.18fr;
+      }
+
+      .section-showcase h2,
+      .agent-showcase h2 {
+        max-width: 760px;
+      }
+
+      .section-showcase p,
+      .agent-showcase p {
+        max-width: 620px;
+      }
+
+      .channel-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 18px;
+      }
+
+      .channel-card {
+        min-height: 214px;
+        padding: 24px;
+        display: grid;
+        align-content: space-between;
+        gap: 18px;
+      }
+
+      .channel-card > div {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .channel-icon {
+        width: 50px;
+        height: 50px;
+        display: grid;
+        place-items: center;
+        border-radius: 12px;
+        color: var(--ink);
+        background: #0c0d12;
+        font-size: 22px;
+      }
+
+      .channel-card strong {
+        font-size: 32px;
+        font-weight: 400;
+      }
+
+      .channel-card span {
+        color: #6e6878;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+
+      .agent-showcase {
+        grid-template-columns: 1.05fr 0.95fr;
+      }
+
+      .mascot-row {
+        height: 340px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        overflow: hidden;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background: #0c0d12;
+        box-shadow: inset 0 0 80px rgba(132, 120, 255, 0.12), 0 28px 70px rgba(0, 0, 0, 0.26);
+      }
+
+      .mascot-row img {
+        width: 74px;
+        height: 74px;
+        flex: 0 0 auto;
+      }
+
+      .sandbox-board {
+        position: relative;
+        height: 560px;
+        border-radius: 18px;
+        border: 1px solid var(--border);
+        background:
+          linear-gradient(rgba(21, 19, 31, 0.08) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(21, 19, 31, 0.08) 1px, transparent 1px),
+          rgba(255, 255, 255, 0.68);
+        background-size: 40px 40px;
+        overflow: hidden;
+      }
+
+      .sandbox-node {
+        position: absolute;
+        width: 220px;
+        min-height: 84px;
+        padding: 18px;
+        display: grid;
+        align-content: center;
+        gap: 8px;
+        border-radius: 14px;
+        border: 1px solid rgba(21, 19, 31, 0.12);
+        background: #fbf7f0;
+        box-shadow: 0 18px 42px rgba(55, 45, 31, 0.14);
+      }
+
+      .sandbox-node span {
+        font-family: var(--font-mono);
+        color: #5c51dd;
+        font-size: 13px;
+      }
+
+      .sandbox-node strong {
+        font-size: 22px;
+        font-weight: 400;
+      }
+
+      .sandbox-node.n1 { left: 52px; top: 54px; }
+      .sandbox-node.n2 { right: 62px; top: 54px; }
+      .sandbox-node.n3 { left: 52px; top: 238px; }
+      .sandbox-node.n4 { right: 62px; top: 238px; }
+      .sandbox-node.n5 { left: 52px; bottom: 54px; }
+      .sandbox-node.n6 { right: 62px; bottom: 54px; }
+
+      .flow-line {
+        position: absolute;
+        height: 2px;
+        background: linear-gradient(90deg, rgba(132, 120, 255, 0), rgba(132, 120, 255, 0.82));
+        transform-origin: 0 50%;
+      }
+
+      .flow-line.l1 { left: 272px; top: 96px; width: 250px; }
+      .flow-line.l2 { left: 272px; top: 280px; width: 250px; }
+      .flow-line.l3 { left: 272px; top: 464px; width: 250px; }
+      .flow-line.l4 { right: 172px; top: 144px; width: 2px; height: 205px; }
+
+      .queue-columns {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 16px;
+      }
+
+      .queue-column {
+        padding: 18px;
+        display: grid;
+        align-content: start;
+        gap: 14px;
+      }
+
+      .queue-column header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--ink-dark);
+      }
+
+      .queue-column header span {
+        flex: 1;
+        font-size: 20px;
+      }
+
+      .queue-column header small {
+        font-family: var(--font-mono);
+        color: #6e6878;
+      }
+
+      .phase-dot {
+        width: 11px;
+        height: 11px;
+        flex: 0 0 auto;
+        border-radius: 999px;
+        background: var(--accent);
+      }
+
+      .phase-dot.phase-reproducing { background: #3ee6ad; }
+      .phase-dot.phase-approval { background: #f4c15d; }
+      .phase-dot.phase-delivered { background: #48d18c; }
+
+      .queue-card {
+        min-height: 142px;
+        padding: 18px;
+        display: grid;
+        align-content: space-between;
+        gap: 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(21, 19, 31, 0.1);
+        background: #fbf7f0;
+      }
+
+      .queue-card.ghost {
+        opacity: 0.62;
+      }
+
+      .queue-card strong {
+        font-size: 20px;
+        font-weight: 400;
+        line-height: 1.18;
+      }
+
+      .queue-card span,
+      .queue-card small {
+        color: #6e6878;
+        font-size: 13px;
+      }
+
+      .reports-table {
+        padding: 22px;
+        display: grid;
+        gap: 12px;
+      }
+
+      .search-row,
+      .filter-row span,
+      .table-row {
+        border-radius: 10px;
+        border: 1px solid rgba(21, 19, 31, 0.1);
+        background: #fbf7f0;
+      }
+
+      .search-row {
+        padding: 14px 18px;
+        color: #6e6878;
+      }
+
+      .filter-row {
+        justify-content: flex-start;
+      }
+
+      .filter-row span {
+        padding: 9px 13px;
+        color: #403b49;
+        font-size: 13px;
+      }
+
+      .table-row {
+        padding: 15px 16px;
+        display: grid;
+        grid-template-columns: 1.25fr 0.78fr 168px;
+      }
+
+      .table-row > span:first-child {
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 17px;
+      }
+
+      .table-row small {
+        align-self: center;
+        color: #6e6878;
+      }
+
+      .table-row .status {
+        justify-self: end;
+        white-space: nowrap;
+      }
+
+      .faq-list {
+        padding: 10px 28px;
+      }
+
+      .faq-item {
+        padding: 22px 0;
+        border-bottom: 1px solid rgba(21, 19, 31, 0.1);
+      }
+
+      .faq-item:last-child {
+        border-bottom: 0;
+      }
+
+      .faq-item strong {
+        font-size: 27px;
+        font-weight: 400;
+      }
+
+      .faq-item p {
+        margin-top: 12px;
+        color: #6e6878;
+        font-size: 20px;
+      }
+
+      .faq-item:not(.open) p {
+        display: none;
+      }
+
+      .footer-close {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        color: rgba(247, 244, 236, 0.36);
+        font-size: 170px;
+        line-height: 0.9;
+        overflow: hidden;
+      }
+
+      .footer-close > img:first-child {
+        position: absolute;
+        top: 228px;
+        width: 82px;
+        height: 82px;
+        opacity: 0.92;
+      }
+
+      .footer-close .mascot {
+        width: 136px;
+        height: 136px;
+        opacity: 0.34;
+      }
+
+      .footer-close p {
+        position: absolute;
+        left: 50%;
+        bottom: 248px;
+        margin: 0;
+        transform: translateX(-50%);
+        width: 720px;
+        color: var(--ink-muted);
+        text-align: center;
+      }
+
       .stack-panel,
       .checks,
       .terminal-block,
@@ -905,58 +1399,47 @@
     </style>
   </head>
   <body>
-    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="96.5" data-width="1920" data-height="1080" data-fps="60">
-      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="96.5" data-track-index="4"></section>
+    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="67" data-width="1920" data-height="1080" data-fps="60">
+      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="67" data-track-index="4"></section>
 
       <div data-hf-id="hf-bd-card" id="tour-card" class="tour-card">
         <div data-hf-id="hf-bd-s01" id="shot01" class="bd-shot" data-bd-shot="home"></div>
         <div data-hf-id="hf-bd-s02" id="shot02" class="bd-shot" data-bd-shot="intake"></div>
-        <div data-hf-id="hf-bd-s03" id="shot03" class="bd-shot" data-bd-shot="fixture"></div>
-        <div data-hf-id="hf-bd-s04" id="shot04" class="bd-shot" data-bd-shot="target"></div>
-        <div data-hf-id="hf-bd-s05" id="shot05" class="bd-shot" data-bd-shot="negative"></div>
-        <div data-hf-id="hf-bd-s06" id="shot06" class="bd-shot" data-bd-shot="trace"></div>
-        <div data-hf-id="hf-bd-s07" id="shot07" class="bd-shot" data-bd-shot="oracle"></div>
+        <div data-hf-id="hf-bd-s03" id="shot03" class="bd-shot" data-bd-shot="landing"></div>
+        <div data-hf-id="hf-bd-s04" id="shot04" class="bd-shot" data-bd-shot="approval"></div>
+        <div data-hf-id="hf-bd-s05" id="shot05" class="bd-shot" data-bd-shot="channels"></div>
+        <div data-hf-id="hf-bd-s06" id="shot06" class="bd-shot" data-bd-shot="agent"></div>
+        <div data-hf-id="hf-bd-s07" id="shot07" class="bd-shot" data-bd-shot="sandbox"></div>
         <div data-hf-id="hf-bd-s08" id="shot08" class="bd-shot" data-bd-shot="queue"></div>
-        <div data-hf-id="hf-bd-s09" id="shot09" class="bd-shot" data-bd-shot="scope"></div>
-        <div data-hf-id="hf-bd-s10" id="shot10" class="bd-shot" data-bd-shot="lifecycle"></div>
-        <div data-hf-id="hf-bd-s11" id="shot11" class="bd-shot" data-bd-shot="ready"></div>
-        <div data-hf-id="hf-bd-s12" id="shot12" class="bd-shot" data-bd-shot="similar"></div>
-        <div data-hf-id="hf-bd-s13" id="shot13" class="bd-shot" data-bd-shot="audit"></div>
-        <div data-hf-id="hf-bd-s15" id="shot15" class="bd-shot" data-bd-shot="delivery"></div>
+        <div data-hf-id="hf-bd-s09" id="shot09" class="bd-shot" data-bd-shot="reports"></div>
+        <div data-hf-id="hf-bd-s10" id="shot10" class="bd-shot" data-bd-shot="faq"></div>
+        <div data-hf-id="hf-bd-s11" id="shot11" class="bd-shot" data-bd-shot="footer"></div>
       </div>
 
-      <div data-hf-id="hf-bd-cardp" id="tour-card-p" class="tour-card portrait">
-        <div data-hf-id="hf-bd-s14" id="shot14" class="bd-shot" data-bd-shot="approval"></div>
-      </div>
-
-      <section data-hf-id="hf-bd-caps" id="tour-caps" class="clip scene" data-start="0" data-duration="96.5" data-track-index="5" data-layout-allow-caption-zone="" style="z-index: 14">
-        <div data-hf-id="hf-bd-c01" id="tc01" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-9gry" class="dot"></span>“A triage agent that cannot declare victory by itself.” The canary, not the model, decides whether a report reproduced.</div>
-        <div data-hf-id="hf-bd-c02" id="tc02" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zcc2" class="dot"></span>OAuth signs in the user. The GitHub App grants repo access. The server binds each delivery to the target profile.</div>
-        <div data-hf-id="hf-bd-c03" id="tc03" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zqn3" class="dot"></span>No defender fixture, no reproduced verdict. The report becomes analysis only, and a human decides the next move.</div>
-        <div data-hf-id="hf-bd-c04" id="tc04" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-04y4" class="dot"></span>The target is pinned before the run: Vaibhav91one/juice-shop at the exact v17.3.0 commit.</div>
-        <div data-hf-id="hf-bd-c05" id="tc05" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-0j95" class="dot"></span>The negative control runs first. A passing script is only useful after the control proves the oracle can stay quiet.</div>
-        <div data-hf-id="hf-bd-c06" id="tc06" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-0xk6" class="dot"></span>TrueForge can drive the browser, shell, and logs. It still cannot narrate the verdict.</div>
-        <div data-hf-id="hf-bd-c07" id="tc07" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-1bv7" class="dot"></span>The evidence packet carries the target hash, canary outcome, oracle adapter, and outbound payload hash.</div>
-        <div data-hf-id="hf-bd-c08" id="tc08" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-1q68" class="dot"></span>The close calls come to the review queue with states, severity, evidence, and the exact action needed.</div>
-        <div data-hf-id="hf-bd-c09" id="tc09" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-vrkt" class="dot"></span>Scope is enforced at the capability boundary. Clone, deploy, and egress never come from report text.</div>
-        <div data-hf-id="hf-bd-c10" id="tc10" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-w5vu" class="dot"></span>Report state and job execution stay separate, so leasing problems cannot become user-facing verdicts.</div>
-        <div data-hf-id="hf-bd-c11" id="tc11" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-mnty" class="dot"></span>READY means the target answered its health check. It never means reproduced, severe, or safe to deliver.</div>
-        <div data-hf-id="hf-bd-c12" id="tc12" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-m9ix" class="dot"></span>Similar reports are candidates, not auto-closures. Only exact delivery replays do nothing.</div>
-        <div data-hf-id="hf-bd-c13" id="tc13" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-ngg0" class="dot"></span>The reviewer gets the raw record: run log, oracle result, target profile, hashes, and signed payload.</div>
-        <div data-hf-id="hf-bd-c14" id="tc14" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-n24z" class="dot"></span>The human gate signs the exact outbound words. Change the text, and the hash no longer matches.</div>
-        <div data-hf-id="hf-bd-c15" id="tc15" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-l2lu" class="dot"></span>One approved comment ships. The token is discarded, and exact replays are ignored.</div>
+      <section data-hf-id="hf-bd-caps" id="tour-caps" class="clip scene" data-start="0" data-duration="67" data-track-index="5" data-layout-allow-caption-zone="" style="z-index: 14">
+        <div data-hf-id="hf-bd-c01" id="tc01" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-9gry" class="dot"></span>Resolve bug reports, vulnerabilities, and CVEs in a sandbox where the model cannot declare victory.</div>
+        <div data-hf-id="hf-bd-c02" id="tc02" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zcc2" class="dot"></span>Introducing BountyDesk.</div>
+        <div data-hf-id="hf-bd-c03" id="tc03" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-zqn3" class="dot"></span>The landing page opens with the core promise: read every report, sign every verdict.</div>
+        <div data-hf-id="hf-bd-c04" id="tc04" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-04y4" class="dot"></span>The approval panel shows the exact outbound words and the hash a reviewer signs.</div>
+        <div data-hf-id="hf-bd-c05" id="tc05" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-0j95" class="dot"></span>Intake channels are honest about state: GitHub is live, the other paths are designed.</div>
+        <div data-hf-id="hf-bd-c06" id="tc06" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-0xk6" class="dot"></span>Agent Bounty can draft and drive work, but the verdict comes from the oracle.</div>
+        <div data-hf-id="hf-bd-c07" id="tc07" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-1bv7" class="dot"></span>The sandbox diagram explains build, reproduction, PoC execution, and the external canary check.</div>
+        <div data-hf-id="hf-bd-c08" id="tc08" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-1q68" class="dot"></span>The review queue groups work by phase so the next human action is visible.</div>
+        <div data-hf-id="hf-bd-c09" id="tc09" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-vrkt" class="dot"></span>The reports index keeps every arrival visible, including closed work and analysis-only outcomes.</div>
+        <div data-hf-id="hf-bd-c10" id="tc10" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-w5vu" class="dot"></span>The FAQ says what is built, what is designed, and what the GitHub App can access.</div>
+        <div data-hf-id="hf-bd-c11" id="tc11" class="lower3 wrap" style="opacity: 0"><span data-hf-id="hf-mnty" class="dot"></span>Bugs, CVEs, bounties. Reproduced securely.</div>
       </section>
 
-      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="96.5" data-track-index="10" data-volume="1"></audio>
+      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="67" data-track-index="10" data-volume="1"></audio>
       <audio data-hf-id="hf-4bv1" id="whoosh01" src="assets/audio/whoosh.wav" data-start="4.0" data-duration="0.7" data-track-index="11" data-volume="0.45"></audio>
       <audio data-hf-id="hf-onif" id="whoosh02" src="assets/audio/whoosh.wav" data-start="8.0" data-duration="0.7" data-track-index="12" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-od1x" id="whoosh03" src="assets/audio/whoosh.wav" data-start="26.0" data-duration="0.7" data-track-index="13" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-vqjq" id="whoosh04" src="assets/audio/whoosh.wav" data-start="47.0" data-duration="0.7" data-track-index="14" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-kli6" id="whoosh05" src="assets/audio/whoosh.wav" data-start="68.7" data-duration="0.7" data-track-index="15" data-volume="0.45"></audio>
-      <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="34.6" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
-      <audio data-hf-id="hf-bfk6" id="ping02" src="assets/audio/ping.wav" data-start="91.0" data-duration="0.38" data-track-index="17" data-volume="0.65"></audio>
+      <audio data-hf-id="hf-od1x" id="whoosh03" src="assets/audio/whoosh.wav" data-start="22.0" data-duration="0.7" data-track-index="13" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-vqjq" id="whoosh04" src="assets/audio/whoosh.wav" data-start="34.0" data-duration="0.7" data-track-index="14" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-kli6" id="whoosh05" src="assets/audio/whoosh.wav" data-start="48.0" data-duration="0.7" data-track-index="15" data-volume="0.45"></audio>
+      <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="15.6" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
+      <audio data-hf-id="hf-bfk6" id="ping02" src="assets/audio/ping.wav" data-start="61.6" data-duration="0.38" data-track-index="17" data-volume="0.65"></audio>
 
-      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="96.5" data-track-index="6"></div>
+      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="67" data-track-index="6"></div>
     </div>
 
     <script>
@@ -964,8 +1447,9 @@
       var G = "power3.out";
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
-      var starts = [0, 4, 8, 14, 20.5, 26, 34, 40, 47, 53.5, 64.5, 68.7, 72.5, 82.5, 90.5];
-      var durations = [4, 4, 6, 6.5, 5.5, 8, 6, 7, 6.5, 11, 4.2, 3.8, 10, 8, 6];
+      var totalDuration = 67;
+      var starts = [0, 4, 8, 15, 22, 28, 34, 41, 48, 55, 61];
+      var durations = [4, 4, 7, 7, 6, 6, 7, 7, 7, 6, 6];
 
       starts.forEach(function(start, index) {
         var shot = "#shot" + String(index + 1).padStart(2, "0");
@@ -990,15 +1474,43 @@
       tl.to("#shot02 .brand-intro-logo", { x: -18, scale: 0.96, opacity: 0, duration: 0.34, ease: "power2.in" }, 7.35);
       tl.to("#shot02 .text-animate-character", { x: -24, opacity: 0, duration: 0.3, stagger: 0.012, ease: "power2.in" }, 7.42);
 
-      tl.set("#tour-card", { opacity: 0 }, 82.5);
-      tl.set("#tour-card-p", { opacity: 1 }, 82.5);
-      tl.set("#tour-card-p", { opacity: 0 }, 90.5);
-      tl.set("#tour-card", { opacity: 1 }, 90.5);
+      tl.fromTo("#shot03 .site-header-mini", { y: -20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.52, ease: G }, 8.25);
+      tl.fromTo("#shot03 .landing-copy > *", { y: 34, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.13, ease: G }, 8.5);
+      tl.fromTo("#shot03 .hero-panel", { y: 70, scale: 0.94, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.74, ease: G }, 10.1);
 
-      tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: 96.5, ease: "none" }, 0);
-      tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: 96.5, ease: "none" }, 0);
+      tl.fromTo("#shot04 section", { x: -46, opacity: 0 }, { x: 0, opacity: 1, duration: 0.58, ease: G }, 15.3);
+      tl.fromTo("#shot04 .approval-card", { x: 60, scale: 0.95, opacity: 0 }, { x: 0, scale: 1, opacity: 1, duration: 0.68, ease: G }, 15.75);
+      tl.fromTo("#shot04 .approval-meta, #shot04 .approval-actions", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.1, ease: G }, 16.35);
+
+      tl.fromTo("#shot05 section", { y: 34, opacity: 0 }, { y: 0, opacity: 1, duration: 0.56, ease: G }, 22.3);
+      tl.fromTo("#shot05 .channel-card", { y: 48, opacity: 0 }, { y: 0, opacity: 1, duration: 0.55, stagger: 0.11, ease: G }, 22.85);
+
+      tl.fromTo("#shot06 .mascot-row img", { x: 80, opacity: 0 }, { x: 0, opacity: 1, duration: 0.58, stagger: 0.08, ease: G }, 28.3);
+      tl.fromTo("#shot06 section", { x: 42, opacity: 0 }, { x: 0, opacity: 1, duration: 0.62, ease: G }, 29.05);
+      tl.to("#shot06 .mascot-row img", { x: -20, duration: 4.4, ease: "none" }, 29.5);
+
+      tl.fromTo("#shot07 section", { x: -42, opacity: 0 }, { x: 0, opacity: 1, duration: 0.56, ease: G }, 34.3);
+      tl.fromTo("#shot07 .sandbox-node", { y: 38, opacity: 0 }, { y: 0, opacity: 1, duration: 0.48, stagger: 0.09, ease: G }, 34.85);
+      tl.fromTo("#shot07 .flow-line", { scaleX: 0, opacity: 0 }, { scaleX: 1, opacity: 1, duration: 0.5, stagger: 0.08, ease: G }, 35.6);
+
+      tl.fromTo("#shot08 section", { x: -42, opacity: 0 }, { x: 0, opacity: 1, duration: 0.56, ease: G }, 41.3);
+      tl.fromTo("#shot08 .queue-column", { y: 46, opacity: 0 }, { y: 0, opacity: 1, duration: 0.52, stagger: 0.12, ease: G }, 41.85);
+      tl.fromTo("#shot08 .queue-card", { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.42, stagger: 0.07, ease: G }, 42.45);
+
+      tl.fromTo("#shot09 section", { x: -42, opacity: 0 }, { x: 0, opacity: 1, duration: 0.56, ease: G }, 48.3);
+      tl.fromTo("#shot09 .reports-table", { x: 55, opacity: 0 }, { x: 0, opacity: 1, duration: 0.6, ease: G }, 48.82);
+      tl.fromTo("#shot09 .table-row", { y: 18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.36, stagger: 0.07, ease: G }, 49.35);
+
+      tl.fromTo("#shot10 section", { x: -42, opacity: 0 }, { x: 0, opacity: 1, duration: 0.56, ease: G }, 55.25);
+      tl.fromTo("#shot10 .faq-item", { y: 34, opacity: 0 }, { y: 0, opacity: 1, duration: 0.44, stagger: 0.09, ease: G }, 55.8);
+
+      tl.fromTo("#shot11 .footer-close > span, #shot11 .footer-close .mascot", { y: 55, opacity: 0 }, { y: 0, opacity: 1, duration: 0.72, stagger: 0.08, ease: G }, 61.35);
+      tl.fromTo("#shot11 .footer-close > img:first-child, #shot11 .footer-close p", { y: 22, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.12, ease: G }, 62.05);
+
+      tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: totalDuration, ease: "none" }, 0);
+      tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: totalDuration, ease: "none" }, 0);
       tl.set("#bgm", { volume: 0.45 }, 0);
-      tl.to("#bgm", { volume: 0.2, duration: 3, ease: "power1.out" }, 93);
+      tl.to("#bgm", { volume: 0.2, duration: 3, ease: "power1.out" }, 64);
 
       window.__timelines["bountydesk-tour"] = tl;
     </script>

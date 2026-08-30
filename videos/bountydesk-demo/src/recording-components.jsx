@@ -3,38 +3,47 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 
 const reports = [
-  { title: "SQL injection in /rest/products/search", state: "Reproducing", sev: "Critical" },
-  { title: "Auth bypass via SQL injection on login", state: "Awaiting approval", sev: "Critical" },
-  { title: "Directory traversal in upload handler", state: "Analysis only", sev: "High" },
-  { title: "Missing headers on marketing site", state: "Out of scope", sev: "Low" },
+  { title: "Stored XSS in the product review field", source: "#175151", state: "Triaging", phase: "triaging" },
+  { title: "SQL injection in /rest/products/search", source: "#175152", state: "Reproducing", phase: "reproducing" },
+  { title: "Auth bypass via SQL injection on login", source: "#175156", state: "Awaiting approval", phase: "approval" },
+  { title: "Directory traversal in the file upload handler", source: "#175154", state: "Delivered", phase: "delivered" },
 ];
 
-const traceRows = [
-  "negative control passed",
-  "fresh canary seeded",
-  "poc executed against pinned target",
-  "external oracle observed canary",
+const channels = [
+  { name: "GitHub", status: "Live", note: "Issues in, approved verdicts back out." },
+  { name: "Email", status: "Designed", note: "Intake without a GitHub account." },
+  { name: "File upload", status: "Designed", note: "Direct report packets." },
+  { name: "Drive", status: "Mapped", note: "Shared folder intake." },
 ];
 
-function Chrome({ children, tone = "dark", bare = false, portrait = false }) {
+const faq = [
+  ["Does reproduction run today?", "No. The sandbox topology and canary oracle are designed and not built."],
+  ["How would you know a bug is real?", "A fresh canary is seeded, the negative control runs first, and an external oracle decides."],
+  ["What exactly am I approving?", "The precise outbound comment, bound to a content hash."],
+  ["What does the GitHub App ask for?", "Metadata read plus Issues read and write. Nothing that can write code."],
+];
+
+function Chrome({ children, tone = "dark", bare = false }) {
   return (
-    <div className={`bd-chrome ${tone}${bare ? " bare" : ""}${portrait ? " portrait" : ""}`}>
-      {!bare && <div className="topbar">
-        <div className="traffic">
-          <span />
-          <span />
-          <span />
+    <div className={`bd-chrome ${tone}${bare ? " bare" : ""}`}>
+      {!bare && (
+        <div className="topbar">
+          <div className="traffic">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="brand-pill">
+            <img src="assets/logo-small.svg" alt="" />
+            <span>BountyDesk</span>
+          </div>
+          <div className="url">Landing page</div>
+          <div className="nav-item active">Home</div>
+          <div className="nav-item">How it works</div>
+          <div className="nav-item">FAQ</div>
+          <div className="nav-item">Sign in</div>
         </div>
-        <div className="brand-pill">
-          <img src="assets/logo-small.svg" alt="" />
-          <span>BountyDesk</span>
-        </div>
-        <div className="url">Review queue</div>
-        <div className="nav-item active">Reports</div>
-        <div className="nav-item">Runs</div>
-        <div className="nav-item">Scope</div>
-        <div className="nav-item">Approvals</div>
-      </div>}
+      )}
       {children}
     </div>
   );
@@ -63,20 +72,234 @@ function TextAnimate({ children, animation = "slideUp", by = "word", className =
   );
 }
 
-function QueueCards() {
+function PhaseDot({ phase }) {
+  return <span className={`phase-dot phase-${phase}`} />;
+}
+
+function LandingHero() {
   return (
-    <div className="queue-grid">
-      {reports.map((report, index) => (
-        <div className="report-card" key={report.title}>
-          <div className="card-kicker">Report 0{index + 1}</div>
-          <h3>{report.title}</h3>
-          <div className="card-row">
-            <StatusPill tone={index === 3 ? "muted" : index === 2 ? "amber" : "violet"}>{report.state}</StatusPill>
-            <span>{report.sev}</span>
+    <Chrome>
+      <div className="landing-hero-showcase">
+        <div className="site-header-mini">
+          <img src="assets/logo-small.svg" alt="" />
+          <span>BountyDesk</span>
+          <span>How it works</span>
+          <span>FAQ</span>
+        </div>
+        <div className="landing-copy">
+          <h1>
+            <span>Read every report.</span>
+            <span>Sign every verdict.</span>
+          </h1>
+          <p>Every report authenticated and scope-checked. No verdict ships until you sign it.</p>
+          <div className="hero-actions">
+            <button className="primary">Get started</button>
+            <button>Star on GitHub</button>
           </div>
         </div>
-      ))}
+        <div className="hero-panel">
+          <ApprovalCard compact />
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function ApprovalCard({ compact = false }) {
+  return (
+    <div className={`approval-card ${compact ? "compact" : ""}`}>
+      <div className="approval-top">
+        <StatusPill tone="amber">Awaiting approval</StatusPill>
+        <span>Auth bypass via SQL injection on login</span>
+      </div>
+      <div className="agent-reply">
+        <img src="assets/mascot-canary-found.svg" alt="" />
+        <div>
+          <span>Agent Bounty drafted this reply</span>
+          <p><strong>Verdict: analysis only.</strong> No reproduced verdict was produced. A reviewer signs the final reply by hand.</p>
+        </div>
+      </div>
+      <div className="approval-meta">
+        <span>Bound target</span>
+        <strong>juice-shop-v17.3.0</strong>
+      </div>
+      <div className="approval-meta">
+        <span>Content hash</span>
+        <strong>30e7597fc122c1c7ad3a6bc97e70f984</strong>
+      </div>
+      <div className="approval-actions">
+        <button>Deny</button>
+        <button className="primary">Approve</button>
+      </div>
     </div>
+  );
+}
+
+function ChannelsGrid() {
+  return (
+    <Chrome>
+      <div className="section-showcase channels-showcase">
+        <section>
+          <div className="eyebrow">Intake channels</div>
+          <h2>Reports arrive from where they arrive.</h2>
+          <p>GitHub is live. Email, uploads, and drive intake stay visible as designed channels without pretending they are shipped.</p>
+        </section>
+        <div className="channel-grid">
+          {channels.map((channel) => (
+            <div className="channel-card" key={channel.name}>
+              <div>
+                <div className="channel-icon">{channel.name.slice(0, 1)}</div>
+                <StatusPill tone={channel.status === "Live" ? "green" : "muted"}>{channel.status}</StatusPill>
+              </div>
+              <strong>{channel.name}</strong>
+              <span>{channel.note}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function AgentBounty() {
+  return (
+    <Chrome>
+      <div className="agent-showcase">
+        <div className="mascot-row">
+          {["idle", "ingest", "scanning", "reproducing", "awaiting-approval", "delivered"].map((name) => (
+            <img key={name} src={`assets/mascot-${name === "idle" ? "idle" : name === "delivered" ? "delivered" : "canary-found"}.svg`} alt="" />
+          ))}
+        </div>
+        <section>
+          <div className="eyebrow">Agent Bounty</div>
+          <h2>It drafts the reply. It never decides the verdict.</h2>
+          <p>The model can read, triage, and drive the run. The oracle decides whether the canary was observed, and a person signs the words.</p>
+        </section>
+      </div>
+    </Chrome>
+  );
+}
+
+function SandboxTopology() {
+  return (
+    <Chrome>
+      <div className="section-showcase sandbox-showcase">
+        <section>
+          <div className="eyebrow">Reproduction</div>
+          <h2>Two sandboxes, and an oracle outside both.</h2>
+          <p>The build sandbox handles dependencies. The reproduction sandbox runs offline. Only the built artifact crosses between them.</p>
+        </section>
+        <div className="sandbox-board">
+          {["Connected repo", "BountyDesk", "Build sandbox", "Target runtime", "PoC runner", "External oracle"].map((node, index) => (
+            <div className={`sandbox-node n${index + 1}`} key={node}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{node}</strong>
+            </div>
+          ))}
+          <div className="flow-line l1" />
+          <div className="flow-line l2" />
+          <div className="flow-line l3" />
+          <div className="flow-line l4" />
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function QueuePreview() {
+  const columns = [
+    ["Triaging", reports[0]],
+    ["Reproducing", reports[1]],
+    ["Awaiting approval", reports[2]],
+  ];
+  return (
+    <Chrome>
+      <div className="section-showcase queue-landing-showcase">
+        <section>
+          <div className="eyebrow">Review queue</div>
+          <h2>Work in flight, by phase.</h2>
+          <p>Cards move through the same phases the console uses, so reviewers can scan what is running and what needs a signature.</p>
+        </section>
+        <div className="queue-columns">
+          {columns.map(([label, report]) => (
+            <div className="queue-column" key={label}>
+              <header><PhaseDot phase={report.phase} /><span>{label}</span><small>2</small></header>
+              <div className="queue-card">
+                <span>{report.source}</span>
+                <strong>{report.title}</strong>
+                <small>juice-shop-v17.3.0</small>
+              </div>
+              <div className="queue-card ghost">
+                <span>#175159</span>
+                <strong>IDOR on the basket endpoint</strong>
+                <small>juice-shop-v17.3.0</small>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function ReportsIndex() {
+  return (
+    <Chrome>
+      <div className="section-showcase reports-showcase">
+        <section>
+          <div className="eyebrow">Reports</div>
+          <h2>Everything that arrived, however it ended.</h2>
+          <p>The index keeps closed work visible and lets a reviewer filter for open reports or rows waiting on them.</p>
+        </section>
+        <div className="reports-table">
+          <div className="search-row">Search by title, issue or repository</div>
+          <div className="filter-row"><span>All 7</span><span>Open 5</span><span>Waiting on me 2</span><span>Closed 2</span></div>
+          {reports.map((report) => (
+            <div className="table-row" key={report.title}>
+              <span><PhaseDot phase={report.phase} />{report.title}</span>
+              <small>{report.source} · Vaibhav91one/juice-shop</small>
+              <StatusPill tone={report.phase === "delivered" ? "green" : report.phase === "approval" ? "amber" : "violet"}>{report.state}</StatusPill>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function FaqShowcase() {
+  return (
+    <Chrome>
+      <div className="section-showcase faq-showcase">
+        <section>
+          <div className="eyebrow">FAQ</div>
+          <h2>Answers come from the design record.</h2>
+          <p>The landing page tells a security reader exactly what is live, what is designed, and where the human gate sits.</p>
+        </section>
+        <div className="faq-list">
+          {faq.map(([question, answer], index) => (
+            <div className={`faq-item ${index === 0 ? "open" : ""}`} key={question}>
+              <strong>{question}</strong>
+              <p>{answer}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Chrome>
+  );
+}
+
+function FooterClose() {
+  return (
+    <Chrome bare>
+      <div className="footer-close">
+        <img src="assets/logo-small.svg" alt="" />
+        <span>Bounty</span>
+        <img className="mascot" src="assets/mascot-idle.svg" alt="" />
+        <span>Desk</span>
+        <p>Bugs, CVEs, bounties. Reproduced securely.</p>
+      </div>
+    </Chrome>
   );
 }
 
@@ -114,213 +337,35 @@ function Shot({ id }) {
           </div>
         </Chrome>
       );
-    case "fixture":
-      return (
-        <Chrome>
-          <div className="verdict-panel">
-            <div>
-              <div className="eyebrow">Fixture gate</div>
-              <h2>No fixture, no reproduced verdict.</h2>
-              <p>Without a defender-authored fixture, negative control, and oracle adapter, the run stops at analysis only.</p>
-            </div>
-            <div className="terminal-block">
-              <code>$ bd triage report-1842</code>
-              <code className="warn">fixture_missing: true</code>
-              <code>verdict: ANALYSIS_ONLY</code>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "target":
-      return (
-        <Chrome>
-          <div className="target-map">
-            <div className="node large">Target profile</div>
-            <div className="node">Exact commit</div>
-            <div className="node">Pinned snapshot</div>
-            <div className="node">Canary fixture</div>
-            <div className="link one" />
-            <div className="link two" />
-            <div className="link three" />
-            <aside>
-              <div className="eyebrow">Reproduction</div>
-              <h2>Target comes from the server.</h2>
-              <p>Clone, deploy, and egress are bound at the capability boundary, never from model text.</p>
-            </aside>
-          </div>
-        </Chrome>
-      );
-    case "negative":
-      return (
-        <Chrome>
-          <div className="run-log">
-            <div>
-              <div className="eyebrow">Control first</div>
-              <h2>A green script is not reproduction.</h2>
-              <p>The run proves the exploit only after the negative control fails to observe the canary.</p>
-            </div>
-            <div className="checks">
-              <div><span /> Negative control <strong>passed</strong></div>
-              <div><span /> Fresh canary <strong>seeded</strong></div>
-              <div><span /> PoC execution <strong>pending</strong></div>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "trace":
-      return (
-        <Chrome>
-          <div className="trace">
-            <div className="terminal-block big">
-              {traceRows.map((row) => <code key={row}>{row}</code>)}
-            </div>
-            <div>
-              <div className="eyebrow">TrueForge session</div>
-              <h2>The transcript is evidence, not the judge.</h2>
-              <p>The model can drive the run. The oracle decides whether the canary was observed.</p>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "oracle":
-      return (
-        <Chrome tone="light">
-          <div className="oracle">
-            <div className="packet">
-              <div className="packet-top">
-                <span>Evidence packet</span>
-                <StatusPill tone="green">REPRODUCED</StatusPill>
-              </div>
-              <pre>control: passed{"\n"}canary: seeded per run{"\n"}oracle: canary observed</pre>
-              <div className="hashes">
-                <span>target 1867b926</span>
-                <span>payload sha256:c0e7</span>
-              </div>
-            </div>
-            <img src="assets/mascot-canary-found.svg" />
-          </div>
-        </Chrome>
-      );
-    case "queue":
-      return (
-        <Chrome>
-          <div className="queue-shot">
-            <div>
-              <div className="eyebrow">Review queue</div>
-              <h2>Every report has a state. None has a guess.</h2>
-            </div>
-            <QueueCards />
-          </div>
-        </Chrome>
-      );
-    case "scope":
-      return (
-        <Chrome>
-          <div className="scope">
-            <div className="scope-card in"><span>in scope</span><strong>juice-shop</strong></div>
-            <div className="scope-card out"><span>blocked</span><strong>marketing.example</strong></div>
-            <div>
-              <div className="eyebrow">Scope guard</div>
-              <h2>Scope is a capability boundary.</h2>
-              <p>The agent never widens target access by reading strings from a report or a log.</p>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "lifecycle":
-      return (
-        <Chrome>
-          <div className="lifecycle">
-            {["TRIAGING", "REPRODUCING", "AWAITING_APPROVAL", "DELIVERING", "DELIVERED"].map((state) => (
-              <div className="state" key={state}>{state}</div>
-            ))}
-          </div>
-        </Chrome>
-      );
-    case "ready":
-      return (
-        <Chrome>
-          <div className="compare">
-            <div className="status-file">
-              <span>status.txt</span>
-              <strong>READY</strong>
-              <small>target answered health check</small>
-            </div>
-            <div>
-              <div className="eyebrow">Evidence boundary</div>
-              <h2>READY never means reproduced.</h2>
-              <p>A sandbox status file reports target readiness only. The oracle owns the verdict.</p>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "similar":
-      return (
-        <Chrome>
-          <div className="similar">
-            <div className="matches">
-              <div><strong>92%</strong><span>same endpoint</span></div>
-              <div><strong>81%</strong><span>same payload shape</span></div>
-              <div><strong>73%</strong><span>same component</span></div>
-            </div>
-            <section>
-              <div className="eyebrow">Duplicate handling</div>
-              <h2>Similar reports go to a human.</h2>
-              <p>Only exact delivery replays are automatic no-ops.</p>
-            </section>
-          </div>
-        </Chrome>
-      );
-    case "audit":
-      return (
-        <Chrome tone="score" bare>
-          <div className="audit">
-            <div className="packet wide">
-              <div className="packet-top">
-                <span>Audit trail</span>
-                <StatusPill tone="green">immutable</StatusPill>
-              </div>
-              {["target profile", "session events", "oracle adapter", "payload hash"].map((item) => (
-                <div className="audit-row" key={item}>{item}<strong>recorded</strong></div>
-              ))}
-            </div>
-          </div>
-        </Chrome>
-      );
+    case "landing":
+      return <LandingHero />;
     case "approval":
       return (
-        <Chrome portrait>
-          <div className="approval">
-            <div className="reply">
-              <span>Agent Bounty drafted this reply</span>
-              <p>Verdict reproduced. The run seeded a fresh canary, passed the negative control, ran the submitted PoC, and the external oracle observed the canary.</p>
-              <div><button>Deny</button><button className="primary">Approve</button></div>
-            </div>
-            <div>
-              <div className="eyebrow">Human gate</div>
-              <h2>The exact words get signed.</h2>
-            </div>
-          </div>
-        </Chrome>
-      );
-    case "delivery":
-      return (
         <Chrome>
-          <div className="delivery">
-            <div>
-              <div className="eyebrow">Delivery</div>
-              <h2>One approved comment. Replays do nothing.</h2>
-              <p>The worker mints a short-lived installation token, posts the approved verdict, then ignores exact replays.</p>
-            </div>
-            <div className="delivered-card">
-              <img src="assets/mascot-delivered.svg" />
-              <strong>Delivered</strong>
-              <span>GitHub comment 584b033799</span>
-              <small>approved hash matched</small>
-            </div>
+          <div className="section-showcase approval-showcase">
+            <section>
+              <div className="eyebrow">Sign the verdict</div>
+              <h2>The exact words get signed.</h2>
+              <p>The approval panel from the landing page centers the whole product promise: Agent Bounty drafts, a person approves.</p>
+            </section>
+            <ApprovalCard />
           </div>
         </Chrome>
       );
+    case "channels":
+      return <ChannelsGrid />;
+    case "agent":
+      return <AgentBounty />;
+    case "sandbox":
+      return <SandboxTopology />;
+    case "queue":
+      return <QueuePreview />;
+    case "reports":
+      return <ReportsIndex />;
+    case "faq":
+      return <FaqShowcase />;
+    case "footer":
+      return <FooterClose />;
     default:
       return null;
   }
