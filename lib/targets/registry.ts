@@ -33,6 +33,16 @@ export const JUICE_SHOP_EXPECTED_BUILD_MARKER =
 export const JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF =
   `${JUICE_SHOP_IMAGE_NAME}:v17.3.0-bountydesk-sandbox`;
 
+/**
+ * A build marker only proves provenance once the operator has actually built the image and
+ * baked the source commit into it (see lib/sandbox/build-marker.ts). The four challenge
+ * targets below are not built yet, so they carry this sentinel instead of a real commit.
+ * buildMarkerCheck compares it against what booted inside the sandbox and will refuse to
+ * proceed while it is still the sentinel, which is the behaviour we want: nothing reproduces
+ * against an unbuilt target. Replace it with the fork's pinned commit when the image is built.
+ */
+export const PENDING_BUILD_MARKER = "PENDING_OPERATOR_BUILD";
+
 const LOCALHOST_SCOPE = [{ allow: "localhost" }];
 
 const TARGETS: TargetDefinition[] = [
@@ -53,6 +63,79 @@ const TARGETS: TargetDefinition[] = [
         "cd /juice-shop && (nohup node build/app >/tmp/bountydesk-app.log 2>&1 &)",
       expectedBuildMarker: JUICE_SHOP_EXPECTED_BUILD_MARKER,
       snapshotImageRefOverride: JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF,
+    },
+  },
+  // The four targets below are scaffolding: config and recipes an operator can build against,
+  // not live profiles. imageName is where each fork is expected to be built and pushed, mirroring
+  // juice-shop's ghcr path; the upstream public image each fork is based on is recorded in
+  // docs/additional-targets.md. imageDigest and snapshotId come from the operator build step and
+  // stay unset here on purpose (the seed script reads them from the environment and rejects the
+  // env.example placeholders), and expectedBuildMarker is PENDING_BUILD_MARKER until a build
+  // bakes a real commit in. baseUrl carries the app's own port, which is what authorize-
+  // reproduction turns into the sandbox preview port.
+  {
+    // DVWA (Damn Vulnerable Web Application), a PHP/MySQL app. Serves on port 80.
+    name: "dvwa",
+    repoFullName: "Vaibhav91one/DVWA",
+    envPrefix: "DVWA",
+    imageName: "ghcr.io/vaibhav91one/dvwa",
+    config: {
+      baseUrl: "http://localhost:80",
+      commandInjectionPath: "/vulnerabilities/exec/",
+    },
+    scopeRules: LOCALHOST_SCOPE,
+    provisioning: {
+      readinessPath: "/login.php",
+      expectedBuildMarker: PENDING_BUILD_MARKER,
+    },
+  },
+  {
+    // WebGoat, a Java/Spring lesson app. Serves on port 8080 under the /WebGoat context path.
+    name: "webgoat",
+    repoFullName: "Vaibhav91one/WebGoat",
+    envPrefix: "WEBGOAT",
+    imageName: "ghcr.io/vaibhav91one/webgoat",
+    config: {
+      baseUrl: "http://localhost:8080",
+      sqlInjectionPath: "/WebGoat/SqlInjection/assignment5a",
+    },
+    scopeRules: LOCALHOST_SCOPE,
+    provisioning: {
+      readinessPath: "/WebGoat/login",
+      expectedBuildMarker: PENDING_BUILD_MARKER,
+    },
+  },
+  {
+    // DSVW (Damn Small Vulnerable Web), a single-file Python app. Serves on port 65412.
+    name: "dsvw",
+    repoFullName: "Vaibhav91one/DSVW",
+    envPrefix: "DSVW",
+    imageName: "ghcr.io/vaibhav91one/dsvw",
+    config: {
+      baseUrl: "http://localhost:65412",
+      sqlInjectionPath: "/",
+    },
+    scopeRules: LOCALHOST_SCOPE,
+    provisioning: {
+      readinessPath: "/",
+      expectedBuildMarker: PENDING_BUILD_MARKER,
+    },
+  },
+  {
+    // A Log4Shell (CVE-2021-44228) lab, a vulnerable Spring Boot app. Serves on port 8080.
+    name: "log4shell-cve-lab",
+    repoFullName: "Vaibhav91one/log4shell-cve-lab",
+    envPrefix: "LOG4SHELL_CVE_LAB",
+    imageName: "ghcr.io/vaibhav91one/log4shell-cve-lab",
+    config: {
+      baseUrl: "http://localhost:8080",
+      injectionPath: "/",
+      injectionHeader: "X-Api-Version",
+    },
+    scopeRules: LOCALHOST_SCOPE,
+    provisioning: {
+      readinessPath: "/",
+      expectedBuildMarker: PENDING_BUILD_MARKER,
     },
   },
 ];
