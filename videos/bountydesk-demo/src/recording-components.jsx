@@ -124,6 +124,23 @@ const intakeChannels = [
   },
 ];
 
+const mascotStates = [
+  "idle",
+  "ingest",
+  "scanning",
+  "reproducing",
+  "canary-found",
+  "awaiting-approval",
+  "delivered",
+  "celebrating",
+  "denied",
+  "out-of-scope",
+  "infra-hiccup",
+  "greeting",
+  "chilling",
+  "cowboy",
+];
+
 function IntakeChannels() {
   return (
     <Chrome bare>
@@ -147,7 +164,7 @@ function IntakeChannels() {
                   </Button>
                 ) : (
                   <Button className="intake-button" variant="outline" size="sm" disabled>
-                    Coming soon
+                    <Icon className="intake-button-icon" /> Coming soon
                   </Button>
                 )}
                 <span className="intake-tagline">{channel.tagline}</span>
@@ -155,6 +172,37 @@ function IntakeChannels() {
             );
           })}
         </ul>
+      </section>
+    </Chrome>
+  );
+}
+
+function AgentBountyScene() {
+  return (
+    <Chrome bare>
+      <section className="agent-bounty-section">
+        <div className="agent-mascot-mask" data-layout-allow-overflow="">
+          <div className="agent-mascot-track" data-layout-allow-overflow="">
+            {mascotStates.map((state, index) => (
+              <img
+                className={`agent-mascot agent-mascot-${index}`}
+                src={`assets/mascot-${state}.svg`}
+                alt=""
+                width="112"
+                height="112"
+                key={state}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="agent-copy">
+          <h2>Meet Agent Bounty</h2>
+          <p>
+            It reads every report, checks it against the target the server pins, and drafts the
+            reply. What it never does is decide: the verdict comes from the oracle, and the words
+            that go out are the ones you signed.
+          </p>
+        </div>
       </section>
     </Chrome>
   );
@@ -198,6 +246,8 @@ function Shot({ id }) {
       return <LandingScroll />;
     case "channels":
       return <IntakeChannels />;
+    case "agent":
+      return <AgentBountyScene />;
     default:
       return null;
   }
