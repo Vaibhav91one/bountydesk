@@ -6,6 +6,7 @@ import { CaretDown } from "@phosphor-icons/react/ssr";
 import { cn } from "@/lib/utils";
 
 import { StepBadge, type StepState } from "./lifecycle-step";
+import { ToolCallHover, type ToolCallView } from "./tool-call-detail";
 
 export type LifecycleStep = {
   key: string;
@@ -14,7 +15,10 @@ export type LifecycleStep = {
   state: StepState;
   /** Inline SVG for the mascot standing in for this phase, id-prefixed by the page. */
   mascot: string;
-  events: { seq: number; type: string; at: string }[];
+  // detail is the live tool-call arguments and result for a mirrored tool-call event, matched
+  // by id in the page. Present only on "agent.tool_call:<name>" rows whose detail TrueForge
+  // still holds; every other row leaves it undefined and shows no hover.
+  events: { seq: number; type: string; at: string; detail?: ToolCallView }[];
 };
 
 /**
@@ -92,13 +96,15 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
                   <span aria-hidden="true" className="mx-auto h-full w-px bg-border/50" />
                   <ul className="flex flex-col gap-1.5">
                     {step.events.map((event) => (
-                      <li key={event.seq} className="flex items-baseline justify-between gap-4">
-                        <span className="min-w-0 truncate text-meta text-muted-foreground">
-                          {event.type}
-                        </span>
-                        <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
-                          {event.at}
-                        </span>
+                      <li key={event.seq} className="flex items-center gap-4">
+                        <ToolCallHover detail={event.detail}>
+                          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
+                            {event.type}
+                          </span>
+                          <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+                            {event.at}
+                          </span>
+                        </ToolCallHover>
                       </li>
                     ))}
                   </ul>

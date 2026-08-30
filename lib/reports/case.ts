@@ -36,6 +36,10 @@ export type CaseEvent = {
   /** intake, worker, sandbox, oracle, control. Taken from the type's first segment. */
   channel: string;
   data: unknown;
+  // The event's idempotency key. A mirrored tool call carries "agent.tool_call:<call id>" here,
+  // which is how a lifecycle row is matched to its live TrueForge detail: the row's type only
+  // holds the tool name, the id lives on this key. Null for events written without one.
+  eventKey: string | null;
   at: Date;
 };
 
@@ -336,6 +340,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           seq: sessionEvent.seq,
           type: sessionEvent.type,
           data: sessionEvent.data,
+          eventKey: sessionEvent.eventKey,
           at: sessionEvent.createdAt,
         })
         .from(sessionEvent)

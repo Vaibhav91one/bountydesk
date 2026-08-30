@@ -54,11 +54,14 @@ export type PublishVerdictInput = z.infer<typeof publishVerdictInputSchema>;
 export type DraftVerdictResult = { ok: true; verdictId: string } | { ok: false; reason: string };
 
 function renderFinding(finding: Finding, index: number): string {
-  return `${index + 1}. [${finding.severity.toUpperCase()}] ${finding.title}\n   ${finding.description}\n   Evidence: ${finding.evidenceRef}`;
+  // A subheading carrying the severity, then the description, then the evidence reference on its
+  // own line. GitHub renders this as a heading and two paragraphs; the reviewer's UI reads the
+  // same structured fields directly rather than this string.
+  return `### ${index + 1}. ${finding.title} (${finding.severity.toUpperCase()})\n\n${finding.description}\n\nEvidence: ${finding.evidenceRef}`;
 }
 
 /**
- * Server-authored prose for an agent-drafted verdict: the only thing that turns the agent's
+ * Server-authored markdown for an agent-drafted verdict: the only thing that turns the agent's
  * structured fields into the exact text a human approves and GitHub receives. The agent's raw
  * words never reach the outbound comment unrendered, which matters doubly here since the
  * agent may have absorbed prompt-injection content while probing an untrusted target.
@@ -66,14 +69,14 @@ function renderFinding(finding: Finding, index: number): string {
 export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft): string {
   const findingsBlock =
     draft.findings.length > 0
-      ? `\n\nFindings:\n${draft.findings.map(renderFinding).join("\n")}`
+      ? `\n\n## Findings\n\n${draft.findings.map(renderFinding).join("\n\n")}`
       : "";
 
-  // The outcome is stated on its own line, in the reviewer's and outbound comment's own words,
-  // rather than left for the free-form summary to convey: a draft's `summary` is validated only
-  // for length, not for agreeing with its own `outcome`, so the approved text must say the
+  // The outcome heads the comment on its own line, in the outbound comment's own words, rather
+  // than left for the free-form summary to convey: a draft's `summary` is validated only for
+  // length, not for agreeing with its own `outcome`, so the approved text must state the
   // persisted outcome plainly instead of relying on the agent's prose to get it right.
-  const body = `Outcome: ${draft.outcome}\n\n${draft.summary}${findingsBlock}\n\nA person still needs to review this before any next step.`;
+  const body = `## Outcome: ${draft.outcome}\n\n## Summary\n\n${draft.summary}${findingsBlock}`;
   return `${body}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
 }
 

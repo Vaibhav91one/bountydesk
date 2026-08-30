@@ -5,6 +5,8 @@ import { CaretDown, Check, Sparkle } from "@phosphor-icons/react/ssr";
 
 import { cn } from "@/lib/utils";
 
+import { ToolCallHover, type ToolCallView } from "./tool-call-detail";
+
 /**
  * The pixel-grid loader, ported from a loading-state component.
  *
@@ -48,7 +50,10 @@ export function ShimmerLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-export type TraceRow = { seq: number; type: string; at: string };
+// detail carries the live TrueForge arguments and result for a mirrored tool-call row, matched
+// by id in the page. Only "agent.tool_call:<name>" rows whose detail still exists carry it; the
+// rest render plain, with no hover.
+export type TraceRow = { seq: number; type: string; at: string; detail?: ToolCallView };
 
 /**
  * What the agent actually did, expandable.
@@ -106,12 +111,14 @@ export function AgentTrace({ rows }: { rows: TraceRow[] }) {
                     aria-hidden="true"
                     className="size-3 shrink-0 text-phase-delivered"
                   />
-                  <span className="min-w-0 flex-1 truncate text-meta text-foreground">
-                    {row.type}
-                  </span>
-                  <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
-                    {row.at}
-                  </span>
+                  <ToolCallHover detail={row.detail}>
+                    <span className="min-w-0 flex-1 truncate text-meta text-foreground">
+                      {row.type}
+                    </span>
+                    <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
+                      {row.at}
+                    </span>
+                  </ToolCallHover>
                 </li>
               ))}
             </ul>
