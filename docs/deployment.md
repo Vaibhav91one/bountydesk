@@ -31,7 +31,8 @@ A Zerops project holds the persistent tier:
 
 The worker calls the authenticated TrueForge proxy over the Zerops private network and sends
 `TRUEFORGE_API_KEY` as its bearer token. The proxy forwards to TrueForge on loopback. The worker
-calls Daytona directly for sandbox provisioning and teardown, and GitHub for approved delivery.
+does not provision sandboxes itself: TrueForge provisions its own generic sandbox for the
+agent's tool use, and the worker's only other outbound call is to GitHub for approved delivery.
 TrueForge calls the model provider and the authenticated MCP route on Vercel. Vercel never calls
 TrueForge directly; Supabase is the coordination boundary.
 

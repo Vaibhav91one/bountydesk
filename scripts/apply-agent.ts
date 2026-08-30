@@ -29,10 +29,8 @@ async function main(): Promise<void> {
   });
   console.log(`MCP connector "bountydesk" registered at ${mcpUrl}`);
 
-  // Registers the connector itself. No agent manifest lists it yet - the reproduction agent
-  // that would call scope-guard's tools isn't built (see AGENTS.md), so there is nothing to
-  // set requireApprovalForTools on until that agent's manifest exists. Registering the
-  // connector now means that manifest edit is the only thing left to do later.
+  // Registers the connector itself. `agent/bountydesk.agent.json`, applied below, lists it
+  // with `requireApprovalForTools` already set to SCOPE_GUARD_APPROVAL_GATED_TOOLS.
   const scopeGuardUrl = requireEnv("SCOPE_GUARD_URL");
   await client.settings.mcpServers.createOrUpdate({
     manifest: buildScopeGuardServerManifest(scopeGuardUrl, scopeGuardToken()),

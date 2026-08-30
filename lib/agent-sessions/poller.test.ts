@@ -308,7 +308,7 @@ test("a wrong tool name is refused loudly and never touches report state", async
   assert.equal(row.pendingThreadId, null);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a capability mismatch is refused loudly and never touches report state", async () => {
@@ -327,7 +327,7 @@ test("a capability mismatch is refused loudly and never touches report state", a
   assert.match(row.lastError ?? "", /capability/);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("more than one pending call is refused loudly rather than guessed at", async () => {
@@ -349,7 +349,7 @@ test("more than one pending call is refused loudly rather than guessed at", asyn
   assert.match(row.lastError ?? "", /2 pending calls, expected 1/);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a retried poll on a report already at AWAITING_APPROVAL is a safe no-op", async () => {
@@ -596,7 +596,7 @@ test("a full draft claiming REPRODUCED for a report with no bound target is refu
   assert.match(row.lastError ?? "", /publish_verdict draft refused/);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
   const verdicts = await dbm.db
     .select()
     .from(dbm.verdict)
@@ -630,7 +630,7 @@ test("a malformed draft attempt is refused rather than silently approved as the 
   assert.equal(row.pendingVerdictId, null, "no approval may be bound to the pre-existing verdict");
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "TRIAGING");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
