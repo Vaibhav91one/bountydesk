@@ -2,23 +2,34 @@
 
 import { useActionState, useState } from "react";
 
+import { Check, Plus, Trash } from "@phosphor-icons/react/ssr";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CatalogProviderView, ModelProviderView, ModelView } from "@/lib/trueforge/harness";
 
 import { saveModelProvider, type ActionResult } from "./actions";
 
-const WELL_KNOWN = [
-  "openai",
-  "anthropic",
-  "google-gemini",
-  "fireworks",
-  "zai",
-  "moonshot",
-  "together",
-  "alibaba",
-] as const;
+/** `items` is what teaches the trigger to print the label rather than the stored value. */
+const PROVIDERS = [
+  { value: "openai", label: "openai" },
+  { value: "anthropic", label: "anthropic" },
+  { value: "google-gemini", label: "google-gemini" },
+  { value: "fireworks", label: "fireworks" },
+  { value: "zai", label: "zai" },
+  { value: "moonshot", label: "moonshot" },
+  { value: "together", label: "together" },
+  { value: "alibaba", label: "alibaba" },
+  { value: "custom", label: "custom (OpenAI-compatible)" },
+];
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -97,18 +108,18 @@ export function ModelProviderForm({
           <input type="hidden" name="name" value={provider.type === "custom" ? provider.name : ""} />
         ) : (
           <Field label="Provider">
-            <select
-              value={type}
-              onChange={(event) => pickType(event.target.value)}
-              className="h-9 rounded-md border border-transparent bg-input/50 px-3 text-sm outline-none focus-visible:border-ring"
-            >
-              {WELL_KNOWN.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-              <option value="custom">custom (OpenAI-compatible)</option>
-            </select>
+            <Select items={PROVIDERS} value={type} onValueChange={(value) => pickType(value as string)}>
+              <SelectTrigger aria-label="Provider" className="h-9 w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDERS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
         )}
 
@@ -156,6 +167,7 @@ export function ModelProviderForm({
                 title={lastModel ? "A provider must keep at least one model." : undefined}
                 onClick={() => setModels(models.filter((other) => other.name !== model.name))}
               >
+                <Trash data-icon="inline-start" />
                 Remove
               </Button>
             </li>
@@ -178,6 +190,7 @@ export function ModelProviderForm({
             />
           </Field>
           <Button type="button" size="sm" variant="outline" onClick={addDraft}>
+            <Plus data-icon="inline-start" />
             Add model
           </Button>
         </div>
@@ -185,6 +198,7 @@ export function ModelProviderForm({
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="sm" loading={pending}>
+          {provider ? <Check data-icon="inline-start" /> : <Plus data-icon="inline-start" />}
           {provider ? "Save provider" : "Add provider"}
         </Button>
         {result?.ok ? <Badge variant="outline">Saved</Badge> : null}

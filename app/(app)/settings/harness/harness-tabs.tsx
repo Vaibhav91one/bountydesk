@@ -1,7 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
-import { Brain, Cube, Lightning, PlugsConnected, Robot } from "@phosphor-icons/react/ssr";
+import { ArrowsClockwise, Brain, Cube, Lightning, PlugsConnected, Robot } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
-import { Empty, Panel, Row } from "./panel";
+import { Empty, Panel, Row } from "../panel";
 import { applyManagedResources, type ActionResult } from "./actions";
 import { ModelProviderForm } from "./model-provider-form";
 import { SandboxForm } from "./sandbox-form";
@@ -279,6 +279,7 @@ function ApplyButton({ scope, label }: { scope: "connectors" | "skills" | "agent
     <form action={action} className="flex flex-col items-end gap-1.5">
       <input type="hidden" name="scope" value={scope} />
       <Button type="submit" size="sm" loading={pending}>
+        <ArrowsClockwise data-icon="inline-start" />
         {label}
       </Button>
       {result?.ok ? <Badge variant="outline">Applied</Badge> : null}

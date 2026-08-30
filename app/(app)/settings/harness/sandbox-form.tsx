@@ -1,6 +1,9 @@
 "use client";
 
 import { useActionState } from "react";
+import { FloppyDisk } from "@phosphor-icons/react/ssr";
+
+import { Check } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +68,8 @@ export function SandboxForm({ sandbox }: { sandbox: SandboxView | null }) {
 
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" size="sm" loading={pending}>
+          <FloppyDisk />
+          <Check data-icon="inline-start" />
           {sandbox ? "Save sandbox provider" : "Configure sandbox provider"}
         </Button>
         {result?.ok ? <Badge variant="outline">Saved</Badge> : null}
