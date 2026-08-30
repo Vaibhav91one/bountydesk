@@ -33,12 +33,33 @@ function inFuture(ms: number): Date {
  * publish_verdict, not an MCP tool, or an unparseable/mismatched capability argument. This
  * is the only outcome for those cases; the poller never guesses which call was "the real
  * one," because a wrong guess here is a wrong verdict shipped to a human for approval.
+ *
+ * A refusal still needs to move the report out of TRIAGING/REPRODUCING, exactly like
+ * finishWithoutApproval, or a report whose agent drafted something unresolvable (including
+ * an unauthorized REPRODUCED claim caught by draftVerdictFromPendingCall) sits stuck forever
+ * with no verdict and nothing to bring it back for human review. No verdict row is minted
+ * here: this only moves lifecycle state, the same no-op-guarded move finishWithoutApproval
+ * already makes safely for every other state, including terminal reports.
  */
 async function refuseUnresolvablePending(
   lease: AgentSessionLease,
   message: string,
 ): Promise<string> {
-  await release(lease, { turnStatus: "ERROR", lastError: message });
+  await db.transaction(async (tx) => {
+    const [reportRow] = await tx
+      .select({ state: report.state })
+      .from(report)
+      .where(eq(report.id, lease.reportId))
+      .for("update");
+
+    if (!reportRow) {
+      throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
+    }
+    if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
+      await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
+    }
+    await release(lease, { turnStatus: "ERROR", lastError: message }, tx);
+  });
   return lease.id;
 }
 
