@@ -25,10 +25,12 @@ export function SiteHeader({
   links = true,
   sticky = true,
   entrance = false,
+  appLinkPrefetch = true,
 }: {
   links?: boolean;
   sticky?: boolean;
   entrance?: boolean;
+  appLinkPrefetch?: boolean;
 }) {
   return (
     <header
@@ -75,7 +77,7 @@ export function SiteHeader({
           <Button
             size="sm"
             nativeButton={false}
-            render={<Link href="/login" />}
+            render={<Link href="/login" prefetch={appLinkPrefetch} />}
             className="rounded-full px-4"
           >
             <RollingIcon icon={Sparkle} weight="fill" className="size-4" /> Get

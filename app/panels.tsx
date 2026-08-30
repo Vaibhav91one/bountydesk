@@ -147,7 +147,7 @@ export function ApprovalPanel() {
             size="sm"
             variant="ghost"
             nativeButton={false}
-            render={<Link href="/login" />}
+            render={<Link href="/login" prefetch={false} />}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <RollingIcon icon={Prohibit} className="size-4" /> Deny
@@ -155,7 +155,7 @@ export function ApprovalPanel() {
           <Button
             size="sm"
             nativeButton={false}
-            render={<Link href="/login" />}
+            render={<Link href="/login" prefetch={false} />}
           >
             <RollingIcon icon={Signature} weight="fill" className="size-4" />{" "}
             Approve

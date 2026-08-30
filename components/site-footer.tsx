@@ -40,7 +40,7 @@ const COLUMNS: {
   },
 ];
 
-export function SiteFooter() {
+export function SiteFooter({ appLinkPrefetch = true }: { appLinkPrefetch?: boolean }) {
   return (
     <footer className="mt-24 border-t border-border/50">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-6 py-14">
@@ -88,6 +88,7 @@ export function SiteFooter() {
                       ) : (
                         <Link
                           href={link.href}
+                          prefetch={appLinkPrefetch}
                           className="text-meta text-muted-foreground hover:text-foreground"
                         >
                           {link.label}
