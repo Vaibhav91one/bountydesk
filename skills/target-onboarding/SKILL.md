@@ -24,6 +24,8 @@ Return only a JSON object with this shape:
 Rules:
 
 1. Use a lowercase manifest `name` with letters, numbers, dot, dash or underscore.
+   Derive it from the repository name by lowercasing it, so `Vaibhav91one/WebGoat` becomes
+   `"webgoat"`, not `"WebGoat"` and not `"vaibhav91one-webgoat"`.
 2. Use an untagged `ghcr.io` image name. Do not include `:latest`, another tag, or a digest.
 3. Use an HTTP loopback `baseUrl` only. Do not name a public host.
 4. Use a same-origin absolute `readinessPath`.
