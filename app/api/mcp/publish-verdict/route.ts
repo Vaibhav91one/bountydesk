@@ -2,10 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { z } from "zod";
 
 import { mcpServerSecret } from "@/lib/env";
-import { publishVerdict } from "@/lib/mcp/publish-verdict";
+import { publishVerdict, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
 
 // node:crypto and the Postgres connection publishVerdict opens both need the Node runtime.
 export const runtime = "nodejs";
@@ -30,11 +29,21 @@ function buildServer(): McpServer {
     "publish_verdict",
     {
       description:
-        "Publish the verdict already approved for this session's pending call. Refuses unless a matching human approval was recorded ahead of time.",
-      inputSchema: { capability: z.string() },
+        "Draft this report's verdict from your own investigation (outcome, summary, findings), or publish one already approved for this session's pending call. Refuses unless a matching human approval was recorded ahead of time.",
+      // The full agent-drafted shape, not capability alone: the poller
+      // (lib/agent-sessions/poller.ts) reads a pending call's arguments straight off what
+      // TrueForge captured before ever reaching this route, so the schema advertised here is
+      // what actually constrains what a real tool-calling model can send. Declaring only
+      // `capability` left the model with no schema-level way to submit a draft at all.
+      inputSchema: publishVerdictInputSchema.shape,
       annotations: { destructiveHint: true },
     },
     async ({ capability }) => {
+      // Post-approval dispatch only ever needs the capability: the draft this same call
+      // originally carried was already turned into an immutable verdict row by the poller
+      // (draftVerdictFromPendingCall) before a human ever saw it for approval. Re-reading
+      // outcome/summary/findings here would let a second, differently worded call under the
+      // same capability smuggle different content past that approval.
       const result = await publishVerdict(capability);
       if (result.ok) {
         return { content: [{ type: "text", text: "verdict published" }] };
