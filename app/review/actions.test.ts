@@ -61,8 +61,13 @@ function signOut() {
 
 let seq = 0;
 
-/** A report already sitting in AWAITING_APPROVAL with a verdict and a live pending call. */
-async function seedPendingReport({ pendingHash }: { pendingHash?: string } = {}) {
+/** A report already sitting in AWAITING_APPROVAL with a verdict and a live pending call.
+ * `synthesized` seeds the server-authored ANALYSIS_ONLY case instead: a verdict awaiting
+ * approval with null thread/tool-call markers, because there is no TrueForge call to answer. */
+async function seedPendingReport({
+  pendingHash,
+  synthesized,
+}: { pendingHash?: string; synthesized?: boolean } = {}) {
   seq += 1;
   const [reportRow] = await dbm.db
     .insert(dbm.report)
@@ -94,8 +99,8 @@ async function seedPendingReport({ pendingHash }: { pendingHash?: string } = {})
       reportId: reportRow.id,
       capabilityToken: `cap-${seq}`,
       sessionId: `sess-${seq}`,
-      pendingThreadId: `thread-${seq}`,
-      pendingToolCallId: `call-${seq}`,
+      pendingThreadId: synthesized ? null : `thread-${seq}`,
+      pendingToolCallId: synthesized ? null : `call-${seq}`,
       pendingVerdictId: verdictId,
       // pendingHash lets the tampering test pin a hash that does not match the payload it
       // actually inserted, standing in for a payload changed after approval was set up.
@@ -159,6 +164,29 @@ test("allowVerdict records an approval but never moves the report itself", async
   assert.equal(sessionRow.pendingApprovedContentHash, decisions[0].payloadHash);
 
   // The load-bearing assertion: allow records a decision, it does not manufacture delivery.
+  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});
+
+test("allowVerdict approves a synthesized verdict with null thread/tool-call markers", async () => {
+  signIn(REVIEWER_ID, "carol");
+  const { reportId, verdictId, agentSessionId } = await seedPendingReport({ synthesized: true });
+
+  const result = await actions.allowVerdict(reportId, verdictId);
+  assert.equal(result.ok, true);
+
+  // The decision records null thread/tool-call ids, which the approval-submission worker reads
+  // as "deliver without a TrueForge round-trip".
+  const decisions = await decisionsFor(verdictId);
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decision, "APPROVED");
+  assert.equal(decisions[0].threadId, null);
+  assert.equal(decisions[0].toolCallId, null);
+
+  // The submission is still enqueued, exactly as the agent path enqueues it.
+  const submissions = await submissionsFor(agentSessionId);
+  assert.equal(submissions.length, 1);
+  assert.equal(submissions[0].state, "PENDING");
+
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
 });
 

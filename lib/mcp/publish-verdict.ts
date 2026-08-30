@@ -81,29 +81,94 @@ export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft)
 }
 
 /**
- * The validated draft, an authorization re-check, rendering, and the actual write -- shared by
- * both callers below so neither re-implements any of it.
+ * The fixed text of a server-synthesized ANALYSIS_ONLY verdict. A run that ends without the
+ * agent ever drafting a verdict still needs something a human can approve and deliver, and this
+ * is it. The wording is a constant, never the agent's output or a tool result or the run's
+ * lastError string: those can carry a secret or prompt-injection content absorbed from an
+ * untrusted target, and none of that belongs in an outbound GitHub comment.
+ */
+export const SYNTHESIZED_ANALYSIS_SUMMARY =
+  "Automated investigation could not complete or verify this report. It is surfaced for human triage; a reviewer should read the report and decide whether it is valid.";
+
+/**
+ * Mint the server-authored ANALYSIS_ONLY verdict for a report whose agent run reached a dead
+ * end (a pending call the poller cannot resolve, or a turn that finished with no publish_verdict
+ * draft) so the report still carries something a human can approve rather than sitting stuck at
+ * ANALYSIS_ONLY with nothing to approve. Returns the verdict id and its content hash for the
+ * caller to bind the pending approval to.
  *
- * The authorization re-check is the load-bearing part: an agent claiming REPRODUCED or
- * NOT_REPRODUCED for a report with no bound target profile, or one whose repository grant has
- * since been revoked, is refused here before its claim ever becomes a verdict row. This is the
- * only place that enforcement happens now that trueforge-driver.ts no longer pre-decides
- * anything; the turn message can describe a target as authorized, but this check is what
- * actually stops an unauthorized claim from becoming a persisted verdict. ANALYSIS_ONLY needs
- * no live authorization, since it never claims the sandboxed target actually confirmed
- * anything.
+ * Only ever ANALYSIS_ONLY, and only when the report has no verdict yet: an existing verdict is
+ * never overwritten, and a REPRODUCED or NOT_REPRODUCED claim is never synthesized here. Runs
+ * inside the caller's transaction, so it commits or rolls back with the lifecycle move around it.
+ */
+export async function synthesizeAnalysisOnlyVerdict(
+  reportId: string,
+  tx: Executor,
+): Promise<{ verdictId: string; contentHash: string } | null> {
+  const [existing] = await tx
+    .select({ id: verdict.id })
+    .from(verdict)
+    .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+    .limit(1);
+  if (existing) return null;
+
+  // The same authorization gate the agent-drafted path runs, in this same transaction: it
+  // refuses a terminal or DELIVERING report, and it permits ANALYSIS_ONLY with no target or a
+  // revoked grant, which is exactly the intended outcome for those reports (see the gate's
+  // doc). The poller only calls this from TRIAGING/REPRODUCING, so a refusal is a genuine race
+  // worth surfacing rather than swallowing.
+  const allowed = await assertVerdictInsertAllowed(reportId, "ANALYSIS_ONLY", tx);
+  if (!allowed.ok) {
+    throw new Error(
+      `cannot synthesize ANALYSIS_ONLY verdict for report ${reportId}: ${allowed.reason}`,
+    );
+  }
+
+  const verdictId = randomUUID();
+  const draft: VerdictDraft = {
+    outcome: "ANALYSIS_ONLY",
+    summary: SYNTHESIZED_ANALYSIS_SUMMARY,
+    findings: [],
+  };
+  const row = await ensureInitialVerdict(
+    {
+      id: verdictId,
+      reportId,
+      outcome: "ANALYSIS_ONLY",
+      summary: SYNTHESIZED_ANALYSIS_SUMMARY,
+      evidence: { source: "server-synthesized" },
+      payload: buildAgentDraftedPayload(verdictId, draft),
+    },
+    tx,
+  );
+  return { verdictId: row.id, contentHash: row.contentHash };
+}
+
+/**
+ * The authorization gate every verdict insertion shares, run inside the caller's transaction so
+ * it commits or rolls back with the insert. Two rules:
  *
  * A report past the analysis stages is refused regardless of outcome: a revision-1 verdict is
- * this function's own idempotency key, so writing one for a cancelled, expired, delivered,
- * denied, out-of-scope, or already-delivering report would permanently attach a definitive
- * verdict to a report that can never again legitimately produce one.
+ * the insertion's idempotency key, so writing one for a cancelled, expired, delivered, denied,
+ * out-of-scope, or already-delivering report would permanently attach a definitive verdict to a
+ * report that can never again legitimately produce one.
+ *
+ * A REPRODUCED or NOT_REPRODUCED claim needs a bound target with an active repository grant; an
+ * agent's claim to the contrary is refused here before it becomes a verdict row, the only place
+ * that enforcement happens now that trueforge-driver.ts pre-decides nothing. ANALYSIS_ONLY is
+ * permitted with no target and with a revoked grant on purpose: it never asserts the sandboxed
+ * target confirmed anything, and it is the correct outcome for exactly those reports (AGENTS.md:
+ * "No bound target, no REPRODUCED... that run stays ANALYSIS_ONLY"). The delivery worker still
+ * re-checks the live GitHub grant (lib/github/lifecycle.ts activeRepository: installation
+ * unsuspended, repository active with a bound target profile) before it mints a token or posts,
+ * so a revoked-grant report can be surfaced for human triage but never actually posted while the
+ * grant is gone.
  */
-async function persistAgentDraftedVerdict(
+async function assertVerdictInsertAllowed(
   reportId: string,
-  verdictId: string,
-  draft: VerdictDraft,
+  outcome: (typeof verdict.outcome.enumValues)[number],
   tx: Executor,
-): Promise<DraftVerdictResult> {
+): Promise<PublishVerdictResult> {
   const [reportRow] = await tx
     .select({ state: report.state })
     .from(report)
@@ -120,16 +185,31 @@ async function persistAgentDraftedVerdict(
       reason: `report is ${reportRow.state}; a fresh verdict cannot be drafted for it`,
     };
   }
-
-  if (draft.outcome === "REPRODUCED" || draft.outcome === "NOT_REPRODUCED") {
+  if (outcome === "REPRODUCED" || outcome === "NOT_REPRODUCED") {
     const grant = await loadRepositoryGrantSnapshot(reportId, tx);
     if (!grant || !hasActiveRepositoryGrant(grant)) {
       return {
         ok: false,
-        reason: `outcome ${draft.outcome} requires a bound target with an active repository grant; only ANALYSIS_ONLY is permitted here`,
+        reason: `outcome ${outcome} requires a bound target with an active repository grant; only ANALYSIS_ONLY is permitted here`,
       };
     }
   }
+  return { ok: true };
+}
+
+/**
+ * The agent-drafted write: run the shared authorization gate, render the payload, and insert.
+ * Evidence is labelled agent-drafted here; the server-synthesized path mints its own row with
+ * its own label but through the same gate.
+ */
+async function persistAgentDraftedVerdict(
+  reportId: string,
+  verdictId: string,
+  draft: VerdictDraft,
+  tx: Executor,
+): Promise<DraftVerdictResult> {
+  const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
+  if (!allowed.ok) return allowed;
 
   const payload = buildAgentDraftedPayload(verdictId, draft);
   const row = await ensureInitialVerdict(
@@ -290,60 +370,85 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
       return { ok: false, reason: "content hash mismatch" };
     }
 
-    // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
-    // human has approved it, so this only guards against a value nothing in this codebase
-    // writes today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
-    const publishableOutcomes: (typeof verdict.outcome.enumValues)[number][] = [
-      "ANALYSIS_ONLY",
-      "REPRODUCED",
-      "NOT_REPRODUCED",
-    ];
-    if (!publishableOutcomes.includes(verdictRow.outcome)) {
-      return { ok: false, reason: "verdict outcome is not publishable" };
-    }
-
-    const [reportRow] = await tx
-      .select({ channel: report.channel, sourceRef: report.sourceRef })
-      .from(report)
-      .where(eq(report.id, verdictRow.reportId))
-      .limit(1);
-
-    if (!reportRow) return { ok: false, reason: "report not found" };
-    if (reportRow.channel !== "github") {
-      return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
-    }
-    if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
-      return { ok: false, reason: "invalid GitHub delivery target" };
-    }
-
-    await enqueueDelivery(
-      {
-        reportId: verdictRow.reportId,
-        verdictId: verdictRow.id,
-        idempotencyKey: `verdict:${verdictRow.id}`,
-        target: reportRow.sourceRef,
-        // The hash this write commits to is the one just verified above, not a second,
-        // unverified read of the same column: a `verdict` row is immutable, so the two should
-        // always agree, but the outbox must never bind to a value this handler didn't itself
-        // check the moment before enqueueing.
-        approvedContentHash: recomputedHash,
-      },
-      tx,
-    );
-
-    await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
-
-    await tx
-      .update(agentSession)
-      .set({
-        pendingThreadId: null,
-        pendingToolCallId: null,
-        pendingVerdictId: null,
-        pendingApprovedContentHash: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(agentSession.id, session.id));
-
-    return { ok: true };
+    return enqueueApprovedVerdictDelivery(tx, session.id, verdictRow, recomputedHash);
   });
+}
+
+/**
+ * The shared tail that turns a proven human approval into a queued delivery: check the outcome
+ * is publishable, resolve the GitHub target, enqueue the outbound comment bound to the exact
+ * approved hash, move the report to DELIVERING, and clear the session's pending markers.
+ *
+ * Both callers reach here only after proving the approval: the agent path through
+ * `publishVerdict` (a recorded APPROVED decision plus three matching hashes), and the
+ * synthesized path through the approval-submission worker (the same decision and hash checks,
+ * minus the TrueForge round-trip a synthesized verdict has no call for). This function itself
+ * assumes that proof and never re-derives consent; it takes the verdict and the hash the caller
+ * already verified.
+ */
+export async function enqueueApprovedVerdictDelivery(
+  tx: Executor,
+  sessionId: string,
+  verdictRow: {
+    id: string;
+    reportId: string;
+    outcome: (typeof verdict.outcome.enumValues)[number];
+  },
+  approvedContentHash: string,
+): Promise<PublishVerdictResult> {
+  // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
+  // human has approved it, so this only guards against a value nothing in this codebase writes
+  // today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
+  const publishableOutcomes: (typeof verdict.outcome.enumValues)[number][] = [
+    "ANALYSIS_ONLY",
+    "REPRODUCED",
+    "NOT_REPRODUCED",
+  ];
+  if (!publishableOutcomes.includes(verdictRow.outcome)) {
+    return { ok: false, reason: "verdict outcome is not publishable" };
+  }
+
+  const [reportRow] = await tx
+    .select({ channel: report.channel, sourceRef: report.sourceRef })
+    .from(report)
+    .where(eq(report.id, verdictRow.reportId))
+    .limit(1);
+
+  if (!reportRow) return { ok: false, reason: "report not found" };
+  if (reportRow.channel !== "github") {
+    return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
+  }
+  if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
+    return { ok: false, reason: "invalid GitHub delivery target" };
+  }
+
+  await enqueueDelivery(
+    {
+      reportId: verdictRow.reportId,
+      verdictId: verdictRow.id,
+      idempotencyKey: `verdict:${verdictRow.id}`,
+      target: reportRow.sourceRef,
+      // The hash this write commits to is the one the caller just verified, not a second,
+      // unverified read of the same column: a `verdict` row is immutable, so the two should
+      // always agree, but the outbox must never bind to a value nobody checked the moment
+      // before enqueueing.
+      approvedContentHash,
+    },
+    tx,
+  );
+
+  await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
+
+  await tx
+    .update(agentSession)
+    .set({
+      pendingThreadId: null,
+      pendingToolCallId: null,
+      pendingVerdictId: null,
+      pendingApprovedContentHash: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSession.id, sessionId));
+
+  return { ok: true };
 }

@@ -138,7 +138,9 @@ export async function releaseUnstarted(lease: ApprovalSubmissionLease): Promise<
 /** Mark a submission acknowledged by TrueForge and drop the lease. */
 export async function markSubmitted(
   lease: ApprovalSubmissionLease,
-  submittedTurnId: string,
+  // null when there was no TrueForge turn to record: a synthesized ANALYSIS_ONLY verdict is
+  // delivered without a harness round-trip, so the submission closes with no submitted turn id.
+  submittedTurnId: string | null,
   tx: Executor = db,
 ): Promise<void> {
   const updated = await tx

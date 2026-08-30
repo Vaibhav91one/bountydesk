@@ -712,7 +712,61 @@ test("a pending call carrying a full agent-drafted payload mints the verdict and
   assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
 });
 
-test("a full draft claiming REPRODUCED for a report with no bound target is refused, and no verdict is created", async () => {
+test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+  await drainOthers();
+  const { SYNTHESIZED_ANALYSIS_SUMMARY } = await import("@/lib/mcp/publish-verdict");
+  const fixture = await seedSessionWithoutVerdict();
+  const client = fakeClient({ status: "done_no_action" });
+
+  await poller.pollOnce("w-synth-done", { client });
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "AWAITING_APPROVAL");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "DONE_NO_ACTION");
+  assert.ok(row.pendingVerdictId, "a verdict must have been minted for a dead-end run");
+  assert.equal(row.pendingThreadId, null, "there is no TrueForge call to answer");
+  assert.equal(row.pendingToolCallId, null);
+  assert.ok(row.pendingApprovedContentHash);
+
+  const [v] = await dbm.db
+    .select({ id: dbm.verdict.id, outcome: dbm.verdict.outcome, summary: dbm.verdict.summary })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal(v.summary, SYNTHESIZED_ANALYSIS_SUMMARY);
+  assert.equal(row.pendingVerdictId, v.id);
+});
+
+test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  // A wrong tool name is unresolvable, which drives the refuseUnresolvablePending terminal path.
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken, { toolName: "delete_everything" })],
+  });
+
+  await poller.pollOnce("w-synth-refuse", { client });
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "AWAITING_APPROVAL");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /unsupported pending tool call/);
+  assert.ok(row.pendingVerdictId, "a verdict must have been minted for a dead-end run");
+  assert.equal(row.pendingThreadId, null);
+
+  const [v] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
+test("a full draft claiming REPRODUCED for a report with no bound target never becomes a REPRODUCED verdict", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
   const client = fakeClient({
@@ -731,13 +785,18 @@ test("a full draft claiming REPRODUCED for a report with no bound target is refu
   assert.equal(row.turnStatus, "ERROR");
   assert.match(row.lastError ?? "", /publish_verdict draft refused/);
 
-  const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "ANALYSIS_ONLY");
+  // The unauthorized REPRODUCED claim is refused, but the report is not a dead end: it falls
+  // through to the same server-authored ANALYSIS_ONLY verdict every verdict-less terminal path
+  // now mints, so a human still gets to triage it. What must never happen is a REPRODUCED row.
   const verdicts = await dbm.db
-    .select()
+    .select({ outcome: dbm.verdict.outcome })
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
-  assert.equal(verdicts.length, 0);
+  assert.equal(verdicts.length, 1);
+  assert.equal(verdicts[0].outcome, "ANALYSIS_ONLY");
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "AWAITING_APPROVAL");
 });
 
 test("a malformed draft attempt is refused rather than silently approved as the legacy shape", async () => {
