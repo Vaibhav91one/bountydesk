@@ -623,7 +623,11 @@ export default function LandingPage() {
                   scrolls, which is why the framed half starts at md. */}
               <div className="hidden md:block">
                 <Framed src="/backdrop/panel.webp">
-                  <SandboxDiagram targetName="juice-shop-v17.3.0" status={{}} />
+                  <SandboxDiagram
+                    repositoryFullName="Vaibhav91one/juice-shop"
+                    targetName="juice-shop-v17.3.0"
+                    sandboxId="daytona-demo"
+                  />
                 </Framed>
               </div>
 

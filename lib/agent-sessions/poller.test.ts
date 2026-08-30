@@ -769,6 +769,47 @@ test("a malformed draft attempt is refused rather than silently approved as the 
   assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
+async function finalSummaryOf(agentSessionId: string): Promise<string | null> {
+  const [row] = await dbm.db
+    .select({ finalSummary: dbm.agentSession.finalSummary })
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, agentSessionId));
+  return row.finalSummary;
+}
+
+test("a pending publish_verdict captures the agent's final summary", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken)],
+  });
+  client.getFinalSummary = async () => "Reproduced the IDOR. Next: patch the access check.";
+
+  await poller.pollOnce("w-summary", { client });
+
+  assert.equal(
+    await finalSummaryOf(fixture.agentSessionId),
+    "Reproduced the IDOR. Next: patch the access check.",
+  );
+});
+
+test("a still-running turn never captures a summary", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({ status: "running" });
+  let asked = false;
+  client.getFinalSummary = async () => {
+    asked = true;
+    return "premature";
+  };
+
+  await poller.pollOnce("w-summary-running", { client });
+
+  assert.equal(asked, false, "the summary is only fetched once the turn is done");
+  assert.equal(await finalSummaryOf(fixture.agentSessionId), null);
+});
+
 test("pollOnce renews its lease while getTurn is slow, so an independent sweeper can't reclaim it mid-poll", async () => {
   await drainOthers();
   const fixture = await seedSession();

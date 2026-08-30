@@ -46,6 +46,9 @@ export type AgentSessionLease = {
    * can tear it down without a second query. */
   sandboxId: string | null;
   lastMirroredEventId: string | null;
+  /** The agent's closing summary, once captured. Carried so a poll can tell whether it still
+   * needs to fetch one (see lib/agent-sessions/poller.ts). */
+  finalSummary: string | null;
   fence: number;
   leaseOwner: string;
 };
@@ -86,6 +89,7 @@ export async function claim(
     pending_approved_content_hash: string | null;
     sandbox_id: string | null;
     last_mirrored_event_id: string | null;
+    final_summary: string | null;
     fence: string | number;
   }>(sql`
     update ${agentSession}
@@ -116,6 +120,7 @@ export async function claim(
               ${agentSession.pendingApprovedContentHash}    as pending_approved_content_hash,
               ${agentSession.sandboxId}                     as sandbox_id,
               ${agentSession.lastMirroredEventId}           as last_mirrored_event_id,
+              ${agentSession.finalSummary}                  as final_summary,
               ${agentSession.fence}                         as fence
   `);
 
@@ -135,6 +140,7 @@ export async function claim(
     pendingApprovedContentHash: row.pending_approved_content_hash,
     sandboxId: row.sandbox_id,
     lastMirroredEventId: row.last_mirrored_event_id,
+    finalSummary: row.final_summary,
     fence: Number(row.fence),
     leaseOwner: owner,
   };
@@ -182,6 +188,24 @@ export async function markMirrored(
   const updated = await db
     .update(agentSession)
     .set({ lastMirroredEventId, updatedAt: new Date() })
+    .where(heldBy(lease))
+    .returning({ id: agentSession.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
+/**
+ * Persist the agent's captured closing summary. A separate fenced call from `release()`, like
+ * `markMirrored`: it runs mid-poll while the poll is still deciding what the turn's status
+ * means, and a later release in the same poll still fences against the lease this held.
+ */
+export async function recordFinalSummary(
+  lease: AgentSessionLease,
+  finalSummary: string,
+): Promise<void> {
+  const updated = await db
+    .update(agentSession)
+    .set({ finalSummary, updatedAt: new Date() })
     .where(heldBy(lease))
     .returning({ id: agentSession.id });
 

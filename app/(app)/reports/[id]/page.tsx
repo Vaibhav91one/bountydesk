@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
 import { PhaseDot } from "@/components/phase-dot";
-import { SandboxDiagram, type NodeStatus } from "@/components/sandbox-diagram";
+import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
@@ -20,7 +20,7 @@ import { mascotState } from "@/lib/mascot/states";
 import { phaseOf } from "@/lib/reports/queue";
 
 import { ApprovalDialog } from "./approval-dialog";
-import { ArtifactsPanel, verdictArtifacts } from "./artifacts-panel";
+import { ArtifactsPanel } from "./artifacts-panel";
 import { FindingsPanel } from "./findings-panel";
 import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
@@ -306,32 +306,12 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     };
   });
 
-  /**
-   * Which sandbox stages this report can show actually happened.
-   *
-   * Two, today. The repository resolved to a commit and the controller processed the report,
-   * both of which leave rows behind. The target is bound but has never booted, and the build
-   * sandbox, PoC runner and oracle have never run at all, so none of them is marked and
-   * nothing spins. When reproduction ships and writes its own events, this fills in on its own.
-   */
-  const artifacts = verdictArtifacts(file.verdict?.evidence);
   const findings = verdictFindings(file.verdict?.evidence);
 
   // Same id-prefix trap as the lifecycle rows: several mascots share one page.
   const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
     const mascot = mascotState(key);
     return mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${slot}__`);
-  };
-
-  const nodeStatus: Record<string, NodeStatus> = {
-    repo: file.repositoryFullName ? "done" : "idle",
-    controller: file.events.length > 0 ? "done" : "idle",
-    build: file.events.some((e) => e.channel === "sandbox") ? "done" : "idle",
-    target: file.state === "REPRODUCING" ? "running" : "idle",
-    poc: file.events.some((e) => e.channel === "repro") ? "done" : "idle",
-    // Only a recorded oracle result marks the oracle. A tick here would say a canary was
-    // observed, which is the one claim the UI must never make on the model's behalf.
-    oracle: file.verdict && oracleDecided(file.verdict.evidence) ? "done" : "idle",
   };
 
   /**
@@ -455,10 +435,31 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             <LifecycleList steps={steps} />
           </Panel>
 
-          <Panel title="Sandbox architecture" aside={<Badge variant="outline">Not run</Badge>}>
-            <SandboxDiagram targetName={file.target?.name ?? null} status={nodeStatus} />
+          <Panel
+            title="Sandbox architecture"
+            aside={
+              <Badge variant="outline">
+                {file.sandbox ? "Target provisioned" : "No sandbox"}
+              </Badge>
+            }
+          >
+            <SandboxDiagram
+              repositoryFullName={file.repositoryFullName}
+              targetName={file.target?.name ?? null}
+              sandboxId={file.sandbox?.id ?? null}
+            />
           </Panel>
         </div>
+
+        {file.finalSummary ? (
+          <Panel title="Summary and next steps">
+            {/* The agent's own closing message, captured from its turn. Rendered as text, never
+                as HTML: the agent may have read prompt-injection content while probing an
+                untrusted target, so its prose is shown, not interpreted. whitespace-pre-wrap
+                keeps the paragraph and list breaks it wrote. */}
+            <p className="whitespace-pre-wrap text-body text-foreground">{file.finalSummary}</p>
+          </Panel>
+        ) : null}
 
         {file.verdict ? (
           <Panel
@@ -503,12 +504,14 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           title="Artifacts"
           aside={
             <Badge variant="outline">
-              {artifacts.length === 0 ? "None produced" : `${artifacts.length} recorded`}
+              {file.artifacts.length === 0
+                ? "None recorded"
+                : `${file.artifacts.length} recorded`}
             </Badge>
           }
         >
           <ArtifactsPanel
-            artifacts={artifacts}
+            artifacts={file.artifacts}
             imageDigest={file.target?.imageDigest || null}
             contentHash={file.verdict?.contentHash ?? null}
           />

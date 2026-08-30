@@ -9,7 +9,15 @@ import {
   type TrueForgeClient,
 } from "@/lib/trueforge/client";
 
-import { claim, markMirrored, release, renew, type AgentSessionLease } from "./queue";
+import {
+  claim,
+  LeaseLostError,
+  markMirrored,
+  recordFinalSummary,
+  release,
+  renew,
+  type AgentSessionLease,
+} from "./queue";
 
 /**
  * How long a poll waits before checking a running (or not-yet-started) turn again.
@@ -494,7 +502,7 @@ export async function pollOnce(
   const turnId = lease.turnId;
 
   const client = opts.client ?? createTrueForgeClient();
-  const { snapshot, toolCalls, cursor } = await runWithHeartbeat(
+  const { snapshot, toolCalls, cursor, finalSummary } = await runWithHeartbeat(
     lease,
     leaseSeconds,
     async (signal) => {
@@ -506,7 +514,17 @@ export async function pollOnce(
         signal,
         since: lease.lastMirroredEventId ?? undefined,
       });
-      return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null };
+      // The agent's closing summary exists only once the turn is done: on a pending
+      // publish_verdict call (the agent-authored path) or a turn that finished without one.
+      // Fetched once, inside the heartbeat like the calls above, and only while the turn is
+      // still running would it be premature or absent.
+      const captureSummary =
+        lease.finalSummary === null &&
+        (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
+      const finalSummary = captureSummary
+        ? ((await client.getFinalSummary?.(lease.sessionId, turnId, { signal })) ?? null)
+        : null;
+      return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
     },
     opts.signal,
   );
@@ -521,6 +539,21 @@ export async function pollOnce(
     await markMirrored(lease, cursor).catch((error: unknown) => {
       console.error(
         `agent session ${lease.id}: failed to persist tool-call mirroring cursor: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  }
+
+  // Best-effort, like the cursor above: the summary is a nice-to-have for the case file, and a
+  // failure to store it must never keep the turn's real status from being handled below. A
+  // LeaseLostError still propagates, matching markMirrored: losing the lease mid-poll is not
+  // something to swallow.
+  if (finalSummary !== null) {
+    await recordFinalSummary(lease, finalSummary).catch((error: unknown) => {
+      if (error instanceof LeaseLostError) throw error;
+      console.error(
+        `agent session ${lease.id}: failed to persist final summary: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
