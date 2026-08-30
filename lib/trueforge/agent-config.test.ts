@@ -19,6 +19,7 @@ const EXPECTED_SKILL_NAMES = [
   "bountydesk-cve-lab-construction",
   "bountydesk-firmware",
   "bountydesk-mobile",
+  "bountydesk-demo-targets",
 ];
 
 test("the BountyDesk agent preloads the approval-gated publish_verdict tool", () => {
@@ -47,7 +48,7 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
   assert.equal(agentDefinition.manifest.config.dynamic_sub_agents.enabled, true);
 });
 
-test("the manifest wires in exactly the 10 ported skills, each backed by a real SKILL.md", () => {
+test("the manifest wires in exactly the 11 ported skills, each backed by a real SKILL.md", () => {
   const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
   assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
 

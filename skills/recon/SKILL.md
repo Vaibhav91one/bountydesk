@@ -40,10 +40,19 @@ of truth.
 ## Phase 0: target resolution
 
 BountyDesk resolves exactly one authorized target per run through
-`scope_check`; there's no target list to bootstrap or enumerate. The target
-is already deployed for you (see `AGENTS.md` for how the sandbox is
-provisioned). Call `scope_check` against it, confirm it's allowed, and move
-to Phase 1.
+`scope_check`; there's no target list to bootstrap or enumerate. For a real
+report against the pinned Juice Shop target, deployment is server-side
+provisioning that this skill does not cover; call `scope_check` against it,
+confirm it's allowed, and move to Phase 1.
+
+For a DVWA or WebGoat demo mission specifically, nothing is deployed ahead of
+time: use `bountydesk-demo-targets` to boot the target yourself inside your
+own sandbox first, then investigate it directly rather than through
+`scope_check` (that skill explains why). Don't generalize this to other
+targets; it applies only to that demo case. A generic self-boot path for an
+arbitrary report-named repository is separate, larger work (see
+`docs/multi-target-expansion-plan.md`), not something this skill or
+`bountydesk-demo-targets` covers today.
 
 ## Phase 0b: black-box relay tools (when contact happens outside the sandbox)
 
