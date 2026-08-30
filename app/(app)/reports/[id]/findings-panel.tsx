@@ -83,7 +83,7 @@ export function FindingsPanel({ findings }: { findings: Finding[] }) {
           {selected ? (
             <>
               <SheetHeader className="gap-3 border-b border-border/50 p-6">
-                <SheetTitle className="text-title">{selected.title}</SheetTitle>
+                <SheetTitle className="text-title break-words">{selected.title}</SheetTitle>
                 <SheetDescription>
                   <Badge variant={SEVERITY_VARIANT[selected.severity]}>{selected.severity}</Badge>
                 </SheetDescription>
@@ -95,7 +95,7 @@ export function FindingsPanel({ findings }: { findings: Finding[] }) {
                   {/* The full text, shown not interpreted: the agent may have read
                       prompt-injection content off an untrusted target, so its prose is
                       rendered verbatim. whitespace-pre-wrap keeps the breaks it wrote. */}
-                  <p className="whitespace-pre-wrap text-body text-foreground">
+                  <p className="whitespace-pre-wrap break-words text-body text-foreground">
                     {selected.description}
                   </p>
                 </section>
