@@ -41,6 +41,10 @@ export type AgentSessionLease = {
   pendingToolCallId: string | null;
   pendingVerdictId: string | null;
   pendingApprovedContentHash: string | null;
+  /** The Daytona sandbox lib/analysis/trueforge-driver.ts provisioned for this session, if
+   * any -- carried on the lease so the poller's terminal paths (lib/agent-sessions/poller.ts)
+   * can tear it down without a second query. */
+  sandboxId: string | null;
   fence: number;
   leaseOwner: string;
 };
@@ -79,6 +83,7 @@ export async function claim(
     pending_tool_call_id: string | null;
     pending_verdict_id: string | null;
     pending_approved_content_hash: string | null;
+    sandbox_id: string | null;
     fence: string | number;
   }>(sql`
     update ${agentSession}
@@ -107,6 +112,7 @@ export async function claim(
               ${agentSession.pendingToolCallId}             as pending_tool_call_id,
               ${agentSession.pendingVerdictId}              as pending_verdict_id,
               ${agentSession.pendingApprovedContentHash}    as pending_approved_content_hash,
+              ${agentSession.sandboxId}                     as sandbox_id,
               ${agentSession.fence}                         as fence
   `);
 
@@ -124,6 +130,7 @@ export async function claim(
     pendingToolCallId: row.pending_tool_call_id,
     pendingVerdictId: row.pending_verdict_id,
     pendingApprovedContentHash: row.pending_approved_content_hash,
+    sandboxId: row.sandbox_id,
     fence: Number(row.fence),
     leaseOwner: owner,
   };

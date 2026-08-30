@@ -1,6 +1,7 @@
 import { and, db, eq, report, verdict } from "@/lib/db";
 import { draftVerdictFromPendingCall, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
 import { transition } from "@/lib/reports/lifecycle";
+import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
   createTrueForgeClient,
   type PendingToolCall,
@@ -33,11 +34,16 @@ function inFuture(ms: number): Date {
  * publish_verdict, not an MCP tool, or an unparseable/mismatched capability argument. This
  * is the only outcome for those cases; the poller never guesses which call was "the real
  * one," because a wrong guess here is a wrong verdict shipped to a human for approval.
+ *
+ * This is one of this session's investigation-ending terminal paths (AGENTS.md's teardown
+ * section), so a provisioned sandbox is torn down here too, best-effort: refusing a call the
+ * poller can't resolve is not a reason to leave a sandbox running until its TTL backstop.
  */
 async function refuseUnresolvablePending(
   lease: AgentSessionLease,
   message: string,
 ): Promise<string> {
+  if (lease.sandboxId) await teardownSandbox(lease.sandboxId, true);
   await release(lease, { turnStatus: "ERROR", lastError: message });
   return lease.id;
 }
@@ -57,6 +63,12 @@ function extractCapability(argumentsJson: string): string | null {
   return typeof capability === "string" ? capability : null;
 }
 
+/**
+ * A terminal path (AGENTS.md's teardown section): the turn ended without ever reaching a
+ * publish_verdict call, so nothing further will use this session's sandbox. Torn down after
+ * the transaction commits, not inside it, same reasoning as everywhere else in this PR -- a
+ * Daytona network call is not something to hold report.state's row lock across.
+ */
 async function finishWithoutApproval(
   lease: AgentSessionLease,
   updates: { turnStatus: "DONE_NO_ACTION" | "ERROR" | "CANCELLED"; lastError?: string },
@@ -76,6 +88,7 @@ async function finishWithoutApproval(
     }
     await release(lease, updates, tx);
   });
+  if (lease.sandboxId) await teardownSandbox(lease.sandboxId, true);
   return lease.id;
 }
 

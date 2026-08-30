@@ -2,29 +2,25 @@
  * The reproduction orchestrator: turns a frozen ReproductionRecipe into a real REPRODUCED /
  * NOT_REPRODUCED / ANALYSIS_ONLY verdict against a live Daytona sandbox.
  *
- * The oracle boundary from lib/reproduction/types.ts is the rule this file exists to hold:
- * the fixture, negative-control and exploit requests are direct HTTP calls this process makes
- * and reads itself, over the sandbox's per-port preview URL, never text daytona.ts's execute()
- * captured from inside the sandbox. execute() is used only for boot readiness, build-identity,
- * and the egress self-check, never a verdict input: waitForAppReady launches the app and polls
- * for it answering its own port, per AGENTS.md's "READY means the target started and answered
- * its health check"; buildMarkerCheck (build-marker.ts) confirms which image actually booted;
- * and verifyNoEgress reads only a probe's HTTP status against a known denial string, to confirm
- * the sandbox's own network policy rather than anything from the target. The pinned snapshot
- * boots Daytona's own agent as PID 1 and does not run the image's own start command on its
- * own, confirmed live: nothing answers :3000 until this runs it explicitly.
+ * Provisioning the sandbox itself -- pick the image ref, boot from the pinned snapshot, verify
+ * egress is blocked, verify build identity, wait for the app to answer its own port -- lives in
+ * provisionTarget (./provision.ts), shared with lib/analysis/trueforge-driver.ts's turn-time
+ * provisioning. What stays here is the oracle: the fixture, negative-control and exploit
+ * requests are direct HTTP calls this process makes and reads itself, over the sandbox's
+ * per-port preview URL, never text daytona.ts's execute() captured from inside the sandbox.
+ * execute() only ever gates boot readiness, build-identity and the egress self-check inside
+ * provisionTarget, never a verdict input, per the oracle boundary in lib/reproduction/types.ts.
  *
- * daytona.ts deliberately doesn't expose the per-port preview endpoint (it isn't one of the
- * five calls the reproduction-sandbox lifecycle needs), so this file calls it directly. It is
- * the mechanism a `public: false` sandbox uses to hand out one reachable, token-gated URL for
- * a single port without making the sandbox itself public: confirmed live against the pinned
- * Juice Shop snapshot (see the PR description for the request/response evidence) -- a
- * no-token request gets 401 from Daytona's edge, and a token-bearing request that reaches an
- * unready app gets a 502 from the sandbox's own daemon, never today's sandbox contents.
+ * getPortPreviewUrl (also in ./provision.ts) is called fresh here, right after provisionTarget
+ * returns, to get the token this file's oracle legs need: `public: false` never changes on the
+ * sandbox, and this URL is reachable only with the token it comes back with -- confirmed live
+ * against the pinned Juice Shop snapshot (see PR #33's description for the request/response
+ * evidence): a no-token request gets 401 from Daytona's edge, and a token-bearing request that
+ * reaches an unready app gets a 502 from the sandbox's own daemon, never today's sandbox
+ * contents.
  */
 import { createHash, randomBytes } from "node:crypto";
 
-import { requireSecret } from "@/lib/env";
 import { decideOutcome } from "@/lib/reproduction/decide";
 import type {
   AnalysisOnlyReason,
@@ -36,62 +32,24 @@ import type {
   ReproductionRequest,
   RequestBodyEvidence,
 } from "@/lib/reproduction/types";
-import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, isValidImageDigest } from "@/lib/targets/configure";
-import { buildMarkerCheck } from "./build-marker";
-import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox } from "./daytona";
+import {
+  getPortPreviewUrl,
+  positiveIntegerEnv,
+  provisionTarget,
+  ProvisionTargetUnavailableError,
+  readLimitedText,
+  rethrowIfAborted,
+  teardownSandbox,
+  throwIfAborted,
+  timeoutSignal,
+  type PortPreviewUrl,
+} from "./provision";
 import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
 
-const DAYTONA_API = "https://app.daytona.io/api";
-
-/** Juice Shop's own start command (its package.json's `start` script). Backgrounded and
- * redirected so execute()'s own command timeout doesn't wait on a process that is meant to
- * keep running after this call returns. */
-const START_APP_COMMAND = "cd /juice-shop && (nohup node build/app >/tmp/bountydesk-app.log 2>&1 &)";
-
-/**
- * Ceiling on how long a fresh sandbox gets to boot before this gives up and reports
- * ANALYSIS_ONLY. Generous because a cold Daytona sandbox pull can take a while, short enough
- * that a hung boot cannot wedge a reproduction run indefinitely.
- *
- * Env-overridable, not a function parameter: ReproduceFn's signature is shared with the
- * driver and recipe pieces of Track B and isn't ours to widen. reproduce.test.ts overrides
- * both to a few milliseconds so its never-ready case doesn't sit through a real 90s wait.
- */
-export function positiveIntegerEnv(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const value = Number(raw);
-  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
-}
-
-const READINESS_TIMEOUT_MS = positiveIntegerEnv("BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS", 90_000);
-const READINESS_POLL_MS = positiveIntegerEnv("BOUNTYDESK_REPRODUCE_READINESS_POLL_MS", 3_000);
-
-/** Wall-clock ceiling on each direct HTTP call this process makes to the sandbox or to
- * Daytona's control plane. */
-const HTTP_TIMEOUT_MS = 15_000;
-const MAX_RESPONSE_BODY_BYTES = 1_000_000;
-
-/** Our ceiling on how long a reproduction sandbox lives, same order of magnitude as the spike
- * script's. Short: a run either finishes in a couple of minutes or something is wrong. */
-const SANDBOX_TTL_MINUTES = 10;
+export { positiveIntegerEnv };
 
 function sha256Hex(input: string): string {
   return createHash("sha256").update(input).digest("hex");
-}
-
-class ResponseBodyTooLarge extends Error {
-  constructor(limit: number) {
-    super(`sandbox response exceeded ${limit} bytes`);
-    this.name = "ResponseBodyTooLarge";
-  }
-}
-
-function imageRefForProfile(imageName: string, imageDigest: string): string {
-  if (!isValidImageDigest(imageDigest)) {
-    throw new Error(`not a valid image digest: ${imageDigest}`);
-  }
-  return `${imageName}@${imageDigest}`;
 }
 
 /** Fresh and unpredictable every run, per decisions.md Q3 -- never a fixed literal. 18 random
@@ -121,178 +79,14 @@ function substituteCanary(value: unknown, canary: string): unknown {
   return value;
 }
 
-type PortPreviewUrl = { url: string; token: string };
-
-/**
- * Ask Daytona's control plane for a token-gated URL onto one port of a non-public sandbox.
- * This is the mechanism the design-rule comment above rests on: `public: false` never
- * changes, and this URL is reachable only with the token it comes back with.
- */
-async function getPortPreviewUrl(
-  sandboxId: string,
-  port: number,
-  signal?: AbortSignal,
-): Promise<PortPreviewUrl> {
-  const response = await fetch(
-    `${DAYTONA_API}/sandbox/${encodeURIComponent(sandboxId)}/ports/${port}/preview-url`,
-    {
-      headers: { authorization: `Bearer ${requireSecret("DAYTONA_API_KEY")}` },
-      signal: timeoutSignal(signal),
-    },
-  );
-
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`preview-url lookup for sandbox ${sandboxId} port ${port} -> ${response.status} ${body.slice(0, 300)}`);
-  }
-
-  const data = (await response.json()) as Partial<PortPreviewUrl>;
-  if (typeof data.url !== "string" || typeof data.token !== "string") {
-    throw new Error(`preview-url response for sandbox ${sandboxId} port ${port} carries no url or token`);
-  }
-  return { url: data.url, token: data.token };
-}
-
-function timeoutSignal(outer?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(HTTP_TIMEOUT_MS);
-  return outer ? AbortSignal.any([outer, timeout]) : timeout;
-}
-
-function abortReason(signal: AbortSignal): unknown {
-  return signal.reason ?? new Error("operation aborted");
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw abortReason(signal);
-}
-
-function rethrowIfAborted(error: unknown, signal?: AbortSignal): void {
-  if (signal?.aborted) throw abortReason(signal);
-  if (error instanceof DOMException && error.name === "AbortError") throw error;
-  if (error instanceof Error && error.name === "AbortError") throw error;
-}
-
-function delay(ms: number, signal?: AbortSignal): Promise<void> {
-  throwIfAborted(signal);
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(abortReason(signal!));
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
-/**
- * Poll the sandbox from inside until its app port answers, or give up.
- *
- * This is the one place execute() is allowed to gate anything: a boot check, matching
- * AGENTS.md's "READY means the target started and answered its health check". The status
- * code is read only to decide whether to keep polling, never fed into the oracle.
- *
- * `signal` is checked between poll attempts, not inside a single execute() call: a caller
- * that cancels mid-probe still waits out that one in-flight command, but never starts another.
- */
-async function waitForAppReady(
-  sandbox: Sandbox,
-  port: number,
-  timeoutMs: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  throwIfAborted(signal);
-  const started = await execute(sandbox, START_APP_COMMAND, 10);
-  if (started.exitCode !== 0) {
-    throw new Error(`sandbox ${sandbox.id} app start failed: ${started.result.slice(0, 200)}`);
-  }
-
-  const deadline = Date.now() + timeoutMs;
-  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}/ 2>/dev/null || echo 000`;
-
-  while (Date.now() < deadline) {
-    throwIfAborted(signal);
-    const result = await execute(sandbox, probe, 10);
-    const status = result.result.trim();
-    if (/^2\d\d$/.test(status)) return;
-    await delay(READINESS_POLL_MS, signal);
-  }
-
-  throw new Error(`sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms`);
-}
-
-/**
- * The third place execute() is allowed to gate anything: confirming the sandbox's own network
- * policy actually blocks egress, before any fixture/exploit request runs. The oracle input
- * itself never comes from here -- only a probe's HTTP status against a known denial string.
- */
-async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
-  throwIfAborted(signal);
-  if (!sandbox.networkBlockAll) {
-    throw new Error("reproduction sandbox came up with networkBlockAll false");
-  }
-  if (sandbox.networkAllowList || sandbox.domainAllowList) {
-    throw new Error("reproduction sandbox came up with a non-empty egress allow list");
-  }
-
-  const haveCurl = await execute(sandbox, "command -v curl >/dev/null && echo CURL_PRESENT", 15);
-  throwIfAborted(signal);
-  if (!haveCurl.result.includes("CURL_PRESENT")) {
-    throw new Error("curl is not available in the sandbox, so the egress probes prove nothing");
-  }
-
-  // IP literals only, deliberately: networkBlockAll blocks DNS resolution too, not just the
-  // HTTP(S) request itself, so a by-hostname probe never reaches the interception proxy at
-  // all. An IP literal skips DNS entirely and reaches the proxy directly, which is what
-  // actually answers with the "Internet is restricted" 403 this loop checks for.
-  const probes = [
-    "http://1.1.1.1",
-    "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
-  ];
-  const denial = "Internet is restricted";
-
-  for (const url of probes) {
-    throwIfAborted(signal);
-    const script = [
-      ": > /tmp/bountydesk-egress.body",
-      `curl -sS --max-time 8 -o /tmp/bountydesk-egress.body -w '%{http_code}' '${url}' > /tmp/bountydesk-egress.status 2>/tmp/bountydesk-egress.err`,
-      "echo \"PROBE curl_exit=$? status=$(cat /tmp/bountydesk-egress.status)\"",
-      "echo \"BODY $(head -c 120 /tmp/bountydesk-egress.body | tr -d '\\n')\"",
-    ].join("; ");
-    const result = await execute(sandbox, script, 20);
-    throwIfAborted(signal);
-    const parsed = /PROBE curl_exit=(\d+) status=(\d*)/.exec(result.result);
-    if (result.exitCode !== 0 || !parsed) {
-      throw new Error(`egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`);
-    }
-
-    const status = parsed[2] === "" || parsed[2] === "000" ? null : parsed[2];
-    const body = /BODY (.*)/.exec(result.result)?.[1]?.trim() ?? "";
-    if (status === "403" && body.includes(denial)) continue;
-
-    throw new Error(`reproduction sandbox reached ${url} despite networkBlockAll`);
-  }
-}
-
-async function readLimitedText(response: Response, limitBytes = MAX_RESPONSE_BODY_BYTES): Promise<string> {
-  if (!response.body) return "";
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let size = 0;
-  let text = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limitBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw new ResponseBodyTooLarge(limitBytes);
-    }
-    text += decoder.decode(value, { stream: true });
-  }
-
-  return text + decoder.decode();
-}
+// getPortPreviewUrl, timeoutSignal, abortReason, throwIfAborted, rethrowIfAborted,
+// waitForAppReady, verifyNoEgress and readLimitedText all moved to ./provision.ts as part of
+// extracting provisionTarget() (see that file's own doc comment). verifyNoEgress in
+// particular -- the IP-literal probes that confirm networkBlockAll actually denies egress with
+// the "Internet is restricted" 403, before anything else touches the sandbox -- now runs
+// unchanged inside provisionTarget, which createReproducer calls below. Nothing about that
+// check's behavior changed, only which file it lives in; it still runs before the
+// fixture/negative-control/exploit legs on every call, exactly as it did here before.
 
 type SentRequest = { probe: ReproductionProbeResult; bodyEvidence: RequestBodyEvidence };
 
@@ -469,7 +263,7 @@ type AuthorizeReproductionTargetFn = typeof authorizeReproductionTarget;
 export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn = authorizeReproductionTarget): ReproduceFn {
   return async (input, opts) => {
   const recipeId = input.recipe.id;
-  let sandbox: Sandbox | undefined;
+  let sandboxId: string | undefined;
   let cancellationInFlight = false;
 
   try {
@@ -489,79 +283,39 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
     }
 
-    let imageRef: string;
+    // Steps 1-8 (image ref, boot from the pinned snapshot, verify egress is blocked, verify
+    // build identity, wait for the app to answer its own port) live in provisionTarget now --
+    // see lib/sandbox/provision.ts. This is the same sequence that used to run inline here,
+    // just shared with the driver's turn-time provisioning.
+    let provisioned: { sandboxId: string; appPort: number };
     try {
-      imageRef = imageRefForProfile(authorization.imageName, authorization.imageDigest);
-    } catch (error) {
-      rethrowIfAborted(error, opts?.signal);
-      return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
-    }
-
-    try {
-      const snapshotInfo = await getSnapshot(authorization.snapshotId);
-      throwIfAborted(opts?.signal);
-      sandbox = await createSandbox(
+      provisioned = await provisionTarget(
         {
-          snapshot: authorization.snapshotId,
-          imageRef,
-          // Matched to the snapshot's own declared limits, the same way scripts/spike-daytona.ts
-          // does it: createSandbox refuses to request resources of its own, so these are read
-          // back from the snapshot record and createSandbox re-verifies them before it provisions.
-          cpu: snapshotInfo.cpu ?? 0,
-          memoryGb: snapshotInfo.mem ?? 0,
-          diskGb: snapshotInfo.disk ?? 0,
-          ttlMinutes: SANDBOX_TTL_MINUTES,
-          labels: { "bountydesk.recipe": recipeId, "bountydesk.targetProfileId": input.targetProfileId },
+          imageName: authorization.imageName,
+          imageDigest: authorization.imageDigest,
+          snapshotId: authorization.snapshotId,
+          targetProfileId: input.targetProfileId,
+          recipeId,
         },
-        // The narrow, explicitly-named exception documented on assertSnapshotImage: today's
-        // registered snapshot can only be tag-pinned (see that function's doc comment), so this
-        // is the one tag createSandbox is allowed to accept in the digest's place. The
-        // buildMarkerCheck call below is what makes that safe to do -- it must run, and it must
-        // fail closed, every single time this override is exercised.
-        TAG_PINNED_SNAPSHOT_IMAGE_REF,
+        authorization.appPort,
+        { signal: opts?.signal },
       );
-      throwIfAborted(opts?.signal);
-      sandbox = await getSandbox(sandbox.id);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
-      return analysisOnly("COULD_NOT_DEPLOY", { recipeId });
+      const reason = error instanceof ProvisionTargetUnavailableError ? "TARGET_UNAVAILABLE" : "COULD_NOT_DEPLOY";
+      return analysisOnly(reason, { recipeId });
     }
-
-    throwIfAborted(opts?.signal);
-
-    try {
-      await verifyNoEgress(sandbox, opts?.signal);
-    } catch (error) {
-      rethrowIfAborted(error, opts?.signal);
-      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
-    }
-
-    // A second, independent proof of build identity (see build-marker.ts), on top of
-    // assertSnapshotImage's control-plane check that createSandbox already ran above. This
-    // reads a marker from the booted image before the target application starts, so a mismatched
-    // tag-pinned snapshot cannot execute target code before being rejected.
-    const markerMatches = await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER);
-    throwIfAborted(opts?.signal);
-    if (!markerMatches) {
-      return analysisOnly("COULD_NOT_DEPLOY", { recipeId, sandboxId: sandbox.id });
-    }
-
-    try {
-      await waitForAppReady(sandbox, authorization.appPort, READINESS_TIMEOUT_MS, opts?.signal);
-    } catch (error) {
-      rethrowIfAborted(error, opts?.signal);
-      return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id });
-    }
+    sandboxId = provisioned.sandboxId;
 
     const canary = generateCanary();
     const canaryHash = sha256Hex(canary);
 
     let preview: PortPreviewUrl;
     try {
-      preview = await getPortPreviewUrl(sandbox.id, authorization.appPort, opts?.signal);
+      preview = await getPortPreviewUrl(sandboxId, provisioned.appPort, opts?.signal);
     } catch (error) {
       rethrowIfAborted(error, opts?.signal);
-      return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId: sandbox.id, canaryHash });
+      return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId, canaryHash });
     }
 
     // The fixture seeds the canary through the trusted registration endpoint, never through
@@ -628,7 +382,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     const evidence: ReproductionEvidence = {
       recipeId,
-      sandboxId: sandbox.id,
+      sandboxId,
       fixture: { ranToCompletion: fixtureCompleted, at: fixtureAt },
       negativeControl: {
         ranToCompletion: negativeControl.ranToCompletion,
@@ -664,24 +418,8 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // guessed verdict.
     return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
   } finally {
-    if (sandbox) {
-      const sandboxId = sandbox.id;
-      await deleteSandbox(sandboxId).catch((error) => {
-        if (cancellationInFlight) {
-          console.error(
-            `failed to delete reproduction sandbox ${sandboxId} after cancellation: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return;
-        }
-        throw new Error(
-          `failed to delete reproduction sandbox ${sandboxId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          { cause: error },
-        );
-      });
+    if (sandboxId) {
+      await teardownSandbox(sandboxId, cancellationInFlight);
     }
   }
   };

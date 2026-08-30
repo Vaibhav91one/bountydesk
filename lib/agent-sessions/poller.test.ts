@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { after, before } from "node:test";
+import test, { after, before, mock } from "node:test";
 
 import type { PendingToolCall, TrueForgeClient, TurnSnapshot } from "@/lib/trueforge/client";
 
@@ -9,6 +9,33 @@ import type { PendingToolCall, TrueForgeClient, TurnSnapshot } from "@/lib/truef
  * enforces. Only the TrueForge boundary is faked.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
+
+/**
+ * Every terminal path this file exercises (finishWithoutApproval, refuseUnresolvablePending)
+ * now tears down a session's sandbox, if it had one. Mocked here the same way
+ * reproduce.test.ts fakes ./daytona: this file never provisions a real sandbox, so
+ * lib/sandbox/provision.ts's teardownSandbox is the only thing under test, not Daytona itself.
+ */
+let deleteSandboxCalls: string[] = [];
+mock.module("@/lib/sandbox/daytona", {
+  namedExports: {
+    createSandbox: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    getSandbox: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    execute: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    getSnapshot: async () => {
+      throw new Error("not used by pollOnce");
+    },
+    deleteSandbox: async (id: string) => {
+      deleteSandboxCalls.push(id);
+    },
+  },
+});
 
 type PollerModule = typeof import("./poller");
 type QueueModule = typeof import("./queue");
@@ -43,6 +70,7 @@ async function seedSession(
       | "ANALYSIS_ONLY"
       | "AWAITING_APPROVAL"
       | "CANCELLED";
+    sandboxId?: string;
   } = {},
 ) {
   seq += 1;
@@ -77,6 +105,8 @@ async function seedSession(
       capabilityToken: `cap-${n}`,
       sessionId: `session-${n}`,
       turnId: `turn-${n}`,
+      sandboxId: opts.sandboxId ?? null,
+      appPort: opts.sandboxId ? 3000 : null,
     })
     .returning({ id: dbm.agentSession.id });
 
@@ -415,6 +445,42 @@ test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONL
 
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
+test("an error snapshot tears down the session's provisioned sandbox", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  await seedSession({ sandboxId: "sandbox-error-path" });
+  const client = fakeClient({ status: "error", message: "the model blew up" });
+
+  await poller.pollOnce("w-error-sandbox", { client });
+
+  assert.deepEqual(deleteSandboxCalls, ["sandbox-error-path"]);
+});
+
+test("a session with no provisioned sandbox never calls teardown", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  await seedSession();
+  const client = fakeClient({ status: "done_no_action" });
+
+  await poller.pollOnce("w-no-sandbox", { client });
+
+  assert.deepEqual(deleteSandboxCalls, []);
+});
+
+test("a wrong tool name tears down the session's provisioned sandbox", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  const fixture = await seedSession({ sandboxId: "sandbox-refused-path" });
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken, { toolName: "delete_everything" })],
+  });
+
+  await poller.pollOnce("w-wrong-tool-sandbox", { client });
+
+  assert.deepEqual(deleteSandboxCalls, ["sandbox-refused-path"]);
 });
 
 test("a cancelled snapshot sets CANCELLED and moves unfinished analysis to ANALYSIS_ONLY", async () => {

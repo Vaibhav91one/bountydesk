@@ -5,6 +5,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { mcpServerSecret } from "@/lib/env";
 import { publishVerdict, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
+import { probeTarget, probeTargetInputSchema } from "@/lib/mcp/probe-target";
 
 // node:crypto and the Postgres connection publishVerdict opens both need the Node runtime.
 export const runtime = "nodejs";
@@ -47,6 +48,25 @@ function buildServer(): McpServer {
       const result = await publishVerdict(capability);
       if (result.ok) {
         return { content: [{ type: "text", text: "verdict published" }] };
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: result.reason }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "probe_target",
+    {
+      description:
+        "Send one HTTP request to this session's provisioned target sandbox. Give a method, a same-origin path (e.g. /rest/products/search), and optional headers/body -- never a URL, host or token; the server resolves and reaches the one sandbox this session's capability is bound to. Refuses cleanly when no sandbox was provisioned for this run.",
+      inputSchema: probeTargetInputSchema.shape,
+    },
+    async ({ capability, method, path, headers, body }) => {
+      const result = await probeTarget({ capability, method, path, headers, body });
+      if (result.ok) {
+        return { content: [{ type: "text", text: JSON.stringify({ status: result.status, body: result.body }) }] };
       }
       return {
         isError: true,

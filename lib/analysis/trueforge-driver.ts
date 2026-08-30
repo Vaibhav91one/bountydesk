@@ -12,6 +12,8 @@ import {
   targetProfile,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
+import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 
@@ -31,15 +33,29 @@ type BoundTarget = {
  * persistAgentDraftedVerdict (lib/mcp/publish-verdict.ts) re-checks against this same
  * authorization before it ever becomes a verdict row.
  */
+/**
+ * `provisioned` is only meaningful when `target` is non-null: it says whether provisionTarget
+ * (called in run(), before the turn message is even built) actually produced a reachable
+ * sandbox for this run. A target can be authorized and still unprovisioned -- Daytona down, a
+ * bad snapshot, no port configured -- and that failure must never block the report from getting
+ * a turn at all, so the agent is told plainly and pointed at ANALYSIS_ONLY, same as having no
+ * target bound in the first place.
+ */
 function buildTurnMessage(
   title: string,
   body: string,
   capabilityToken: string,
   target: BoundTarget | null,
+  provisioned: boolean,
 ): string {
-  const targetSection = target
-    ? `This report is bound to an authorized target: ${target.name}, pinned at image ${target.imageName}@${target.imageDigest}${target.snapshotId ? ` (snapshot ${target.snapshotId})` : ""}. Investigate the report against this target using the tools available to you (scope-guard, a sandbox, skills, subagents), then decide the outcome yourself.`
-    : `No authorized target is bound to this report -- either no target profile is attached, or the connected repository's grant is inactive or revoked. There is nothing to reproduce against. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`;
+  const pinnedAt = (t: BoundTarget) =>
+    `${t.name}, pinned at image ${t.imageName}@${t.imageDigest}${t.snapshotId ? ` (snapshot ${t.snapshotId})` : ""}`;
+
+  const targetSection = !target
+    ? `No authorized target is bound to this report -- either no target profile is attached, or the connected repository's grant is inactive or revoked. There is nothing to reproduce against. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`
+    : provisioned
+      ? `This report is bound to an authorized target: ${pinnedAt(target)}. A sandbox running it has already been provisioned for you. Reach it exclusively through the probe_target tool: give it a method, a same-origin path, and optional headers/body, and it forwards the request to your sandbox -- you never need, and never get, a raw URL, host or token. Use scope-guard, skills and subagents alongside it, then decide the outcome yourself.`
+      : `This report is bound to an authorized target: ${pinnedAt(target)}. Its sandbox could not be provisioned this run, so there is nothing reachable to investigate. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`;
 
   return `A bug bounty report has come in for triage.
 
@@ -131,6 +147,7 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
  */
 export function createTrueforgeAnalysisDriver(
   client: TrueForgeClient = createTrueForgeClient(),
+  provision: typeof provisionTarget = provisionTarget,
 ): AnalysisDriver {
   return {
     async ensureSession({ reportId, signal }: AnalysisContext): Promise<void> {
@@ -234,6 +251,7 @@ export function createTrueforgeAnalysisDriver(
           targetImageName: targetProfile.imageName,
           targetImageDigest: targetProfile.imageDigest,
           targetSnapshotId: targetProfile.snapshotId,
+          targetConfig: targetProfile.config,
           connectedRepositoryId: report.connectedRepositoryId,
           repoActive: connectedRepository.active,
           repoArchivedAt: connectedRepository.archivedAt,
@@ -277,6 +295,45 @@ export function createTrueforgeAnalysisDriver(
             }
           : null;
 
+      // Provisioning is a slow, failure-prone network call (boot a sandbox, wait for the app to
+      // answer its own port) and must not run inside the row lock below: AGENTS.md's own design
+      // record is explicit that holding a Postgres row lock across it would pay a cost the
+      // existing code never had to pay for anything this slow. A cheap, unlocked pre-check
+      // first: a turn already exists (a retry, or the loser of a concurrent race below) means
+      // this report was already provisioned once, so there's nothing to redo -- provisioning
+      // again here would boot a second sandbox nobody would ever store a reference to.
+      let provisioned: { sandboxId: string; appPort: number } | null = null;
+      if (targetInfo && targetInfo.snapshotId) {
+        const [existing] = await db
+          .select({ turnId: agentSession.turnId })
+          .from(agentSession)
+          .where(eq(agentSession.reportId, reportId))
+          .limit(1);
+
+        if (existing && !existing.turnId) {
+          const appPort = profileAppPort(context.targetConfig);
+          if (appPort !== null) {
+            try {
+              provisioned = await provision(
+                {
+                  imageName: targetInfo.imageName,
+                  imageDigest: targetInfo.imageDigest,
+                  snapshotId: targetInfo.snapshotId,
+                  targetProfileId: context.targetProfileId as string,
+                },
+                appPort,
+                { signal },
+              );
+            } catch {
+              // A genuine cancellation must still propagate as one, not be swallowed into "no
+              // target this run" -- the caller's lease/retry semantics depend on seeing it.
+              if (signal.aborted) throw signal.reason;
+              provisioned = null;
+            }
+          }
+        }
+      }
+
       // The row lock spans the createTurn call on purpose, unlike the delivery worker's GitHub
       // calls: TrueForge is a loopback service this deployment always controls, not a slow or
       // rate-limited external API, so holding one Postgres row lock for the length of one local
@@ -312,12 +369,23 @@ export function createTrueforgeAnalysisDriver(
 
         // A turn was already started for this report, either by an earlier pass or by
         // whichever concurrent caller won the lock first. The poller takes it from here
-        // regardless of how that turn is doing.
-        if (session.turnId) return;
+        // regardless of how that turn is doing. If this losing attempt already provisioned a
+        // sandbox before losing the race, it's this attempt's own to clean up -- nothing else
+        // ever learns its id, since only the winner's write below persists one onto the row.
+        if (session.turnId) {
+          if (provisioned) await teardownSandbox(provisioned.sandboxId, false);
+          return;
+        }
 
         if (signal.aborted) throw signal.reason;
 
-        const content = buildTurnMessage(context.title, context.body, session.capabilityToken, targetInfo);
+        const content = buildTurnMessage(
+          context.title,
+          context.body,
+          session.capabilityToken,
+          targetInfo,
+          provisioned !== null,
+        );
         const { turnId } = await client.createTurn(
           session.sessionId,
           [{ type: "user.message", content }],
@@ -329,7 +397,13 @@ export function createTrueforgeAnalysisDriver(
         // actually observed the turn still going on a later poll.
         await tx
           .update(agentSession)
-          .set({ turnId, turnStatus: "RUNNING", updatedAt: new Date() })
+          .set({
+            turnId,
+            turnStatus: "RUNNING",
+            sandboxId: provisioned?.sandboxId ?? null,
+            appPort: provisioned?.appPort ?? null,
+            updatedAt: new Date(),
+          })
           .where(eq(agentSession.id, session.id));
       });
 

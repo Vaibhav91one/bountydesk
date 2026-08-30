@@ -30,7 +30,12 @@ to spend this way, since `verify_grant` itself consumes it.
 
 ## 2. Enumerate the app's OWN challenge set (don't hand-maintain lists)
 
-Most lab apps expose their challenge/level taxonomy; pull it at runtime:
+Most lab apps expose their challenge/level taxonomy; pull it at runtime.
+Every `GET`/`POST` path below is a `probe_target` call
+(`probe_target {capability, method, path, ...}`), not a raw request to a
+host you can dial yourself -- the pinned target lives in its own provisioned
+sandbox, reachable only through that tool. Read `bountydesk-recon`'s Phase 0
+and 1 before this section if you haven't already:
 
 - Juice Shop: `GET /api/Challenges/` returns JSON of every challenge (name,
   category, `solved`). This IS the scoreboard and the progress signal, and is
@@ -132,6 +137,12 @@ chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --dump-do
 grep -q BOUNTYDESK_MARKER artifacts/<id>.dom.html && echo CONFIRMED
 ```
 `--disable-dev-shm-usage` avoids a crash on the sandbox's small `/dev/shm`.
+This one needs a real `<url>` a browser can navigate to, which is exactly
+what `probe_target`'s single-request forwarding doesn't give you -- your own
+sandbox has no direct route to the pinned target the way this recipe
+assumes. Mark a DOM XSS challenge `blocked` with that reason rather than
+guessing at a URL, unless the run's own turn message hands you a real,
+directly reachable target origin.
 Stderr `dbus`/`NameHasOwner` lines are harmless noise (no session bus in a
 minimal container), not a failure signal, ignore them.
 

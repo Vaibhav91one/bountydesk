@@ -449,6 +449,13 @@ export const agentSession = pgTable(
     capabilityToken: text("capability_token").notNull(),
     sessionId: text("session_id").notNull(),
     turnId: text("turn_id"),
+    /** The Daytona sandbox provisioned for this session's investigation, and the app port it
+     * listens on -- both null when no target was bound or provisioning failed, which is most
+     * sessions today. Set once, before the turn starts (lib/analysis/trueforge-driver.ts),
+     * read by probe_target (app/api/mcp/probe-target/route.ts) to reach it, and cleared only by
+     * the row's own teardown, never reused across sessions. */
+    sandboxId: text("sandbox_id"),
+    appPort: integer("app_port"),
     /** Local bookkeeping only, never a report state: RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
     turnStatus: text("turn_status").notNull().default("RUNNING"),
     pendingThreadId: text("pending_thread_id"),

@@ -17,7 +17,7 @@ function defaultPort(protocol: string): number | null {
   return null;
 }
 
-function profileAppPort(config: unknown): number | null {
+export function profileAppPort(config: unknown): number | null {
   if (typeof config !== "object" || config === null) return null;
   const baseUrl = (config as { baseUrl?: unknown }).baseUrl;
   if (typeof baseUrl !== "string") return null;

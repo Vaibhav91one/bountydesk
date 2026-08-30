@@ -15,6 +15,7 @@ import {
 } from "@/lib/db";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
+import { teardownSandbox } from "@/lib/sandbox/provision";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
@@ -149,6 +150,14 @@ async function persistAgentDraftedVerdict(
  *
  * Rejects an invalid draft before touching the database at all: schema validation runs first,
  * outside any transaction.
+ *
+ * A successful persist is the agent's investigation ending -- publish_verdict is the last tool
+ * call a turn makes, so this is one of the three terminal points AGENTS.md's teardown section
+ * names, and the session's sandbox (if it had one) is torn down here. The delete itself runs
+ * after the transaction commits, not inside it: same reasoning as provisionTarget staying
+ * outside trueforge-driver.ts's row lock, a Daytona network call is not something to hold a
+ * Postgres lock across. Best-effort, matching reproduce.ts's own pattern -- a teardown failure
+ * is logged, never allowed to turn a successful publish into a thrown error.
  */
 export async function draftVerdictFromPendingCall(
   capability: string,
@@ -163,9 +172,11 @@ export async function draftVerdictFromPendingCall(
   }
   const draft = parsed.data;
 
-  return db.transaction(async (tx) => {
+  let sandboxToTearDown: string | null = null;
+
+  const result = await db.transaction(async (tx): Promise<DraftVerdictResult> => {
     const [session] = await tx
-      .select({ reportId: agentSession.reportId })
+      .select({ reportId: agentSession.reportId, sandboxId: agentSession.sandboxId })
       .from(agentSession)
       .where(eq(agentSession.capabilityToken, capability))
       .limit(1)
@@ -179,8 +190,19 @@ export async function draftVerdictFromPendingCall(
       .limit(1);
     const verdictId = existing?.id ?? randomUUID();
 
-    return persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
+    const outcome = await persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
+    if (outcome.ok) sandboxToTearDown = session.sandboxId;
+    return outcome;
   });
+
+  if (result.ok && sandboxToTearDown) {
+    // cancellationInFlight: true always swallows a delete failure into a log line rather than
+    // throwing -- there is no cancellation concept on this path, only "never block a successful
+    // publish on cleanup."
+    await teardownSandbox(sandboxToTearDown, true);
+  }
+
+  return result;
 }
 
 /**

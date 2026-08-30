@@ -649,3 +649,97 @@ test("run's turn message treats a revoked repository grant the same as no target
   );
   assert.ok(!message.includes(target.name), "a revoked target's name must not be handed to the agent as authorized");
 });
+
+test("run() provisions the target before opening its row-locking transaction, and persists the result", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-provision-order" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  const order: string[] = [];
+
+  const client = fakeClient({
+    async createTurn() {
+      order.push("createTurn");
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (_authorization, appPort) => {
+    order.push("provision");
+    return { sandboxId: "sandbox-from-provisioning", appPort };
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+
+  assert.deepEqual(order, ["provision", "createTurn"], "provisioning must run before the turn-creating transaction");
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.sandboxId, "sandbox-from-provisioning");
+  assert.equal(session.appPort, 3000);
+});
+
+test("run() falls back to the no-target turn message when provisioning fails, and still creates a turn", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-provision-failure" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  let capturedInput: unknown;
+  // A custom createTurn override replaces the fake's own createTurnCalls counter entirely (see
+  // the concurrent-run() test above), so this test tracks the call itself.
+  let createTurnCalls = 0;
+
+  const client = fakeClient({
+    async createTurn(_sessionId, input) {
+      createTurnCalls++;
+      capturedInput = input;
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new Error("daytona is down");
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+
+  assert.equal(createTurnCalls, 1, "a provisioning failure must never block the turn from starting");
+
+  const inputArray = capturedInput as { type: string; content: string }[];
+  const message = inputArray[0].content;
+  assert.ok(message.includes(target.name), "the target must still be named even though it could not be provisioned");
+  assert.ok(
+    message.includes("could not be provisioned"),
+    "the agent must be told plainly that the sandbox isn't reachable this run",
+  );
+  assert.ok(
+    message.includes("ANALYSIS_ONLY"),
+    "the agent must be pointed at ANALYSIS_ONLY when there is nothing reachable",
+  );
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.sandboxId, null);
+  assert.equal(session.appPort, null);
+});
+
+test("run() never calls provisioning a second time once a turn already exists", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-provision-once" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  let provisionCalls = 0;
+
+  const client = fakeClient();
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (_authorization, appPort) => {
+    provisionCalls++;
+    return { sandboxId: "sandbox-once", appPort };
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+  await d.run(context(reportId));
+
+  assert.equal(provisionCalls, 1, "a report whose turn already started must never be provisioned again");
+});

@@ -31,19 +31,27 @@ of truth.
    metadata.google.internal). The guard hard-denies them; attempting anyway is
    a violation.
 4. Each subagent re-runs `scope_check` itself before touching the target.
-5. The sandbox has RESTRICTED egress (package registries and git hosts only).
-   Never try to bypass that firewall. If an external target is unreachable,
-   say so. CVE lookups use the host-side `osv_query` / `osv_get` MCP tools;
-   they work because they run outside the sandbox, not because you should
-   curl OSV yourself.
+5. Treat your own sandbox's egress as restricted by default -- exactly which
+   hosts it can reach has not been independently verified against TrueForge's
+   own defaults, so don't assume it and don't try to bypass whatever firewall
+   is actually in front of you. If an external target is unreachable, say so
+   rather than working around it. CVE lookups use the host-side `osv_query` /
+   `osv_get` MCP tools; they work because they run outside the sandbox, not
+   because you should curl OSV yourself.
 
 ## Phase 0: target resolution
 
 BountyDesk resolves exactly one authorized target per run through
-`scope_check`; there's no target list to bootstrap or enumerate. The target
-is already deployed for you (see `AGENTS.md` for how the sandbox is
-provisioned). Call `scope_check` against it, confirm it's allowed, and move
-to Phase 1.
+`scope_check`; there's no target list to bootstrap or enumerate. When a
+target is authorized, its sandbox is provisioned for you automatically
+before your turn starts, and the turn message tells you so. You never reach
+it by a raw URL: every request goes through `probe_target {capability,
+method, path, headers?, body?}`, which forwards to your own session's
+sandbox and hands back the status and body -- give it a same-origin path
+like `/rest/products/search`, not a host or a URL. If the turn message says
+provisioning failed this run, there is nothing to probe; stop and draft
+ANALYSIS_ONLY. Call `scope_check` against the target before any contact with
+it, confirm it's allowed, and move to Phase 1.
 
 ## Phase 0b: black-box relay tools (when contact happens outside the sandbox)
 
@@ -76,21 +84,39 @@ Doctrine:
 
 ## Phase 1: passive fingerprint (no approval needed)
 
-Run in the sandbox:
+The pinned target lives in its own provisioned sandbox, not yours -- reach it
+through `probe_target`, never a raw `curl` to a hostname you don't have:
 
-```bash
-curl -sS -m 10 -D /tmp/headers -o /tmp/body.html http://<target>/
-head -60 /tmp/body.html
-grep -ioE 'server: .*|x-powered-by: .*' /tmp/headers 2>/dev/null || true
+```text
+probe_target {capability, method: "GET", path: "/"}
 ```
 
-Record the server banner, framework hints from body HTML, TLS info if https
-(`curl -vI`), response timing. Write findings as JSON lines to
+Read the response `status`, `body`, and the headers you asked for back (pass
+any you need in `headers`, e.g. to inspect `Server`/`X-Powered-By` echo them
+back yourself, since `probe_target` returns status and body, not raw
+response headers -- request the same path with `HEAD` if all you need is
+status and reachability). Record the server banner, framework hints from the
+body, and response timing. Write findings as JSON lines to
 `artifacts/<host>.recon.jsonl`, one finding per line:
 
 ```json
 {"kind":"banner","value":"nginx/1.24","confidence":"high"}
 ```
+
+**Reachability note for Phases 2-2b:** these commands assume a routable
+`<host>`/`<url>` your own sandbox can dial directly. The pinned target's
+provisioned sandbox is a separate, isolated sandbox you cannot route to that
+way -- your own bash session has no path to it except through
+`probe_target`'s single-request forwarding, which speaks GET/POST/HEAD to
+one path at a time, not raw sockets. A raw port sweep (`nmap`) or a
+tool-driven scan that needs to dial the target itself (`sqlmap -u`, `nuclei
+-u`, `ffuf`) cannot reach the pinned target today; there is no port-sweep or
+arbitrary-tool path onto it yet. Prefer reading the target's own source
+(Phase 2b below) and probing individual endpoints one request at a time
+through `probe_target` over anything that assumes it can dial the target
+directly. These commands stay accurate for a genuinely external host reached
+through Phase 0b's `http_probe`/`tcp_probe` relay, where a real routable
+host/URL is what you're given.
 
 ## Phase 2: service enumeration (needs grant)
 
@@ -107,7 +133,7 @@ timing.
 ## Phase 3: web surface (needs grant)
 
 - `nuclei -u <url> -severity low,medium,high,critical -rl 20` if installed;
-  otherwise curated curl probes for common admin paths (`/admin`,
+  otherwise curated `probe_target` calls for common admin paths (`/admin`,
   `/.git/HEAD`, `/console`, `/.env`), max 20 requests, 1s apart.
 - Log every probe to `artifacts/<host>.web.jsonl`.
 
