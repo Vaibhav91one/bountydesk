@@ -21,7 +21,7 @@ const COLUMNS = [
   // A fixed track, not a fraction. Reconfigure and Remove repository measure 111 and 156
   // with an 8 gap, and a proportional column dropped below that at this table's width and
   // stacked them. The table scrolls sideways rather than the buttons wrapping.
-  { key: "action", label: "", width: "20rem", align: "end" as const },
+  { key: "action", label: "", width: "20rem", align: "end" as const, controls: true },
 ];
 
 /**

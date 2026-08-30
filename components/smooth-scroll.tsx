@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Lenis from "lenis";
+import { useReducedMotion } from "motion/react";
 
 /**
  * Smooth scrolling, on the pages that want it.
@@ -17,10 +18,14 @@ import Lenis from "lenis";
  * Renders nothing.
  */
 export function SmoothScroll() {
+  // Subscribed rather than read once, so turning the preference on tears this down on a page
+  // that is already open.
+  const reduced = useReducedMotion();
+
   useEffect(() => {
     // Asking for reduced motion and getting scroll inertia is the exact complaint the setting
     // exists to answer, so this stays off rather than running faster.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (reduced) return;
 
     const lenis = new Lenis();
     let frame = 0;
@@ -35,7 +40,7 @@ export function SmoothScroll() {
       cancelAnimationFrame(frame);
       lenis.destroy();
     };
-  }, []);
+  }, [reduced]);
 
   return null;
 }

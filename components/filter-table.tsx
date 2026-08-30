@@ -23,6 +23,14 @@ export type TableColumn = {
   width: string;
   /** Right-aligned, for counts and timestamps. */
   align?: "start" | "end";
+  /**
+   * This column holds controls of its own.
+   *
+   * It is lifted above the row's hit area so its buttons receive their own clicks. Every other
+   * column stays under it, because a row a person can only select along one column is a row
+   * whose click target is a guess.
+   */
+  controls?: boolean;
 };
 
 export type TableFilter = {
@@ -176,9 +184,7 @@ function RowBody({
   const cells = columns.map((column, index) => (
     <span
       key={column.key}
-      // Above the first cell's stretched hit area, so a cell holding a control of its own
-      // receives its clicks rather than the row swallowing them.
-      className={cn(cellClass(columns, index), index > 0 && "relative z-10")}
+      className={cn(cellClass(columns, index), column.controls && "relative z-10")}
     >
       {row.cells[index]}
     </span>

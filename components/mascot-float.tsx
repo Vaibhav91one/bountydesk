@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useReducedMotion } from "motion/react";
 
 /**
  * One mascot on a card: bobbing, and out of step with its neighbours.
@@ -31,6 +32,10 @@ export function MascotFloat({
   tilt: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  // Subscribed rather than read once, so turning the preference on stills a board that is
+  // already open and turning it off starts it again.
+  const reduced = useReducedMotion();
+  const staggered = useRef(false);
 
   useEffect(() => {
     const node = ref.current;
@@ -40,17 +45,24 @@ export function MascotFloat({
     // The artwork carries its own infinite animation inside the SVG, where no class can reach
     // it: motion-reduce stops the bob on the wrapper and leaves the drawing running. Pausing is
     // the only thing that answers the preference for the part of this that is not ours.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (reduced) {
       for (const animation of animations) animation.pause();
       return;
     }
+
+    for (const animation of animations) animation.play();
+
+    // Once. The shift is relative to the animation's own clock, so applying it a second time
+    // would move the copy further out of step every time the preference is toggled.
+    if (staggered.current) return;
+    staggered.current = true;
 
     for (const animation of animations) {
       if (animation.startTime !== null) {
         animation.startTime = Number(animation.startTime) + delay * 1000;
       }
     }
-  }, [delay]);
+  }, [delay, reduced]);
 
   return (
     <span
