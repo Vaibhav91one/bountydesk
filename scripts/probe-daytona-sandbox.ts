@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import {
   NETWORK_PROBES,
+  REQUIRED_TOOLS,
   classifyNetworkProbe,
   networkProbeCommand,
   parseNetworkProbeOutput,
@@ -9,6 +10,8 @@ import {
   readProbeConfig,
   toolCheckCommand,
 } from "@/lib/sandbox/capability-probe";
+import { buildMarkerCheck } from "@/lib/sandbox/build-marker";
+import { EXPECTED_BUILD_MARKER } from "@/lib/targets/configure";
 import {
   PURPOSE,
   PURPOSE_LABEL,
@@ -81,12 +84,18 @@ async function verifyTools(sandbox: Sandbox): Promise<void> {
   if (result.exitCode !== 0) throw new Error(`tool check command failed: ${result.result.slice(0, 200)}`);
 
   const tools = parseToolAvailability(result.result);
-  const missing = tools.filter((tool) => !tool.ok).map((tool) => tool.tool);
+  // Check against the full REQUIRED_TOOLS list, not just lines the output happened to include:
+  // truncated toolbox output can drop whole TOOL lines, and treating "no missing line" as a pass
+  // would report success for a tool the check never actually confirmed.
+  const present = new Set(tools.filter((tool) => tool.ok).map((tool) => tool.tool));
+  const missing = REQUIRED_TOOLS.filter((tool) => !present.has(tool));
   record("tools", missing.length ? "FAIL" : "PASS", {
     missing,
-    found: tools.filter((tool) => tool.ok).map((tool) => tool.tool),
+    found: [...present],
   });
-  if (missing.length) throw new Error(`sandbox is missing required tools: ${missing.join(", ")}`);
+  if (missing.length) {
+    throw new Error(`sandbox is missing or did not confirm required tools: ${missing.join(", ")}`);
+  }
 }
 
 async function verifyBackgroundAndLocalhost(sandbox: Sandbox): Promise<void> {
@@ -258,6 +267,19 @@ async function main(): Promise<void> {
 
     sandbox = await waitForState(sandbox.id, ["started", "running"]);
     inspectSandbox(sandbox);
+    // When the tag-pinned override is used, createSandbox accepts a mutable tag instead of
+    // matching the expected digest, so the booted image is only as trustworthy as that tag. Read
+    // the defender-baked build marker from inside the sandbox to confirm which build actually
+    // came up before reporting any capability for it. Without the override the digest match
+    // already proved identity, but the marker check is cheap and honest either way.
+    const markerOk = await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER);
+    record("build_marker", markerOk ? "PASS" : "FAIL", {
+      expected: EXPECTED_BUILD_MARKER,
+      viaTagOverride: Boolean(config.allowedSnapshotImageRef),
+    });
+    if (!markerOk) {
+      throw new Error("booted image build marker did not match the expected build");
+    }
     await verifyTools(sandbox);
     await verifyBackgroundAndLocalhost(sandbox);
     await verifyNoEgressAndMetadata(sandbox);
@@ -273,10 +295,18 @@ async function main(): Promise<void> {
   } finally {
     if (sandbox) {
       await cleanupLocalServer(sandbox);
-      await deleteSandbox(sandbox.id);
-      record("sandbox_delete_called", "PASS", { id: sandbox.id });
-      await assertSandboxGone(sandbox.id);
-      record("sandbox_absent", "PASS", { id: sandbox.id });
+      // The direct delete is the primary teardown, but a persistent provider error here must not
+      // skip the label-based sweep below, which is the reconciliation backstop that stops the
+      // probe sandbox from leaking until its TTL. So the delete and its absence check are
+      // best-effort, and the sweep always runs.
+      try {
+        await deleteSandbox(sandbox.id);
+        record("sandbox_delete_called", "PASS", { id: sandbox.id });
+        await assertSandboxGone(sandbox.id);
+        record("sandbox_absent", "PASS", { id: sandbox.id });
+      } catch (error) {
+        record("sandbox_delete_called", "FAIL", error instanceof Error ? error.message : String(error));
+      }
       try {
         record("labelled_sweep", "INFO", { swept: await sweep(1, sandbox.id) });
       } catch (error) {

@@ -56,8 +56,26 @@ const IMAGE_REF_RE = /^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$/;
 const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
 const IMAGE_NAME_RE = /^[A-Za-z0-9._/-]+$/;
 
+const KNOWN_FLAGS = new Set([
+  "snapshot",
+  "expected-image-ref",
+  "image-name",
+  "expected-image-digest",
+  "allowed-snapshot-image-ref",
+  "ttl-minutes",
+]);
+
 export function readProbeConfig(argv: string[], env: Record<string, string | undefined>): ProbeConfig {
   const options = parseArgs(argv);
+
+  // Reject an unknown flag rather than silently ignoring it: a typo like --ttl-minute would
+  // otherwise fall through to the default and the probe would run against the wrong config
+  // without saying so.
+  for (const key of options.keys()) {
+    if (!KNOWN_FLAGS.has(key)) {
+      throw new Error(`unknown flag --${key}\n${usage()}`);
+    }
+  }
 
   requireRealValue("DAYTONA_API_KEY", env.DAYTONA_API_KEY, { secret: true });
 
