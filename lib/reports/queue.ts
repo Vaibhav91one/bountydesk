@@ -1,9 +1,11 @@
 import {
+  and,
   connectedRepository,
   db,
   desc,
   eq,
   inArray,
+  isNull,
   notInArray,
   report,
   sql,
@@ -111,7 +113,8 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     })
     .from(report)
     .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
-    .where(inArray(report.state, states))
+    // Soft-hidden reports never reach a list surface. The board is a list.
+    .where(and(inArray(report.state, states), isNull(report.hiddenAt)))
     .orderBy(desc(report.updatedAt))
     .limit(COLUMN_LIMIT);
 
@@ -152,6 +155,8 @@ export async function listQueue(): Promise<QueueColumn[]> {
       const counts = await tx
         .select({ state: report.state, total: sql<number>`count(*)::int` })
         .from(report)
+        // Counts must match the cards: a hidden report is off the board, total included.
+        .where(isNull(report.hiddenAt))
         .groupBy(report.state);
 
       const byState = new Map(counts.map((row) => [row.state, row.total]));
@@ -190,7 +195,7 @@ export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
     .select({ id: report.id, title: report.title, state: report.state })
     .from(report)
     // Spread because TERMINAL_STATES is a readonly tuple and the operator takes a mutable array.
-    .where(notInArray(report.state, [...TERMINAL_STATES]))
+    .where(and(notInArray(report.state, [...TERMINAL_STATES]), isNull(report.hiddenAt)))
     .orderBy(sql`(${report.state} = 'AWAITING_APPROVAL') desc`, desc(report.updatedAt))
     .limit(limit);
 
@@ -249,6 +254,9 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     .from(report)
     .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
     .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    // Terminal reports still show here, hidden ones never do: this list is for what exists,
+    // not what a run left behind for testing.
+    .where(isNull(report.hiddenAt))
     .orderBy(desc(report.updatedAt))
     .limit(limit);
 

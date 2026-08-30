@@ -114,8 +114,9 @@ test("reports bucket into the column their state belongs to", async () => {
   const columns = await queue.listQueue();
 
   assert.equal(column(columns, "triaging").total, 1);
-  assert.equal(column(columns, "reproducing").total, 1);
-  assert.equal(column(columns, "analysis-only").total, 1);
+  // REPRODUCING has no column of its own: it is a dead state that folds in with ANALYSIS_ONLY,
+  // so the seeded REPRODUCING and ANALYSIS_ONLY both land here.
+  assert.equal(column(columns, "analysis-only").total, 2);
   // DELIVERING and DELIVERED share a column: one is the other in flight.
   assert.equal(column(columns, "delivered").total, 2);
   assert.equal(column(columns, "closed").total, 4);
@@ -186,7 +187,8 @@ test("eventCount counts session events, and cards sort newest first", async () =
   const newer = await seedReport("REPRODUCING");
 
   const columns = await queue.listQueue();
-  const cards = column(columns, "reproducing").cards;
+  // REPRODUCING folds into the analysis-only column.
+  const cards = column(columns, "analysis-only").cards;
   const positions = [cards.findIndex((c) => c.id === newer), cards.findIndex((c) => c.id === older)];
 
   assert.ok(positions[0] < positions[1], "newer report should sort ahead of older");
@@ -454,4 +456,36 @@ test("the home counts split open from closed and only count answerable approvals
   // Three of the four are non-terminal; DELIVERED is not.
   assert.equal(after.open - before.open, 3);
   assert.equal(after.awaiting - before.awaiting, 1, "only the one with a pending call counts");
+});
+
+test("a soft-hidden report drops off every list but still loads by its id", async () => {
+  const { readCase } = await import("./case");
+
+  const visible = await seedReport("TRIAGING");
+  const hidden = await seedReport("TRIAGING");
+
+  // Snapshot after both are seeded and both visible, so the drop below is unambiguous even
+  // with rows other tests left in this column.
+  const triagingBefore = column(await queue.listQueue(), "triaging").total;
+
+  await dbm.db
+    .update(dbm.report)
+    .set({ hiddenAt: new Date() })
+    .where(dbm.eq(dbm.report.id, hidden));
+
+  const triaging = column(await queue.listQueue(), "triaging");
+  const boardIds = triaging.cards.map((c) => c.id);
+
+  // The count drops with the card. A hidden report is off the total, not merely off the page.
+  assert.equal(triaging.total, triagingBefore - 1);
+  assert.ok(boardIds.includes(visible));
+  assert.equal(boardIds.includes(hidden), false, "a hidden report must not appear on the board");
+
+  // The reports index hides it too, terminal-inclusive as it is.
+  const indexIds = (await queue.listAllReports()).map((r) => r.id);
+  assert.ok(indexIds.includes(visible));
+  assert.equal(indexIds.includes(hidden), false, "a hidden report must not appear in the index");
+
+  // But the case file still opens it by direct id, so an existing link does not 404.
+  assert.ok(await readCase(hidden), "a hidden report must still load by id");
 });
