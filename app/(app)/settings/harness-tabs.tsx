@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
-import { Empty, Panel, Row } from "../panel";
+import { Empty, Panel, Row } from "./panel";
 import { applyManagedResources, type ActionResult } from "./actions";
 import { ModelProviderForm } from "./model-provider-form";
 import { SandboxForm } from "./sandbox-form";
