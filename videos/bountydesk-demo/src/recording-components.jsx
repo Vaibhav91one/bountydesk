@@ -1,6 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
+import { Folder } from "@phosphor-icons/react/ssr";
+import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Badge } from "../../../components/ui/badge";
+import { Button } from "../../../components/ui/button";
 
 function TextAnimate({ children, animation = "slideUp", by = "word", className = "" }) {
   const text = String(children);
@@ -23,10 +27,6 @@ function TextAnimate({ children, animation = "slideUp", by = "word", className =
 
 function Chrome({ children, tone = "dark", bare = false }) {
   return <div className={`bd-chrome ${tone}${bare ? " bare" : ""}`}>{children}</div>;
-}
-
-function HeroButton({ children, primary = false }) {
-  return <button className={`landing-button ${primary ? "primary" : ""}`}>{children}</button>;
 }
 
 function ApprovalPanel() {
@@ -59,8 +59,8 @@ function ApprovalPanel() {
         <strong>30e7597fc122c1c7ad3a6bc97e70f984</strong>
       </div>
       <div className="landing-actions">
-        <button>Deny</button>
-        <button className="primary">Approve</button>
+        <Button className="bd-ui-button bd-ui-button-outline" variant="outline">Deny</Button>
+        <Button className="bd-ui-button bd-ui-button-default" variant="default">Approve</Button>
       </div>
     </div>
   );
@@ -70,32 +70,16 @@ function LandingScroll() {
   return (
     <Chrome bare>
       <div className="landing-viewport">
-      <div className="landing-scroll-content" data-layout-allow-overflow="">
+        <div className="landing-backdrop" data-layout-allow-overflow="" />
+        <div className="landing-scroll-content" data-layout-allow-overflow="">
           <section className="landing-hero">
-            <header className="landing-site-header">
-              <span className="landing-logo-lockup">
-                <img src="assets/logo-small.svg" alt="" />
-                <span>BountyDesk</span>
-              </span>
-              <nav>
-                <span>How it works</span>
-                <span>FAQ</span>
-              </nav>
-            </header>
-
             <div className="landing-hero-copy">
               <h1>
                 <span>Read every report.</span>
                 <span>Sign every verdict.</span>
               </h1>
               <p>Every report authenticated and scope-checked. No verdict ships until you sign it.</p>
-              <div className="landing-hero-actions">
-                <HeroButton primary>Get started</HeroButton>
-                <HeroButton>Star on GitHub</HeroButton>
-              </div>
             </div>
-
-            <div className="landing-backdrop" data-layout-allow-overflow="" />
           </section>
 
           <section className="landing-panel-section">
@@ -105,6 +89,73 @@ function LandingScroll() {
           </section>
         </div>
       </div>
+    </Chrome>
+  );
+}
+
+const intakeChannels = [
+  {
+    id: "github",
+    name: "GitHub",
+    icon: GitHubLight,
+    built: true,
+    tagline: "Report intake from issues, and the approved verdict posted back as a comment.",
+  },
+  {
+    id: "email",
+    name: "Email",
+    icon: Gmail,
+    built: false,
+    tagline: "Report intake by email, with no GitHub connection needed.",
+  },
+  {
+    id: "upload",
+    name: "File upload",
+    icon: Folder,
+    built: false,
+    tagline: "Report intake by direct upload, for a reporter with no account anywhere.",
+  },
+  {
+    id: "drive",
+    name: "Drive",
+    icon: OneDrive,
+    built: false,
+    tagline: "Pulling reports from a shared drive folder.",
+  },
+];
+
+function IntakeChannels() {
+  return (
+    <Chrome bare>
+      <section className="intake-section">
+        <h2>Reports arrive from where they arrive</h2>
+        <ul className="intake-grid">
+          {intakeChannels.map((channel) => {
+            const Icon = channel.icon;
+            return (
+              <li className="intake-card" key={channel.id}>
+                <span className="intake-card-top">
+                  <span className="intake-icon">
+                    <Icon className="intake-icon-svg" />
+                  </span>
+                  {channel.built ? <Badge className="intake-badge" variant="success">Live</Badge> : null}
+                </span>
+                <span className="intake-name">{channel.name}</span>
+                {channel.built ? (
+                  <Button className="intake-button" variant="outline" size="sm">
+                    <GitHubLight className="intake-button-icon" /> Connect
+                  </Button>
+                ) : (
+                  <Button className="intake-button" variant="outline" size="sm" disabled>
+                    Coming soon
+                  </Button>
+                )}
+                <span className="intake-tagline">{channel.tagline}</span>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
     </Chrome>
   );
 }
@@ -145,6 +196,8 @@ function Shot({ id }) {
       );
     case "landing":
       return <LandingScroll />;
+    case "channels":
+      return <IntakeChannels />;
     default:
       return null;
   }

@@ -951,10 +951,25 @@
         background: var(--bg-page);
       }
 
+      .landing-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        opacity: 0.74;
+        background-position: center bottom;
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-image:
+          linear-gradient(to bottom, #07080d 0%, rgba(7, 8, 13, 0.94) 13%, rgba(7, 8, 13, 0.62) 38%, rgba(7, 8, 13, 0.76) 70%, #07080d 100%),
+          linear-gradient(to right, rgba(7, 8, 13, 0.35), rgba(7, 8, 13, 0.04) 48%, rgba(7, 8, 13, 0.32)),
+          url("assets/hero.webp");
+      }
+
       .landing-scroll-content {
         position: absolute;
         left: 0;
         top: 0;
+        z-index: 1;
         width: 1920px;
         height: 1540px;
         will-change: transform;
@@ -962,45 +977,19 @@
 
       .landing-hero {
         position: relative;
-        min-height: 790px;
-        padding: 46px 320px 0;
+        min-height: 980px;
+        padding: 0 320px;
+        display: grid;
+        place-items: center;
         overflow: hidden;
         text-align: center;
-        background: #07080d;
-      }
-
-      .landing-site-header {
-        height: 38px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 22px;
-        color: #c9c6d2;
-        font-family: var(--font-sans);
-        font-size: 13px;
-      }
-
-      .landing-logo-lockup {
-        display: inline-flex;
-        align-items: center;
-        gap: 7px;
-      }
-
-      .landing-logo-lockup img {
-        width: 18px;
-        height: 18px;
-      }
-
-      .landing-site-header nav {
-        display: inline-flex;
-        gap: 18px;
-        color: #8f8b98;
+        background: transparent;
       }
 
       .landing-hero-copy {
         position: relative;
         z-index: 3;
-        margin: 52px auto 0;
+        margin: 0 auto;
         display: grid;
         justify-items: center;
       }
@@ -1024,47 +1013,9 @@
         line-height: 1.4;
       }
 
-      .landing-hero-actions {
-        margin-top: 42px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 18px;
-      }
-
-      .landing-button,
-      .landing-actions button {
-        height: 64px;
-        min-width: 206px;
-        padding: 0 32px;
-        border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.13);
-        color: #f7f4ec;
-        background: rgba(255, 255, 255, 0.02);
-        font: 400 21px var(--font-sans);
-      }
-
-      .landing-button.primary,
-      .landing-actions button.primary {
-        border-color: rgba(132, 120, 255, 0.8);
-        background: #4937bf;
-      }
-
-      .landing-backdrop {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: -108px;
-        height: 440px;
-        opacity: 0.62;
-        background:
-          linear-gradient(to bottom, #07080d 0%, rgba(7, 8, 13, 0.92) 21%, rgba(7, 8, 13, 0.12) 56%, rgba(7, 8, 13, 0.2) 100%),
-          url("assets/hero.webp") center bottom / cover no-repeat;
-      }
-
       .landing-panel-section {
         position: relative;
-        margin-top: -104px;
+        margin-top: -92px;
         min-height: 750px;
         padding: 0 344px 160px;
       }
@@ -1178,6 +1129,143 @@
         display: flex;
         justify-content: flex-end;
         gap: 14px;
+      }
+
+      .bd-ui-button {
+        height: 44px;
+        min-width: 92px;
+        display: inline-flex;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 0 16px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background-clip: padding-box;
+        font: 500 14px var(--font-sans);
+        color: #f7f4ec;
+        white-space: nowrap;
+        outline: none;
+      }
+
+      .bd-ui-button-default {
+        border-color: rgba(132, 120, 255, 0.8);
+        background: #4937bf;
+      }
+
+      .bd-ui-button-outline {
+        border-color: rgba(255, 255, 255, 0.12);
+        background: transparent;
+      }
+
+      .intake-section {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        gap: 42px;
+        padding: 148px 144px 0;
+        background: #07080d;
+        color: #f7f4ec;
+      }
+
+      .intake-section h2 {
+        max-width: none;
+        color: #f7f4ec;
+        font-size: 36px;
+        line-height: 1.12;
+      }
+
+      .intake-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+        list-style: none;
+      }
+
+      .intake-card {
+        min-height: 316px;
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+        padding: 28px;
+        border-radius: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: #111111;
+      }
+
+      .intake-card-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .intake-icon {
+        width: 52px;
+        height: 52px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 13px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: #08090d;
+      }
+
+      .intake-icon-svg {
+        width: 26px;
+        height: 26px;
+      }
+
+      .intake-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 34px;
+        padding: 0 16px;
+        border-radius: 9px;
+        background: rgba(52, 211, 153, 0.15);
+        color: #7ee0a5;
+        font: 500 15px var(--font-sans);
+      }
+
+      .intake-name {
+        color: #f7f4ec;
+        font-size: 20px;
+        line-height: 1.25;
+      }
+
+      .intake-button {
+        width: 100%;
+        height: 52px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 16px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        background: transparent;
+        color: #f7f4ec;
+        font: 500 18px var(--font-sans);
+      }
+
+      .intake-button:disabled {
+        color: #8f8b98;
+        opacity: 1;
+      }
+
+      .intake-button-icon {
+        width: 20px;
+        height: 20px;
+      }
+
+      .intake-tagline {
+        color: #9f9aa8;
+        font-size: 18px;
+        line-height: 1.45;
       }
 
       .stack-panel,
@@ -1553,10 +1641,7 @@
         background: var(--accent);
       }
 
-      .landing-button,
-      .landing-actions button,
-      .landing-button.primary,
-      .landing-actions button.primary {
+      .landing-actions button {
         color: #f7f4ec;
       }
 
@@ -1658,21 +1743,23 @@
     </style>
   </head>
   <body>
-    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="20" data-width="1920" data-height="1080" data-fps="60">
-      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="20" data-track-index="4"></section>
+    <div data-hf-id="hf-bd-root" id="root" data-composition-id="bountydesk-tour" data-start="0" data-duration="26" data-width="1920" data-height="1080" data-fps="60">
+      <section data-hf-id="hf-bd-bg" id="tour-bg" class="clip scene recording-bg" data-start="0" data-duration="26" data-track-index="4"></section>
 
       <div data-hf-id="hf-bd-card" id="tour-card" class="tour-card">
         <div data-hf-id="hf-bd-s01" id="shot01" class="bd-shot" data-bd-shot="home"></div>
         <div data-hf-id="hf-bd-s02" id="shot02" class="bd-shot" data-bd-shot="intake"></div>
         <div data-hf-id="hf-bd-s03" id="shot03" class="bd-shot" data-bd-shot="landing"></div>
+        <div data-hf-id="hf-bd-s04" id="shot04" class="bd-shot" data-bd-shot="channels"></div>
       </div>
 
-      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="20" data-track-index="10" data-volume="1"></audio>
+      <audio data-hf-id="hf-eqes" id="bgm" src="assets/audio/bountydesk-lofi.mp3" data-start="0" data-duration="26" data-track-index="10" data-volume="1"></audio>
       <audio data-hf-id="hf-4bv1" id="whoosh01" src="assets/audio/whoosh.wav" data-start="4.0" data-duration="0.7" data-track-index="11" data-volume="0.45"></audio>
       <audio data-hf-id="hf-onif" id="whoosh02" src="assets/audio/whoosh.wav" data-start="8.0" data-duration="0.7" data-track-index="12" data-volume="0.45"></audio>
       <audio data-hf-id="hf-gxw2" id="ping01" src="assets/audio/ping.wav" data-start="15.2" data-duration="0.38" data-track-index="16" data-volume="0.65"></audio>
+      <audio data-hf-id="hf-exit1" id="whoosh03" src="assets/audio/whoosh.wav" data-start="17.1" data-duration="0.7" data-track-index="13" data-volume="0.38"></audio>
 
-      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="20" data-track-index="6"></div>
+      <div data-hf-id="hf-bd-progress" id="progress" class="clip" data-start="0" data-duration="26" data-track-index="6"></div>
     </div>
 
     <script>
@@ -1680,9 +1767,9 @@
       var G = "power3.out";
       window.__timelines = window.__timelines || {};
       var tl = gsap.timeline({ paused: true });
-      var totalDuration = 20;
-      var starts = [0, 4, 8];
-      var durations = [4, 4, 12];
+      var totalDuration = 26;
+      var starts = [0, 4, 8, 18];
+      var durations = [4, 4, 10, 8];
 
       starts.forEach(function(start, index) {
         var shot = "#shot" + String(index + 1).padStart(2, "0");
@@ -1700,15 +1787,21 @@
       tl.to("#shot02 .brand-intro-logo", { x: -18, scale: 0.96, opacity: 0, duration: 0.34, ease: "power2.in" }, 7.35);
       tl.to("#shot02 .text-animate-character", { x: -24, opacity: 0, duration: 0.3, stagger: 0.012, ease: "power2.in" }, 7.42);
 
-      tl.fromTo("#shot03 .landing-site-header", { y: -18, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: G }, 8.25);
       tl.fromTo("#shot03 .landing-hero-copy > *", { y: 34, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.13, ease: G }, 8.45);
-      tl.fromTo("#shot03 .landing-approval-panel", { y: 70, scale: 0.96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.7, ease: G }, 10.45);
-      tl.to("#shot03 .landing-scroll-content", { y: -380, duration: 5.1, ease: "power2.inOut" }, 13.1);
+      tl.to("#shot03 .landing-backdrop", { backgroundPosition: "center 61%", duration: 3.0, ease: "power2.inOut" }, 11.4);
+      tl.fromTo("#shot03 .landing-approval-panel", { y: 96, scale: 0.96, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 0.7, ease: G }, 11.65);
+      tl.to("#shot03 .landing-scroll-content", { y: -660, duration: 2.7, ease: "power2.inOut" }, 12.0);
+      tl.to("#shot03 .landing-scroll-content", { y: -1040, opacity: 0, duration: 0.75, ease: "power2.in" }, 17.05);
+      tl.to("#shot03 .landing-backdrop", { y: -260, opacity: 0, duration: 0.85, ease: "power2.in" }, 17.05);
+
+      tl.fromTo("#shot04 .intake-section h2", { y: 36, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, ease: G }, 18.35);
+      tl.fromTo("#shot04 .intake-card", { y: 44, opacity: 0 }, { y: 0, opacity: 1, duration: 0.58, stagger: 0.09, ease: G }, 18.65);
+      tl.fromTo("#shot04 .intake-icon", { scale: 0.86, opacity: 0 }, { scale: 1, opacity: 1, duration: 0.38, stagger: 0.09, ease: G }, 18.78);
 
       tl.fromTo("#tour-bg", { scale: 1 }, { scale: 1.035, duration: totalDuration, ease: "none" }, 0);
       tl.fromTo("#progress", { scaleX: 0 }, { scaleX: 1, duration: totalDuration, ease: "none" }, 0);
       tl.set("#bgm", { volume: 0.45 }, 0);
-      tl.to("#bgm", { volume: 0.2, duration: 2.5, ease: "power1.out" }, 17.2);
+      tl.to("#bgm", { volume: 0.2, duration: 2.5, ease: "power1.out" }, 23.2);
 
       window.__timelines["bountydesk-tour"] = tl;
     </script>

@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:components": "esbuild src/recording-components.jsx --bundle --format=iife --minify --outfile=assets/vendor/recording-components.min.js",
+    "build:components": "esbuild src/recording-components.jsx --bundle --format=iife --minify --alias:@=../.. --outfile=assets/vendor/recording-components.min.js",
     "dev": "npm run build:components && npx --yes hyperframes@0.8.20 preview",
     "check": "npm run build:components && npx --yes hyperframes@0.8.20 check",
     "render": "npm run build:components && npx --yes hyperframes@0.8.20 render --quality high --output renders/bountydesk-demo-hyperframes.mp4",
