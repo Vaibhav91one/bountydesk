@@ -215,7 +215,8 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
   const res = await POST(
     signedWebhook("delivery-flow-1", {
       action: "opened",
-      issue: { number: issueNumber, title: "IDOR on order history", body: "details", user: { login: "researcher" } },
+      issue: { number: issueNumber, title: "IDOR on order history", body: "/reproduce\n\ndetails", user: { login: "researcher" } },
+      sender: { id: REVIEWER_ID, login: "reviewer" },
       repository: { id: repoId, full_name: fullName },
       installation: { id: installationId },
     }),
@@ -388,7 +389,8 @@ test("a denied verdict never reaches publish_verdict and the report stays DENIED
   const res = await POST(
     signedWebhook("delivery-flow-2", {
       action: "opened",
-      issue: { number: issueNumber, title: "XSS in profile bio", body: "details", user: { login: "researcher" } },
+      issue: { number: issueNumber, title: "XSS in profile bio", body: "/reproduce\n\ndetails", user: { login: "researcher" } },
+      sender: { id: REVIEWER_ID, login: "reviewer" },
       repository: { id: repoId, full_name: fullName },
       installation: { id: installationId },
     }),

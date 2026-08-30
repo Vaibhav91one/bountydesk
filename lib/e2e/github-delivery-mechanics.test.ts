@@ -15,6 +15,11 @@ import test, { after, before } from "node:test";
 const SECRET = "e2e-test-secret";
 process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
+// The intake gate only enqueues on a /reproduce command from an actor on this allowlist, so
+// the webhook this test posts has to carry both.
+const REVIEWER_ID = 5150;
+process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
+
 let schema: import("@/lib/db/testing").DisposableSchema;
 
 // Imported dynamically, after createSchema() sets DATABASE_SCHEMA, so every pool this test
@@ -92,7 +97,8 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   const res = await POST(
     signedWebhook("delivery-1", {
       action: "opened",
-      issue: { number: issueNumber, title: "SQLi in search", body: "details", user: { login: "researcher" } },
+      issue: { number: issueNumber, title: "SQLi in search", body: "/reproduce\n\ndetails", user: { login: "researcher" } },
+      sender: { id: REVIEWER_ID, login: "reviewer" },
       repository: { id: repoId, full_name: fullName },
       installation: { id: installationId },
     }),

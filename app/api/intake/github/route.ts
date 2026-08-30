@@ -1,5 +1,6 @@
 import { db, lifecycleDelivery } from "@/lib/db";
 import { githubWebhookSecret } from "@/lib/env";
+import { parseReproduceCommand, reproductionRequested } from "@/lib/github/commands";
 import { LIFECYCLE_EVENTS, activeRepository, applyLifecycle } from "@/lib/github/lifecycle";
 import { readBoundedBody, verifySignature } from "@/lib/github/webhook";
 import { enqueue } from "@/lib/jobs/queue";
@@ -11,9 +12,16 @@ export const runtime = "nodejs";
 type IssuePayload = {
   action?: string;
   issue?: { number?: number; title?: string; body?: string | null; user?: { login?: string } };
+  sender?: { id?: number; login?: string };
   repository?: { id?: number; full_name?: string };
   installation?: { id?: number };
 };
+
+type GateResult =
+  | { kind: "not_connected" }
+  | { kind: "no_command" }
+  | { kind: "unauthorized" }
+  | { kind: "enqueued"; disposition: string };
 
 /**
  * The GitHub App webhook endpoint.
@@ -105,7 +113,7 @@ async function handleIssue(deliveryId: string, payload: IssuePayload): Promise<R
   // The access check and the enqueue are one transaction, and the check locks the rows it
   // read. A suspension or a repository removal arriving concurrently either commits first,
   // and the check fails, or waits for this to commit. It cannot land in between.
-  const disposition = await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx): Promise<GateResult> => {
     const repository = await activeRepository(
       payload.installation?.id,
       payload.repository?.id,
@@ -114,15 +122,35 @@ async function handleIssue(deliveryId: string, payload: IssuePayload): Promise<R
 
     // Suspended, uninstalled, or a repository the installation no longer covers. A signed
     // delivery for one of those is still a delivery we refuse to act on.
-    if (!repository) return null;
+    if (!repository) return { kind: "not_connected" };
+
+    // The intent gate. The capability boundary already decided which target this repository
+    // may reach; this decides whether the reporter actually asked to spend it. An opened
+    // issue with no `/reproduce` command is a report to triage, not a run to start, and a
+    // `/reproduce` from someone off the reviewer allowlist is ignored because these repos can
+    // be public and a stranger must not be able to burn the sandbox budget.
+    if (!parseReproduceCommand(payload.issue?.body).matched) {
+      return { kind: "no_command" };
+    }
+    if (!reproductionRequested(payload.issue?.body, payload.sender?.id)) {
+      return { kind: "unauthorized" };
+    }
 
     const { disposition } = await enqueue({ channel: "github", deliveryId, payload }, tx);
-    return disposition;
+    return { kind: "enqueued", disposition };
   });
 
-  if (!disposition) {
+  if (result.kind === "not_connected") {
     return new Response("repository is not connected", { status: 202 });
   }
 
-  return new Response(disposition, { status: 202 });
+  if (result.kind === "no_command") {
+    return new Response("no /reproduce command, not triggering a run", { status: 202 });
+  }
+
+  if (result.kind === "unauthorized") {
+    return new Response("reproduce command ignored: sender not authorized", { status: 202 });
+  }
+
+  return new Response(result.disposition, { status: 202 });
 }
