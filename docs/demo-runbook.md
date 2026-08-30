@@ -28,12 +28,11 @@ flow, not that run's canary pipeline.
 
 1. **Intake** — a GitHub issue on the dedicated demo repo: `SQLi in /api/search`. The **installed BountyDesk GitHub App** delivers a **signed** webhook (`X-Hub-Signature-256`, platform-owned App secret); the receiver verifies it and resolves `installation_id → repo → TargetProfile` server-side → harness starts a TrueForge session.
 2. **Triage** — scope_check passes, dedupe_check clean, PoC extracted. (Text-only, seconds.)
-3. Sandbox: boot the prebuilt pinned image for this run. The build that produced it ran earlier, so nothing is cloned or installed live on stage.
-4. **Investigate (the money moment):** the TrueForge agent works the report against this target using scope-guard, its skills, and subagents. It decides what to try; nothing here is scripted for it in advance. Say out loud: **"the verdict is the agent's own conclusion from its own sandboxed investigation, not something we handed it. What makes it trustworthy is that nothing reaches the reporter until a person reads that exact text and approves it, and the target's authorization is re-checked before a reproduced claim counts."**
-5. **Draft:** from what it found, the agent calls `publish_verdict` with its own outcome, summary, and findings, and the turn ends on that pending call.
-6. **Packet:** the case file shows the agent's drafted outcome, summary, and findings, plus the evidence it gathered, with the researcher's raw PoC quarantined alongside in a labeled "unverified" box.
-7. **Human gate:** `publish_verdict`'s pending call is what the reviewer sees (session persisted). Reviewer reads the agent's drafted findings, clicks **Allow** → a NEW approval turn carries `user.tool_approval` → one DB commit (verdict + outbox) → the delivery worker mints a **short-lived GitHub App installation token** server-side, posts the comment idempotently, and discards the token. Control is *not* pre-filled.
-8. **Kill-the-process flourish** (optional): kill the harness at step 7, reopen browser, session still waiting. "State's in the DB, not memory."
+3. Investigate (the money moment): the driver's turn message tells the agent which target is authorized, with its pinned image, digest, and snapshot, and starts its turn. The agent investigates using its own TrueForge sandbox, scope-guard, skills, and subagents; it decides what to try, and none of it is scripted for it in advance. Say out loud: "the verdict is the agent's own conclusion, not something we handed it. Nothing reaches the reporter until a person reads that exact text and approves it, and a reproduced claim can't become a verdict in the first place unless the target's authorization already checked out, before a human ever saw the draft."
+4. Draft: from what it found, the agent calls `publish_verdict` with its own outcome, summary, and findings, and the turn ends on that pending call.
+5. Packet: the case file shows the agent's drafted outcome, summary, and findings, plus the evidence it gathered, with the researcher's raw PoC quarantined alongside in a labeled "unverified" box.
+6. Human gate: `publish_verdict`'s pending call is what the reviewer sees (session persisted). Reviewer reads the agent's drafted findings, clicks **Allow** → a NEW approval turn carries `user.tool_approval` → one DB commit (verdict + outbox) → the delivery worker mints a **short-lived GitHub App installation token** server-side, posts the comment idempotently, and discards the token. Control is *not* pre-filled.
+7. Kill-the-process flourish (optional): kill the harness at step 6, reopen browser, session still waiting. "State's in the DB, not memory."
 
 ---
 
@@ -63,10 +62,10 @@ flow, not that run's canary pipeline.
 
 ## If a judge asks the sharp questions
 
-- **"Isn't the verdict forgeable?"** → "The agent draws its own conclusion from its own sandboxed investigation, but nothing reaches the reporter until a person reads the exact drafted text and approves it. The server also re-checks target authorization at that point: a reproduced claim for a target we haven't authorized, or whose grant is revoked, gets refused no matter what the agent asserts."
-- **"Is that sandbox actually safe for malicious code?"** → "For the demo it's Daytona cloud, a shared-kernel container, fine for benign inputs. Production runs a Kata microVM with host-side egress default-deny and metadata blocked. It's on the threat-model page as a known upgrade."
-- **"Can this dedupe / auto-reject real bugs?"** → "Two different things. A repeated webhook delivery is a safe automatic no-op. A *semantically* similar report is never auto-closed — we surface top-k candidates and a human decides. Same as HackerOne and Bugcrowd."
-- **"What about prompt injection in the report?"** → "Report is treated as data, so nothing in it can pick a target or skip authorization. The agent's draft still needs a human to read and approve the exact text before anything ships. The board's threat-model page walks the attack chains."
+- "Isn't the verdict forgeable?" → "The agent draws its own conclusion from its own sandboxed investigation, but a reproduced or not-reproduced claim can't even become a verdict unless the target is authorized and its grant is still active. That check runs the moment the draft is persisted, before a human ever sees it, and nothing reaches the reporter until a person separately reads the exact text and approves it."
+- "Is that sandbox actually safe for malicious code?" → "For the demo it's Daytona cloud, a shared-kernel container, fine for benign inputs. Production runs a Kata microVM with host-side egress default-deny and metadata blocked. It's on the threat-model page as a known upgrade."
+- "Can this dedupe / auto-reject real bugs?" → "Two different things. A repeated webhook delivery is a safe automatic no-op. A *semantically* similar report is never auto-closed: we surface top-k candidates and a human decides. Same as HackerOne and Bugcrowd."
+- "What about prompt injection in the report?" → "Report is treated as data, so nothing in it can pick a target or skip authorization. The agent's draft still needs a human to read and approve the exact text before anything ships. The board's threat-model page walks the attack chains."
 
 ---
 
@@ -76,4 +75,4 @@ flow, not that run's canary pipeline.
 - Don't type anything live you can paste.
 - Don't run the dynamic clone-and-build tier live unless the provisioning spike and a full rehearsal both went green today, on this network. This is a demo-risk decision, not a scope limit: the tier is designed and documented, and on stage it is a walkthrough of the two-sandbox diagram. The build is the one step that needs the network the rest of the demo brags about not having, and that is not a sentence to improvise.
 - Don't demo email or file-upload intake as live. They are designed channels; show the UI and say so.
-- Don't clone or install anything at runtime on stage. The image is prebuilt and the sandbox is offline; that's the point.
+- Don't clone or install anything at runtime on stage. The target image is built and verified ahead of time; that's the point.
