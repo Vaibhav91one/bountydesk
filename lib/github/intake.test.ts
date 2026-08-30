@@ -14,6 +14,12 @@ import test, { after, before } from "node:test";
 const SECRET = "intake-test-secret";
 process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
+// The reproduce command is honored only from an actor on this allowlist. REVIEWER is on it,
+// STRANGER is not, so the gate can be exercised from both sides.
+const REVIEWER = 4242;
+const STRANGER = 9999;
+process.env.REVIEWER_GITHUB_IDS = String(REVIEWER);
+
 let schema: import("@/lib/db/testing").DisposableSchema;
 
 // Imported dynamically so DATABASE_SCHEMA is set before the pool is constructed.
@@ -119,10 +125,14 @@ function repositoryEvent(f: Fixture, action: string, fullName = f.fullName): Req
   });
 }
 
-function issueOpened(f: Fixture): Request {
+function issueOpened(
+  f: Fixture,
+  { body = "/reproduce\n\nsteps to reproduce", senderId = REVIEWER }: { body?: string; senderId?: number } = {},
+): Request {
   return request("issues", {
     action: "opened",
-    issue: { number: 1, title: "report", body: "steps to reproduce" },
+    issue: { number: 1, title: "report", body },
+    sender: { id: senderId, login: "reporter" },
     repository: { id: f.repoId, full_name: f.fullName },
     installation: { id: f.installationId },
   });
@@ -225,6 +235,30 @@ test("a configured repository admits a signed issue exactly once", async () => {
   const replay = await POST(opened);
   assert.equal(await replay.text(), "IN_FLIGHT");
   assert.equal(await jobCount(f), 1);
+});
+
+test("a signed issue with no /reproduce command creates no job", async () => {
+  const f = fixture();
+  await connect(f);
+
+  const response = await POST(issueOpened(f, { body: "found a bug but not asking for a run" }));
+
+  assert.equal(response.status, 202);
+  assert.equal(await response.text(), "no /reproduce command, not triggering a run");
+  assert.equal(await jobCount(f), 0);
+});
+
+test("a /reproduce command from a non-reviewer creates no job", async () => {
+  const f = fixture();
+  await connect(f);
+
+  // Same command, but the actor is off the allowlist. On a public repo this is a stranger, and
+  // honoring it would be a free way to spend the sandbox budget.
+  const response = await POST(issueOpened(f, { senderId: STRANGER }));
+
+  assert.equal(response.status, 202);
+  assert.equal(await response.text(), "reproduce command ignored: sender not authorized");
+  assert.equal(await jobCount(f), 0);
 });
 
 test("an installed but unconfigured repository creates no job", async () => {
