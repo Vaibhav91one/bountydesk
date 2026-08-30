@@ -35,11 +35,17 @@ export function MascotFloat({
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
-    // The bob already respects this through motion-reduce; the artwork's own animation has no
-    // such class, so leaving it alone here is the only thing that keeps it still.
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const animations = node.getAnimations({ subtree: true });
 
-    for (const animation of node.getAnimations({ subtree: true })) {
+    // The artwork carries its own infinite animation inside the SVG, where no class can reach
+    // it: motion-reduce stops the bob on the wrapper and leaves the drawing running. Pausing is
+    // the only thing that answers the preference for the part of this that is not ours.
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      for (const animation of animations) animation.pause();
+      return;
+    }
+
+    for (const animation of animations) {
       if (animation.startTime !== null) {
         animation.startTime = Number(animation.startTime) + delay * 1000;
       }

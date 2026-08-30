@@ -187,16 +187,14 @@ export default async function HomePage() {
           )}
         </section>
 
-        {/* One card per screen that exists, with the count behind it. The two cards that
-            used to sit here described how the product works rather than where anything is,
-            and that belongs in the prose below, not in the place a person looks to go
-            somewhere. */}
+        {/* One card per screen, each carrying the count behind it. Somewhere to go and how
+            much is waiting there; what the product does is the prose below, not here. */}
         <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2">
           <RouteCard
             href="/board"
             icon={<Tray className="size-5" />}
             title="Review queue"
-            body="Work in flight, by phase. Terminal reports are deliberately not here."
+            body="Every report by phase, from triage through to the ones that are finished."
             stats={[
               { label: "open", value: summary.open },
               { label: "need you", value: summary.awaiting, urgent: summary.awaiting > 0 },

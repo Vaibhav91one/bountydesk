@@ -155,6 +155,15 @@ export function FilterTable({
   );
 }
 
+/** How a cell is laid out. Two call sites need it now, so it is written once. */
+function cellClass(columns: TableColumn[], index: number) {
+  return cn(
+    "flex min-w-0 items-center px-4 py-3 text-body",
+    index < columns.length - 1 && "border-r border-border/50",
+    columns[index]?.align === "end" && "justify-end",
+  );
+}
+
 function RowBody({
   row,
   columns,
@@ -167,11 +176,9 @@ function RowBody({
   const cells = columns.map((column, index) => (
     <span
       key={column.key}
-      className={cn(
-        "flex min-w-0 items-center px-4 py-3 text-body",
-        index < columns.length - 1 && "border-r border-border/50",
-        column.align === "end" && "justify-end",
-      )}
+      // Above the first cell's stretched hit area, so a cell holding a control of its own
+      // receives its clicks rather than the row swallowing them.
+      className={cn(cellClass(columns, index), index > 0 && "relative z-10")}
     >
       {row.cells[index]}
     </span>
@@ -179,23 +186,32 @@ function RowBody({
 
   const className = "grid border-b border-border/50 text-left last:border-b-0";
 
-  // A row that does something is a button, so it answers the keyboard and announces itself.
-  // A row that does not stays a div rather than a button with nothing behind it.
+  // The row's control is one button in the first cell, stretched over the whole row by its
+  // ::after, rather than a button wrapping every cell. A cell can hold a form or a button of
+  // its own, and nesting those inside a button is invalid markup that browsers resolve by
+  // guessing; it also meant a click on such a control fired the row's action as well as its
+  // own. The later cells sit above that hit area so they still receive their own clicks.
+  //
+  // A row that does nothing stays a div rather than a button with nothing behind it.
   return row.onSelect ? (
-    <button
-      type="button"
-      // Named so a caller can tell a row apart from the chips and the search field above it.
-      // The landing page's previews use it to swallow the click without losing either.
-      data-row=""
-      onClick={row.onSelect}
+    <div
       style={{ gridTemplateColumns: template }}
-      className={cn(
-        className,
-        "w-full cursor-pointer transition-colors duration-100 hover:bg-muted/40",
-      )}
+      className={cn(className, "relative transition-colors duration-100 hover:bg-muted/40")}
     >
-      {cells}
-    </button>
+      <span className={cellClass(columns, 0)}>
+        <button
+          type="button"
+          // Named so a caller can tell a row apart from the chips and the search field above
+          // it. The landing page's previews use it to swallow the click without losing either.
+          data-row=""
+          onClick={row.onSelect}
+          className="flex min-w-0 flex-1 cursor-pointer items-center text-left after:absolute after:inset-0 after:content-['']"
+        >
+          {row.cells[0]}
+        </button>
+      </span>
+      {cells.slice(1)}
+    </div>
   ) : (
     <div className={className} style={{ gridTemplateColumns: template }}>
       {cells}

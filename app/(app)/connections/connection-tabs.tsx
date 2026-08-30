@@ -106,8 +106,9 @@ export function ConnectionTabs({
   const needle = query.trim().toLowerCase();
   const rows: TableRow[] = repositories.map((repo) => ({
     id: repo.id,
-    // The row opens the panel; the buttons inside the last cell stop the click before it
-    // gets here, so Configure still configures rather than opening a sheet.
+    // The row opens the panel. FilterTable stretches this over the row from the first cell
+    // and leaves the later cells above it, so Configure configures and does not also open a
+    // sheet behind itself.
     onSelect: () => setOpen(repo.id),
     hidden:
       !inGroup(repo.status, group) ||

@@ -5,6 +5,7 @@ import {
   motion,
   useAnimationFrame,
   useMotionValue,
+  useReducedMotion,
   useScroll,
   useSpring,
   useTransform,
@@ -215,6 +216,7 @@ export function MarqueeAlongSvgPath({
 
   const hoverFactorValue = useMotionValue(1);
   const defaultVelocity = useMotionValue(1);
+  const reducedMotion = useReducedMotion();
   const smoothHoverFactor = useSpring(hoverFactorValue, slowDownSpringConfig);
   const velocityFactor = useTransform(
     useScrollVelocity ? smoothVelocity : defaultVelocity,
@@ -224,6 +226,10 @@ export function MarqueeAlongSvgPath({
   );
 
   useAnimationFrame((_, delta) => {
+    // Decorative travel, so it stops entirely rather than slowing down. Returning here also
+    // drops the per-frame work for anyone who asked not to see it move.
+    if (reducedMotion) return;
+
     if (isDragging.current && draggable) {
       baseOffset.set(baseOffset.get() + dragVelocity.current);
       dragVelocity.current *= 0.9;
