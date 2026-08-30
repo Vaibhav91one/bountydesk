@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
-import { MascotLoader } from "@/components/mascot-loader";
-import { SitePreloader } from "@/components/site-preloader";
 import { cn } from "@/lib/utils";
 
 // One family for the whole product. Inter is variable, so a single file covers 400 to 600 and
@@ -36,14 +34,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         geistMono.variable,
       )}
     >
-      <body className="min-h-full flex flex-col">
-        {children}
-        {/* Rendered on the server so it covers the page from the first paint, before any of
-            this app's JavaScript has run. */}
-        <SitePreloader>
-          <MascotLoader />
-        </SitePreloader>
-      </body>
+      <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );
 }

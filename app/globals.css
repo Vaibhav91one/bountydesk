@@ -60,6 +60,12 @@
   --font-heading: var(--font-sans);
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
+  --color-phase-triaging: var(--phase-triaging);
+  --color-phase-reproducing: var(--phase-reproducing);
+  --color-phase-analysis: var(--phase-analysis);
+  --color-phase-approval: var(--phase-approval);
+  --color-phase-delivered: var(--phase-delivered);
+  --color-phase-closed: var(--phase-closed);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -133,6 +139,18 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /*
+   * The phase palette, darkened for a light background. The product ships one theme and forces
+   * dark on <html>, so nothing renders these today, but every other token in this file is
+   * defined on both and a half-defined one resolves to nothing rather than to a fallback.
+   */
+  --phase-triaging: oklch(0.52 0.17 250);
+  --phase-reproducing: oklch(0.55 0.13 195);
+  --phase-analysis: oklch(0.53 0.2 330);
+  --phase-approval: oklch(0.62 0.15 75);
+  --phase-delivered: oklch(0.52 0.15 150);
+  --phase-closed: oklch(0.55 0 0);
 }
 
 .dark {
@@ -169,6 +187,20 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  /*
+   * One colour per phase of the pipeline, spread far enough apart in hue to stay apart on a
+   * dark background. Amber is the only warm one, and it belongs to the phase that needs a
+   * human. Closed is deliberately colourless: it is the end of the line either way.
+   *
+   * Colour is never the only signal. Every dot sits beside its own label.
+   */
+  --phase-triaging: oklch(0.7 0.15 250);
+  --phase-reproducing: oklch(0.75 0.13 195);
+  --phase-analysis: oklch(0.72 0.18 330);
+  --phase-approval: oklch(0.8 0.15 75);
+  --phase-delivered: oklch(0.72 0.16 150);
+  --phase-closed: oklch(0.55 0 0);
 }
 
 @layer base {
@@ -199,44 +231,6 @@
   animation-iteration-count: infinite;
 }
 
-/* Agent Bounty adrift on the loading screen. Each copy gets its own distance, tilt and
-   duration through the custom properties, so one keyframe covers the whole field. */
-@keyframes mascot-drift {
-  0%,
-  100% {
-    translate: 0 0;
-    rotate: 0deg;
-  }
-  50% {
-    translate: var(--drift-x) var(--drift-y);
-    rotate: var(--drift-rotate);
-  }
-}
-
-@utility animate-mascot-drift {
-  animation-name: mascot-drift;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-}
-
-/* The starfield twinkles by fading the whole layer, not per star. Three layers at different
-   speeds is enough for the eye to read it as individual stars blinking. */
-@keyframes starfield-twinkle {
-  0%,
-  100% {
-    opacity: 0.35;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@utility animate-starfield-twinkle {
-  animation-name: starfield-twinkle;
-  animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
-}
-
 /* The same marquee running sideways. Separate keyframes rather than one generalised set,
    because translate on two axes needs both values and only one of them is ever moving. */
 @keyframes mascot-marquee-x {
@@ -252,4 +246,116 @@
   animation-name: mascot-marquee-x;
   animation-timing-function: linear;
   animation-iteration-count: infinite;
+}
+
+/* Agent Bounty bobbing on a board card. This rides on top of the animation baked into each
+   SVG, so the two compose rather than replace one another: the export handles what the mascot
+   is doing, this handles it drifting while it does it. */
+@keyframes mascot-float {
+  0%,
+  100% {
+    translate: 0 0;
+    rotate: 0deg;
+  }
+  50% {
+    translate: 0 var(--float-y);
+    rotate: var(--float-tilt);
+  }
+}
+
+@utility animate-mascot-float {
+  animation-name: mascot-float;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* Lifecycle steps arriving one after another, so the eye follows the pipeline left to right
+   rather than meeting all of it at once. */
+@keyframes step-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@utility animate-step-in {
+  animation-name: step-in;
+  animation-duration: 450ms;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  animation-fill-mode: both;
+}
+
+/* A label that reads as busy: a bright band travelling across the text itself, clipped to the
+   glyphs. Paired with an elapsed timer, it says "still going" without a spinner. */
+@keyframes shimmer-text {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@utility animate-shimmer-text {
+  animation-name: shimmer-text;
+  animation-duration: 1.4s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+/* The wavefront in the pixel-grid loader. Each cell runs the same fade on its own delay, so
+   the front appears to travel across the grid. */
+@keyframes grid-pulse {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@utility animate-grid-pulse {
+  animation-name: grid-pulse;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* The approval button's halo. Attention without a spinner, because nothing is spinning: the
+   run has stopped and is waiting on a person. */
+@keyframes approval-halo {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--phase-approval);
+    opacity: 0.9;
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+    opacity: 1;
+  }
+}
+
+@utility animate-approval-halo {
+  animation-name: approval-halo;
+  animation-duration: 2s;
+  animation-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+  animation-iteration-count: infinite;
+}
+
+/**
+ * A scroll container without the bar.
+ *
+ * Only for panels that already say they scroll some other way, like a dialog whose content
+ * runs under a pinned footer. Taking the bar off something that looks finished hides the fact
+ * that there is more below it.
+ */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }

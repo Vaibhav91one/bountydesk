@@ -120,7 +120,29 @@ export function authorizeUrl(state: string, verifier: string): string {
 
 /** Where the operator goes to pick an account and repositories. */
 export function installUrl(): string {
-  return `https://github.com/apps/${requireEnv("GITHUB_APP_SLUG")}/installations/new`;
+  return `${appListingUrl()}/installations/new`;
+}
+
+/** The App's own page on GitHub. The one public thing about this integration we can link to. */
+export function appListingUrl(): string {
+  return `https://github.com/apps/${requireEnv("GITHUB_APP_SLUG")}`;
+}
+
+/**
+ * Where repository access for one installation is actually changed.
+ *
+ * On GitHub, never here: the grant belongs to whoever administers the account, and a screen
+ * that looked like it could edit it would be describing a permission this app does not have.
+ * Personal accounts and organisations keep it in different places.
+ */
+export function installationSettingsUrl(
+  installationId: number,
+  accountType: string | null,
+  accountLogin: string,
+): string {
+  return accountType === "Organization"
+    ? `https://github.com/organizations/${accountLogin}/settings/installations/${installationId}`
+    : `https://github.com/settings/installations/${installationId}`;
 }
 
 export type GitHubUser = { login: string; id: number };

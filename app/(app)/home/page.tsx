@@ -1,6 +1,16 @@
 import Link from "next/link";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
-import { ArrowRight, ArrowSquareOut, Check, CheckCircle, Envelope, Folder, Plus, Signature, Target, UploadSimple } from "@phosphor-icons/react/ssr";
+import {
+  ArrowRight,
+  Check,
+  CheckCircle,
+  Files,
+  Folder,
+  Gear,
+  Plus,
+  ShareNetwork,
+  Tray,
+} from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -8,53 +18,55 @@ import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import { listConnections } from "@/lib/github/connections";
+import { readHomeSummary } from "@/lib/home/summary";
 import { mascotState } from "@/lib/mascot/states";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Home · BountyDesk" };
 
 /**
  * Report sources, in the order they are likely to matter.
  *
- * `state` is what is true today, not what is planned: GitHub is the only one wired, email and
- * upload are designed channels with no route yet, and a drive connector is not in the product
- * at all. developer-icons carries no Google Drive, so OneDrive stands in for the brand, and a
- * folder is not a brand at all so it comes from Phosphor.
+ * `state` is what is true today: GitHub is the only one wired. developer-icons carries no
+ * Google Drive, so OneDrive stands in for the brand, and a folder is not a brand at all so it
+ * comes from Phosphor.
  */
 const INTEGRATIONS = [
   { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected" },
-  { key: "drive", name: "Drive", icon: OneDrive, state: "not planned" },
-  { key: "email", name: "Email", icon: Gmail, state: "designed, not built" },
-  { key: "upload", name: "File upload", icon: Folder, state: "designed, not built" },
+  { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon" },
+  { key: "email", name: "Email", icon: Gmail, state: "coming soon" },
+  { key: "upload", name: "File upload", icon: Folder, state: "coming soon" },
 ] as const;
 
-/** A setup card. `done` is read from the database, never assumed. */
-function SetupCard({
+/**
+ * A door to a screen, with the count behind it.
+ *
+ * Every number comes from the database. A card that guessed, or that showed a placeholder
+ * while it loaded, would be the one thing on this page a person could not act on.
+ */
+function RouteCard({
+  href,
   icon,
   title,
   body,
-  done,
-  action,
-  note,
+  stats,
 }: {
+  href: string;
   icon: React.ReactNode;
   title: string;
   body: string;
-  done?: string;
-  action?: React.ReactNode;
-  note?: string;
+  stats: { label: string; value: number; urgent?: boolean }[];
 }) {
   return (
-    <section className="flex flex-col gap-3.5 rounded-xl border border-border/50 bg-card p-5">
+    <Link
+      href={href}
+      className="group/button flex flex-col gap-3.5 rounded-xl border border-border/50 bg-card p-5 transition-colors hover:border-border hover:bg-muted/20"
+    >
       <div className="flex items-start justify-between gap-3">
         <span className="flex size-10 items-center justify-center rounded-lg border bg-background">
           {icon}
         </span>
-        {done ? (
-          <Badge variant="outline" className="gap-1 text-brand-soft">
-            <CheckCircle className="size-3" />
-            {done}
-          </Badge>
-        ) : null}
+        <RollingIcon icon={ArrowRight} className="size-4 text-muted-foreground" />
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -62,18 +74,34 @@ function SetupCard({
         <p className="text-body text-muted-foreground">{body}</p>
       </div>
 
-      <div className="mt-auto flex flex-col gap-2">
-        {action}
-        {note ? <p className="text-meta text-muted-foreground">{note}</p> : null}
+      <div className="mt-auto flex flex-wrap items-baseline gap-x-5 gap-y-1 pt-1">
+        {stats.map((stat) => (
+          <span key={stat.label} className="flex items-baseline gap-1.5">
+            <span
+              className={cn(
+                "text-heading tabular-nums",
+                // Amber only where a reviewer is actually the blocker. A count of zero is
+                // not urgent, and colouring it would cry wolf on an empty queue.
+                stat.urgent ? "text-phase-approval" : "text-foreground",
+              )}
+            >
+              {stat.value}
+            </span>
+            <span className="text-meta text-muted-foreground">{stat.label}</span>
+          </span>
+        ))}
       </div>
-    </section>
+    </Link>
   );
 }
 
 export default async function HomePage() {
   await requireReviewer();
   const mascot = mascotState("idle");
-  const connections = await listConnections();
+  // Two reads rather than one snapshot, deliberately: the GitHub grant and the report counts
+  // describe different things and no card claims a relationship between them. readHomeSummary
+  // takes its own transaction, so the numbers that do sit beside each other agree.
+  const [connections, summary] = await Promise.all([listConnections(), readHomeSummary()]);
 
   const live = connections.filter((c) => !c.suspendedAt);
   const repositories = live.flatMap((c) => c.repositories);
@@ -149,7 +177,7 @@ export default async function HomePage() {
           </ul>
 
           {live.length > 0 ? (
-            <Button size="sm" nativeButton={false} render={<Link href="/settings/integrations" />}>
+            <Button size="sm" nativeButton={false} render={<Link href="/integrations" />}>
               Manage integrations <RollingIcon icon={ArrowRight} className="size-3.5" />
             </Button>
           ) : (
@@ -159,77 +187,54 @@ export default async function HomePage() {
           )}
         </section>
 
-        <SetupCard
-          icon={<Target className="size-5" />}
-          title="Reproduction target"
-          body="A report can only be reproduced against a server-held target profile: a pinned image, its digest, and a defender-authored fixture. Without one a report stops at analysis only."
-          done={admissible.length > 0 ? `${admissible.length} bound` : undefined}
-          action={
-            <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/settings/integrations" />}>
-              Bind a target <RollingIcon icon={ArrowRight} className="size-3.5" />
-            </Button>
-          }
-          note={
-            admissible.length === 0
-              ? "Nothing is bound yet, so intake refuses every repository."
-              : undefined
-          }
-        />
+        {/* One card per screen, each carrying the count behind it. Somewhere to go and how
+            much is waiting there; what the product does is the prose below, not here. */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2">
+          <RouteCard
+            href="/board"
+            icon={<Tray className="size-5" />}
+            title="Review queue"
+            body="Every report by phase, from triage through to the ones that are finished."
+            stats={[
+              { label: "open", value: summary.open },
+              { label: "need you", value: summary.awaiting, urgent: summary.awaiting > 0 },
+            ]}
+          />
 
-        <SetupCard
-          icon={<Signature className="size-5" />}
-          title="Human approval"
-          body="Nothing is ever auto-closed. The verdict is drafted, frozen, and posted only after a reviewer approves the exact words, and the tool refuses any payload whose hash moved."
-          done="Always on"
-          note="Not a setting. It is how delivery works."
-        />
-      </div>
+          <RouteCard
+            href="/reports"
+            icon={<Files className="size-5" />}
+            title="Reports"
+            body="Everything that has arrived, whatever state it ended in."
+            stats={[
+              { label: "total", value: summary.reports },
+              { label: "closed", value: summary.reports - summary.open },
+            ]}
+          />
 
-      <section className="flex flex-col gap-4 rounded-xl border border-border/50 border-l-2 border-l-brand/60 bg-card/40 px-6 py-5">
-        <h2 className="text-label text-muted-foreground uppercase">
-          What is built so far
-        </h2>
-        <ul className="flex flex-col gap-3 text-body">
-          {[
-            { text: "GitHub App intake with signature checks and durable, idempotent delivery", href: "/settings/integrations", link: "Open integrations" },
-            { text: "Separate job execution and report lifecycle state machines, with leased workers", href: null, link: null },
-            { text: "Scope bound at the capability boundary, never from a string the agent produced", href: null, link: null },
-            { text: "Sign-in restricted to a reviewer allowlist, re-checked on every request", href: null, link: null },
-          ].map((row) => (
-            <li key={row.text} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="text-foreground">{row.text}</span>
-              {row.href ? (
-                <Link href={row.href} className="inline-flex items-center gap-1 text-brand-soft">
-                  <ArrowRight className="size-3.5" />
-                  {row.link}
-                </Link>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      </section>
+          <RouteCard
+            href="/connections"
+            icon={<ShareNetwork className="size-5" />}
+            title="Connections"
+            body="Which repositories are admissible, and what each is bound to."
+            stats={[
+              { label: "granted", value: repositories.length },
+              { label: "accepting", value: admissible.length },
+            ]}
+          />
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-label text-muted-foreground uppercase">
-          Channels that need no GitHub connection
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground">
-            <Envelope className="size-4" /> Email intake
-            <Badge variant="outline" className="text-muted-foreground">designed</Badge>
-          </span>
-          <span className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground">
-            <UploadSimple className="size-4" /> File upload
-            <Badge variant="outline" className="text-muted-foreground">designed</Badge>
-          </span>
-          <a
-            href="https://github.com/Vaibhav91one/bountydesk"
-            className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-meta text-muted-foreground hover:text-foreground"
-          >
-            Repository <ArrowSquareOut className="size-3.5" />
-          </a>
+          <RouteCard
+            href="/settings"
+            icon={<Gear className="size-5" />}
+            title="Settings"
+            body="What the guard enforces, and what has been signed."
+            stats={[
+              { label: "targets", value: summary.targets },
+              { label: "decisions", value: summary.decisions },
+            ]}
+          />
         </div>
-      </section>
+      </div>
     </main>
   );
 }
