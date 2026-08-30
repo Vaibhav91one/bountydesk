@@ -32,9 +32,26 @@ after(async () => {
 
 let seq = 0;
 
-async function seedSession(overrides: { sandboxId?: string | null; appPort?: number | null } = {}): Promise<string> {
+async function seedSession(
+  overrides: { sandboxId?: string | null; appPort?: number | null; targetName?: string } = {},
+): Promise<{ capabilityToken: string; reportId: string }> {
   seq += 1;
   const n = seq;
+
+  let targetProfileId: string | null = null;
+  if (overrides.targetName) {
+    const [t] = await dbm.db
+      .insert(dbm.targetProfile)
+      .values({
+        name: overrides.targetName,
+        imageName: "ghcr.io/vaibhav91one/juice-shop",
+        imageDigest: "sha256:" + "a".repeat(64),
+        config: { baseUrl: "http://localhost:3000" },
+        scopeRules: [],
+      })
+      .returning({ id: dbm.targetProfile.id });
+    targetProfileId = t.id;
+  }
 
   const [r] = await dbm.db
     .insert(dbm.report)
@@ -44,6 +61,7 @@ async function seedSession(overrides: { sandboxId?: string | null; appPort?: num
       title: `report ${n}`,
       body: "body",
       state: "REPRODUCING",
+      targetProfileId,
     })
     .returning({ id: dbm.report.id });
 
@@ -56,7 +74,22 @@ async function seedSession(overrides: { sandboxId?: string | null; appPort?: num
     appPort: overrides.appPort === undefined ? null : overrides.appPort,
   });
 
-  return capabilityToken;
+  return { capabilityToken, reportId: r.id };
+}
+
+/** A fetch stub that only ever answers the Daytona preview-url lookup, for tests whose refusal
+ * must happen before (or regardless of) any request actually reaching the sandbox. */
+function previewOnlyStub(url = "https://preview.example", token = "preview-token-abc"): typeof fetch {
+  return (async (input: string | URL | Request) => {
+    const requested = typeof input === "string" ? input : input.toString();
+    if (requested.includes("/ports/") && requested.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ url, token }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    throw new Error(`unexpected fetch to ${requested}`);
+  }) as typeof fetch;
 }
 
 async function withFetch<T>(stub: typeof fetch, run: () => Promise<T>): Promise<T> {
@@ -80,29 +113,48 @@ test("refuses an unknown capability", async () => {
 });
 
 test("refuses a capability with no sandbox provisioned for its session", async () => {
-  const capability = await seedSession();
+  const { capabilityToken } = await seedSession();
 
-  const result = await probeTargetModule.probeTarget({ capability, method: "GET", path: "/rest/products" });
+  const result = await probeTargetModule.probeTarget({ capability: capabilityToken, method: "GET", path: "/rest/products" });
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /no sandbox is provisioned/);
 });
 
-test("refuses a path that isn't a same-origin path", async () => {
-  const capability = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
+test("refuses a path that doesn't start with a single '/', before ever touching the network", async () => {
+  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
 
   const result = await probeTargetModule.probeTarget({
-    capability,
+    capability: capabilityToken,
     method: "GET",
-    path: "//evil.example/x",
+    path: "evil.example/x",
   });
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /same-origin path/);
 });
 
-test("resolves the session's sandbox, injects the preview token fresh, and forwards the response", async () => {
-  const capability = await seedSession({ sandboxId: "sandbox-under-test", appPort: 3000 });
+test("refuses a path that resolves off the preview origin (WHATWG backslash-as-slash escape)", async () => {
+  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
+
+  // For a special (http/https) URL, a leading "/\" is parsed the same as "//": a naive check
+  // that only rejects a literal "//" prefix lets this resolve to https://evil.example/x once
+  // appended to the preview origin. resolveTargetUrl must catch it by comparing origins, not
+  // by pattern-matching the input string.
+  const result = await withFetch(previewOnlyStub(), () =>
+    probeTargetModule.probeTarget({
+      capability: capabilityToken,
+      method: "GET",
+      path: "/\\evil.example/x",
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /same-origin request/);
+});
+
+test("resolves the session's sandbox, injects the preview token fresh, strips a caller Host, and forwards the response", async () => {
+  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-under-test", appPort: 3000 });
 
   const calls: { url: string; init?: RequestInit }[] = [];
   const stub = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -121,10 +173,14 @@ test("resolves the session's sandbox, injects the preview token fresh, and forwa
 
   const result = await withFetch(stub, () =>
     probeTargetModule.probeTarget({
-      capability,
+      capability: capabilityToken,
       method: "GET",
       path: "/rest/products/search?q=juice",
-      headers: { "x-daytona-preview-token": "caller-supplied-should-be-ignored" },
+      headers: {
+        "x-daytona-preview-token": "caller-supplied-should-be-ignored",
+        Host: "attacker.example",
+        "x-real-header": "kept",
+      },
     }),
   );
 
@@ -141,17 +197,92 @@ test("resolves the session's sandbox, injects the preview token fresh, and forwa
     "preview-token-abc",
     "the server's own preview token must win over anything the caller supplied",
   );
+  assert.notEqual(headers.get("host"), "attacker.example", "a caller-supplied Host must never reach the outbound request");
+  assert.equal(headers.get("x-real-header"), "kept", "only Host is stripped, not every caller header");
 });
 
 test("refuses cleanly when the preview-url lookup fails", async () => {
-  const capability = await seedSession({ sandboxId: "sandbox-gone", appPort: 3000 });
+  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-gone", appPort: 3000 });
 
   const stub = (async () => new Response("not found", { status: 404 })) as typeof fetch;
 
   const result = await withFetch(stub, () =>
-    probeTargetModule.probeTarget({ capability, method: "GET", path: "/" }),
+    probeTargetModule.probeTarget({ capability: capabilityToken, method: "GET", path: "/" }),
   );
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /could not reach the sandbox/);
+});
+
+test("refuses a POST with no grant_token", async () => {
+  const { capabilityToken } = await seedSession({
+    sandboxId: "sandbox-write",
+    appPort: 3000,
+    targetName: `juice-shop-${randomUUID()}`,
+  });
+
+  const result = await withFetch(previewOnlyStub(), () =>
+    probeTargetModule.probeTarget({
+      capability: capabilityToken,
+      method: "POST",
+      path: "/rest/user/login",
+      body: JSON.stringify({ email: "a", password: "b" }),
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /grant denial/);
+});
+
+test("refuses a POST whose grant was minted for a different target", async () => {
+  const mintModule = await import("@/lib/scope-guard/grants");
+  const { capabilityToken } = await seedSession({
+    sandboxId: "sandbox-write",
+    appPort: 3000,
+    targetName: `juice-shop-${randomUUID()}`,
+  });
+  const minted = await mintModule.mint("a-completely-different-target", "POST /rest/user/login");
+
+  const result = await withFetch(previewOnlyStub(), () =>
+    probeTargetModule.probeTarget({
+      capability: capabilityToken,
+      method: "POST",
+      path: "/rest/user/login",
+      body: JSON.stringify({ email: "a", password: "b" }),
+      grant_token: minted.token,
+    }),
+  );
+
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /grant denial/);
+});
+
+test("a POST with a grant minted for this session's own target name succeeds", async () => {
+  const targetName = `juice-shop-${randomUUID()}`;
+  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-write", appPort: 3000, targetName });
+  const mintModule = await import("@/lib/scope-guard/grants");
+  const minted = await mintModule.mint(targetName, "POST /rest/user/login");
+
+  const stub = (async (input: string | URL | Request) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/ports/") && url.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ url: "https://preview.example", token: "preview-token-abc" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ authentication: { token: "jwt" } }), { status: 200 });
+  }) as typeof fetch;
+
+  const result = await withFetch(stub, () =>
+    probeTargetModule.probeTarget({
+      capability: capabilityToken,
+      method: "POST",
+      path: "/rest/user/login",
+      body: JSON.stringify({ email: "a", password: "b" }),
+      grant_token: minted.token,
+    }),
+  );
+
+  assert.equal(result.ok, true);
 });

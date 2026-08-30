@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test, { after, before } from "node:test";
+import test, { after, before, mock } from "node:test";
 
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
@@ -11,6 +11,33 @@ import type { TrueForgeClient } from "@/lib/trueforge/client";
  * so there is nothing to fake at the HTTP layer.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
+
+/**
+ * provisionTarget itself is faked directly (the driver takes it as a constructor argument),
+ * but its own teardownSandbox calls a real deleteSandbox from ./daytona -- mocked here, same
+ * technique as poller.test.ts, so the "leaked sandbox on turn-startup failure" tests can
+ * observe a delete without a real Daytona sandbox ever existing.
+ */
+let deleteSandboxCalls: string[] = [];
+mock.module("@/lib/sandbox/daytona", {
+  namedExports: {
+    createSandbox: async () => {
+      throw new Error("not used: provisionTarget is faked directly in these tests");
+    },
+    getSandbox: async () => {
+      throw new Error("not used: provisionTarget is faked directly in these tests");
+    },
+    execute: async () => {
+      throw new Error("not used: provisionTarget is faked directly in these tests");
+    },
+    getSnapshot: async () => {
+      throw new Error("not used: provisionTarget is faked directly in these tests");
+    },
+    deleteSandbox: async (id: string) => {
+      deleteSandboxCalls.push(id);
+    },
+  },
+});
 
 type DbModule = typeof import("@/lib/db");
 type DriverModule = typeof import("./trueforge-driver");
@@ -742,4 +769,37 @@ test("run() never calls provisioning a second time once a turn already exists", 
   await d.run(context(reportId));
 
   assert.equal(provisionCalls, 1, "a report whose turn already started must never be provisioned again");
+});
+
+test("run() tears down a provisioned sandbox when createTurn fails before it is ever persisted", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-teardown-on-failure" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  deleteSandboxCalls = [];
+
+  const client = fakeClient({
+    async createTurn() {
+      throw new Error("TrueForge is unreachable");
+    },
+  });
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (_authorization, appPort) => {
+    return { sandboxId: "sandbox-orphan-risk", appPort };
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+
+  await assert.rejects(() => d.run(context(reportId)), /TrueForge is unreachable/);
+
+  assert.deepEqual(
+    deleteSandboxCalls,
+    ["sandbox-orphan-risk"],
+    "a sandbox provisioned before createTurn fails must be torn down, since nothing durable will ever point at it otherwise",
+  );
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.sandboxId, null);
+  assert.equal(session.turnId, null);
 });

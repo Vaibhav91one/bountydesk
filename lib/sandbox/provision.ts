@@ -6,7 +6,7 @@
  * there: the fixture/negative-control/exploit oracle logic is reproduce.ts's alone, and this
  * file has no notion of a canary or a recipe. Two callers need exactly this and nothing more:
  * reproduce.ts's own createReproducer, and lib/analysis/trueforge-driver.ts, which provisions a
- * target before starting the agent's turn so probe_target (app/api/mcp/probe-target/route.ts)
+ * target before starting the agent's turn so probe_target (lib/mcp/probe-target.ts)
  * has something reachable to forward to.
  *
  * This module deliberately does not call getPortPreviewUrl for the caller: a live preview URL
@@ -51,7 +51,7 @@ const READINESS_POLL_MS = positiveIntegerEnv("BOUNTYDESK_REPRODUCE_READINESS_POL
 /** Wall-clock ceiling on each direct HTTP call this process makes to Daytona's control plane. */
 const HTTP_TIMEOUT_MS = 15_000;
 
-/** Shared with probe_target (app/api/mcp/probe-target/route.ts) and reproduce.ts's own
+/** Shared with probe_target (lib/mcp/probe-target.ts) and reproduce.ts's own
  * sendToSandbox: every direct HTTP call this process makes to the sandbox itself, not just to
  * Daytona's control plane, reads its response through the same cap. */
 export const MAX_RESPONSE_BODY_BYTES = 1_000_000;

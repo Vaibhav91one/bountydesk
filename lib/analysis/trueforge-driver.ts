@@ -349,63 +349,78 @@ export function createTrueforgeAnalysisDriver(
       // before the write below commits, that turn is orphaned. The next retry creates a new
       // one, which supersedes it via the same session-chaining behavior, at the cost of one
       // wasted call. Same category as ensureSession's accepted orphaned-session cost above.
-      await db.transaction(async (tx) => {
-        const [session] = await tx
-          .select({
-            id: agentSession.id,
-            sessionId: agentSession.sessionId,
-            turnId: agentSession.turnId,
-            capabilityToken: agentSession.capabilityToken,
-          })
-          .from(agentSession)
-          .where(eq(agentSession.reportId, reportId))
-          .for("update");
+      //
+      // A provisioned-but-not-yet-persisted sandbox is a different kind of orphan: nothing
+      // durable points at it yet, so neither this driver's own retry nor the poller's teardown
+      // paths (lib/agent-sessions/poller.ts) can ever find it again once this call returns.
+      // The outer try/catch exists for exactly that window -- cancellation, a createTurn
+      // failure, or any other error thrown before the write above commits -- and tears the
+      // sandbox down itself rather than leaving it live until its TTL backstop.
+      try {
+        await db.transaction(async (tx) => {
+          const [session] = await tx
+            .select({
+              id: agentSession.id,
+              sessionId: agentSession.sessionId,
+              turnId: agentSession.turnId,
+              capabilityToken: agentSession.capabilityToken,
+            })
+            .from(agentSession)
+            .where(eq(agentSession.reportId, reportId))
+            .for("update");
 
-        if (!session) {
-          throw new Error(
-            `trueforgeAnalysisDriver.run: no agent session for report ${reportId}; ensureSession must run first`,
+          if (!session) {
+            throw new Error(
+              `trueforgeAnalysisDriver.run: no agent session for report ${reportId}; ensureSession must run first`,
+            );
+          }
+
+          // A turn was already started for this report, either by an earlier pass or by
+          // whichever concurrent caller won the lock first. The poller takes it from here
+          // regardless of how that turn is doing. If this losing attempt already provisioned a
+          // sandbox before losing the race, it's this attempt's own to clean up -- nothing else
+          // ever learns its id, since only the winner's write below persists one onto the row.
+          if (session.turnId) {
+            if (provisioned) await teardownSandbox(provisioned.sandboxId, true);
+            provisioned = null;
+            return;
+          }
+
+          if (signal.aborted) throw signal.reason;
+
+          const content = buildTurnMessage(
+            context.title,
+            context.body,
+            session.capabilityToken,
+            targetInfo,
+            provisioned !== null,
           );
-        }
+          const { turnId } = await client.createTurn(
+            session.sessionId,
+            [{ type: "user.message", content }],
+            { signal },
+          );
 
-        // A turn was already started for this report, either by an earlier pass or by
-        // whichever concurrent caller won the lock first. The poller takes it from here
-        // regardless of how that turn is doing. If this losing attempt already provisioned a
-        // sandbox before losing the race, it's this attempt's own to clean up -- nothing else
-        // ever learns its id, since only the winner's write below persists one onto the row.
-        if (session.turnId) {
-          if (provisioned) await teardownSandbox(provisioned.sandboxId, false);
-          return;
-        }
-
-        if (signal.aborted) throw signal.reason;
-
-        const content = buildTurnMessage(
-          context.title,
-          context.body,
-          session.capabilityToken,
-          targetInfo,
-          provisioned !== null,
-        );
-        const { turnId } = await client.createTurn(
-          session.sessionId,
-          [{ type: "user.message", content }],
-          { signal },
-        );
-
-        // RUNNING means the turn just started and the agent hasn't called anything yet; the
-        // poller (lib/agent-sessions/poller.ts) promotes this to INVESTIGATING once it has
-        // actually observed the turn still going on a later poll.
-        await tx
-          .update(agentSession)
-          .set({
-            turnId,
-            turnStatus: "RUNNING",
-            sandboxId: provisioned?.sandboxId ?? null,
-            appPort: provisioned?.appPort ?? null,
-            updatedAt: new Date(),
-          })
-          .where(eq(agentSession.id, session.id));
-      });
+          // RUNNING means the turn just started and the agent hasn't called anything yet; the
+          // poller (lib/agent-sessions/poller.ts) promotes this to INVESTIGATING once it has
+          // actually observed the turn still going on a later poll.
+          await tx
+            .update(agentSession)
+            .set({
+              turnId,
+              turnStatus: "RUNNING",
+              sandboxId: provisioned?.sandboxId ?? null,
+              appPort: provisioned?.appPort ?? null,
+              updatedAt: new Date(),
+            })
+            .where(eq(agentSession.id, session.id));
+        });
+      } catch (error) {
+        // provisioned is cleared above once its cleanup has already happened (the race-loss
+        // branch), so this only fires for a sandbox that's still genuinely unaccounted for.
+        if (provisioned) await teardownSandbox(provisioned.sandboxId, true);
+        throw error;
+      }
 
       if (signal.aborted) throw signal.reason;
     },

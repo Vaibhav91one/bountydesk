@@ -60,11 +60,12 @@ function buildServer(): McpServer {
     "probe_target",
     {
       description:
-        "Send one HTTP request to this session's provisioned target sandbox. Give a method, a same-origin path (e.g. /rest/products/search), and optional headers/body -- never a URL, host or token; the server resolves and reaches the one sandbox this session's capability is bound to. Refuses cleanly when no sandbox was provisioned for this run.",
+        "Send one HTTP request to this session's provisioned target sandbox. Give a method, a same-origin path (e.g. /rest/products/search), and optional headers/body -- never a URL, host or token; the server resolves and reaches the one sandbox this session's capability is bound to. POST is a write/active action and needs grant_token from request_intrusive_approval, requested against the bound target's name. Refuses cleanly when no sandbox was provisioned for this run.",
       inputSchema: probeTargetInputSchema.shape,
+      annotations: { destructiveHint: true },
     },
-    async ({ capability, method, path, headers, body }) => {
-      const result = await probeTarget({ capability, method, path, headers, body });
+    async ({ capability, method, path, headers, body, grant_token }) => {
+      const result = await probeTarget({ capability, method, path, headers, body, grant_token });
       if (result.ok) {
         return { content: [{ type: "text", text: JSON.stringify({ status: result.status, body: result.body }) }] };
       }
