@@ -1,5 +1,9 @@
 import { and, db, eq, report, verdict } from "@/lib/db";
-import { draftVerdictFromPendingCall, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
+import {
+  draftVerdictFromPendingCall,
+  publishVerdictInputSchema,
+  synthesizeAnalysisOnlyVerdict,
+} from "@/lib/mcp/publish-verdict";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
@@ -17,6 +21,7 @@ import {
   release,
   renew,
   type AgentSessionLease,
+  type AgentSessionReleaseUpdate,
 } from "./queue";
 
 /**
@@ -139,19 +144,37 @@ async function mirrorToolCalls(reportId: string, calls: ObservedToolCall[]): Pro
  * A refusal still needs to move the report out of TRIAGING/REPRODUCING, exactly like
  * finishWithoutApproval, or a report whose agent drafted something unresolvable (including
  * an unauthorized REPRODUCED claim caught by draftVerdictFromPendingCall) sits stuck forever
- * with no verdict and nothing to bring it back for human review. No verdict row is minted
- * here: this only moves lifecycle state, the same no-op-guarded move finishWithoutApproval
- * already makes safely for every other state, including terminal reports.
- *
- * This is also one of this session's investigation-ending terminal paths (AGENTS.md's
- * teardown section), so a provisioned sandbox is torn down here too, best-effort, after the
- * transaction commits: refusing a call the poller can't resolve is not a reason to leave a
- * sandbox running until its TTL backstop, and a Daytona network call is not something to hold
- * report.state's row lock across.
+ * with no verdict and nothing to bring it back for human review. Both paths share
+ * endWithoutAgentVerdict, which mints the server-authored ANALYSIS_ONLY verdict when the
+ * report has none so it can still reach a human for approval; see that function.
  */
 async function refuseUnresolvablePending(
   lease: AgentSessionLease,
   message: string,
+): Promise<string> {
+  return endWithoutAgentVerdict(lease, { turnStatus: "ERROR", lastError: message });
+}
+
+/**
+ * The shared body of the two dead-end terminal paths: move a still-investigating report to
+ * ANALYSIS_ONLY, and, when it has no verdict at all, mint the server-authored ANALYSIS_ONLY
+ * verdict and carry it into AWAITING_APPROVAL so a human can still approve and deliver it. The
+ * alternative is what this fixes: a report parked at ANALYSIS_ONLY with nothing to approve,
+ * which can never reach delivery.
+ *
+ * The mint and the AWAITING_APPROVAL move happen only when there is no verdict yet. A report
+ * that somehow already has one (not reachable through the real driver, which mints only via
+ * publish_verdict) keeps the old behavior and stops at ANALYSIS_ONLY: an existing verdict is
+ * never overwritten, and a REPRODUCED claim is never advanced toward delivery from here.
+ *
+ * thread/tool-call markers stay null because there is no live TrueForge call to answer; the
+ * relaxed pending_* check constraint allows the verdict pair set with the thread pair null.
+ * Sandbox teardown stays after the transaction commits, same reasoning as everywhere in this
+ * file: a Daytona network call is not something to hold report.state's row lock across.
+ */
+async function endWithoutAgentVerdict(
+  lease: AgentSessionLease,
+  updates: { turnStatus: "DONE_NO_ACTION" | "ERROR" | "CANCELLED"; lastError?: string },
 ): Promise<string> {
   await db.transaction(async (tx) => {
     const [reportRow] = await tx
@@ -163,10 +186,23 @@ async function refuseUnresolvablePending(
     if (!reportRow) {
       throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
     }
+
+    let pending: Pick<
+      AgentSessionReleaseUpdate,
+      "pendingVerdictId" | "pendingApprovedContentHash"
+    > = {};
     if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
+      const synthesized = await synthesizeAnalysisOnlyVerdict(lease.reportId, tx);
+      if (synthesized) {
+        await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+        pending = {
+          pendingVerdictId: synthesized.verdictId,
+          pendingApprovedContentHash: synthesized.contentHash,
+        };
+      }
     }
-    await release(lease, { turnStatus: "ERROR", lastError: message }, tx);
+    await release(lease, { ...updates, ...pending }, tx);
   });
   if (lease.sandboxId) await teardownSandbox(lease.sandboxId, true);
   return lease.id;
@@ -189,31 +225,15 @@ function extractCapability(argumentsJson: string): string | null {
 
 /**
  * A terminal path (AGENTS.md's teardown section): the turn ended without ever reaching a
- * publish_verdict call, so nothing further will use this session's sandbox. Torn down after
- * the transaction commits, not inside it, same reasoning as everywhere else in this PR -- a
- * Daytona network call is not something to hold report.state's row lock across.
+ * publish_verdict call. Shares endWithoutAgentVerdict with refuseUnresolvablePending, which
+ * moves the report to ANALYSIS_ONLY, mints the server-authored verdict when it has none, and
+ * tears the sandbox down after the commit.
  */
 async function finishWithoutApproval(
   lease: AgentSessionLease,
   updates: { turnStatus: "DONE_NO_ACTION" | "ERROR" | "CANCELLED"; lastError?: string },
 ): Promise<string> {
-  await db.transaction(async (tx) => {
-    const [reportRow] = await tx
-      .select({ state: report.state })
-      .from(report)
-      .where(eq(report.id, lease.reportId))
-      .for("update");
-
-    if (!reportRow) {
-      throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
-    }
-    if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
-      await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
-    }
-    await release(lease, updates, tx);
-  });
-  if (lease.sandboxId) await teardownSandbox(lease.sandboxId, true);
-  return lease.id;
+  return endWithoutAgentVerdict(lease, updates);
 }
 
 /**

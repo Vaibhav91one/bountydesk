@@ -98,12 +98,14 @@ async function decide(
         };
       }
 
-      // The fresh path needs an actual pending call to answer, bound to this exact verdict:
-      // if the session's pending_verdict_id has moved on to a different verdict since the
-      // page rendered, this is not the call being answered.
+      // The fresh path needs a pending verdict bound to this exact one: if the session's
+      // pending_verdict_id has moved on to a different verdict since the page rendered, this is
+      // not the verdict being answered. The thread/tool-call markers are deliberately not
+      // required here: a synthesized ANALYSIS_ONLY verdict has a verdict awaiting approval but
+      // no TrueForge call to answer, so they are legitimately null and the decision records
+      // them as null (which the approval-submission worker reads as "deliver without a harness
+      // round-trip").
       if (
-        !session.pendingThreadId ||
-        !session.pendingToolCallId ||
         !session.pendingVerdictId ||
         !session.pendingApprovedContentHash ||
         session.pendingVerdictId !== v.id

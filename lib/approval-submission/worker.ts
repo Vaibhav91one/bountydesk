@@ -1,4 +1,6 @@
 import { agentSession, and, approvalDecision, db, eq, sql, verdict } from "@/lib/db";
+import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
+import { ReportStateConflictError } from "@/lib/reports/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { createTrueForgeClient, type TrueForgeClient, type TurnInput } from "@/lib/trueforge/client";
 
@@ -16,6 +18,14 @@ import {
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/**
+ * Raised inside the synthesized-verdict delivery transaction when enqueueApprovedVerdictDelivery
+ * returns a refusal (an unpublishable outcome, a non-GitHub target, a report that has moved on).
+ * A refusal is a permanent, invariant failure a retry cannot repair, so the worker turns this
+ * into failPermanently rather than the retrying fail() an unexpected error gets.
+ */
+class SynthesizedDeliveryError extends Error {}
 
 async function runWithHeartbeat<T>(
   lease: ApprovalSubmissionLease,
@@ -125,26 +135,12 @@ export async function submitApprovalOnce(
       return lease.id;
     }
 
-    // threadId/toolCallId are non-null by the time a submission exists in practice (the
-    // reviewer UI only creates one once it has real pending markers to bind to), but this is
-    // a trust boundary between two independently-shipped features, so it is checked here
-    // rather than assumed.
-    if (!decision.threadId || !decision.toolCallId) {
-      await failPermanently(
-        lease,
-        `approval decision ${lease.approvalDecisionId} has no pending call to answer (threadId/toolCallId missing)`,
-      );
-      return lease.id;
-    }
-    const threadId = decision.threadId;
-    const toolCallId = decision.toolCallId;
-
     // approval_submission.agent_session_id and .approval_decision_id are independent foreign
     // keys, so nothing in the schema stops a submission from pairing a decision with a
     // session for a different report. Load the decision's own verdict and check it against
-    // the session's report before this worker ever tells TrueForge anything.
+    // the session's report before this worker ever tells TrueForge or enqueues a delivery.
     const [verdictRow] = await db
-      .select({ reportId: verdict.reportId, payload: verdict.payload })
+      .select({ id: verdict.id, reportId: verdict.reportId, payload: verdict.payload, outcome: verdict.outcome })
       .from(verdict)
       .where(eq(verdict.id, decision.verdictId));
 
@@ -162,7 +158,8 @@ export async function submitApprovalOnce(
     }
 
     // Both choices answer the exact payload the reviewer saw. Refuse a stale commitment before
-    // TrueForge receives either decision; a retry cannot repair an immutable verdict or decision.
+    // TrueForge or the outbox receives either decision; a retry cannot repair an immutable
+    // verdict or decision.
     if (computeContentHash(verdictRow.payload) !== decision.payloadHash) {
       await failPermanently(
         lease,
@@ -172,8 +169,8 @@ export async function submitApprovalOnce(
     }
 
     if (
-      session.pendingThreadId !== threadId ||
-      session.pendingToolCallId !== toolCallId ||
+      session.pendingThreadId !== decision.threadId ||
+      session.pendingToolCallId !== decision.toolCallId ||
       session.pendingVerdictId !== decision.verdictId ||
       session.pendingApprovedContentHash !== decision.payloadHash
     ) {
@@ -183,6 +180,52 @@ export async function submitApprovalOnce(
       );
       return lease.id;
     }
+
+    // A synthesized ANALYSIS_ONLY verdict (an agent run that ended without ever drafting one)
+    // has no TrueForge call to answer: its decision and the session's pending markers both carry
+    // null thread/tool-call ids, matched just above. The human approval was still recorded and
+    // hash-checked exactly like the agent path; only the harness round-trip is skipped. An
+    // approval enqueues the same content-hash-gated delivery the agent path does, inside one
+    // transaction with markSubmitted so the outbox row and the closed submission commit together.
+    // A denial is already terminal on bounty-desk's side (actions.ts moved the report to DENIED),
+    // so the submission just completes with nothing to deliver. The DB constraint pairs
+    // thread/tool-call, so both-null is the only synthesized shape; a half-set pair is a corrupt
+    // row and is refused permanently.
+    if (!decision.threadId || !decision.toolCallId) {
+      if (decision.threadId || decision.toolCallId) {
+        await failPermanently(
+          lease,
+          `approval decision ${lease.approvalDecisionId} has a half-set thread/tool-call pair`,
+        );
+        return lease.id;
+      }
+      try {
+        await db.transaction(async (tx) => {
+          if (decision.decision === "APPROVED") {
+            const delivered = await enqueueApprovedVerdictDelivery(
+              tx,
+              lease.agentSessionId,
+              { id: verdictRow.id, reportId: verdictRow.reportId, outcome: verdictRow.outcome },
+              decision.payloadHash,
+            );
+            if (!delivered.ok) throw new SynthesizedDeliveryError(delivered.reason);
+          }
+          // No harness turn was created, so there is no submitted turn id to record.
+          await markSubmitted(lease, null, tx);
+        });
+      } catch (err) {
+        if (err instanceof LeaseLostError) return lease.id;
+        if (err instanceof SynthesizedDeliveryError || err instanceof ReportStateConflictError) {
+          await failPermanently(lease, err.message);
+          return lease.id;
+        }
+        throw err;
+      }
+      return lease.id;
+    }
+    const threadId = decision.threadId;
+    const toolCallId = decision.toolCallId;
+
     if (!session.turnId) {
       await failPermanently(
         lease,

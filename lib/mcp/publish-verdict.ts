@@ -81,6 +81,58 @@ export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft)
 }
 
 /**
+ * The fixed text of a server-synthesized ANALYSIS_ONLY verdict. A run that ends without the
+ * agent ever drafting a verdict still needs something a human can approve and deliver, and this
+ * is it. The wording is a constant, never the agent's output or a tool result or the run's
+ * lastError string: those can carry a secret or prompt-injection content absorbed from an
+ * untrusted target, and none of that belongs in an outbound GitHub comment.
+ */
+export const SYNTHESIZED_ANALYSIS_SUMMARY =
+  "Automated investigation could not complete or verify this report. It is surfaced for human triage; a reviewer should read the report and decide whether it is valid.";
+
+/**
+ * Mint the server-authored ANALYSIS_ONLY verdict for a report whose agent run reached a dead
+ * end (a pending call the poller cannot resolve, or a turn that finished with no publish_verdict
+ * draft) so the report still carries something a human can approve rather than sitting stuck at
+ * ANALYSIS_ONLY with nothing to approve. Returns the verdict id and its content hash for the
+ * caller to bind the pending approval to.
+ *
+ * Only ever ANALYSIS_ONLY, and only when the report has no verdict yet: an existing verdict is
+ * never overwritten, and a REPRODUCED or NOT_REPRODUCED claim is never synthesized here. Runs
+ * inside the caller's transaction, so it commits or rolls back with the lifecycle move around it.
+ */
+export async function synthesizeAnalysisOnlyVerdict(
+  reportId: string,
+  tx: Executor,
+): Promise<{ verdictId: string; contentHash: string } | null> {
+  const [existing] = await tx
+    .select({ id: verdict.id })
+    .from(verdict)
+    .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+    .limit(1);
+  if (existing) return null;
+
+  const verdictId = randomUUID();
+  const draft: VerdictDraft = {
+    outcome: "ANALYSIS_ONLY",
+    summary: SYNTHESIZED_ANALYSIS_SUMMARY,
+    findings: [],
+  };
+  const row = await ensureInitialVerdict(
+    {
+      id: verdictId,
+      reportId,
+      outcome: "ANALYSIS_ONLY",
+      summary: SYNTHESIZED_ANALYSIS_SUMMARY,
+      evidence: { source: "server-synthesized" },
+      payload: buildAgentDraftedPayload(verdictId, draft),
+    },
+    tx,
+  );
+  return { verdictId: row.id, contentHash: row.contentHash };
+}
+
+/**
  * The validated draft, an authorization re-check, rendering, and the actual write -- shared by
  * both callers below so neither re-implements any of it.
  *
@@ -290,60 +342,85 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
       return { ok: false, reason: "content hash mismatch" };
     }
 
-    // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
-    // human has approved it, so this only guards against a value nothing in this codebase
-    // writes today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
-    const publishableOutcomes: (typeof verdict.outcome.enumValues)[number][] = [
-      "ANALYSIS_ONLY",
-      "REPRODUCED",
-      "NOT_REPRODUCED",
-    ];
-    if (!publishableOutcomes.includes(verdictRow.outcome)) {
-      return { ok: false, reason: "verdict outcome is not publishable" };
-    }
-
-    const [reportRow] = await tx
-      .select({ channel: report.channel, sourceRef: report.sourceRef })
-      .from(report)
-      .where(eq(report.id, verdictRow.reportId))
-      .limit(1);
-
-    if (!reportRow) return { ok: false, reason: "report not found" };
-    if (reportRow.channel !== "github") {
-      return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
-    }
-    if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
-      return { ok: false, reason: "invalid GitHub delivery target" };
-    }
-
-    await enqueueDelivery(
-      {
-        reportId: verdictRow.reportId,
-        verdictId: verdictRow.id,
-        idempotencyKey: `verdict:${verdictRow.id}`,
-        target: reportRow.sourceRef,
-        // The hash this write commits to is the one just verified above, not a second,
-        // unverified read of the same column: a `verdict` row is immutable, so the two should
-        // always agree, but the outbox must never bind to a value this handler didn't itself
-        // check the moment before enqueueing.
-        approvedContentHash: recomputedHash,
-      },
-      tx,
-    );
-
-    await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
-
-    await tx
-      .update(agentSession)
-      .set({
-        pendingThreadId: null,
-        pendingToolCallId: null,
-        pendingVerdictId: null,
-        pendingApprovedContentHash: null,
-        updatedAt: new Date(),
-      })
-      .where(eq(agentSession.id, session.id));
-
-    return { ok: true };
+    return enqueueApprovedVerdictDelivery(tx, session.id, verdictRow, recomputedHash);
   });
+}
+
+/**
+ * The shared tail that turns a proven human approval into a queued delivery: check the outcome
+ * is publishable, resolve the GitHub target, enqueue the outbound comment bound to the exact
+ * approved hash, move the report to DELIVERING, and clear the session's pending markers.
+ *
+ * Both callers reach here only after proving the approval: the agent path through
+ * `publishVerdict` (a recorded APPROVED decision plus three matching hashes), and the
+ * synthesized path through the approval-submission worker (the same decision and hash checks,
+ * minus the TrueForge round-trip a synthesized verdict has no call for). This function itself
+ * assumes that proof and never re-derives consent; it takes the verdict and the hash the caller
+ * already verified.
+ */
+export async function enqueueApprovedVerdictDelivery(
+  tx: Executor,
+  sessionId: string,
+  verdictRow: {
+    id: string;
+    reportId: string;
+    outcome: (typeof verdict.outcome.enumValues)[number];
+  },
+  approvedContentHash: string,
+): Promise<PublishVerdictResult> {
+  // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
+  // human has approved it, so this only guards against a value nothing in this codebase writes
+  // today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
+  const publishableOutcomes: (typeof verdict.outcome.enumValues)[number][] = [
+    "ANALYSIS_ONLY",
+    "REPRODUCED",
+    "NOT_REPRODUCED",
+  ];
+  if (!publishableOutcomes.includes(verdictRow.outcome)) {
+    return { ok: false, reason: "verdict outcome is not publishable" };
+  }
+
+  const [reportRow] = await tx
+    .select({ channel: report.channel, sourceRef: report.sourceRef })
+    .from(report)
+    .where(eq(report.id, verdictRow.reportId))
+    .limit(1);
+
+  if (!reportRow) return { ok: false, reason: "report not found" };
+  if (reportRow.channel !== "github") {
+    return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
+  }
+  if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
+    return { ok: false, reason: "invalid GitHub delivery target" };
+  }
+
+  await enqueueDelivery(
+    {
+      reportId: verdictRow.reportId,
+      verdictId: verdictRow.id,
+      idempotencyKey: `verdict:${verdictRow.id}`,
+      target: reportRow.sourceRef,
+      // The hash this write commits to is the one the caller just verified, not a second,
+      // unverified read of the same column: a `verdict` row is immutable, so the two should
+      // always agree, but the outbox must never bind to a value nobody checked the moment
+      // before enqueueing.
+      approvedContentHash,
+    },
+    tx,
+  );
+
+  await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
+
+  await tx
+    .update(agentSession)
+    .set({
+      pendingThreadId: null,
+      pendingToolCallId: null,
+      pendingVerdictId: null,
+      pendingApprovedContentHash: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(agentSession.id, sessionId));
+
+  return { ok: true };
 }
