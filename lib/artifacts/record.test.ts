@@ -87,6 +87,15 @@ test("the transcript carries the tool name and safe preview, never a raw secret"
   );
 });
 
+test("the transcript is deterministic, so a retry cannot diverge from the recorded hash", async () => {
+  const { reportId, verdictId } = await seedVerdictWithEvents();
+
+  const first = await record.buildTranscript(reportId, verdictId);
+  const second = await record.buildTranscript(reportId, verdictId);
+
+  assert.equal(first, second, "rebuilding the transcript must produce byte-identical output");
+});
+
 test("recordVerdictArtifacts writes one row per kind, unstored, content-addressed", async () => {
   const { reportId, verdictId, payload } = await seedVerdictWithEvents();
 

@@ -20,6 +20,14 @@ const BUCKET = "bountydesk-artifacts";
  * is useless by the time it leaves the reviewer's screen. */
 const SIGNED_URL_TTL_SECONDS = 300;
 
+/**
+ * Per-request timeout. Artifact recording is best-effort and runs on the publish path, so a
+ * Storage endpoint that is up but slow (or a socket that never answers) must not hold that path
+ * open: every request aborts here and the caller treats the abort as "not stored". Without it a
+ * stalled fetch has no deadline of its own.
+ */
+const REQUEST_TIMEOUT_MS = 8000;
+
 let warnedMissing = false;
 
 type StorageConfig = { baseUrl: string; key: string };
@@ -71,6 +79,7 @@ function ensureBucket(cfg: StorageConfig): Promise<boolean> {
         method: "POST",
         headers: { ...authHeaders(cfg.key), "Content-Type": "application/json" },
         body: JSON.stringify({ id: BUCKET, name: BUCKET, public: false }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       // 200 created; anything else is either "already exists" (fine) or a real failure the
       // upload below will surface on its own. Never throws either way.
@@ -113,6 +122,7 @@ export async function uploadArtifact(
           "x-upsert": "true",
         },
         body: bytes as BodyInit,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     );
     if (!res.ok) {
@@ -144,6 +154,7 @@ export async function createSignedUrl(path: string): Promise<string | null> {
         method: "POST",
         headers: { ...authHeaders(cfg.key), "Content-Type": "application/json" },
         body: JSON.stringify({ expiresIn: SIGNED_URL_TTL_SECONDS }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       },
     );
     if (!res.ok) {

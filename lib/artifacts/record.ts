@@ -42,12 +42,15 @@ export async function buildTranscript(reportId: string, verdictId: string): Prom
 
   const toolCalls = rows.filter((row) => row.type.startsWith("agent.tool_call:"));
 
+  // Deterministic on purpose: no wall-clock generation stamp. The tool calls carry their own
+  // timestamps, and the events are stable once the turn is done, so rebuilding the transcript on
+  // a retried draft produces byte-identical output. That is what keeps the uploaded bytes (which
+  // x-upsert would replace) matching the sha256 the append-only artifact row already recorded.
   const lines = [
     "# Investigation transcript",
     "",
     `Report: ${reportId}`,
     `Verdict: ${verdictId}`,
-    `Generated: ${new Date().toISOString()}`,
     "",
     "## Tool calls",
     "",
