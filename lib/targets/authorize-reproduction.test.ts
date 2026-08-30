@@ -60,6 +60,8 @@ test("a bound target with a matching recipe resolves everything from the DB row,
   assert.equal(result.snapshotId, "snapshot-1");
   assert.equal(result.appPort, 443, "https baseUrl with no explicit port defaults to 443");
   assert.equal(result.recipe.id, "juice-shop-sqli-search");
+  assert.equal(result.readinessPath, "/");
+  assert.equal(result.expectedBuildMarker, "1867b926c5f50e4e692dc9c8f61821413cebe0cd");
 });
 
 test("an unknown target profile id is refused, not treated as a caller-supplied target", async () => {
@@ -100,6 +102,26 @@ test("a profile whose config carries no usable app port has no approved oracle",
   } finally {
     await restoreProfile();
   }
+});
+
+test("a profile with no registry entry or stored provisioning is not deployable", async () => {
+  const [row] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: "unknown-target",
+      imageName: "ghcr.io/example/unknown-target",
+      imageDigest: `sha256:${"2".repeat(64)}`,
+      snapshotId: "snapshot-unknown",
+      config: { baseUrl: "http://localhost:8080" },
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  const result = await authorize.authorizeReproductionTarget({
+    targetProfileId: row.id,
+    recipeId: "juice-shop-sqli-search",
+  });
+
+  assert.deepEqual(result, { ok: false, reason: "COULD_NOT_DEPLOY" });
 });
 
 test("a recipe id that this target does not offer is refused, even for an otherwise-valid target", async () => {

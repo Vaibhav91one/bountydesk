@@ -18,16 +18,11 @@
  * comment. So getPortPreviewUrl is called fresh, by whoever actually needs the token, every time.
  */
 import { requireSecret } from "@/lib/env";
-import { EXPECTED_BUILD_MARKER, TAG_PINNED_SNAPSHOT_IMAGE_REF, isValidImageDigest } from "@/lib/targets/configure";
+import { isValidImageDigest } from "@/lib/targets/validation";
 import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox } from "./daytona";
 
 const DAYTONA_API = "https://app.daytona.io/api";
-
-/** Juice Shop's own start command (its package.json's `start` script). Backgrounded and
- * redirected so execute()'s own command timeout doesn't wait on a process that is meant to
- * keep running after this call returns. */
-const START_APP_COMMAND = "cd /juice-shop && (nohup node build/app >/tmp/bountydesk-app.log 2>&1 &)";
 
 /**
  * Ceiling on how long a fresh sandbox gets to boot before this gives up and reports
@@ -191,17 +186,22 @@ export async function getPortPreviewUrl(
 async function waitForAppReady(
   sandbox: Sandbox,
   port: number,
+  readinessPath: string,
+  startCommand: string | undefined,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
   throwIfAborted(signal);
-  const started = await execute(sandbox, START_APP_COMMAND, 10);
-  if (started.exitCode !== 0) {
-    throw new Error(`sandbox ${sandbox.id} app start failed: ${started.result.slice(0, 200)}`);
+  if (startCommand) {
+    const started = await execute(sandbox, startCommand, 10);
+    if (started.exitCode !== 0) {
+      throw new Error(`sandbox ${sandbox.id} app start failed: ${started.result.slice(0, 200)}`);
+    }
   }
 
   const deadline = Date.now() + timeoutMs;
-  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}/ 2>/dev/null || echo 000`;
+  const probePath = readinessPath.startsWith("/") ? readinessPath : `/${readinessPath}`;
+  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}${probePath} 2>/dev/null || echo 000`;
 
   while (Date.now() < deadline) {
     throwIfAborted(signal);
@@ -293,6 +293,10 @@ export type ProvisionAuthorization = {
   imageDigest: string;
   snapshotId: string;
   targetProfileId: string;
+  readinessPath: string;
+  expectedBuildMarker: string;
+  startCommand?: string;
+  snapshotImageRefOverride?: string;
   /** Only present when a reproduction recipe is driving this run; threaded onto the sandbox's
    * labels for audit, same as before this function existed on its own. The driver's turn-time
    * provisioning has no recipe and leaves this unset. */
@@ -353,7 +357,7 @@ export async function provisionTarget(
       // is the one tag createSandbox is allowed to accept in the digest's place. The
       // buildMarkerCheck call below is what makes that safe to do -- it must run, and it must
       // fail closed, every single time this override is exercised.
-      TAG_PINNED_SNAPSHOT_IMAGE_REF,
+      authorization.snapshotImageRefOverride,
     );
     throwIfAborted(opts?.signal);
     sandbox = await getSandbox(sandbox.id);
@@ -372,7 +376,7 @@ export async function provisionTarget(
     // assertSnapshotImage's control-plane check that createSandbox already ran above. This
     // reads a marker from the booted image before the target application starts, so a
     // mismatched tag-pinned snapshot cannot execute target code before being rejected.
-    const markerMatches = await buildMarkerCheck(sandbox, EXPECTED_BUILD_MARKER);
+    const markerMatches = await buildMarkerCheck(sandbox, authorization.expectedBuildMarker);
     throwIfAborted(opts?.signal);
     if (!markerMatches) {
       throw new Error(`sandbox ${sandbox.id} booted the wrong build`);
@@ -384,7 +388,14 @@ export async function provisionTarget(
   }
 
   try {
-    await waitForAppReady(sandbox, appPort, READINESS_TIMEOUT_MS, opts?.signal);
+    await waitForAppReady(
+      sandbox,
+      appPort,
+      authorization.readinessPath,
+      authorization.startCommand,
+      READINESS_TIMEOUT_MS,
+      opts?.signal,
+    );
   } catch (error) {
     await teardownSandbox(sandbox.id, opts?.signal?.aborted === true);
     rethrowIfAborted(error, opts?.signal);

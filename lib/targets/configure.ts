@@ -9,14 +9,19 @@ import {
   isNull,
   targetProfile,
 } from "@/lib/db";
+import {
+  DEFAULT_TARGET_NAME,
+  JUICE_SHOP_EXPECTED_BUILD_MARKER,
+  JUICE_SHOP_IMAGE_NAME,
+  JUICE_SHOP_PROFILE_NAME,
+  JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF,
+  targetDefinitionFor,
+  targetProfileConfig,
+  type TargetPin,
+} from "./registry";
+import { isValidImageDigest } from "./validation";
 
-const PROFILE_NAME = "juice-shop-v17.3.0";
-const CONFIG = {
-  baseUrl: "http://localhost:3000",
-  searchPath: "/rest/products/search",
-  canaryRegistrationPath: "/api/Users/",
-};
-const SCOPE_RULES = [{ allow: "localhost" }];
+export { isValidImageDigest, isValidSnapshotId } from "./validation";
 
 /**
  * The registry and image name the pinned target is built into. A fixed constant, since there
@@ -25,7 +30,7 @@ const SCOPE_RULES = [{ allow: "localhost" }];
  * match a code constant is a mismatch a caller can detect, where a value that exists only in
  * code cannot be checked against what a row actually holds.
  */
-export const IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop";
+export const IMAGE_NAME = JUICE_SHOP_IMAGE_NAME;
 
 /**
  * The tag Daytona's registered snapshot declares as its imageName, matching the `docker push`
@@ -37,7 +42,7 @@ export const IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop";
  * named tag createSandbox is allowed to accept in the digest's place, with buildMarkerCheck
  * re-verifying the image that actually booted immediately afterward, from inside the sandbox.
  */
-export const TAG_PINNED_SNAPSHOT_IMAGE_REF = `${IMAGE_NAME}:v17.3.0-bountydesk-sandbox`;
+export const TAG_PINNED_SNAPSHOT_IMAGE_REF = JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF;
 
 /**
  * The commit the Daytona target image is built from, baked into the image at a fixed path by
@@ -46,23 +51,7 @@ export const TAG_PINNED_SNAPSHOT_IMAGE_REF = `${IMAGE_NAME}:v17.3.0-bountydesk-s
  * SOURCE_COMMIT in .github/workflows/build-daytona-target.yml; keep both in sync if the target
  * is ever rebuilt from a different commit.
  */
-export const EXPECTED_BUILD_MARKER = "1867b926c5f50e4e692dc9c8f61821413cebe0cd";
-
-const IMAGE_DIGEST_RE = /^sha256:[0-9a-f]{64}$/;
-/**
- * Same character class createSandbox already accepts for a snapshot identifier. An env.example
- * placeholder like "<immutable-daytona-snapshot-id>" fails this on its own, since angle
- * brackets are not in it, so no separate placeholder blocklist is needed.
- */
-const SNAPSHOT_ID_RE = /^[A-Za-z0-9._:@/-]{1,200}$/;
-
-export function isValidImageDigest(value: string): boolean {
-  return IMAGE_DIGEST_RE.test(value);
-}
-
-export function isValidSnapshotId(value: string): boolean {
-  return SNAPSHOT_ID_RE.test(value);
-}
+export const EXPECTED_BUILD_MARKER = JUICE_SHOP_EXPECTED_BUILD_MARKER;
 
 /**
  * Compose the digest-pinned reference a SandboxSpec's imageRef expects, from the one piece
@@ -70,18 +59,19 @@ export function isValidSnapshotId(value: string): boolean {
  * caller with an invalid digest has a bug worth surfacing at the seam, not three frames later
  * inside assertSafeSpec.
  */
-export function imageRefFor(imageDigest: string): string {
+export function imageRefFor(imageDigest: string, imageName = IMAGE_NAME): string {
   if (!isValidImageDigest(imageDigest)) {
     throw new Error(`not a valid image digest: ${imageDigest}`);
   }
-  return `${IMAGE_NAME}@${imageDigest}`;
+  return `${imageName}@${imageDigest}`;
 }
 
-export type ConfigureJuiceShopTargetInput = {
+export type ConfigureTargetInput = TargetPin & {
   repoId: number;
-  imageDigest: string;
-  snapshotId: string | null;
+  targetName?: string;
 };
+
+export type ConfigureJuiceShopTargetInput = Omit<ConfigureTargetInput, "targetName">;
 
 export type ConfiguredTarget = {
   repositoryId: string;
@@ -93,16 +83,23 @@ export type ConfiguredTarget = {
 export async function configureJuiceShopTarget(
   input: ConfigureJuiceShopTargetInput,
 ): Promise<ConfiguredTarget> {
+  return configureTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME });
+}
+
+export async function configureTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
+  const definition = requireTargetDefinition(input.targetName ?? DEFAULT_TARGET_NAME);
+  const config = targetProfileConfig(definition, input);
+
   return db.transaction(async (tx) => {
     const [inserted] = await tx
       .insert(targetProfile)
       .values({
-        name: PROFILE_NAME,
-        imageName: IMAGE_NAME,
+        name: definition.name,
+        imageName: definition.imageName,
         imageDigest: input.imageDigest,
         snapshotId: input.snapshotId,
-        config: CONFIG,
-        scopeRules: SCOPE_RULES,
+        config,
+        scopeRules: definition.scopeRules,
       })
       .onConflictDoNothing({ target: targetProfile.name })
       .returning();
@@ -112,19 +109,19 @@ export async function configureJuiceShopTarget(
       : await tx
           .select()
           .from(targetProfile)
-          .where(eq(targetProfile.name, PROFILE_NAME))
+          .where(eq(targetProfile.name, definition.name))
           .limit(1)
           .for("update");
 
-    if (!target) throw new Error(`could not create or find ${PROFILE_NAME}`);
+    if (!target) throw new Error(`could not create or find ${definition.name}`);
     if (
-      target.imageName !== IMAGE_NAME ||
+      target.imageName !== definition.imageName ||
       target.imageDigest !== input.imageDigest ||
       target.snapshotId !== input.snapshotId ||
-      !isDeepStrictEqual(target.config, CONFIG) ||
-      !isDeepStrictEqual(target.scopeRules, SCOPE_RULES)
+      !isDeepStrictEqual(target.config, config) ||
+      !isDeepStrictEqual(target.scopeRules, definition.scopeRules)
     ) {
-      throw new Error(`${PROFILE_NAME} exists with different pinned target settings`);
+      throw new Error(`${definition.name} exists with different pinned target settings`);
     }
 
     const [repository] = await tx
@@ -186,22 +183,29 @@ export async function configureJuiceShopTarget(
 export async function rotateJuiceShopTarget(
   input: ConfigureJuiceShopTargetInput,
 ): Promise<ConfiguredTarget> {
+  return rotateTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME });
+}
+
+export async function rotateTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
+  const definition = requireTargetDefinition(input.targetName ?? DEFAULT_TARGET_NAME);
+  const config = targetProfileConfig(definition, input);
+
   return db.transaction(async (tx) => {
     const [target] = await tx
       .update(targetProfile)
       .set({
-        imageName: IMAGE_NAME,
+        imageName: definition.imageName,
         imageDigest: input.imageDigest,
         snapshotId: input.snapshotId,
-        config: CONFIG,
-        scopeRules: SCOPE_RULES,
+        config,
+        scopeRules: definition.scopeRules,
         updatedAt: new Date(),
       })
-      .where(eq(targetProfile.name, PROFILE_NAME))
+      .where(eq(targetProfile.name, definition.name))
       .returning();
 
     if (!target) {
-      throw new Error(`${PROFILE_NAME} does not exist yet; nothing to rotate`);
+      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
     }
 
     const [repository] = await tx
@@ -239,4 +243,10 @@ export async function rotateJuiceShopTarget(
       targetProfileName: target.name,
     };
   });
+}
+
+function requireTargetDefinition(targetName: string) {
+  const definition = targetDefinitionFor(targetName);
+  if (!definition) throw new Error(`unknown target profile ${targetName}`);
+  return definition;
 }

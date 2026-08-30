@@ -85,6 +85,31 @@ test("configuring the same repository twice reuses the pinned target profile", a
   );
 });
 
+test("configuring a selected target profile writes an independent profile row", async () => {
+  await connectedRepo(700_007, "acme/webgoat");
+
+  const configured = await targets.configureTarget({
+    repoId: 700_007,
+    targetName: "webgoat",
+    imageDigest: `sha256:${"3".repeat(64)}`,
+    snapshotId: "snapshot-webgoat",
+    buildMarker: "webgoat-build-1",
+  });
+
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, configured.targetProfileId));
+
+  assert.equal(row.name, "webgoat");
+  assert.equal(row.imageName, "ghcr.io/vaibhav91one/webgoat");
+  assert.equal((row.config as { baseUrl?: unknown }).baseUrl, "http://localhost:8080");
+  assert.deepEqual((row.config as { provisioning?: unknown }).provisioning, {
+    readinessPath: "/WebGoat",
+    expectedBuildMarker: "webgoat-build-1",
+  });
+});
+
 test("rotating an existing profile updates it in place, keeping its id", async () => {
   await connectedRepo(700_005, "acme/rotated");
   const first = await targets.configureJuiceShopTarget({

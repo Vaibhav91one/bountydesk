@@ -103,6 +103,46 @@ test("a reviewer can configure an active repository", async () => {
   assert.ok(await boundTarget(repoId), "the repository is bound to a target");
 });
 
+test("a reviewer can configure a selected target profile", async () => {
+  const repoId = await repo();
+  process.env.BOUNTYDESK_TARGET_WEBGOAT_IMAGE_DIGEST = `sha256:${"4".repeat(64)}`;
+  process.env.BOUNTYDESK_TARGET_WEBGOAT_SNAPSHOT_ID = "snapshot-webgoat";
+  process.env.BOUNTYDESK_TARGET_WEBGOAT_BUILD_MARKER = "webgoat-build-1";
+
+  const result = await configure.configureRepositoryRequest(
+    session(REVIEWER_ID),
+    repoId,
+    "webgoat",
+  );
+
+  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_IMAGE_DIGEST;
+  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_SNAPSHOT_ID;
+  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_BUILD_MARKER;
+
+  assert.equal(result.ok, true);
+  const targetProfileId = await boundTarget(repoId);
+  assert.ok(targetProfileId, "the repository is bound to the selected target");
+  const [row] = await dbm.db
+    .select({ name: dbm.targetProfile.name })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, targetProfileId));
+  assert.equal(row.name, "webgoat");
+});
+
+test("an unknown selected target profile is refused before touching the database", async () => {
+  const repoId = await repo();
+
+  const result = await configure.configureRepositoryRequest(
+    session(REVIEWER_ID),
+    repoId,
+    "unknown-target",
+  );
+
+  assert.equal(result.ok, false);
+  assert.match((result as { error: string }).error, /not registered/);
+  assert.equal(await boundTarget(repoId), null);
+});
+
 test("a repository the installation no longer grants is refused", async () => {
   const repoId = await repo({ active: false });
 

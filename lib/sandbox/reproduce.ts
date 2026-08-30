@@ -295,6 +295,14 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
           imageDigest: authorization.imageDigest,
           snapshotId: authorization.snapshotId,
           targetProfileId: input.targetProfileId,
+          readinessPath: authorization.readinessPath,
+          expectedBuildMarker: authorization.expectedBuildMarker,
+          ...(authorization.startCommand
+            ? { startCommand: authorization.startCommand }
+            : {}),
+          ...(authorization.snapshotImageRefOverride
+            ? { snapshotImageRefOverride: authorization.snapshotImageRefOverride }
+            : {}),
           recipeId,
         },
         authorization.appPort,

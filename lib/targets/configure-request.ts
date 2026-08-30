@@ -1,7 +1,18 @@
 import { isReviewer } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 
-import { configureJuiceShopTarget, isValidImageDigest, isValidSnapshotId, rotateJuiceShopTarget } from "./configure";
+import {
+  configureTarget,
+  isValidImageDigest,
+  isValidSnapshotId,
+  rotateTarget,
+} from "./configure";
+import {
+  DEFAULT_TARGET_NAME,
+  envNameForTarget,
+  targetDefinitionFor,
+  type TargetPin,
+} from "./registry";
 
 export type ConfigureResult = { ok: true } | { ok: false; error: string };
 
@@ -13,8 +24,9 @@ export type ConfigureResult = { ok: true } | { ok: false; error: string };
 function authorizeTargetRequest(
   session: Session | null,
   rawRepoId: unknown,
+  rawTargetName: unknown = DEFAULT_TARGET_NAME,
 ):
-  | { ok: true; repoId: number; imageDigest: string; snapshotId: string }
+  | ({ ok: true; repoId: number; targetName: string } & TargetPin)
   | { ok: false; error: string } {
   if (!session || !isReviewer(session.userId)) {
     return { ok: false, error: "You are not signed in as a reviewer." };
@@ -25,14 +37,32 @@ function authorizeTargetRequest(
     return { ok: false, error: "That repository id is not valid." };
   }
 
+  const targetName = typeof rawTargetName === "string" && rawTargetName.length > 0
+    ? rawTargetName
+    : DEFAULT_TARGET_NAME;
+  const targetDefinition = targetDefinitionFor(targetName);
+  if (!targetDefinition) {
+    return { ok: false, error: "That target profile is not registered." };
+  }
+
   // Both must come from an operator who has actually built and verified the connected fork.
   // Falling back to a bundled digest when they are unset would silently bind every repository
   // to whatever that fallback happened to be, which is exactly the artifact this profile is
   // supposed to pin against.
-  const imageDigest = process.env.DAYTONA_TARGET_IMAGE_DIGEST;
-  const snapshotId = process.env.DAYTONA_TARGET_SNAPSHOT_ID;
+  const targetImageDigestEnv = envNameForTarget(targetDefinition, "IMAGE_DIGEST");
+  const targetSnapshotIdEnv = envNameForTarget(targetDefinition, "SNAPSHOT_ID");
+  const imageDigest =
+    process.env[targetImageDigestEnv] ??
+    (targetName === DEFAULT_TARGET_NAME ? process.env.DAYTONA_TARGET_IMAGE_DIGEST : undefined);
+  const snapshotId =
+    process.env[targetSnapshotIdEnv] ??
+    (targetName === DEFAULT_TARGET_NAME ? process.env.DAYTONA_TARGET_SNAPSHOT_ID : undefined);
   if (!imageDigest || !snapshotId) {
-    return { ok: false, error: "The connected-fork target is not configured yet. Set DAYTONA_TARGET_IMAGE_DIGEST and DAYTONA_TARGET_SNAPSHOT_ID first." };
+    return {
+      ok: false,
+      error:
+        `The ${targetName} target is not configured yet. Set ${targetImageDigestEnv} and ${targetSnapshotIdEnv} first.`,
+    };
   }
 
   // A nonempty string is not a built artifact. env.example ships both names set to explicit
@@ -41,11 +71,24 @@ function authorizeTargetRequest(
   if (!isValidImageDigest(imageDigest) || !isValidSnapshotId(snapshotId)) {
     return {
       ok: false,
-      error: "DAYTONA_TARGET_IMAGE_DIGEST or DAYTONA_TARGET_SNAPSHOT_ID is still a placeholder or malformed. DAYTONA_TARGET_IMAGE_DIGEST must be sha256: followed by 64 hex characters, and DAYTONA_TARGET_SNAPSHOT_ID must be a real Daytona snapshot identifier.",
+      error:
+        `${targetImageDigestEnv} or ${targetSnapshotIdEnv} is still a placeholder or malformed. ${targetImageDigestEnv} must be sha256: followed by 64 hex characters, and ${targetSnapshotIdEnv} must be a real Daytona snapshot identifier.`,
     };
   }
 
-  return { ok: true, repoId, imageDigest, snapshotId };
+  const buildMarker = process.env[envNameForTarget(targetDefinition, "BUILD_MARKER")];
+  const snapshotImageRefOverride =
+    process.env[envNameForTarget(targetDefinition, "SNAPSHOT_IMAGE_REF")];
+
+  return {
+    ok: true,
+    repoId,
+    targetName,
+    imageDigest,
+    snapshotId,
+    ...(buildMarker ? { buildMarker } : {}),
+    ...(snapshotImageRefOverride ? { snapshotImageRefOverride } : {}),
+  };
 }
 
 /**
@@ -63,12 +106,13 @@ function authorizeTargetRequest(
 export async function configureRepositoryRequest(
   session: Session | null,
   rawRepoId: unknown,
+  rawTargetName?: unknown,
 ): Promise<ConfigureResult> {
-  const authorized = authorizeTargetRequest(session, rawRepoId);
+  const authorized = authorizeTargetRequest(session, rawRepoId, rawTargetName);
   if (!authorized.ok) return authorized;
 
   try {
-    await configureJuiceShopTarget(authorized);
+    await configureTarget(authorized);
   } catch (error) {
     return { ok: false, error: safeMessage(error) };
   }
@@ -87,12 +131,13 @@ export async function configureRepositoryRequest(
 export async function rotateRepositoryTargetRequest(
   session: Session | null,
   rawRepoId: unknown,
+  rawTargetName?: unknown,
 ): Promise<ConfigureResult> {
-  const authorized = authorizeTargetRequest(session, rawRepoId);
+  const authorized = authorizeTargetRequest(session, rawRepoId, rawTargetName);
   if (!authorized.ok) return authorized;
 
   try {
-    await rotateJuiceShopTarget(authorized);
+    await rotateTarget(authorized);
   } catch (error) {
     return { ok: false, error: safeMessage(error) };
   }
@@ -119,6 +164,10 @@ function safeMessage(error: unknown): string {
 
   if (/does not exist yet; nothing to rotate/.test(message)) {
     return "There is no existing target profile to rotate. Configure one first.";
+  }
+
+  if (/has no expected build marker/.test(message)) {
+    return "That target profile is missing its expected build marker. Set the target build marker before configuring it.";
   }
 
   console.error("configureRepositoryRequest failed", error);
