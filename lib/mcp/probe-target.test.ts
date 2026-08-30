@@ -2,6 +2,11 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+// getPortPreviewUrl reads this through requireSecret before it ever reaches the stubbed
+// fetch below; CI and a bare checkout have no real key, so this must be set here rather than
+// assumed from the environment, same as reproduce.test.ts's own DAYTONA_API_KEY line.
+process.env.DAYTONA_API_KEY = "dtn_test_key_not_a_real_one";
+
 /**
  * Real Postgres for the same reason publish-verdict.test.ts uses one: the capability lookup
  * this tool relies on is a real unique index, not something a mock could quietly disagree with.
