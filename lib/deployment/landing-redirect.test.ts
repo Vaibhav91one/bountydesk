@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { SOURCE_URL, shouldRedirectToSource } from "./landing-redirect";
+import {
+  SOURCE_URL,
+  landingRedirectEnabled,
+  shouldRedirectToSource,
+} from "./landing-redirect";
+
+test("enables the landing redirect only for Vercel or an explicit override", () => {
+  assert.equal(landingRedirectEnabled({}), false);
+  assert.equal(landingRedirectEnabled({ VERCEL: "1" }), true);
+  assert.equal(landingRedirectEnabled({ BOUNTYDESK_LANDING_REDIRECT: "1" }), true);
+});
 
 test("keeps the landing page and its assets on Vercel", () => {
   for (const pathname of [
