@@ -458,6 +458,15 @@ export const agentSession = pgTable(
     appPort: integer("app_port"),
     /** Local bookkeeping only, never a report state: RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
     turnStatus: text("turn_status").notNull().default("RUNNING"),
+    /**
+     * The id of the newest TrueForge turn event the poller has already mirrored into
+     * session_event (see lib/agent-sessions/poller.ts's mirrorToolCalls). Event ids are
+     * monotonic ULIDs, so "newer than this" is a plain string comparison. Lets a poll ask
+     * TrueForge for only the events since the last one it processed instead of walking the
+     * turn's entire history every tick; session_event's own unique event_key stays the
+     * correctness backstop if this cursor ever lags a retry.
+     */
+    lastMirroredEventId: text("last_mirrored_event_id"),
     pendingThreadId: text("pending_thread_id"),
     pendingToolCallId: text("pending_tool_call_id"),
     pendingVerdictId: uuid("pending_verdict_id").references(() => verdict.id),

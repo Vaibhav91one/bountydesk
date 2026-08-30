@@ -45,6 +45,7 @@ export type AgentSessionLease = {
    * any -- carried on the lease so the poller's terminal paths (lib/agent-sessions/poller.ts)
    * can tear it down without a second query. */
   sandboxId: string | null;
+  lastMirroredEventId: string | null;
   fence: number;
   leaseOwner: string;
 };
@@ -84,6 +85,7 @@ export async function claim(
     pending_verdict_id: string | null;
     pending_approved_content_hash: string | null;
     sandbox_id: string | null;
+    last_mirrored_event_id: string | null;
     fence: string | number;
   }>(sql`
     update ${agentSession}
@@ -113,6 +115,7 @@ export async function claim(
               ${agentSession.pendingVerdictId}              as pending_verdict_id,
               ${agentSession.pendingApprovedContentHash}    as pending_approved_content_hash,
               ${agentSession.sandboxId}                     as sandbox_id,
+              ${agentSession.lastMirroredEventId}           as last_mirrored_event_id,
               ${agentSession.fence}                         as fence
   `);
 
@@ -131,6 +134,7 @@ export async function claim(
     pendingVerdictId: row.pending_verdict_id,
     pendingApprovedContentHash: row.pending_approved_content_hash,
     sandboxId: row.sandbox_id,
+    lastMirroredEventId: row.last_mirrored_event_id,
     fence: Number(row.fence),
     leaseOwner: owner,
   };
@@ -164,12 +168,33 @@ export async function renew(lease: AgentSessionLease, leaseSeconds: number): Pro
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
+/**
+ * Advance the turn-event mirroring cursor without touching the lease itself. A separate call
+ * from `release()` on purpose: it runs right after mirroring, while the poll is still deciding
+ * what the turn's status means, so a mirroring failure never has to unwind a lease release that
+ * already happened, and a release later in the same poll still finds an active lease to fence
+ * against.
+ */
+export async function markMirrored(
+  lease: AgentSessionLease,
+  lastMirroredEventId: string,
+): Promise<void> {
+  const updated = await db
+    .update(agentSession)
+    .set({ lastMirroredEventId, updatedAt: new Date() })
+    .where(heldBy(lease))
+    .returning({ id: agentSession.id });
+
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 export type AgentSessionReleaseUpdate = {
   turnStatus?: TurnStatus;
   pendingThreadId?: string | null;
   pendingToolCallId?: string | null;
   pendingVerdictId?: string | null;
   pendingApprovedContentHash?: string | null;
+  lastMirroredEventId?: string | null;
   nextPollAt?: Date;
   lastError?: string | null;
 };

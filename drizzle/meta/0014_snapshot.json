@@ -1,6 +1,6 @@
 {
-  "id": "46af527f-e3d5-4d77-996e-62a2a4c71f55",
-  "prevId": "539147ec-62ec-4851-9fed-60662a3e790f",
+  "id": "8cced043-0584-4d95-9d2c-290fcc5b10c8",
+  "prevId": "46af527f-e3d5-4d77-996e-62a2a4c71f55",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -36,6 +36,18 @@
         "turn_id": {
           "name": "turn_id",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sandbox_id": {
+          "name": "sandbox_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "app_port": {
+          "name": "app_port",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },

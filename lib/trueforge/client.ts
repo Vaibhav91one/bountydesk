@@ -34,7 +34,32 @@ export interface TrueForgeClient {
     input: TurnInput[],
     opts?: { signal?: AbortSignal },
   ): Promise<{ turnId: string } | null>;
+  /**
+   * Tool calls the turn has made since `opts.since`, in chronological order. Unlike
+   * `PendingToolCall`, this is not limited to a call still awaiting approval: it is the
+   * poller's only way to see what the agent has actually done mid-investigation, for mirroring
+   * into `session_event` (see lib/agent-sessions/poller.ts). `since` is an event id from a
+   * previous call's `cursor`; omitted, every call the turn has made so far comes back. Walks
+   * the turn's events newest-first and stops at the first one at or before `since`, so a poll
+   * that is only a few tool calls ahead of the last one doesn't re-read the turn's whole
+   * history to find them. `cursor` is the newest event id observed this call (`since` unchanged
+   * when nothing new was found), for the caller to persist and pass back next time. Optional so
+   * a fake client built only to exercise the approval path doesn't have to implement it.
+   */
+  listToolCalls?(
+    sessionId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal; since?: string },
+  ): Promise<{ calls: ObservedToolCall[]; cursor: string | null }>;
 }
+
+export type ObservedToolCall = {
+  /** The tool call's own id, stable across repeated polls of the same turn -- the dedup key
+   * the poller mirrors events on. */
+  id: string;
+  toolName: string;
+  argumentsJson: string;
+};
 
 export type TurnInput =
   | { type: "user.message"; content: string }
@@ -233,7 +258,47 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
       }
       return null;
     },
+
+    async listToolCalls(sessionId, turnId, requestOpts) {
+      // Newest first, and stop at `since`: event ids are monotonic ULIDs, so everything at or
+      // before the last-seen id is history the caller already has. Without this a poll near
+      // the end of a long turn would walk every page back to the turn's start just to find the
+      // handful of tool calls made since the previous poll.
+      const page = await client.sessions.listTurnEvents(
+        sessionId,
+        turnId,
+        { order: "desc" },
+        { abortSignal: requestOpts?.signal },
+      );
+      return collectToolCalls(page, requestOpts?.since);
+    },
   };
+}
+
+/**
+ * Every `model.message` event's tool calls newer than `since`, walking `events` newest-first
+ * and returning them back in chronological order. `cursor` is the newest event id seen (or
+ * `since` unchanged if the walk found nothing past it), for the caller to persist.
+ */
+async function collectToolCalls(
+  events: AsyncIterable<TrueForgeApi.SessionEvent>,
+  since?: string,
+): Promise<{ calls: ObservedToolCall[]; cursor: string | null }> {
+  const calls: ObservedToolCall[] = [];
+  let cursor: string | null = since ?? null;
+
+  for await (const event of events) {
+    if (since !== undefined && event.id <= since) break;
+    if (cursor === null || event.id > cursor) cursor = event.id;
+
+    if (event.type !== "model.message") continue;
+    for (const call of event.toolCalls ?? []) {
+      calls.push({ id: call.id, toolName: call.function.name, argumentsJson: call.function.arguments });
+    }
+  }
+
+  calls.reverse();
+  return { calls, cursor };
 }
 
 async function snapshotFromTurn(

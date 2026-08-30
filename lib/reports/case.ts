@@ -70,6 +70,10 @@ export type CaseFile = {
   state: ReportState;
   createdAt: Date;
   updatedAt: Date;
+  /** Local agent-session bookkeeping, never a report state (see lib/db/schema.ts on
+   * agentSession): RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION |
+   * ERROR | CANCELLED. Null when no session exists yet for this report. */
+  turnStatus: string | null;
   target: { name: string; imageDigest: string } | null;
   verdict: CaseVerdict | null;
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
@@ -78,6 +82,31 @@ export type CaseFile = {
   awaitingVerdictId: string | null;
   events: CaseEvent[];
 };
+
+/**
+ * Whether the agent is actively working this report right now.
+ *
+ * Requires all three: its harness turn is live (`RUNNING` or `INVESTIGATING`), it has at least
+ * one mirrored `agent.tool_call:*` event (lib/agent-sessions/poller.ts), and no verdict has
+ * been drafted yet. The live path mints a verdict only once the agent calls `publish_verdict`,
+ * the last thing it does in its turn (see lib/mcp/publish-verdict.ts), so a verdict already
+ * existing means whatever the turn status still says is stale or about to be.
+ *
+ * The tool-call requirement is deliberate, not incidental: a turn sits in `RUNNING` from the
+ * instant the driver calls `createTurn`, before the agent has done anything at all, and a
+ * report claiming to be "under investigation" with zero observed activity would be a stronger
+ * claim than the evidence supports -- the same fail-closed standard `oracleDecided` and
+ * `verdictFindings` already hold this page to. This is also the single definition the board
+ * badge, the case-file badge, and the case-file's "Investigation" lifecycle step all read, so
+ * the three surfaces can never disagree with each other about whether a run is live.
+ */
+export function isAgentInvestigating(
+  turnStatus: string | null,
+  hasVerdict: boolean,
+  hasToolCallEvents: boolean,
+): boolean {
+  return !hasVerdict && hasToolCallEvents && (turnStatus === "RUNNING" || turnStatus === "INVESTIGATING");
+}
 
 /**
  * Whether a canary oracle, not just the agent's own reasoning, decided this verdict.
@@ -182,6 +211,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .select({
           pendingVerdictId: agentSession.pendingVerdictId,
           pendingThreadId: agentSession.pendingThreadId,
+          turnStatus: agentSession.turnStatus,
         })
         .from(agentSession)
         .where(eq(agentSession.reportId, id));
@@ -297,6 +327,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
 
       return {
         ...row,
+        turnStatus: session?.turnStatus ?? null,
         sourceLabel: caseSourceLabel(row.sourceRef, row.id),
         issueNumber: issue,
         issueUrl:
