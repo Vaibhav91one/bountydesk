@@ -4,6 +4,7 @@ import type {
   ReproductionRecipe,
   ReproductionRequest,
 } from "@/lib/reproduction/types";
+import { additionalRecipesForTarget } from "./recipes.additional";
 
 /**
  * Reproduction scenarios from docs/decisions.md Q18, against the one pinned Juice Shop target.
@@ -239,7 +240,11 @@ function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
 }
 
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
-  if (target.name !== "juice-shop-v17.3.0") return [];
-  if (!isJuiceShopConfig(target.config)) return [];
-  return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config)];
+  if (target.name === "juice-shop-v17.3.0") {
+    if (!isJuiceShopConfig(target.config)) return [];
+    return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config)];
+  }
+  // Every other onboarding target dispatches through its own module, so juice-shop's frozen
+  // recipes above stay untouched. See lib/targets/recipes.additional.ts.
+  return additionalRecipesForTarget(target);
 };
