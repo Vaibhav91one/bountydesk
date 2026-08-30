@@ -111,6 +111,27 @@ merged and not run live: it required extending `ReproductionRecipe` with an opti
 that Juice Shop correctly answers with 401. Until that PR lands and is proven the same way,
 this scenario stays "implemented," not "reproduced."
 
+### Agent-authored investigation succeeds the deterministic recipe path
+
+The reproduction driver no longer decides an outcome before the agent's turn runs.
+`trueforge-driver.ts` describes the report and the bound target, then asks the TrueForge agent
+to investigate with scope-guard, a sandbox, skills and subagents and to draft its own outcome,
+summary and findings through `publish_verdict`. The same authorisation check the old pipeline
+ran up front now runs again just before a drafted `REPRODUCED` or `NOT_REPRODUCED` becomes a
+verdict row: no bound target or a revoked repository grant still means no reproduced verdict,
+whatever the agent claims.
+
+The deterministic recipe pipeline that produced the live 2026-08-29 result above
+(`lib/sandbox/reproduce.ts`, `lib/reproduction/decide.ts`, the fixture/negative-control/oracle
+contract from Q18/Q20) is retained, not deleted, and currently unwired: nothing on the live path
+calls it. Exposing `reproduce()` as an optional MCP tool the agent can call mid-turn, so a
+finding can carry the canary oracle's stronger evidence instead of only the agent's own read of
+a request/response pair, is a later, separate PR.
+
+**Status:** the code for the agent-authored path is merged. It has not yet been proven with a
+real live run producing an agent-drafted verdict; the 2026-08-29 live proof above predates this
+change and used the deterministic pipeline.
+
 ## Phase 5: Human approval and idempotent delivery
 
 **Status:** complete, including the persistent deployment runner.

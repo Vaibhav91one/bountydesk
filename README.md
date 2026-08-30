@@ -6,12 +6,20 @@ Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs
 
 > **Status: in progress.** Built and proven live against the pinned Juice Shop target: the
 > Postgres schema and durable jobs queue, signed GitHub App webhook intake with installation
-> and repository lifecycle handling, GitHub OAuth login behind a reviewer allowlist, the
-> sandboxed reproduction driver with its canary oracle, the human approval gate on `/review`,
-> and idempotent comment delivery. A real GitHub issue was matched to the SQLi scenario, run
-> against a real Daytona sandbox, approved by a reviewer, and delivered as a real comment
+> and repository lifecycle handling, GitHub OAuth login behind a reviewer allowlist, the human
+> approval gate on `/review`, and idempotent comment delivery. A real GitHub issue was matched
+> to the SQLi scenario, run against a real Daytona sandbox with the deterministic canary
+> pipeline, approved by a reviewer, and delivered as a real comment
 > ([Vaibhav91one/juice-shop#5](https://github.com/Vaibhav91one/juice-shop/issues/5)); replaying
-> the same webhook delivery produced no second report or comment. The second frozen scenario,
+> the same webhook delivery produced no second report or comment.
+>
+> Reproduction has since moved to an agent-authored model: the TrueForge agent now investigates
+> a report itself, using scope-guard, a sandbox, skills and subagents against its authorised
+> target, and drafts its own outcome, summary and findings for `publish_verdict`. A human still
+> has to approve the exact drafted text before anything is delivered. This code is merged but
+> not yet proven with a real live run producing an agent-drafted verdict; the SQLi proof above
+> predates the change and used the deterministic pipeline, which is retained as an optional,
+> stronger-evidence tool for a later PR rather than the live path. The second frozen scenario,
 > login bypass, has its recipe and oracle implemented but not yet run live. Not built: email
 > and file-upload intake, and the dynamic per-repository target tier. The operator UI is in
 > progress separately. Nothing below describes behaviour that runs today unless this paragraph
@@ -28,8 +36,19 @@ triaged and stops at an evidence packet for a human.
 The demo target is the owner's connected fork of Juice Shop at commit `1867b926`, the
 `v17.3.0` tag, which matches upstream. It is built and pinned to an immutable digest and
 snapshot ahead of any run, so live reproduction boots that snapshot with no network. The SQLi
-scenario has passed against it live, end to end; the login-bypass scenario is implemented but
-not yet run against it.
+scenario has passed against it live, end to end, and the login-bypass scenario is implemented
+but not yet run against it.
+
+Reproduction against a bound target is now an investigation the TrueForge agent runs itself,
+not a pipeline that hands it a finished answer. The agent uses scope-guard, a sandbox, skills
+and subagents against the authorised target, then drafts its own outcome, summary and findings
+and calls `publish_verdict`. The capability boundary still decides which target and which tool
+authorisations the agent can reach: a claimed reproduced or not-reproduced outcome for a report
+with no bound target, or one whose repository grant has been revoked, is refused before it ever
+becomes a verdict, whatever the agent asserts. What the boundary no longer decides is the
+outcome itself. The canary/fixture/negative-control pipeline that produced the SQLi proof above
+is retained rather than removed, kept as a strictly stronger evidence source for a later PR that
+would let the agent call it mid-investigation; today's live path does not call it.
 
 The dynamic tier has the controller download a connected public repository at a
 server-resolved commit and stage the hashed archive in a build sandbox. That sandbox gets
@@ -37,9 +56,8 @@ narrow dependency egress and no platform secrets. Reproduction uses the immutabl
 second sandbox with no external egress. The tier is accepted, unbuilt, and gated on a
 provisioning spike.
 
-What never changes: a target with no defender-authored fixture and oracle cannot return a
-reproduced verdict, whatever the proof-of-concept printed. It returns evidence and a human
-decides.
+What never changes: nothing is delivered to a reporter without a human approving the exact
+drafted verdict text.
 
 ## Getting started
 
