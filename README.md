@@ -1,15 +1,15 @@
 # BountyDesk
 
-Automated bug-bounty triage. A submitted report is authenticated, scope-checked, reproduced against a target the server pins, inside an isolated sandbox with a defender-authored **canary oracle**, and shipped as a verdict **only after a human approves the exact outbound comment**.
+Automated bug-bounty triage. A submitted report is authenticated, scope-checked, investigated against a target the server pins, and shipped as a verdict **only after a human approves the exact outbound comment**. The defender-authored **canary oracle** path remains the strongest evidence source where a target has a fixture.
 
 Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs × TrueFoundry × Qodo Agent Harness Hackathon.
 
 > **Status: in progress.** Built and proven live against the pinned Juice Shop target: the
 > Postgres schema and durable jobs queue, signed GitHub App webhook intake with installation
 > and repository lifecycle handling, GitHub OAuth login behind a reviewer allowlist, the human
-> approval gate on `/review`, and idempotent comment delivery. A real GitHub issue was matched
-> to the SQLi scenario, run against a real Daytona sandbox with the deterministic canary
-> pipeline, approved by a reviewer, and delivered as a real comment
+> approval gate, now surfaced through the board case file, and idempotent comment delivery. A
+> real GitHub issue was matched to the SQLi scenario, run against a real Daytona sandbox with
+> the deterministic canary pipeline, approved by a reviewer, and delivered as a real comment
 > ([Vaibhav91one/juice-shop#5](https://github.com/Vaibhav91one/juice-shop/issues/5)); replaying
 > the same webhook delivery produced no second report or comment.
 >
@@ -20,10 +20,11 @@ Built on the [TrueForge](https://trueforge.dev) agent harness for the WeMakeDevs
 > not yet proven with a real live run producing an agent-drafted verdict; the SQLi proof above
 > predates the change and used the deterministic pipeline, which is retained as an optional,
 > stronger-evidence tool for a later PR rather than the live path. The second frozen scenario,
-> login bypass, has its recipe and oracle implemented but not yet run live. Not built: email
-> and file-upload intake, and the dynamic per-repository target tier. The operator UI is in
-> progress separately. Nothing below describes behaviour that runs today unless this paragraph
-> says it does.
+> login bypass, has its recipe and oracle implemented but not yet run live. PR #55 added DVWA
+> and WebGoat self-boot demo skills for agent practice; they are not report-shaped live
+> BountyDesk targets. Not built: email and file-upload intake, and the dynamic
+> per-repository target tier. The operator UI is in progress separately. Nothing below
+> describes behaviour that runs today unless this paragraph says it does.
 
 
 ## Scope

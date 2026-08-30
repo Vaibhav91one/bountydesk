@@ -60,8 +60,9 @@ no automated genuine/fake claim.
 
 ## Phase 4: Reproduction against pinned and dynamic targets
 
-**Status:** the pinned-target path is complete and proven live for the SQLi scenario; the
-dynamic tier is not started.
+**Status:** the deterministic pinned-target path is proven live for the SQLi scenario; the
+current agent-authored path is merged but still needs its own live proof. The dynamic tier is
+not started.
 
 - Start with the provisioning spike. It gates everything else in this phase: prove that
   BountyDesk can provision the environment, that a `TargetProfile` selects the exact snapshot,
@@ -90,10 +91,11 @@ egress and teardown failure tests fail closed; a build that does not complete yi
 `COULD_NOT_BUILD` rather than `not-reproduced`; and a target without an approved fixture cannot
 emit `REPRODUCED` even when the PoC claims success.
 
-Confirmed live 2026-08-29 for the SQLi scenario, on the same daemon-driven path Phase 5
-describes: a real GitHub issue on `Vaibhav91one/juice-shop` matched the `juice-shop-sqli-search`
-recipe, ran fixture, negative control and exploit as direct HTTP calls against a real Daytona
-sandbox on the pinned, digest-verified snapshot, and produced a genuine `REPRODUCED` verdict
+Confirmed live 2026-08-29 for the SQLi scenario, using the deterministic canary pipeline on
+the same daemon-driven path Phase 5 describes: a real GitHub issue on
+`Vaibhav91one/juice-shop` matched the `juice-shop-sqli-search` recipe, ran fixture, negative
+control and exploit as direct HTTP calls against a real Daytona sandbox on the pinned,
+digest-verified snapshot, and produced a genuine `REPRODUCED` verdict
 (report `beabb524-1bd7-4651-a9b8-2363926b0a49`, verdict `7cbf3647-2b32-4582-9d43-9db49509aa4d`,
 canary hash `8210fef26e905810dfbef983ab86d55c4c961d51e59e9dc708e8d941309c9727`) with the negative
 control clean and `verifyNoEgress` confirming the sandbox's network policy before either leg
@@ -105,11 +107,11 @@ the shared dev database, and `verifyNoEgress`'s probe list included a hostname, 
 `networkBlockAll`'s DNS block turns into a hang rather than the expected `403` (see PR #36).
 
 The second frozen scenario, login bypass, has its recipe and two-step oracle contract
-(exploit response feeding an authenticated follow-up request) implemented in a PR, not yet
-merged and not run live: it required extending `ReproductionRecipe` with an optional
-`exploitFollowUp` step and widening `runLeg`'s accepted-status handling for a negative control
-that Juice Shop correctly answers with 401. Until that PR lands and is proven the same way,
-this scenario stays "implemented," not "reproduced."
+(exploit response feeding an authenticated follow-up request) implemented in current code. It
+required extending `ReproductionRecipe` with an optional `exploitFollowUp` step and widening
+`runLeg`'s accepted-status handling for a negative control that Juice Shop correctly answers
+with 401. It has not run live through BountyDesk, so this scenario stays "implemented," not
+"reproduced."
 
 ### Agent-authored investigation succeeds the deterministic recipe path
 
@@ -131,6 +133,12 @@ a request/response pair, is a later, separate PR.
 **Status:** the code for the agent-authored path is merged. It has not yet been proven with a
 real live run producing an agent-drafted verdict; the 2026-08-29 live proof above predates this
 change and used the deterministic pipeline.
+
+PR #55 added self-booting DVWA and WebGoat demo skills and a generic report-repo runner for
+agent practice. Those are not report-shaped live targets for BountyDesk. A real report still
+needs a server-bound `TargetProfile`, and no DVWA, WebGoat or CVE lab result should be counted
+as a live BountyDesk proof unless a later run records that target binding, approval and
+delivery evidence.
 
 ## Phase 5: Human approval and idempotent delivery
 
@@ -163,7 +171,8 @@ call but running continuously rather than once per request. The four tick routes
 as bounded, authenticated adapters for local and manual diagnostics; the daemon is what a
 Zerops-deployed worker service actually runs. See [`deployment.md`](deployment.md).
 
-Confirmed live 2026-08-29 with the daemon as the only driver: a real signed GitHub webhook
+Confirmed live 2026-08-29 with the daemon as the only driver, before the case file moved onto
+the board UI: a real signed GitHub webhook
 against a synthetic issue on the connected `Vaibhav91one/juice-shop` fork, a real target
 profile bound from a digest-pinned Daytona image, real reviewer GitHub OAuth sign-in, and a
 real Allow click on `/review`. The daemon alone carried the report from intake through
