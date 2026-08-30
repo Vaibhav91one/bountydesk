@@ -17,6 +17,7 @@ import {
   JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF,
   targetDefinitionFor,
   targetProfileConfig,
+  type TargetDefinition,
   type TargetPin,
 } from "./registry";
 import { isValidImageDigest } from "./validation";
@@ -69,9 +70,13 @@ export function imageRefFor(imageDigest: string, imageName = IMAGE_NAME): string
 export type ConfigureTargetInput = TargetPin & {
   repoId: number;
   targetName?: string;
+  targetDefinition?: TargetDefinition;
 };
 
-export type ConfigureJuiceShopTargetInput = Omit<ConfigureTargetInput, "targetName">;
+export type ConfigureJuiceShopTargetInput = Omit<
+  ConfigureTargetInput,
+  "targetName" | "targetDefinition"
+>;
 
 export type ConfiguredTarget = {
   repositoryId: string;
@@ -87,7 +92,7 @@ export async function configureJuiceShopTarget(
 }
 
 export async function configureTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
-  const definition = requireTargetDefinition(input.targetName ?? DEFAULT_TARGET_NAME);
+  const definition = targetDefinitionForInput(input);
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
@@ -187,7 +192,7 @@ export async function rotateJuiceShopTarget(
 }
 
 export async function rotateTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
-  const definition = requireTargetDefinition(input.targetName ?? DEFAULT_TARGET_NAME);
+  const definition = targetDefinitionForInput(input);
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
@@ -245,7 +250,17 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
   });
 }
 
-function requireTargetDefinition(targetName: string) {
+function targetDefinitionForInput(input: ConfigureTargetInput): TargetDefinition {
+  if (input.targetDefinition) {
+    if (input.targetName && input.targetName !== input.targetDefinition.name) {
+      throw new Error(`target name ${input.targetName} does not match manifest ${input.targetDefinition.name}`);
+    }
+    return input.targetDefinition;
+  }
+  return requireTargetDefinition(input.targetName ?? DEFAULT_TARGET_NAME);
+}
+
+function requireTargetDefinition(targetName: string): TargetDefinition {
   const definition = targetDefinitionFor(targetName);
   if (!definition) throw new Error(`unknown target profile ${targetName}`);
   return definition;

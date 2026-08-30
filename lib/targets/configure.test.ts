@@ -88,9 +88,19 @@ test("configuring the same repository twice reuses the pinned target profile", a
 test("configuring a selected target profile writes an independent profile row", async () => {
   await connectedRepo(700_007, "acme/webgoat");
 
+  const targetDefinition = {
+    name: "webgoat",
+    repoFullName: "Vaibhav91one/WebGoat",
+    envPrefix: "WEBGOAT",
+    imageName: "ghcr.io/vaibhav91one/webgoat",
+    config: { baseUrl: "http://localhost:8080", readinessPath: "/WebGoat" },
+    scopeRules: [{ allow: "localhost" }],
+    provisioning: { readinessPath: "/WebGoat" },
+  };
   const configured = await targets.configureTarget({
     repoId: 700_007,
     targetName: "webgoat",
+    targetDefinition,
     imageDigest: `sha256:${"3".repeat(64)}`,
     snapshotId: "snapshot-webgoat",
     buildMarker: "webgoat-build-1",

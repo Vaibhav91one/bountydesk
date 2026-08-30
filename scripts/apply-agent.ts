@@ -1,12 +1,12 @@
 /**
- * One-time operator setup: registers bounty-desk's MCP connector and agent manifest with the
- * TrueForge harness, so createTrueforgeAnalysisDriver's createSession({agent: {name:
- * "bountydesk"}}) has something to resolve. Re-run whenever agent/bountydesk.agent.json
- * changes; both calls are create-or-replace by name, so re-running is safe.
+ * One-time operator setup: registers bounty-desk's MCP connectors and agent manifests with the
+ * TrueForge harness, so createTrueforgeAnalysisDriver's createSession has named agents to
+ * resolve. Re-run whenever agent/*.agent.json changes; each call is create-or-replace by name,
+ * so re-running is safe.
  *
  *   npm run agent:apply
  */
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,19 +38,25 @@ async function main(): Promise<void> {
   console.log(`MCP connector "scope-guard" registered at ${scopeGuardUrl}/api/mcp/scope-guard`);
 
   const dir = path.dirname(fileURLToPath(import.meta.url));
-  const manifestPath = path.join(dir, "..", "agent", "bountydesk.agent.json");
-  const { name, manifest } = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const agentDir = path.join(dir, "..", "agent");
+  const manifestFiles = readdirSync(agentDir)
+    .filter((name) => name.endsWith(".agent.json"))
+    .sort();
 
-  try {
-    await client.agents.create({ name, manifest });
-    console.log(`agent "${name}" created`);
-  } catch (error) {
-    if (!(error instanceof TrueForgeApi.ConflictError)) throw error;
-    const { data: agents } = await client.agents.list();
-    const existing = agents.find((a) => a.name === name);
-    if (!existing) throw error;
-    await client.agents.update(existing.id, { manifest });
-    console.log(`agent "${name}" updated`);
+  for (const file of manifestFiles) {
+    const { name, manifest } = JSON.parse(readFileSync(path.join(agentDir, file), "utf8"));
+
+    try {
+      await client.agents.create({ name, manifest });
+      console.log(`agent "${name}" created from agent/${file}`);
+    } catch (error) {
+      if (!(error instanceof TrueForgeApi.ConflictError)) throw error;
+      const { data: agents } = await client.agents.list();
+      const existing = agents.find((a) => a.name === name);
+      if (!existing) throw error;
+      await client.agents.update(existing.id, { manifest });
+      console.log(`agent "${name}" updated from agent/${file}`);
+    }
   }
 }
 

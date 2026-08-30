@@ -287,17 +287,19 @@ summary is ambiguous, defer to those records and ask rather than guess.
 
 ## Future feature backlog
 
-Multi-target setup should become dynamic after the manual registry path is proven live. The
-intended feature is: a GitHub App installation creates the connected repo, a build worker clones
-that repo in a build sandbox with dependency egress, the platform infers or reads reviewed target
-metadata, builds and verifies a Daytona snapshot, then writes or rotates the server-side
-`TargetProfile`. The later reproduction run still uses a no-egress sandbox and the agent still
-interacts with the target only through `probe_target` and approval-gated `probe_target_write`.
+Multi-target setup is manifest-driven. The frozen Juice Shop demo profile may stay in the
+server registry, but new targets should come from a validated target manifest or an onboarding
+agent's manifest proposal, not from a growing hardcoded list. The full feature is: a GitHub App
+installation creates the connected repo, a build worker clones that repo in a build sandbox with
+dependency egress, the platform reads or asks an onboarding agent to propose target metadata,
+builds and verifies a Daytona snapshot, then writes or rotates the server-side `TargetProfile`.
+The later reproduction run still uses a no-egress sandbox and the agent still interacts with the
+target only through `probe_target` and approval-gated `probe_target_write`.
 
 Target repositories must stay passive test applications. Do not rely on repo-local scripts such
 as `detect.sh` as the authority for reproduction. Startup commands, readiness checks, image pins,
-scope rules and build markers belong in the platform registry today, or in a reviewed target
-manifest ingested by the future dynamic setup feature. See
+scope rules and build markers belong in the frozen platform profile or in a reviewed target
+manifest ingested by dynamic setup. See
 [`docs/target-profiles.md`](docs/target-profiles.md).
 
 ## Figma design files

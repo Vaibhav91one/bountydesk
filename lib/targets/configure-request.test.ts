@@ -103,21 +103,14 @@ test("a reviewer can configure an active repository", async () => {
   assert.ok(await boundTarget(repoId), "the repository is bound to a target");
 });
 
-test("a reviewer can configure a selected target profile", async () => {
+test("a reviewer can configure an explicitly selected registered target profile", async () => {
   const repoId = await repo();
-  process.env.BOUNTYDESK_TARGET_WEBGOAT_IMAGE_DIGEST = `sha256:${"4".repeat(64)}`;
-  process.env.BOUNTYDESK_TARGET_WEBGOAT_SNAPSHOT_ID = "snapshot-webgoat";
-  process.env.BOUNTYDESK_TARGET_WEBGOAT_BUILD_MARKER = "webgoat-build-1";
 
   const result = await configure.configureRepositoryRequest(
     session(REVIEWER_ID),
     repoId,
-    "webgoat",
+    "juice-shop-v17.3.0",
   );
-
-  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_IMAGE_DIGEST;
-  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_SNAPSHOT_ID;
-  delete process.env.BOUNTYDESK_TARGET_WEBGOAT_BUILD_MARKER;
 
   assert.equal(result.ok, true);
   const targetProfileId = await boundTarget(repoId);
@@ -126,7 +119,7 @@ test("a reviewer can configure a selected target profile", async () => {
     .select({ name: dbm.targetProfile.name })
     .from(dbm.targetProfile)
     .where(dbm.eq(dbm.targetProfile.id, targetProfileId));
-  assert.equal(row.name, "webgoat");
+  assert.equal(row.name, "juice-shop-v17.3.0");
 });
 
 test("an unknown selected target profile is refused before touching the database", async () => {

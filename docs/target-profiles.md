@@ -1,27 +1,33 @@
-# Target profiles and future dynamic target setup
+# Target profiles and dynamic target setup
 
 BountyDesk treats a test repository as source for a pinned target application, not as the
 authority for reproduction. The platform owns the target profile, the Daytona snapshot, the
 readiness check, the scope guard, and the approval-gated tools the agent can call.
 
-The current implementation uses a server-side target registry in `lib/targets/registry.ts`.
-Each entry names the GitHub repo, image name, local base URL, readiness path, scope rules, and
-any command needed to start the app inside the reproduction sandbox. The operator still has to
-build and verify the image and snapshot first, then bind the connected repo with:
+The current implementation keeps the frozen Juice Shop demo target in
+`lib/targets/registry.ts`, and lets every other target come from a validated manifest. A
+manifest can be written by an onboarding agent, a build job, or an operator, but it is still
+only a proposal until BountyDesk parses it and combines it with a verified image digest,
+snapshot id and build marker.
+
+The operator path is:
 
 ```bash
 npm run seed:target -- <github-repository-id> [target-profile-name]
+npm run seed:target -- <github-repository-id> --manifest .bountydesk/target.json
 ```
 
-Rotation uses the same target name:
+Rotation uses the same shape:
 
 ```bash
 npm run rotate:target -- <github-repository-id> [target-profile-name]
+npm run rotate:target -- <github-repository-id> --manifest .bountydesk/target.json
 ```
 
-`target-profile-name` defaults to `juice-shop-v17.3.0`, so the original demo flow still works.
-Other targets read these environment variables, where `<TARGET>` is the registry entry's
-`envPrefix`:
+`target-profile-name` defaults to `juice-shop-v17.3.0`, so the original demo flow still works
+without a manifest. Dynamic targets read these environment variables, where `<TARGET>` is the
+manifest `envPrefix`, or the manifest name uppercased with non-alphanumeric characters changed
+to underscores:
 
 ```text
 BOUNTYDESK_TARGET_<TARGET>_IMAGE_DIGEST
@@ -35,21 +41,36 @@ image reference is optional and exists for Daytona snapshots that are tag-pinned
 plane while the platform still verifies the booted image by reading the build marker inside the
 sandbox.
 
+The manifest shape is intentionally small:
+
+```json
+{
+  "name": "webgoat",
+  "repoFullName": "Vaibhav91one/WebGoat",
+  "imageName": "ghcr.io/vaibhav91one/webgoat",
+  "baseUrl": "http://localhost:8080",
+  "readinessPath": "/WebGoat",
+  "startCommand": "java -jar /opt/webgoat/webgoat.jar"
+}
+```
+
+Validation rejects non-loopback base URLs, tagged image references, malformed names, overbroad
+scope rules, and multiline startup commands. Today scope rules may only allow `localhost`.
+
 No target repository should need `detect.sh` or any other reproduction shell script. If a repo
-needs app startup behavior, put that command in the platform registry or, later, in a reviewed
-target manifest that the platform ingests. The agent investigates through the harness with
-`probe_target` and `probe_target_write`; it should not run repo-provided reproduction scripts
-as the source of truth.
+needs app startup behavior, put that command in the reviewed target manifest. The agent
+investigates through the harness with `probe_target` and `probe_target_write`; it should not
+run repo-provided reproduction scripts as the source of truth.
 
 ## Dynamic setup feature
 
-The dynamic version should automate the operator work above without changing the trust model.
-The expected flow is:
+The fully automated version should automate the operator work above without changing the trust
+model. The expected flow is:
 
 1. The GitHub App installation creates or updates the connected repository row.
 2. A build worker claims the repo and clones it in a build sandbox with dependency egress.
-3. The worker reads a reviewed target manifest, or falls back to a constrained detector that
-   only identifies framework, port, health path, and build command.
+3. The worker reads or asks an onboarding agent to propose the target manifest. The proposal
+   only identifies framework, port, health path, image name and start command.
 4. The worker builds the target image, writes a build marker into it, registers a Daytona
    snapshot, then verifies the snapshot can boot.
 5. The platform writes or rotates the server-side `TargetProfile` and binds the connected repo

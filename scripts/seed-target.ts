@@ -1,7 +1,12 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
 import { configureTarget, isValidImageDigest, isValidSnapshotId } from "@/lib/targets/configure";
+import { parseTargetManifest } from "@/lib/targets/manifest";
 import {
   DEFAULT_TARGET_NAME,
   envNameForTarget,
+  type TargetDefinition,
   targetDefinitionFor,
 } from "@/lib/targets/registry";
 
@@ -13,21 +18,22 @@ import {
  * it by hand in SQL is worse than doing it in a script that at least says what it did.
  *
  *   npm run seed:target -- 123456789 [target-profile-name]
+ *   npm run seed:target -- 123456789 --manifest .bountydesk/target.json
  *
- * The target name defaults to Juice Shop for compatibility with the first demo path. Other
- * targets read BOUNTYDESK_TARGET_<TARGET>_IMAGE_DIGEST and
- * BOUNTYDESK_TARGET_<TARGET>_SNAPSHOT_ID from the registry definition.
+ * The target name defaults to Juice Shop for compatibility with the first demo path. A
+ * manifest lets an onboarding agent or operator propose the same metadata without adding a new
+ * hardcoded registry entry.
  */
 async function main(): Promise<void> {
   const rawRepoId = process.argv[2];
-  const targetName = process.argv[3] ?? DEFAULT_TARGET_NAME;
+  const targetSource = readTargetSource(process.argv.slice(3));
   const repoId = Number(rawRepoId);
   if (!rawRepoId || !Number.isSafeInteger(repoId) || repoId <= 0) {
-    throw new Error("usage: npm run seed:target -- <github-repository-id> [target-profile-name]");
+    throw new Error("usage: npm run seed:target -- <github-repository-id> [target-profile-name|--manifest <path>]");
   }
 
-  const target = targetDefinitionFor(targetName);
-  if (!target) throw new Error(`unknown target profile ${targetName}`);
+  const target = targetSource.targetDefinition ?? targetDefinitionFor(targetSource.targetName);
+  if (!target) throw new Error(`unknown target profile ${targetSource.targetName}`);
 
   const imageDigestEnv = envNameForTarget(target, "IMAGE_DIGEST");
   const snapshotIdEnv = envNameForTarget(target, "SNAPSHOT_ID");
@@ -35,10 +41,14 @@ async function main(): Promise<void> {
   const snapshotImageRefEnv = envNameForTarget(target, "SNAPSHOT_IMAGE_REF");
   const imageDigest =
     process.env[imageDigestEnv] ??
-    (targetName === DEFAULT_TARGET_NAME ? process.env.DAYTONA_TARGET_IMAGE_DIGEST : undefined);
+    (targetSource.targetName === DEFAULT_TARGET_NAME
+      ? process.env.DAYTONA_TARGET_IMAGE_DIGEST
+      : undefined);
   const snapshotId =
     process.env[snapshotIdEnv] ??
-    (targetName === DEFAULT_TARGET_NAME ? process.env.DAYTONA_TARGET_SNAPSHOT_ID : undefined);
+    (targetSource.targetName === DEFAULT_TARGET_NAME
+      ? process.env.DAYTONA_TARGET_SNAPSHOT_ID
+      : undefined);
   if (!imageDigest || !snapshotId) {
     throw new Error(`${imageDigestEnv} and ${snapshotIdEnv} must both be set`);
   }
@@ -50,7 +60,8 @@ async function main(): Promise<void> {
 
   const configured = await configureTarget({
     repoId,
-    targetName,
+    targetName: targetSource.targetName,
+    ...(targetSource.targetDefinition ? { targetDefinition: targetSource.targetDefinition } : {}),
     imageDigest,
     snapshotId,
     ...(process.env[buildMarkerEnv] ? { buildMarker: process.env[buildMarkerEnv] } : {}),
@@ -62,6 +73,28 @@ async function main(): Promise<void> {
   console.log(
     `bound ${configured.repositoryFullName} (${repoId}) to ${configured.targetProfileName}`,
   );
+}
+
+function readTargetSource(args: string[]): { targetName: string; targetDefinition?: TargetDefinition } {
+  const [first, second] = args;
+  if (!first) return { targetName: DEFAULT_TARGET_NAME };
+  if (first === "--manifest") {
+    if (!second) throw new Error("usage: npm run seed:target -- <github-repository-id> --manifest <path>");
+    const targetDefinition = parseTargetManifest(
+      readFileSync(path.resolve(process.cwd(), second), "utf8"),
+    );
+    return { targetName: targetDefinition.name, targetDefinition };
+  }
+  if (first.startsWith("--manifest=")) {
+    const targetDefinition = parseTargetManifest(
+      readFileSync(path.resolve(process.cwd(), first.slice("--manifest=".length)), "utf8"),
+    );
+    return { targetName: targetDefinition.name, targetDefinition };
+  }
+  if (second) {
+    throw new Error("usage: npm run seed:target -- <github-repository-id> [target-profile-name|--manifest <path>]");
+  }
+  return { targetName: first };
 }
 
 main()
