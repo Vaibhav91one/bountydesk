@@ -53,7 +53,7 @@ test("rotating a profile that does not exist yet is refused", async () => {
   // Must run before anything else creates the shared "juice-shop-v17.3.0" row: every
   // configure call in this file targets that one fixed name, so this is the only point at
   // which the profile genuinely does not exist yet.
-  await connectedRepo(700_006, "acme/norotate");
+  await connectedRepo(700_006, "Vaibhav91one/juice-shop");
 
   await assert.rejects(
     targets.rotateJuiceShopTarget({
@@ -68,7 +68,7 @@ test("rotating a profile that does not exist yet is refused", async () => {
 });
 
 test("configuring the same repository twice reuses the pinned target profile", async () => {
-  await connectedRepo(700_001, "acme/reports");
+  await connectedRepo(700_001, "Vaibhav91one/juice-shop");
   const input = {
     repoId: 700_001,
     imageDigest: `sha256:${"1".repeat(64)}`,
@@ -86,7 +86,7 @@ test("configuring the same repository twice reuses the pinned target profile", a
 });
 
 test("configuring a selected target profile writes an independent profile row", async () => {
-  await connectedRepo(700_007, "acme/webgoat");
+  await connectedRepo(700_007, "Vaibhav91one/WebGoat");
 
   const targetDefinition = {
     name: "webgoat",
@@ -120,8 +120,38 @@ test("configuring a selected target profile writes an independent profile row", 
   });
 });
 
+test("configuring refuses a repository that does not match the target profile", async () => {
+  await connectedRepo(700_008, "acme/webgoat");
+
+  await assert.rejects(
+    targets.configureTarget({
+      repoId: 700_008,
+      targetName: "webgoat",
+      targetDefinition: {
+        name: "webgoat",
+        repoFullName: "Vaibhav91one/WebGoat",
+        envPrefix: "WEBGOAT",
+        imageName: "ghcr.io/vaibhav91one/webgoat",
+        config: { baseUrl: "http://localhost:8080", readinessPath: "/WebGoat" },
+        scopeRules: [{ allow: "localhost" }],
+        provisioning: { readinessPath: "/WebGoat" },
+      },
+      imageDigest: `sha256:${"3".repeat(64)}`,
+      snapshotId: "snapshot-webgoat",
+      buildMarker: "webgoat-build-1",
+    }),
+    /does not match target profile webgoat/,
+  );
+
+  const [repository] = await dbm.db
+    .select({ targetProfileId: dbm.connectedRepository.targetProfileId })
+    .from(dbm.connectedRepository)
+    .where(dbm.eq(dbm.connectedRepository.repoId, 700_008));
+  assert.equal(repository.targetProfileId, null, "a mismatched repository must not be bound");
+});
+
 test("rotating an existing profile updates it in place, keeping its id", async () => {
-  await connectedRepo(700_005, "acme/rotated");
+  await connectedRepo(700_005, "Vaibhav91one/juice-shop");
   const first = await targets.configureJuiceShopTarget({
     repoId: 700_005,
     imageDigest: `sha256:${"1".repeat(64)}`,
@@ -153,7 +183,7 @@ test("rotating an existing profile updates it in place, keeping its id", async (
 });
 
 test("an existing logical profile must match every pinned setting", async () => {
-  await connectedRepo(700_002, "acme/second");
+  await connectedRepo(700_002, "Vaibhav91one/juice-shop");
 
   await assert.rejects(
     targets.configureJuiceShopTarget({
@@ -189,8 +219,8 @@ test("a row with no image name, from before that column existed, is a mismatch t
 });
 
 test("repository ID selects one active repository even when names are reused", async () => {
-  await connectedRepo(700_003, "acme/reused");
-  await connectedRepo(700_004, "acme/reused");
+  await connectedRepo(700_003, "Vaibhav91one/juice-shop");
+  await connectedRepo(700_004, "Vaibhav91one/juice-shop");
 
   const configured = await targets.configureJuiceShopTarget({
     repoId: 700_004,
@@ -201,11 +231,13 @@ test("repository ID selects one active repository even when names are reused", a
   const rows = await dbm.db
     .select({ repoId: dbm.connectedRepository.repoId, targetId: dbm.connectedRepository.targetProfileId })
     .from(dbm.connectedRepository)
-    .where(dbm.eq(dbm.connectedRepository.fullName, "acme/reused"));
+    .where(dbm.eq(dbm.connectedRepository.fullName, "Vaibhav91one/juice-shop"));
 
-  assert.equal(configured.repositoryFullName, "acme/reused");
+  assert.equal(configured.repositoryFullName, "Vaibhav91one/juice-shop");
   assert.deepEqual(
-    rows.sort((a, b) => a.repoId - b.repoId),
+    rows
+      .filter((row) => row.repoId === 700_003 || row.repoId === 700_004)
+      .sort((a, b) => a.repoId - b.repoId),
     [
       { repoId: 700_003, targetId: null },
       { repoId: 700_004, targetId: configured.targetProfileId },

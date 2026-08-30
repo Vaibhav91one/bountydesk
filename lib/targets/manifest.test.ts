@@ -32,6 +32,7 @@ test("a target manifest becomes a platform target definition", () => {
 test("a target manifest rejects non-loopback or overbroad authority", () => {
   const base = {
     name: "dynamic-target",
+    repoFullName: "Vaibhav91one/dynamic-target",
     imageName: "ghcr.io/vaibhav91one/dynamic-target",
     baseUrl: "http://localhost:3000",
     readinessPath: "/",
@@ -44,6 +45,12 @@ test("a target manifest rejects non-loopback or overbroad authority", () => {
     { ...base, readinessPath: "http://localhost:3000/health" },
     { ...base, scopeRules: [{ allow: "example.com" }] },
     { ...base, startCommand: "echo one\necho two" },
+    {
+      name: base.name,
+      imageName: base.imageName,
+      baseUrl: base.baseUrl,
+      readinessPath: base.readinessPath,
+    },
   ]) {
     assert.throws(() => targetDefinitionFromManifest(bad), /target manifest/);
   }

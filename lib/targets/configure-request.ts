@@ -1,5 +1,14 @@
 import { isReviewer } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
+import {
+  and,
+  connectedRepository,
+  db,
+  eq,
+  githubInstallation,
+  isNull,
+  targetProfile,
+} from "@/lib/db";
 
 import {
   configureTarget,
@@ -15,6 +24,7 @@ import {
 } from "./registry";
 
 export type ConfigureResult = { ok: true } | { ok: false; error: string };
+type AuthorizedReviewerRepository = { ok: true; repoId: number } | { ok: false; error: string };
 
 /**
  * The checks configuring and rotating both need before they may touch the database: a
@@ -28,14 +38,8 @@ function authorizeTargetRequest(
 ):
   | ({ ok: true; repoId: number; targetName: string } & TargetPin)
   | { ok: false; error: string } {
-  if (!session || !isReviewer(session.userId)) {
-    return { ok: false, error: "You are not signed in as a reviewer." };
-  }
-
-  const repoId = Number(rawRepoId);
-  if (!Number.isSafeInteger(repoId) || repoId <= 0) {
-    return { ok: false, error: "That repository id is not valid." };
-  }
+  const authorizedRepository = authorizeReviewerRepository(session, rawRepoId);
+  if (!authorizedRepository.ok) return authorizedRepository;
 
   const targetName = typeof rawTargetName === "string" && rawTargetName.length > 0
     ? rawTargetName
@@ -82,13 +86,79 @@ function authorizeTargetRequest(
 
   return {
     ok: true,
-    repoId,
+    repoId: authorizedRepository.repoId,
     targetName,
     imageDigest,
     snapshotId,
     ...(buildMarker ? { buildMarker } : {}),
     ...(snapshotImageRefOverride ? { snapshotImageRefOverride } : {}),
   };
+}
+
+function authorizeReviewerRepository(
+  session: Session | null,
+  rawRepoId: unknown,
+): AuthorizedReviewerRepository {
+  if (!session || !isReviewer(session.userId)) {
+    return { ok: false, error: "You are not signed in as a reviewer." };
+  }
+
+  const repoId = Number(rawRepoId);
+  if (!Number.isSafeInteger(repoId) || repoId <= 0) {
+    return { ok: false, error: "That repository id is not valid." };
+  }
+
+  return { ok: true, repoId };
+}
+
+async function targetNameForRotation(
+  session: Session | null,
+  rawRepoId: unknown,
+  rawTargetName: unknown,
+): Promise<
+  | ({ ok: true; targetName: string } & Exclude<AuthorizedReviewerRepository, { ok: false }>)
+  | { ok: false; error: string }
+> {
+  const authorizedRepository = authorizeReviewerRepository(session, rawRepoId);
+  if (!authorizedRepository.ok) return authorizedRepository;
+
+  if (typeof rawTargetName === "string" && rawTargetName.length > 0) {
+    return { ...authorizedRepository, targetName: rawTargetName };
+  }
+
+  const [repository] = await db
+    .select({ targetProfileName: targetProfile.name })
+    .from(connectedRepository)
+    .innerJoin(
+      githubInstallation,
+      eq(connectedRepository.installationId, githubInstallation.id),
+    )
+    .leftJoin(targetProfile, eq(connectedRepository.targetProfileId, targetProfile.id))
+    .where(
+      and(
+        eq(connectedRepository.repoId, authorizedRepository.repoId),
+        eq(connectedRepository.active, true),
+        isNull(connectedRepository.archivedAt),
+        isNull(githubInstallation.suspendedAt),
+        isNull(githubInstallation.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (!repository) {
+    return {
+      ok: false,
+      error: "That repository is not connected right now, so it cannot be configured.",
+    };
+  }
+  if (!repository.targetProfileName) {
+    return {
+      ok: false,
+      error: "There is no existing target profile to rotate. Configure one first.",
+    };
+  }
+
+  return { ...authorizedRepository, targetName: repository.targetProfileName };
 }
 
 /**
@@ -133,7 +203,10 @@ export async function rotateRepositoryTargetRequest(
   rawRepoId: unknown,
   rawTargetName?: unknown,
 ): Promise<ConfigureResult> {
-  const authorized = authorizeTargetRequest(session, rawRepoId, rawTargetName);
+  const rotationTarget = await targetNameForRotation(session, rawRepoId, rawTargetName);
+  if (!rotationTarget.ok) return rotationTarget;
+
+  const authorized = authorizeTargetRequest(session, rawRepoId, rotationTarget.targetName);
   if (!authorized.ok) return authorized;
 
   try {
@@ -164,6 +237,14 @@ function safeMessage(error: unknown): string {
 
   if (/does not exist yet; nothing to rotate/.test(message)) {
     return "There is no existing target profile to rotate. Configure one first.";
+  }
+
+  if (/does not match target profile/.test(message)) {
+    return "That repository does not match the selected target profile.";
+  }
+
+  if (/is not bound to target profile/.test(message)) {
+    return "That repository is not bound to the selected target profile.";
   }
 
   if (/has no expected build marker/.test(message)) {

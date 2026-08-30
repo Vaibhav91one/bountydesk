@@ -96,6 +96,35 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
+    const [repository] = await tx
+      .select({
+        id: connectedRepository.id,
+        fullName: connectedRepository.fullName,
+      })
+      .from(connectedRepository)
+      .innerJoin(
+        githubInstallation,
+        eq(connectedRepository.installationId, githubInstallation.id),
+      )
+      .where(
+        and(
+          eq(connectedRepository.repoId, input.repoId),
+          eq(connectedRepository.active, true),
+          isNull(connectedRepository.archivedAt),
+          isNull(githubInstallation.suspendedAt),
+          isNull(githubInstallation.deletedAt),
+        ),
+      )
+      .limit(1)
+      .for("update");
+
+    if (!repository) {
+      throw new Error(
+        `GitHub repository ${input.repoId} is not an active connected repository`,
+      );
+    }
+    assertRepositoryMatchesTarget(repository.fullName, definition);
+
     const [inserted] = await tx
       .insert(targetProfile)
       .values({
@@ -127,34 +156,6 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
       !isDeepStrictEqual(target.scopeRules, definition.scopeRules)
     ) {
       throw new Error(`${definition.name} exists with different pinned target settings`);
-    }
-
-    const [repository] = await tx
-      .select({
-        id: connectedRepository.id,
-        fullName: connectedRepository.fullName,
-      })
-      .from(connectedRepository)
-      .innerJoin(
-        githubInstallation,
-        eq(connectedRepository.installationId, githubInstallation.id),
-      )
-      .where(
-        and(
-          eq(connectedRepository.repoId, input.repoId),
-          eq(connectedRepository.active, true),
-          isNull(connectedRepository.archivedAt),
-          isNull(githubInstallation.suspendedAt),
-          isNull(githubInstallation.deletedAt),
-        ),
-      )
-      .limit(1)
-      .for("update");
-
-    if (!repository) {
-      throw new Error(
-        `GitHub repository ${input.repoId} is not an active connected repository`,
-      );
     }
 
     await tx
@@ -196,27 +197,11 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
-    const [target] = await tx
-      .update(targetProfile)
-      .set({
-        imageName: definition.imageName,
-        imageDigest: input.imageDigest,
-        snapshotId: input.snapshotId,
-        config,
-        scopeRules: definition.scopeRules,
-        updatedAt: new Date(),
-      })
-      .where(eq(targetProfile.name, definition.name))
-      .returning();
-
-    if (!target) {
-      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
-    }
-
     const [repository] = await tx
       .select({
         id: connectedRepository.id,
         fullName: connectedRepository.fullName,
+        targetProfileId: connectedRepository.targetProfileId,
       })
       .from(connectedRepository)
       .innerJoin(
@@ -240,12 +225,47 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
         `GitHub repository ${input.repoId} is not an active connected repository`,
       );
     }
+    assertRepositoryMatchesTarget(repository.fullName, definition);
+
+    const [target] = await tx
+      .select()
+      .from(targetProfile)
+      .where(eq(targetProfile.name, definition.name))
+      .limit(1)
+      .for("update");
+
+    if (!target) {
+      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
+    }
+
+    if (repository.targetProfileId !== target.id) {
+      throw new Error(
+        `GitHub repository ${input.repoId} is not bound to target profile ${definition.name}`,
+      );
+    }
+
+    const [updatedTarget] = await tx
+      .update(targetProfile)
+      .set({
+        imageName: definition.imageName,
+        imageDigest: input.imageDigest,
+        snapshotId: input.snapshotId,
+        config,
+        scopeRules: definition.scopeRules,
+        updatedAt: new Date(),
+      })
+      .where(eq(targetProfile.id, target.id))
+      .returning();
+
+    if (!updatedTarget) {
+      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
+    }
 
     return {
       repositoryId: repository.id,
       repositoryFullName: repository.fullName,
-      targetProfileId: target.id,
-      targetProfileName: target.name,
+      targetProfileId: updatedTarget.id,
+      targetProfileName: updatedTarget.name,
     };
   });
 }
@@ -264,4 +284,12 @@ function requireTargetDefinition(targetName: string): TargetDefinition {
   const definition = targetDefinitionFor(targetName);
   if (!definition) throw new Error(`unknown target profile ${targetName}`);
   return definition;
+}
+
+function assertRepositoryMatchesTarget(fullName: string, definition: TargetDefinition): void {
+  if (fullName.toLowerCase() !== definition.repoFullName.toLowerCase()) {
+    throw new Error(
+      `GitHub repository ${fullName} does not match target profile ${definition.name}`,
+    );
+  }
 }

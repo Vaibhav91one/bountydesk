@@ -6,7 +6,7 @@ const IMAGE_NAME_RE = /^ghcr\.io\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._/-]*$/;
 
 export type TargetManifest = {
   name: string;
-  repoFullName?: string;
+  repoFullName: string;
   imageName: string;
   baseUrl: string;
   readinessPath: string;
@@ -48,7 +48,7 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
   const startCommand = optionalString(manifest, "startCommand");
   if (startCommand !== undefined) validateStartCommand(startCommand);
 
-  const repoFullName = optionalString(manifest, "repoFullName") ?? "";
+  const repoFullName = readString(manifest, "repoFullName");
   const envPrefix = optionalString(manifest, "envPrefix") ?? envPrefixFromName(name);
   if (!ENV_PREFIX_RE.test(envPrefix)) {
     throw new Error("target manifest envPrefix must use uppercase letters, numbers or underscores");
