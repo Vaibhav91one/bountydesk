@@ -92,12 +92,13 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       eventCount: sql<number>`(
         select count(*)::int from session_event e where e.report_id = ${report.id}
       )`,
-      // agent_session_pending_all_or_none keeps the four pending columns inseparable, so
-      // reading either one answers the question. This reads the thread, the same half
-      // app/review/page.tsx tests, so the card and that page agree by construction.
+      // Gated on the verdict/hash pair, not the thread: a synthesized ANALYSIS_ONLY verdict (a
+      // dead-end run) has a verdict awaiting approval but no TrueForge call, so its thread id is
+      // null. The check constraint pairs pending_verdict_id with pending_approved_content_hash,
+      // so pending_verdict_id alone answers the question and stays in step with case.ts.
       pendingVerdictId: sql<string | null>`(
         select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_thread_id is not null
+        where s.report_id = ${report.id} and s.pending_verdict_id is not null
         limit 1
       )`,
       turnStatus: sql<string | null>`(

@@ -46,6 +46,12 @@ async function seedSubmission(
     badPayloadHash?: boolean;
     /** Point the submission's agent_session at a different report than the decision's verdict. */
     crossSession?: boolean;
+    /**
+     * A server-synthesized ANALYSIS_ONLY verdict: the report is already AWAITING_APPROVAL, the
+     * verdict outcome is ANALYSIS_ONLY, and both the session's pending markers and the decision
+     * carry null thread/tool-call ids (there is no TrueForge call to answer).
+     */
+    synthesized?: boolean;
   } = {},
 ) {
   const { computeContentHash } = await import("@/lib/verdicts/hash");
@@ -59,6 +65,7 @@ async function seedSubmission(
       sourceRef: `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
+      ...(opts.synthesized ? { state: "AWAITING_APPROVAL" as const } : {}),
     })
     .returning({ id: dbm.report.id });
 
@@ -69,7 +76,7 @@ async function seedSubmission(
     .insert(dbm.verdict)
     .values({
       reportId: r.id,
-      outcome: "REPRODUCED",
+      outcome: opts.synthesized ? "ANALYSIS_ONLY" : "REPRODUCED",
       summary: "summary",
       payload,
       contentHash,
@@ -84,8 +91,8 @@ async function seedSubmission(
       sessionId: `session-${n}`,
       turnId: `turn-${n}`,
       turnStatus: "AWAITING_APPROVAL_HARNESS",
-      pendingThreadId: `thread-${n}`,
-      pendingToolCallId: `call-${n}`,
+      pendingThreadId: opts.synthesized ? null : `thread-${n}`,
+      pendingToolCallId: opts.synthesized ? null : `call-${n}`,
       pendingVerdictId: v.id,
       pendingApprovedContentHash: contentHash,
     })
@@ -123,7 +130,7 @@ async function seedSubmission(
       reviewer: "test-reviewer",
       decision: opts.decision ?? "APPROVED",
       payloadHash: opts.badPayloadHash ? `${contentHash}-stale` : contentHash,
-      ...(opts.noPendingCall
+      ...(opts.noPendingCall || opts.synthesized
         ? {}
         : { threadId: `thread-${n}`, toolCallId: `call-${n}` }),
       ...(opts.note ? { note: opts.note } : {}),
@@ -141,6 +148,8 @@ async function seedSubmission(
   return {
     agentSessionRowId: session.id,
     sessionId: `session-${n}`,
+    reportId: r.id,
+    verdictId: v.id,
     approvalDecisionId: decision.id,
     submissionId: submission.id,
     threadId: `thread-${n}`,
@@ -489,18 +498,79 @@ test("a decision that no longer matches the session's pending call is refused be
   assert.match(row.lastError ?? "", /does not match the session's pending approval/);
 });
 
-test("a submission with no pending call to answer never calls TrueForge", async () => {
+test("a null-thread decision that does not match its session's pending call is refused", async () => {
   await drainOthers();
+  // The decision carries null thread/tool-call ids (as a synthesized verdict does), but the
+  // session still has non-null pending markers, so the two do not describe the same approval.
+  // This must be refused as a mismatch rather than mistaken for a synthesized delivery.
   const fixture = await seedSubmission({ noPendingCall: true });
   const { client, calls } = makeFakeClient();
 
   await worker.submitApprovalOnce("w-no-pending", { client });
 
-  assert.equal(calls.length, 0, "a malformed request must never reach TrueForge");
+  assert.equal(calls.length, 0, "a mismatched decision must never reach TrueForge");
 
   const row = await submissionRow(fixture.submissionId);
   assert.equal(row.state, "FAILED");
-  assert.match(row.lastError ?? "", /threadId\/toolCallId missing/);
+  assert.match(row.lastError ?? "", /does not match the session's pending approval/);
+});
+
+test("an approved synthesized verdict enqueues delivery without ever calling TrueForge", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED", synthesized: true });
+  const { client, calls } = makeFakeClient();
+
+  await worker.submitApprovalOnce("w-synthesized-approved", { client });
+
+  assert.equal(calls.length, 0, "a synthesized verdict has no harness call to answer");
+
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "SUBMITTED");
+  assert.equal(row.submittedTurnId, null, "no turn id is recorded when no turn was created");
+
+  // The delivery the human approval gates was enqueued, bound to the exact approved hash.
+  const [delivery] = await dbm.db
+    .select({
+      verdictId: dbm.outboundDelivery.verdictId,
+      state: dbm.outboundDelivery.state,
+      approvedContentHash: dbm.outboundDelivery.approvedContentHash,
+    })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.reportId, fixture.reportId));
+  assert.ok(delivery, "an outbound delivery must be created for the approved synthesized verdict");
+  assert.equal(delivery.verdictId, fixture.verdictId);
+
+  // The report moved on to DELIVERING and the session's pending markers were cleared.
+  const [report] = await dbm.db
+    .select({ state: dbm.report.state })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, fixture.reportId));
+  assert.equal(report.state, "DELIVERING");
+
+  const [session] = await dbm.db
+    .select({ pendingVerdictId: dbm.agentSession.pendingVerdictId })
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionRowId));
+  assert.equal(session.pendingVerdictId, null);
+});
+
+test("a denied synthesized verdict completes with no delivery and no TrueForge call", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "DENIED", synthesized: true });
+  const { client, calls } = makeFakeClient();
+
+  await worker.submitApprovalOnce("w-synthesized-denied", { client });
+
+  assert.equal(calls.length, 0, "a synthesized verdict has no harness call to answer");
+
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "SUBMITTED");
+
+  const deliveries = await dbm.db
+    .select()
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.reportId, fixture.reportId));
+  assert.equal(deliveries.length, 0, "a denial delivers nothing");
 });
 
 test("an expired tick signal does not claim a submission or burn an attempt", async () => {

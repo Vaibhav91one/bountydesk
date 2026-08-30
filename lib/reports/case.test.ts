@@ -170,6 +170,36 @@ test("the approval panel opens only for a call a reviewer can answer", async () 
   assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
 });
 
+test("a synthesized verdict with null thread markers is still exposed as approvable", async () => {
+  // A dead-end run's server-authored ANALYSIS_ONLY verdict has a verdict and hash awaiting
+  // approval but no TrueForge call, so pending_thread_id/pending_tool_call_id are null. Gating
+  // the approval panel on the thread marker would hide it and recreate the dead end; readCase
+  // must key off the verdict/hash pair instead.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "ANALYSIS_ONLY",
+      summary: "could not verify; needs human triage",
+      payload: "the exact comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `hash-${id}`,
+  });
+
+  assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
+});
+
 test("a decided verdict reports its decision and closes the gate", async () => {
   const id = await seedReport("DENIED");
   const [v] = await dbm.db

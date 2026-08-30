@@ -507,13 +507,17 @@ export const agentSession = pgTable(
     uniqueIndex("agent_session_session_id_key").on(t.sessionId),
     index("agent_session_poll_idx").on(t.turnStatus, t.nextPollAt),
     index("agent_session_lease_idx").on(t.leaseExpiresAt),
-    // Every pending_* column is populated together or not at all; a partial pending state
-    // would mean the poller and the publish handler could each see a different half of it.
+    // thread_id/tool_call_id name a live TrueForge call and move together; verdict_id/hash
+    // name the approved content and move together. A synthesized ANALYSIS_ONLY verdict (an
+    // agent run that ended without ever drafting one) has a verdict awaiting approval but no
+    // TrueForge call to answer, so it sets the verdict pair with the thread pair left null. The
+    // reverse is forbidden: a pending call always has a verdict, so thread set with verdict
+    // null is never a legal half-state.
     check(
       "agent_session_pending_all_or_none",
       sql`(${t.pendingThreadId} is null) = (${t.pendingToolCallId} is null)
-          and (${t.pendingToolCallId} is null) = (${t.pendingVerdictId} is null)
-          and (${t.pendingVerdictId} is null) = (${t.pendingApprovedContentHash} is null)`,
+          and (${t.pendingVerdictId} is null) = (${t.pendingApprovedContentHash} is null)
+          and (${t.pendingThreadId} is null or ${t.pendingVerdictId} is not null)`,
     ),
   ],
 );
