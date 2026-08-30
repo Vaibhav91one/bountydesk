@@ -1,4 +1,4 @@
-import { agentSession, approvalDecision, db, eq, report, sql, targetProfile } from "@/lib/db";
+import { agentSession, approvalDecision, db, eq, isNull, report, sql, targetProfile, verdict } from "@/lib/db";
 import { TERMINAL_STATES } from "@/lib/reports/states";
 
 /**
@@ -48,15 +48,23 @@ export async function readHomeSummary(): Promise<HomeSummary> {
           )::int`,
         })
         .from(report)
-        .leftJoin(agentSession, eq(agentSession.reportId, report.id));
+        .leftJoin(agentSession, eq(agentSession.reportId, report.id))
+        // A soft-hidden test report must not inflate the home cards either.
+        .where(isNull(report.hiddenAt));
 
       const [targets] = await tx
         .select({ total: sql<number>`count(*)::int` })
         .from(targetProfile);
 
+      // A decision on a hidden report must not inflate the card either, so the count joins
+      // approval_decision -> verdict -> report and drops the hidden ones, matching the report
+      // aggregate above.
       const [decisions] = await tx
         .select({ total: sql<number>`count(*)::int` })
-        .from(approvalDecision);
+        .from(approvalDecision)
+        .innerJoin(verdict, eq(verdict.id, approvalDecision.verdictId))
+        .innerJoin(report, eq(report.id, verdict.reportId))
+        .where(isNull(report.hiddenAt));
 
       return {
         reports: counts?.reports ?? 0,

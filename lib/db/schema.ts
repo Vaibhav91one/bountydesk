@@ -192,6 +192,14 @@ export const report = pgTable(
     targetProfileId: uuid("target_profile_id").references(() => targetProfile.id),
     /** Set only once a human-approved outcome exists; feeds semantic dedupe candidates. */
     dedupeKey: text("dedupe_key"),
+    /**
+     * When an operator soft-hid this report. Null means visible. The list read models filter
+     * it out, so test rows stay off the board and the index without a delete: verdict and the
+     * other evidence tables refuse DELETE, and report carries restrict FKs, so a real removal
+     * is impossible anyway. A timestamp rather than a flag, so we keep when it was hidden.
+     * readCase still loads a hidden report by id, so an existing link does not 404.
+     */
+    hiddenAt: timestamp("hidden_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
