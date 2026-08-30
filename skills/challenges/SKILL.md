@@ -31,11 +31,12 @@ to spend this way, since `verify_grant` itself consumes it.
 ## 2. Enumerate the app's OWN challenge set (don't hand-maintain lists)
 
 Most lab apps expose their challenge/level taxonomy; pull it at runtime.
-Every `GET`/`POST` path below is a `probe_target` call
-(`probe_target {capability, method, path, ...}`), not a raw request to a
-host you can dial yourself -- the pinned target lives in its own provisioned
-sandbox, reachable only through that tool. Read `bountydesk-recon`'s Phase 0
-and 1 before this section if you haven't already:
+Every `GET`/`HEAD` path below is a `probe_target` call and every `POST` is a
+`probe_target_write` call (same shape: `{capability, method, path, ...}`),
+not a raw request to a host you can dial yourself -- the pinned target lives
+in its own provisioned sandbox, reachable only through those tools. Read
+`bountydesk-recon`'s Phase 0 and 1 before this section if you haven't
+already:
 
 - Juice Shop: `GET /api/Challenges/` returns JSON of every challenge (name,
   category, `solved`). This IS the scoreboard and the progress signal, and is

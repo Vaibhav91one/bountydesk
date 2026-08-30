@@ -32,26 +32,9 @@ after(async () => {
 
 let seq = 0;
 
-async function seedSession(
-  overrides: { sandboxId?: string | null; appPort?: number | null; targetName?: string } = {},
-): Promise<{ capabilityToken: string; reportId: string }> {
+async function seedSession(overrides: { sandboxId?: string | null; appPort?: number | null } = {}): Promise<string> {
   seq += 1;
   const n = seq;
-
-  let targetProfileId: string | null = null;
-  if (overrides.targetName) {
-    const [t] = await dbm.db
-      .insert(dbm.targetProfile)
-      .values({
-        name: overrides.targetName,
-        imageName: "ghcr.io/vaibhav91one/juice-shop",
-        imageDigest: "sha256:" + "a".repeat(64),
-        config: { baseUrl: "http://localhost:3000" },
-        scopeRules: [],
-      })
-      .returning({ id: dbm.targetProfile.id });
-    targetProfileId = t.id;
-  }
 
   const [r] = await dbm.db
     .insert(dbm.report)
@@ -61,7 +44,6 @@ async function seedSession(
       title: `report ${n}`,
       body: "body",
       state: "REPRODUCING",
-      targetProfileId,
     })
     .returning({ id: dbm.report.id });
 
@@ -74,7 +56,7 @@ async function seedSession(
     appPort: overrides.appPort === undefined ? null : overrides.appPort,
   });
 
-  return { capabilityToken, reportId: r.id };
+  return capabilityToken;
 }
 
 /** A fetch stub that only ever answers the Daytona preview-url lookup, for tests whose refusal
@@ -113,19 +95,19 @@ test("refuses an unknown capability", async () => {
 });
 
 test("refuses a capability with no sandbox provisioned for its session", async () => {
-  const { capabilityToken } = await seedSession();
+  const capability = await seedSession();
 
-  const result = await probeTargetModule.probeTarget({ capability: capabilityToken, method: "GET", path: "/rest/products" });
+  const result = await probeTargetModule.probeTarget({ capability, method: "GET", path: "/rest/products" });
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /no sandbox is provisioned/);
 });
 
 test("refuses a path that doesn't start with a single '/', before ever touching the network", async () => {
-  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
+  const capability = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
 
   const result = await probeTargetModule.probeTarget({
-    capability: capabilityToken,
+    capability,
     method: "GET",
     path: "evil.example/x",
   });
@@ -135,7 +117,7 @@ test("refuses a path that doesn't start with a single '/', before ever touching 
 });
 
 test("refuses a path that resolves off the preview origin (WHATWG backslash-as-slash escape)", async () => {
-  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
+  const capability = await seedSession({ sandboxId: "sandbox-1", appPort: 3000 });
 
   // For a special (http/https) URL, a leading "/\" is parsed the same as "//": a naive check
   // that only rejects a literal "//" prefix lets this resolve to https://evil.example/x once
@@ -143,7 +125,7 @@ test("refuses a path that resolves off the preview origin (WHATWG backslash-as-s
   // by pattern-matching the input string.
   const result = await withFetch(previewOnlyStub(), () =>
     probeTargetModule.probeTarget({
-      capability: capabilityToken,
+      capability,
       method: "GET",
       path: "/\\evil.example/x",
     }),
@@ -154,7 +136,7 @@ test("refuses a path that resolves off the preview origin (WHATWG backslash-as-s
 });
 
 test("resolves the session's sandbox, injects the preview token fresh, strips a caller Host, and forwards the response", async () => {
-  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-under-test", appPort: 3000 });
+  const capability = await seedSession({ sandboxId: "sandbox-under-test", appPort: 3000 });
 
   const calls: { url: string; init?: RequestInit }[] = [];
   const stub = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -173,7 +155,7 @@ test("resolves the session's sandbox, injects the preview token fresh, strips a 
 
   const result = await withFetch(stub, () =>
     probeTargetModule.probeTarget({
-      capability: capabilityToken,
+      capability,
       method: "GET",
       path: "/rest/products/search?q=juice",
       headers: {
@@ -202,66 +184,52 @@ test("resolves the session's sandbox, injects the preview token fresh, strips a 
 });
 
 test("refuses cleanly when the preview-url lookup fails", async () => {
-  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-gone", appPort: 3000 });
+  const capability = await seedSession({ sandboxId: "sandbox-gone", appPort: 3000 });
 
   const stub = (async () => new Response("not found", { status: 404 })) as typeof fetch;
 
   const result = await withFetch(stub, () =>
-    probeTargetModule.probeTarget({ capability: capabilityToken, method: "GET", path: "/" }),
+    probeTargetModule.probeTarget({ capability, method: "GET", path: "/" }),
   );
 
   assert.equal(result.ok, false);
   if (!result.ok) assert.match(result.reason, /could not reach the sandbox/);
 });
 
-test("refuses a POST with no grant_token", async () => {
-  const { capabilityToken } = await seedSession({
-    sandboxId: "sandbox-write",
-    appPort: 3000,
-    targetName: `juice-shop-${randomUUID()}`,
+/**
+ * POST is gated one layer up (app/api/mcp/publish-verdict/route.ts registers it only under the
+ * separate probe_target_write tool name, which the harness's own requireApprovalForTools pauses
+ * for a human Allow/Deny before this function is ever called with approvedForWrite: true). These
+ * tests exercise this function's own fail-closed backstop for that split -- see probeTarget's
+ * doc comment for why a scope-guard grant was tried here first and abandoned.
+ */
+test("refuses a POST with no opts at all, before ever touching the network", async () => {
+  const capability = await seedSession({ sandboxId: "sandbox-write", appPort: 3000 });
+
+  const result = await probeTargetModule.probeTarget({
+    capability,
+    method: "POST",
+    path: "/rest/user/login",
+    body: JSON.stringify({ email: "a", password: "b" }),
   });
 
-  const result = await withFetch(previewOnlyStub(), () =>
-    probeTargetModule.probeTarget({
-      capability: capabilityToken,
-      method: "POST",
-      path: "/rest/user/login",
-      body: JSON.stringify({ email: "a", password: "b" }),
-    }),
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /probe_target_write/);
+});
+
+test("refuses a POST with approvedForWrite explicitly false", async () => {
+  const capability = await seedSession({ sandboxId: "sandbox-write", appPort: 3000 });
+
+  const result = await probeTargetModule.probeTarget(
+    { capability, method: "POST", path: "/rest/user/login" },
+    { approvedForWrite: false },
   );
 
   assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /grant denial/);
 });
 
-test("refuses a POST whose grant was minted for a different target", async () => {
-  const mintModule = await import("@/lib/scope-guard/grants");
-  const { capabilityToken } = await seedSession({
-    sandboxId: "sandbox-write",
-    appPort: 3000,
-    targetName: `juice-shop-${randomUUID()}`,
-  });
-  const minted = await mintModule.mint("a-completely-different-target", "POST /rest/user/login");
-
-  const result = await withFetch(previewOnlyStub(), () =>
-    probeTargetModule.probeTarget({
-      capability: capabilityToken,
-      method: "POST",
-      path: "/rest/user/login",
-      body: JSON.stringify({ email: "a", password: "b" }),
-      grant_token: minted.token,
-    }),
-  );
-
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.match(result.reason, /grant denial/);
-});
-
-test("a POST with a grant minted for this session's own target name succeeds", async () => {
-  const targetName = `juice-shop-${randomUUID()}`;
-  const { capabilityToken } = await seedSession({ sandboxId: "sandbox-write", appPort: 3000, targetName });
-  const mintModule = await import("@/lib/scope-guard/grants");
-  const minted = await mintModule.mint(targetName, "POST /rest/user/login");
+test("a POST is forwarded once approvedForWrite is true, the flag only probe_target_write's own handler ever sets", async () => {
+  const capability = await seedSession({ sandboxId: "sandbox-write", appPort: 3000 });
 
   const stub = (async (input: string | URL | Request) => {
     const url = typeof input === "string" ? input : input.toString();
@@ -275,13 +243,15 @@ test("a POST with a grant minted for this session's own target name succeeds", a
   }) as typeof fetch;
 
   const result = await withFetch(stub, () =>
-    probeTargetModule.probeTarget({
-      capability: capabilityToken,
-      method: "POST",
-      path: "/rest/user/login",
-      body: JSON.stringify({ email: "a", password: "b" }),
-      grant_token: minted.token,
-    }),
+    probeTargetModule.probeTarget(
+      {
+        capability,
+        method: "POST",
+        path: "/rest/user/login",
+        body: JSON.stringify({ email: "a", password: "b" }),
+      },
+      { approvedForWrite: true },
+    ),
   );
 
   assert.equal(result.ok, true);

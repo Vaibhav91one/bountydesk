@@ -46,13 +46,13 @@ BountyDesk resolves exactly one authorized target per run through
 target is authorized, its sandbox is provisioned for you automatically
 before your turn starts, and the turn message tells you so. You never reach
 it by a raw URL: every request goes through `probe_target {capability,
-method, path, headers?, body?, grant_token?}`, which forwards to your own
-session's sandbox and hands back the status and body -- give it a
-same-origin path like `/rest/products/search`, not a host or a URL. GET and
-HEAD need no grant; a POST through `probe_target` is a write/active action
-and is refused without one -- call `request_intrusive_approval` with
-`target` set to the bound target's name exactly as the turn message gives
-it, and pass the returned token as `grant_token`. If the turn message says
+method, path, headers?, body?}` (GET/HEAD) or `probe_target_write` (POST,
+same shape), which forwards to your own session's sandbox and hands back the
+status and body -- give it a same-origin path like `/rest/products/search`,
+not a host or a URL. `probe_target` needs no approval; `probe_target_write`
+is a write/active action and is paused for a human Allow/Deny before it ever
+reaches you, the same as `scope_add`/`scope_remove` -- just call it, there is
+no grant to request yourself first. If the turn message says
 provisioning failed this run, there is nothing to probe; stop and draft
 ANALYSIS_ONLY. Call `scope_check` against the target before any contact with
 it, confirm it's allowed, and move to Phase 1.

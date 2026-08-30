@@ -21,11 +21,11 @@ const EXPECTED_SKILL_NAMES = [
   "bountydesk-mobile",
 ];
 
-test("the BountyDesk agent preloads the approval-gated publish_verdict tool", () => {
+test("the BountyDesk agent preloads the approval-gated publish_verdict and probe_target_write tools", () => {
   assert.equal(agentDefinition.name, "bountydesk");
   assert.deepEqual(agentDefinition.manifest.mcpServers[0], {
     name: "bountydesk",
-    requireApprovalForTools: ["publish_verdict"],
+    requireApprovalForTools: ["publish_verdict", "probe_target_write"],
     preload: true,
   });
 });

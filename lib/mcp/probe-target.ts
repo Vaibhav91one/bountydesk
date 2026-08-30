@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { agentSession, db, eq, report, targetProfile } from "@/lib/db";
+import { agentSession, db, eq } from "@/lib/db";
 import { getPortPreviewUrl, readLimitedText, ResponseBodyTooLarge } from "@/lib/sandbox/provision";
-import { verify as verifyGrant } from "@/lib/scope-guard/grants";
 
 /**
  * The tool that lets the agent reach the target this session actually got provisioned, without
@@ -11,6 +10,23 @@ import { verify as verifyGrant } from "@/lib/scope-guard/grants";
  * reach a dynamic per-run Daytona preview URL, so this is a second, narrower tool instead --
  * `capability` resolves the caller's own session (the same lookup publishVerdict uses), and
  * everything else is a same-origin request this function assembles and dispatches itself.
+ *
+ * This function is method-agnostic; the read/write split lives one layer up, at the MCP tool
+ * registration in app/api/mcp/publish-verdict/route.ts. GET/HEAD are registered as `probe_target`
+ * with no approval gate. POST -- the one write/active action this tool can perform -- is
+ * registered as a second tool, `probe_target_write`, named in the agent manifest's
+ * requireApprovalForTools so the harness pauses for a human Allow/Deny before this function ever
+ * runs. This is the exact same trust model this codebase already uses for scope_add/scope_remove
+ * (app/api/mcp/scope-guard/route.ts): those handlers run no additional in-function check either,
+ * because requireApprovalForTools already stops the call from reaching any handler before a
+ * human has approved it -- "gated by the harness's own human-approval checkpoint before this
+ * call executes" is those tools' own description text.
+ *
+ * A scope-guard single-use grant (mint via request_intrusive_approval, verify here) was tried
+ * first and abandoned: grants are minted against a target profile's scope-checked network
+ * address, resolved by matching real allow-listed hosts, and this tool's actual destination -- a
+ * per-run Daytona preview URL -- is never a host the agent knows to name or that any scope entry
+ * would ever match. Gating the tool call itself sidesteps that mismatch entirely.
  *
  * Wall-clock ceiling per request, matching reproduce.ts's own HTTP_TIMEOUT_MS for calls this
  * process makes to the sandbox.
@@ -27,10 +43,17 @@ export const probeTargetInputSchema = z.object({
   // Matches lib/mcp/publish-verdict.ts's own finding/summary caps in spirit: bound every
   // string a tool call can carry, rather than trust a model to stay reasonable on its own.
   body: z.string().max(200_000).optional(),
-  // Required for POST, the one write/active action this tool can perform -- mirrors
-  // scope-guard's http_probe (lib/scope-guard/egress.ts's authorizeConnect), which needs a
-  // grant from request_intrusive_approval for exactly the same reason.
-  grant_token: z.string().optional(),
+});
+
+/** GET/HEAD only: the schema advertised on the unapproved `probe_target` tool, so a
+ * tool-calling model has no schema-level way to slip a POST past the approval gate. */
+export const probeTargetReadInputSchema = probeTargetInputSchema.extend({
+  method: z.enum(["GET", "HEAD"]),
+});
+
+/** POST only: the schema advertised on `probe_target_write`, gated by requireApprovalForTools. */
+export const probeTargetWriteInputSchema = probeTargetInputSchema.extend({
+  method: z.literal("POST"),
 });
 
 export type ProbeTargetInput = z.infer<typeof probeTargetInputSchema>;
@@ -70,6 +93,18 @@ function forwardableHeaders(callerHeaders: Record<string, string> | undefined): 
   return headers;
 }
 
+export type ProbeTargetOptions = {
+  /**
+   * True only when this call arrived through the approval-gated `probe_target_write`
+   * registration (app/api/mcp/publish-verdict/route.ts is the only caller that ever sets this).
+   * Every other caller, including the plain `probe_target` tool, leaves this false. A POST
+   * reaching this function with it false is refused outright: this is a fail-closed backstop
+   * against a POST reaching the network through any path other than the one the harness actually
+   * pauses for human review, not a substitute for that pause.
+   */
+  approvedForWrite?: boolean;
+};
+
 /**
  * Resolve the calling session by capability (the exact lookup publishVerdict uses), forward the
  * request to that session's provisioned sandbox with the preview token injected, and hand back
@@ -78,15 +113,22 @@ function forwardableHeaders(callerHeaders: Record<string, string> | undefined): 
  * fresh, never cached across calls (getPortPreviewUrl is called new every time, per this file's
  * doc comment, since a stored token could go stale between calls).
  */
-export async function probeTarget(input: ProbeTargetInput): Promise<ProbeTargetResult> {
+export async function probeTarget(input: ProbeTargetInput, opts: ProbeTargetOptions = {}): Promise<ProbeTargetResult> {
   // A cheap, network-free rejection for the common case; the authoritative check is
   // resolveTargetUrl below, once the preview origin to resolve against is in hand.
   if (!input.path.startsWith("/")) {
     return { ok: false, reason: "path must be a same-origin path starting with a single '/'" };
   }
 
+  if (input.method === "POST" && !opts.approvedForWrite) {
+    return {
+      ok: false,
+      reason: "POST is a write/active action; call probe_target_write instead, which the harness pauses for human approval",
+    };
+  }
+
   const [session] = await db
-    .select({ sandboxId: agentSession.sandboxId, appPort: agentSession.appPort, reportId: agentSession.reportId })
+    .select({ sandboxId: agentSession.sandboxId, appPort: agentSession.appPort })
     .from(agentSession)
     .where(eq(agentSession.capabilityToken, input.capability))
     .limit(1);
@@ -94,30 +136,6 @@ export async function probeTarget(input: ProbeTargetInput): Promise<ProbeTargetR
   if (!session) return { ok: false, reason: "unknown capability" };
   if (!session.sandboxId || !session.appPort) {
     return { ok: false, reason: "no sandbox is provisioned for this session; there is nothing to probe" };
-  }
-
-  // POST is this tool's one write/active action; every other method stays passive-probe
-  // territory and needs no grant, matching http_probe's own requiresGrant split.
-  if (input.method === "POST") {
-    const [target] = await db
-      .select({ name: targetProfile.name })
-      .from(report)
-      .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
-      .where(eq(report.id, session.reportId))
-      .limit(1);
-    if (!target) {
-      return { ok: false, reason: "no bound target to check the grant against" };
-    }
-    if (!input.grant_token) {
-      return {
-        ok: false,
-        reason: "grant denial: this is a write action and needs a grant from request_intrusive_approval first",
-      };
-    }
-    const verified = await verifyGrant(input.grant_token, target.name);
-    if (!verified.valid) {
-      return { ok: false, reason: `grant denial: ${verified.reason}` };
-    }
   }
 
   let preview: { url: string; token: string };
