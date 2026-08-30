@@ -184,9 +184,9 @@ async function handleVerifiedPendingCall(
  * fields before falling through to the same handleVerifiedPendingCall approval-recording flow
  * a capability-only call uses -- the drafting step is the only part that's new.
  *
- * Nothing in the live agent manifest or turn message asks for this shape yet (that lands with
- * the driver rewrite), so this branch is unreachable in production today; it exists so the
- * poller-side half of the new schema is exercised and provable ahead of that later PR.
+ * `agent/bountydesk.agent.json`'s instructions and `lib/analysis/trueforge-driver.ts`'s
+ * `buildTurnMessage` both ask the agent for this shape today, so this branch is reachable in
+ * production, not just exercised ahead of a later PR.
  */
 async function handleAgentDraftedPendingCall(
   lease: AgentSessionLease,

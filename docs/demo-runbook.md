@@ -5,33 +5,35 @@ One page. Follow top to bottom on demo day.
 ---
 
 ## The one-line pitch
-"Bug report comes in, our harness deploys the target, reproduces the exploit in an isolated sandbox, and hands a human a documented evidence packet with a verdict — the human approves, the verdict ships. No auto-close, ever."
+"Bug report comes in, our TrueForge agent investigates the target in an isolated sandbox using its own tools, drafts a verdict from what it found, and hands a human the exact text to approve before anything ships. No auto-close, ever."
 
 ---
 
 ## Happy path (the live demo)
 
 **Target:** the connected fork `Vaibhav91one/juice-shop` at commit `1867b926c5f50e4e692dc9c8f61821413cebe0cd`, which is the `v17.3.0` tag and the same commit as upstream's, built into an immutable image and pinned by digest and snapshot ID.
-**Vuln class:** SQLi (single request, deterministic), confirmed by a **per-run canary**.
+**Vuln class:** SQLi (single request, deterministic), confirmed by the agent's own sandboxed investigation.
 
-**Confirmed live 2026-08-29.** This exact flow ran end to end against a real GitHub issue
+**Confirmed live 2026-08-29,** under the deterministic canary pipeline that predated the
+2026-08-30 agent-authored-verdict redesign (`docs/decisions.md` Q22). That run went end to end
+against a real GitHub issue
 ([Vaibhav91one/juice-shop#5](https://github.com/Vaibhav91one/juice-shop/issues/5)): report
 `beabb524-1bd7-4651-a9b8-2363926b0a49`, verdict `7cbf3647-2b32-4582-9d43-9db49509aa4d`,
 outcome `REPRODUCED`, delivered as
 [comment 5464633799](https://github.com/Vaibhav91one/juice-shop/issues/5#issuecomment-5464633799)
-whose body matches the approved content hash exactly. Replaying the same webhook delivery
-afterward produced no second job, report, or comment. The steps below are what actually
-happened, not a projection.
+whose body matched the approved content hash exactly. Replaying the same webhook delivery
+afterward produced no second job, report, or comment. The approval gate and the delivery
+idempotency it proved still work the same way; the steps below describe today's agent-driven
+flow, not that run's canary pipeline.
 
 1. **Intake** — a GitHub issue on the dedicated demo repo: `SQLi in /api/search`. The **installed BountyDesk GitHub App** delivers a **signed** webhook (`X-Hub-Signature-256`, platform-owned App secret); the receiver verifies it and resolves `installation_id → repo → TargetProfile` server-side → harness starts a TrueForge session.
 2. **Triage** — scope_check passes, dedupe_check clean, PoC extracted. (Text-only, seconds.)
-3. Sandbox: boot the prebuilt pinned image. No clone, no install, no network at reproduction time: the sandbox is offline. The build that produced it ran earlier, and that is the only step that ever needed the network.
-4. **Seed canary** — the trusted fixture seeds a fresh, unpredictable canary into the target. Run the **negative control** first: without the exploit, the oracle must not trip. The canary is *ours*, not the attacker's.
-5. **Run PoC** — execute the submitted PoC against sandbox-localhost.
-6. **Oracle (the money moment)** — the oracle runs **outside the PoC environment** and checks whether this run's canary reached the trusted sink. It did → `REPRODUCED`. Say out loud: **"the verdict comes from our canary, evaluated outside the sandbox — not from the PoC's own output. A researcher can't fake a 'reproduced.'"**
-7. **Packet** — Word doc auto-generated: action-log flow (booted pinned image → seeded canary → negative control passed → ran PoC → oracle observed the canary @ timestamp) + *our* screenshot of the leaked canary + the researcher's raw PoC quarantined in a labeled "unverified" box.
-8. **Human gate** — `publish_verdict` is called and the turn ends on a PENDING tool call (session persisted). Reviewer reads raw evidence, clicks **Allow** → a NEW approval turn carries `user.tool_approval` → one DB commit (verdict + outbox) → the delivery worker mints a **short-lived GitHub App installation token** server-side, posts the comment idempotently, and discards the token. Control is *not* pre-filled.
-9. **Kill-the-process flourish** (optional) — kill the harness at step 8, reopen browser, session still waiting. "State's in the DB, not memory."
+3. Sandbox: boot the prebuilt pinned image for this run. The build that produced it ran earlier, so nothing is cloned or installed live on stage.
+4. **Investigate (the money moment):** the TrueForge agent works the report against this target using scope-guard, its skills, and subagents. It decides what to try; nothing here is scripted for it in advance. Say out loud: **"the verdict is the agent's own conclusion from its own sandboxed investigation, not something we handed it. What makes it trustworthy is that nothing reaches the reporter until a person reads that exact text and approves it, and the target's authorization is re-checked before a reproduced claim counts."**
+5. **Draft:** from what it found, the agent calls `publish_verdict` with its own outcome, summary, and findings, and the turn ends on that pending call.
+6. **Packet:** the case file shows the agent's drafted outcome, summary, and findings, plus the evidence it gathered, with the researcher's raw PoC quarantined alongside in a labeled "unverified" box.
+7. **Human gate:** `publish_verdict`'s pending call is what the reviewer sees (session persisted). Reviewer reads the agent's drafted findings, clicks **Allow** → a NEW approval turn carries `user.tool_approval` → one DB commit (verdict + outbox) → the delivery worker mints a **short-lived GitHub App installation token** server-side, posts the comment idempotently, and discards the token. Control is *not* pre-filled.
+8. **Kill-the-process flourish** (optional): kill the harness at step 7, reopen browser, session still waiting. "State's in the DB, not memory."
 
 ---
 
@@ -49,7 +51,7 @@ happened, not a projection.
 
 - [ ] Connected fork **built at the pinned commit** and the snapshot id recorded; Daytona sandbox **provisioned and warm**; target image **pre-pulled** (no cold-start on stage).
 - [ ] **BountyDesk GitHub App** registered (Issues read/write + Metadata) and **installed on the one dedicated demo repo**. Subscribe to Issues + Repository events; handle the automatic Installation + Installation repositories events. Verify a signed test delivery, repository removal, suspension and uninstall; mint the approved-comment installation token server-side, post idempotently and discard it.
-- [ ] The SQLi scenario on the pinned target **confirmed green** this morning; canary seed + negative control verified. Scenario 2 (login bypass) rehearsed from its tests if its live-run PR has landed by then.
+- [ ] The SQLi scenario on the pinned target **confirmed green** this morning: the agent investigates it and drafts `REPRODUCED`. Scenario 2 (login bypass) rehearsed from its tests if its live-run PR has landed by then.
 - [ ] One **full happy-path dry run** end to end, today, on the demo machine + demo network.
 - [ ] **Pre-recorded run** (Backup B) saved locally and openable offline.
 - [ ] Pre-generated **Word packet** from a known-good run saved locally.
@@ -61,16 +63,16 @@ happened, not a projection.
 
 ## If a judge asks the sharp questions
 
-- **"Isn't the verdict forgeable?"** → "No. It's a fresh canary we seed through a trusted fixture, and the oracle runs outside the PoC's environment. We run a negative control first. The attacker controls the PoC and its output; they don't control our canary or our instrument."
-- **"Is that sandbox actually safe for malicious code?"** → "For the demo it's Daytona cloud, a shared-kernel container — fine for benign inputs. Production runs a Kata microVM with host-side egress default-deny and metadata blocked. It's on the threat-model page as a known upgrade."
+- **"Isn't the verdict forgeable?"** → "The agent draws its own conclusion from its own sandboxed investigation, but nothing reaches the reporter until a person reads the exact drafted text and approves it. The server also re-checks target authorization at that point: a reproduced claim for a target we haven't authorized, or whose grant is revoked, gets refused no matter what the agent asserts."
+- **"Is that sandbox actually safe for malicious code?"** → "For the demo it's Daytona cloud, a shared-kernel container, fine for benign inputs. Production runs a Kata microVM with host-side egress default-deny and metadata blocked. It's on the threat-model page as a known upgrade."
 - **"Can this dedupe / auto-reject real bugs?"** → "Two different things. A repeated webhook delivery is a safe automatic no-op. A *semantically* similar report is never auto-closed — we surface top-k candidates and a human decides. Same as HackerOne and Bugcrowd."
-- **"What about prompt injection in the report?"** → "Report is treated as data, and the verdict is a deterministic canary check outside the model — plus a human gate that can't be skipped. The board's threat-model page walks the attack chains."
+- **"What about prompt injection in the report?"** → "Report is treated as data, so nothing in it can pick a target or skip authorization. The agent's draft still needs a human to read and approve the exact text before anything ships. The board's threat-model page walks the attack chains."
 
 ---
 
 ## Do NOT demo / do NOT claim
 - Don't claim production-grade sandbox isolation on Daytona cloud — say it's the demo layer.
-- Don't let the model narrate the verdict — the canary does.
+- Don't call the agent's draft a verdict before a human approves it. The approval is what makes it one.
 - Don't type anything live you can paste.
 - Don't run the dynamic clone-and-build tier live unless the provisioning spike and a full rehearsal both went green today, on this network. This is a demo-risk decision, not a scope limit: the tier is designed and documented, and on stage it is a walkthrough of the two-sandbox diagram. The build is the one step that needs the network the rest of the demo brags about not having, and that is not a sentence to improvise.
 - Don't demo email or file-upload intake as live. They are designed channels; show the UI and say so.
