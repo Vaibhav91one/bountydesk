@@ -30,12 +30,14 @@ function caseFile(overrides: Partial<CaseFile> = {}): CaseFile {
     createdAt: AT,
     updatedAt: AT,
     turnStatus: null,
+    sessionError: null,
     finalSummary: null,
     target: null,
     sandbox: null,
     verdict: null,
     approval: null,
     delivery: null,
+    handoff: null,
     awaitingVerdictId: null,
     events: [],
     artifacts: [],
@@ -263,4 +265,124 @@ test("every field crossing the wire survives JSON", () => {
 
   assert.deepEqual(JSON.parse(JSON.stringify(view)), view);
   assert.equal(view.verdict?.payloadArtifactId, "a1");
+});
+
+function handoff(overrides: Partial<NonNullable<CaseFile["handoff"]>> = {}) {
+  return { state: "PENDING", attempts: 0, maxAttempts: 8, lastError: null, ...overrides };
+}
+
+test("a handoff still being retried says so and keeps the report alive", () => {
+  const view = caseLiveView(
+    caseFile({
+      state: "AWAITING_APPROVAL",
+      verdict: verdict(),
+      approval: { decision: "APPROVED", reviewer: "vaibhav", note: null, decidedAt: AT },
+      handoff: handoff({ state: "FAILED", attempts: 3, lastError: "Session not found" }),
+    }),
+  );
+
+  assert.equal(view.failed, false, "three of eight attempts is not a dead run");
+  assert.equal(view.stateLabel, "Approved");
+  assert.equal(step(view, "delivery").note, "handoff failed, retrying (3/8)");
+  assert.equal(step(view, "delivery").state, "current");
+});
+
+test("a handoff that ran out of attempts reads as failed, not as approved", () => {
+  // Report #18: the decision committed, the harness never heard about it, and no
+  // outbound_delivery row was ever written. The page said "Approved" over "Not enqueued",
+  // which is what a report waiting its turn looks like.
+  const view = caseLiveView(
+    caseFile({
+      state: "AWAITING_APPROVAL",
+      verdict: verdict(),
+      approval: { decision: "APPROVED", reviewer: "vaibhav", note: null, decidedAt: AT },
+      handoff: handoff({ state: "FAILED", attempts: 8, lastError: "Session not found" }),
+    }),
+  );
+
+  assert.equal(view.failed, true);
+  assert.equal(view.stateLabel, "Failed");
+  assert.equal(step(view, "delivery").note, "handoff failed after 8 attempts");
+  assert.equal(step(view, "delivery").state, "skipped");
+
+  // The decision itself is still on the record. A failed handoff is not an unapproved report,
+  // and hiding the signature would be a second wrong answer.
+  assert.equal(step(view, "approval").state, "done");
+  assert.equal(step(view, "approval").note, "Approved by vaibhav");
+});
+
+test("a handoff in flight is not mistaken for a delivery that never started", () => {
+  const pending = caseLiveView(
+    caseFile({ state: "AWAITING_APPROVAL", verdict: verdict(), handoff: handoff() }),
+  );
+  assert.equal(step(pending, "delivery").note, "Handing off to the agent");
+  assert.equal(step(pending, "delivery").state, "current");
+
+  const submitted = caseLiveView(
+    caseFile({
+      state: "AWAITING_APPROVAL",
+      verdict: verdict(),
+      handoff: handoff({ state: "SUBMITTED" }),
+    }),
+  );
+  assert.equal(step(submitted, "delivery").note, "Handed off, waiting on the agent");
+
+  // No handoff at all is the synthesized path, enqueued inline without the harness.
+  const none = caseLiveView(caseFile({ state: "ANALYSIS_ONLY", verdict: verdict() }));
+  assert.equal(step(none, "delivery").note, "Not enqueued");
+  assert.equal(step(none, "delivery").state, "pending");
+});
+
+test("once a delivery exists the handoff has done its job and stops being the story", () => {
+  const view = caseLiveView(
+    caseFile({
+      state: "DELIVERED",
+      verdict: verdict(),
+      handoff: handoff({ state: "FAILED", attempts: 8, lastError: "a stale error" }),
+      delivery: {
+        state: "SENT",
+        attempts: 1,
+        maxAttempts: 8,
+        lastError: null,
+        target: "issues/18",
+      },
+    }),
+  );
+
+  assert.equal(view.failed, false);
+  assert.equal(view.stateLabel, "Delivered");
+  assert.equal(step(view, "delivery").note, "sent");
+  assert.equal(step(view, "delivery").state, "done");
+});
+
+test("a turn that errored is not drawn as an investigation that finished", () => {
+  // The poller synthesizes an ANALYSIS_ONLY verdict for a dead turn so the report still
+  // reaches a reviewer, which is exactly why a verdict existing cannot mean "this went fine".
+  const view = caseLiveView(
+    caseFile({
+      state: "ANALYSIS_ONLY",
+      turnStatus: "ERROR",
+      sessionError: "TrueForge session or turn was not found: session-1",
+      verdict: verdict({ outcome: "ANALYSIS_ONLY" }),
+      events: [toolCallEvent(1)],
+    }),
+  );
+
+  assert.equal(step(view, "investigation").state, "skipped");
+  assert.match(step(view, "investigation").note, /^Stopped: TrueForge session or turn was not/);
+  assert.equal(view.sessionError, "TrueForge session or turn was not found: session-1");
+});
+
+test("a long harness error is trimmed to one line for the row", () => {
+  const view = caseLiveView(
+    caseFile({
+      turnStatus: "ERROR",
+      sessionError: `${"x".repeat(200)}\nsecond line`,
+      verdict: verdict(),
+    }),
+  );
+
+  const note = step(view, "investigation").note;
+  assert.ok(note.length <= 70, `note was ${note.length} characters`);
+  assert.ok(!note.includes("second line"), "only the first line reaches the row");
 });

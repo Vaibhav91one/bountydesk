@@ -37,6 +37,7 @@ export function CaseRealtimeBadges({
         state={data.state}
         phase={data.phase}
         deliveryState={data.deliveryState}
+        failed={data.failed}
         label={data.stateLabel}
       />
       {data.verdictOutcome && data.showOutcomeBadge ? (

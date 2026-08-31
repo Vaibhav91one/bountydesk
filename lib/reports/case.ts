@@ -2,6 +2,7 @@ import {
   agentSession,
   and,
   approvalDecision,
+  approvalSubmission,
   artifact,
   connectedRepository,
   db,
@@ -13,6 +14,7 @@ import {
   targetProfile,
   verdict,
 } from "@/lib/db";
+import { MAX_ATTEMPTS as HANDOFF_MAX_ATTEMPTS } from "@/lib/approval-submission/queue";
 export {
   isAgentInvestigating,
   oracleDecided,
@@ -102,6 +104,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           pendingVerdictId: agentSession.pendingVerdictId,
           pendingApprovedContentHash: agentSession.pendingApprovedContentHash,
           turnStatus: agentSession.turnStatus,
+          lastError: agentSession.lastError,
           finalSummary: agentSession.finalSummary,
           sandboxId: agentSession.sandboxId,
           appPort: agentSession.appPort,
@@ -179,6 +182,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
       const [decision] = latest
         ? await tx
             .select({
+              id: approvalDecision.id,
               decision: approvalDecision.decision,
               reviewer: approvalDecision.reviewer,
               note: approvalDecision.note,
@@ -189,6 +193,28 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         : [];
 
       const awaitingVerdictId = canShowPending && !decision ? pendingVerdictId : null;
+
+      // Whether the decision ever reached the harness.
+      //
+      // For a harness-backed verdict this row is the only thing that starts delivery: the
+      // submission worker tells TrueForge, TrueForge calls publish_verdict, and only then does
+      // an outbound_delivery row exist. So a submission that died leaves a report approved,
+      // with no delivery to point at and nothing on its way. Without this read the case file
+      // could not tell that apart from a delivery that simply has not started yet.
+      //
+      // At most one row per decision (approval_submission_approval_decision_key), so there is
+      // no newest to pick. Absent entirely for a synthesized verdict, which is enqueued inline
+      // by the approval action and never involves the harness.
+      const [handoff] = decision
+        ? await tx
+            .select({
+              state: approvalSubmission.state,
+              attempts: approvalSubmission.attempts,
+              lastError: approvalSubmission.lastError,
+            })
+            .from(approvalSubmission)
+            .where(eq(approvalSubmission.approvalDecisionId, decision.id))
+        : [];
 
       // Keyed on the verdict, not the report. A report can carry a delivery per revision, and
       // a report-only predicate returns whichever row the planner reached first, so the page
@@ -244,6 +270,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
       return {
         ...row,
         turnStatus: session?.turnStatus ?? null,
+        sessionError: session?.lastError ?? null,
         finalSummary: session?.finalSummary ?? null,
         sandbox: session?.sandboxId
           ? { id: session.sandboxId, appPort: session.appPort ?? null }
@@ -265,6 +292,10 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         verdict: latest ?? null,
         approval: decision ?? null,
         delivery: dispatch ?? null,
+        // The retry ceiling is a module constant rather than a column on this table, unlike
+        // outbound_delivery. Resolved here so the derived view can compare against it without
+        // importing the queue, which would drag the connection pool into a pure module.
+        handoff: handoff ? { ...handoff, maxAttempts: HANDOFF_MAX_ATTEMPTS } : null,
         awaitingVerdictId,
         events: events.map((e) => ({ ...e, channel: e.type.split(".")[0] })),
         artifacts: artifacts.map(({ storagePath, ...rest }) => ({

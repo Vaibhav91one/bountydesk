@@ -577,3 +577,100 @@ test("a report is investigating only while its turn is live, has observed a tool
     assert.equal(isAgentInvestigating(status, false, true), false, `${status} must not read as investigating`);
   }
 });
+
+test("a decision that never reached the harness is readable, and one that did is not confused with it", async () => {
+  // The shape report #18 was stuck in. The decision committed, the submission worker could not
+  // reach TrueForge, and because publish_verdict never fired there is no outbound_delivery row
+  // at all: the case file's only route to knowing is the submission row itself.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "REPRODUCED",
+      summary: "the payload executes",
+      payload: "comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: id,
+      capabilityToken: `token-${id}`,
+      sessionId: `session-${id}`,
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId: v.id,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash: `hash-${id}`,
+      threadId: "thread-1",
+      toolCallId: "call-1",
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  // Inserted at its terminal shape rather than driven through eight worker attempts. readCase
+  // is a pure read and does not care how the row got here.
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found: session-1",
+  });
+
+  const stalled = await cases.readCase(id);
+  assert.equal(stalled?.handoff?.state, "FAILED");
+  assert.equal(stalled?.handoff?.attempts, 8);
+  assert.equal(stalled?.handoff?.maxAttempts, 8);
+  assert.equal(stalled?.handoff?.lastError, "Session not found: session-1");
+  assert.equal(stalled?.delivery, null, "no delivery row was ever written");
+
+  // A report whose approval took the synthesized path has no submission row at all, and must
+  // not be reported as a handoff that has not happened yet.
+  const other = await seedReport("ANALYSIS_ONLY");
+  const [ov] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: other,
+      outcome: "ANALYSIS_ONLY",
+      summary: "nothing ran",
+      payload: "comment",
+      contentHash: `hash-${other}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: ov.id,
+    reviewer: "vaibhav",
+    decision: "APPROVED",
+    payloadHash: `hash-${other}`,
+  });
+
+  assert.equal((await cases.readCase(other))?.handoff, null);
+});
+
+test("a session that died carries its reason onto the case file", async () => {
+  const id = await seedReport("ANALYSIS_ONLY");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    turnStatus: "ERROR",
+    lastError: "TrueForge session or turn was not found: session-1",
+  });
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.turnStatus, "ERROR");
+  assert.equal(file?.sessionError, "TrueForge session or turn was not found: session-1");
+});

@@ -709,3 +709,68 @@ test("a decision on a hidden report drops off the home decisions count", async (
   const after = (await readHomeSummary()).decisions;
   assert.equal(before - after, 1, "a decision on a hidden report must not count on the home card");
 });
+
+test("a decision the harness never received shows on the board as a failed run", async () => {
+  // No outbound_delivery row exists, because publish_verdict never fired, so deliveryState
+  // cannot carry this. Without handoffFailed the card reads "Needs review" for a report the
+  // reviewer already answered, and nothing on the board says it is stuck.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "REPRODUCED",
+      summary: "the payload executes",
+      payload: "comment",
+      contentHash: `handoff-hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: id,
+      capabilityToken: `handoff-token-${id}`,
+      sessionId: `handoff-session-${id}`,
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: `handoff-hash-${id}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId: v.id,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash: `handoff-hash-${id}`,
+      threadId: "thread-1",
+      toolCallId: "call-1",
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found",
+  });
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+
+  assert.ok(card);
+  assert.equal(card.handoffFailed, true);
+  assert.equal(card.deliveryState, null, "nothing was ever enqueued");
+
+  // A report whose handoff is still being retried is not dead yet and must not say so.
+  const live = await seedReport("AWAITING_APPROVAL");
+  const columnsAgain = await queue.listQueue();
+  assert.equal(
+    columnsAgain.flatMap((c) => c.cards).find((c) => c.id === live)?.handoffFailed,
+    false,
+  );
+});

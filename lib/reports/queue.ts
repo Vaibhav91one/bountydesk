@@ -15,6 +15,7 @@ import {
   targetProfile,
   type Executor,
 } from "@/lib/db";
+import { MAX_ATTEMPTS as HANDOFF_MAX_ATTEMPTS } from "@/lib/approval-submission/queue";
 import { COLUMNS, phaseOf } from "@/lib/reports/columns";
 import { isAgentInvestigating } from "@/lib/reports/case";
 import { TERMINAL_STATES } from "@/lib/reports/states";
@@ -45,6 +46,14 @@ export type QueueCard = {
   outcome: VerdictOutcome | null;
   /** The outbox state for the newest delivery row, if approval has reached delivery. */
   deliveryState: DeliveryState | null;
+  /**
+   * The reviewer's decision never reached the harness and has run out of retries.
+   *
+   * Separate from deliveryState because the two failures happen at different points and only
+   * one of them leaves a row behind: a dead handoff means no delivery was ever enqueued, so
+   * the absence of a delivery state is exactly what makes it invisible.
+   */
+  handoffFailed: boolean;
   /**
    * session_event rows, which is the run's own step log.
    *
@@ -120,6 +129,22 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
       )`,
+      // A decision that never reached the harness, with no attempts left. It leaves no
+      // outbound_delivery row at all, so deliveryState above is null and the card would
+      // otherwise read as merely awaiting approval for a report that is permanently stuck.
+      // MAX_ATTEMPTS is a constant in the submission queue rather than a column here.
+      handoffFailed: sql<boolean>`exists (
+        select 1
+        from approval_submission sub
+        join approval_decision ad on ad.id = sub.approval_decision_id
+        join verdict v on v.id = ad.verdict_id
+        where v.report_id = ${report.id}
+          and sub.state = 'FAILED'
+          and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
+          and not exists (
+            select 1 from outbound_delivery d where d.report_id = ${report.id}
+          )
+      )`,
       // Same event log eventCount reads, filtered to the poller's mirrored tool-call events:
       // the one signal isAgentInvestigating trusts that a RUNNING/INVESTIGATING turn has
       // actually done something, not just started (see lib/reports/case.ts).
@@ -143,6 +168,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     state: row.state,
     outcome: row.outcome,
     deliveryState: row.deliveryState,
+    handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     awaitingVerdictId:
@@ -293,6 +319,22 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
       )`,
+      // A decision that never reached the harness, with no attempts left. It leaves no
+      // outbound_delivery row at all, so deliveryState above is null and the card would
+      // otherwise read as merely awaiting approval for a report that is permanently stuck.
+      // MAX_ATTEMPTS is a constant in the submission queue rather than a column here.
+      handoffFailed: sql<boolean>`exists (
+        select 1
+        from approval_submission sub
+        join approval_decision ad on ad.id = sub.approval_decision_id
+        join verdict v on v.id = ad.verdict_id
+        where v.report_id = ${report.id}
+          and sub.state = 'FAILED'
+          and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
+          and not exists (
+            select 1 from outbound_delivery d where d.report_id = ${report.id}
+          )
+      )`,
       hasToolCallEvents: sql<boolean>`exists (
         select 1 from session_event e
         where e.report_id = ${report.id} and e.type like 'agent.tool_call:%'
@@ -315,6 +357,7 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     state: row.state,
     outcome: row.outcome,
     deliveryState: row.deliveryState,
+    handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.

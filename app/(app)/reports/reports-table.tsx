@@ -122,6 +122,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
             state={row.state}
             phase={row.phase}
             deliveryState={row.deliveryState}
+            failed={row.handoffFailed}
           />
           {shouldShowOutcomeBadge(row.state, row.outcome) ? (
             <ReportOutcomeBadge outcome={row.outcome} />

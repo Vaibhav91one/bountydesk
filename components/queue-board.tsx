@@ -109,10 +109,15 @@ export function Card({
 }) {
   const phase = phaseOf(card.state);
   const failedDelivery = card.deliveryState === "FAILED";
-  const running = !failedDelivery && RUNNING.has(card.state);
+  // A dead handoff never produced a delivery row, so it cannot show up as a failed delivery.
+  // Left out, the card reads "Needs review" for a report a reviewer has already answered.
+  const stalled = failedDelivery || card.handoffFailed;
+  const running = !stalled && RUNNING.has(card.state);
   const float = driftAt(index);
 
-  const status = card.awaitingVerdictId
+  const status = card.handoffFailed
+    ? "Handoff failed"
+    : card.awaitingVerdictId
     ? "Needs review"
     : failedDelivery
       ? "Delivery failed"
@@ -179,6 +184,7 @@ export function Card({
               state={card.state}
               phase={phase}
               deliveryState={card.deliveryState}
+              failed={card.handoffFailed}
             />
           ) : null}
           {shouldShowOutcomeBadge(card.state, card.outcome) ? (
