@@ -266,6 +266,35 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
     pendingApprovedContentHash: `hash-${id}`,
   });
 
+  const decided = await seedReport("AWAITING_APPROVAL");
+  const [decidedVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: decided,
+      outcome: "REPRODUCED",
+      summary: "reproduced",
+      payload: "the exact comment",
+      contentHash: `hash-${decided}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: decided,
+    capabilityToken: `token-${decided}`,
+    sessionId: `session-${decided}`,
+    pendingThreadId: "thread-decided",
+    pendingToolCallId: "call-decided",
+    pendingVerdictId: decidedVerdict.id,
+    pendingApprovedContentHash: `hash-${decided}`,
+  });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: decidedVerdict.id,
+    reviewer: "someone",
+    decision: "APPROVED",
+    payloadHash: `hash-${decided}`,
+    threadId: "thread-decided",
+    toolCallId: "call-decided",
+  });
+
   const columns = await queue.listQueue();
   const cards = column(columns, "awaiting-approval").cards;
 
@@ -273,6 +302,7 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
   // nothing to answer.
   assert.equal(cards.find((c) => c.id === withoutCall)?.awaitingVerdictId, null);
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
+  assert.equal(cards.find((c) => c.id === decided)?.awaitingVerdictId, null);
 });
 
 test("a synthesized verdict with null thread markers is approvable in the analysis column", async () => {

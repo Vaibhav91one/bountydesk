@@ -200,6 +200,42 @@ test("a synthesized verdict in the analysis lane is still exposed as approvable"
   assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
 });
 
+test("an approved pending verdict is no longer exposed as approvable", async () => {
+  const id = await seedReport("ANALYSIS_ONLY");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "ANALYSIS_ONLY",
+      summary: "could not verify; needs human triage",
+      payload: "the exact comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `hash-${id}`,
+  });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: v.id,
+    reviewer: "someone",
+    decision: "APPROVED",
+    payloadHash: `hash-${id}`,
+    threadId: null,
+    toolCallId: null,
+  });
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.approval?.decision, "APPROVED");
+  assert.equal(file?.awaitingVerdictId, null);
+});
+
 test("a decided verdict reports its decision and closes the gate", async () => {
   const id = await seedReport("DENIED");
   const [v] = await dbm.db

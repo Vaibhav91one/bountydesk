@@ -84,6 +84,15 @@ export function ApprovalDialog({
   const [acting, setActing] = useState<"allow" | "deny" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
+  const [open, setOpen] = useState(false);
+
+  function onOpenChange(next: boolean) {
+    setOpen(next);
+    if (next) {
+      setResult(null);
+      setDecision(null);
+    }
+  }
 
   /**
    * What the agent answers with.
@@ -142,18 +151,21 @@ export function ApprovalDialog({
     if (answer.ok) {
       setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
       router.refresh();
+      setOpen(false);
     }
   }
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger
         render={
           <Button
             size="sm"
+            disabled={decision !== null}
             className="relative animate-approval-halo bg-phase-approval text-background hover:bg-phase-approval/85 motion-reduce:animate-none"
           >
-            <RollingIcon icon={Signature} weight="fill" className="size-4" /> Approval needed
+            <RollingIcon icon={Signature} weight="fill" className="size-4" />{" "}
+            {decision ? "Updating verdict" : "Approval needed"}
           </Button>
         }
       />
