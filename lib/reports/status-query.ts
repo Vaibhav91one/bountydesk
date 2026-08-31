@@ -119,16 +119,30 @@ export function toolCallsRefetchInterval(status: CaseLiveView): number | false {
   return status.investigating ? 5000 : false;
 }
 
-/**
- * The queue and the reports index both stop once every row on screen has stopped moving.
- *
- * An empty list keeps polling. It holds no unfinished work, but it is also the state a console
- * sits in before its first report ever arrives, and stopping there means never noticing one.
- */
-export function listRefetchInterval(states: string[]): number | false {
-  if (states.length === 0) return 4000;
+export type ListPollItem = {
+  state: string;
+  deliveryState?: string | null;
+  handoffFailed?: boolean;
+};
 
-  return states.some((state) => !TERMINAL_STATES.includes(state)) ? 4000 : false;
+/**
+ * The queue and the reports index both keep a low watch even when every visible row is done.
+ *
+ * New reports can arrive after a screen has only terminal rows, and the first report can arrive
+ * after an empty first paint. A visible moving row polls faster; a visible dead handoff does not
+ * keep the list hot just because the report state itself is non-terminal.
+ */
+export function listRefetchInterval(items: ListPollItem[]): number {
+  if (items.length === 0) return 4000;
+
+  const hasMovingRow = items.some((item) => {
+    if (item.deliveryState === "PENDING") return true;
+    if (item.handoffFailed || item.deliveryState === "FAILED") return false;
+
+    return !TERMINAL_STATES.includes(item.state);
+  });
+
+  return hasMovingRow ? 4000 : AMBIENT_REFETCH_MS;
 }
 
 /**

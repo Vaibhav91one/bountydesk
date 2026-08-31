@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { CaseLiveView } from "./case-view";
-import { caseRefetchInterval, listRefetchInterval, toolCallsRefetchInterval } from "./status-query";
+import {
+  AMBIENT_REFETCH_MS,
+  caseRefetchInterval,
+  listRefetchInterval,
+  toolCallsRefetchInterval,
+  type ListPollItem,
+} from "./status-query";
 
 /**
  * The poll has to stop on its own. A tab left open on a finished report asking the database
@@ -97,9 +103,15 @@ test("tool-call detail is only fetched while the agent is working", () => {
   assert.equal(toolCallsRefetchInterval(view({ investigating: false })), false);
 });
 
-test("a list stops polling once every row on it has stopped moving", () => {
-  assert.equal(listRefetchInterval(["DELIVERED", "AWAITING_APPROVAL"]), 4000);
-  assert.equal(listRefetchInterval(["DELIVERED", "DENIED"]), false);
+test("a list polls quickly while visible rows are still open", () => {
+  assert.equal(
+    listRefetchInterval([{ state: "DELIVERED" }, { state: "AWAITING_APPROVAL" }]),
+    4000,
+  );
+  assert.equal(
+    listRefetchInterval([{ state: "DELIVERED" }, { state: "DENIED" }]),
+    AMBIENT_REFETCH_MS,
+  );
 });
 
 const handoff = (overrides: Partial<NonNullable<CaseLiveView["handoff"]>>) => ({
@@ -142,4 +154,20 @@ test("a handoff that ran out of attempts stops the poll", () => {
 
 test("an empty list keeps polling, because the first report has to arrive somehow", () => {
   assert.equal(listRefetchInterval([]), 4000);
+});
+
+test("a list reads handoff and delivery liveness, not just report state", () => {
+  const stalled: ListPollItem = {
+    state: "AWAITING_APPROVAL",
+    handoffFailed: true,
+    deliveryState: null,
+  };
+  const sending: ListPollItem = {
+    state: "DELIVERED",
+    handoffFailed: false,
+    deliveryState: "PENDING",
+  };
+
+  assert.equal(listRefetchInterval([stalled]), AMBIENT_REFETCH_MS);
+  assert.equal(listRefetchInterval([sending]), 4000);
 });
