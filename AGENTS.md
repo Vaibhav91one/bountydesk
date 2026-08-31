@@ -285,7 +285,31 @@ The committed source of truth is [`docs/decisions.md`](docs/decisions.md) coveri
 [`docs/demo-runbook.md`](docs/demo-runbook.md), and [`docs/plan.md`](docs/plan.md). When this
 summary is ambiguous, defer to those records and ask rather than guess.
 
-## Future feature backlog
+## Backlog, now active work
+
+The hackathon MVP time-box closed on 2026-09-01. The items below were held out of that window,
+and they are open work now, not deferred. Build them when a task reaches them rather than
+pointing at a freeze.
+
+What the end of the time-box does not change is the safety invariants, which were never about
+the schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until
+their verified-recipient and transport-receipt contracts exist. `AWAITING_REPORTER` still is not
+emitted until reporter-reply correlation ships. Every verdict is still human-approved. Those hold
+whether or not there is time on the clock.
+
+The parked surfaces, so a plan knows where they live:
+
+- Email, upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
+  `built: false`). Email and upload share one blocker, the outbound contract above; drive was out
+  of scope for the demo rather than merely unbuilt.
+- The reviewer-to-agent conversation behind the parked "Chat with Agent Bounty" control
+  (`app/(app)/reports/[id]/verdict-card.tsx`). The panel works; nothing a reviewer typed reached
+  the harness, which is why denying got its own button instead.
+- Reporter reply and resume (`AWAITING_REPORTER`), described below in the lifecycle section.
+- The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
+- Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
+- The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
+  called live-proven; the recorded proof used the deterministic canary pipeline.
 
 Multi-target setup is manifest-driven. The frozen Juice Shop demo profile may stay in the
 server registry, but new targets should come from a validated target manifest or an onboarding
