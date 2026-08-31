@@ -49,6 +49,11 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
   assert.equal(agentDefinition.manifest.config.dynamic_sub_agents.enabled, true);
 });
 
+test("the BountyDesk agent starts provisioned-target contact through probe_target", () => {
+  assert.match(agentDefinition.manifest.instructions, /Start by calling probe_target with method GET and path \//);
+  assert.match(agentDefinition.manifest.instructions, /Do not call scope_check for the target name/);
+});
+
 test("the BountyDesk agent wires in exactly the 11 report skills, each backed by a real SKILL.md", () => {
   const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
   assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
