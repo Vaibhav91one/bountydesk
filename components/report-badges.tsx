@@ -45,16 +45,18 @@ export function ReportStateBadge({
   state,
   phase,
   deliveryState,
+  label,
 }: {
   state: string;
   phase: string;
   deliveryState?: string | null;
+  label?: string;
 }) {
   if (deliveryState === "FAILED") {
     return <Badge variant="destructive">Failed</Badge>;
   }
 
-  return <PhaseBadge phase={phase}>{reportStateLabel(state)}</PhaseBadge>;
+  return <PhaseBadge phase={phase}>{label ?? reportStateLabel(state)}</PhaseBadge>;
 }
 
 export function ReportOutcomeBadge({ outcome }: { outcome: string }) {
