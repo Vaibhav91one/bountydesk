@@ -67,7 +67,12 @@ let seq = 0;
 async function seedPendingReport({
   pendingHash,
   synthesized,
-}: { pendingHash?: string; synthesized?: boolean } = {}) {
+  state,
+}: {
+  pendingHash?: string;
+  synthesized?: boolean;
+  state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
+} = {}) {
   seq += 1;
   const [reportRow] = await dbm.db
     .insert(dbm.report)
@@ -76,7 +81,7 @@ async function seedPendingReport({
       sourceRef: `manual:${seq}`,
       title: `Report ${seq}`,
       body: "body",
-      state: "AWAITING_APPROVAL",
+      state: state ?? (synthesized ? "ANALYSIS_ONLY" : "AWAITING_APPROVAL"),
     })
     .returning({ id: dbm.report.id });
 
@@ -187,7 +192,22 @@ test("allowVerdict approves a synthesized verdict with null thread/tool-call mar
   assert.equal(submissions.length, 1);
   assert.equal(submissions[0].state, "PENDING");
 
-  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+  assert.equal(await reportState(reportId), "ANALYSIS_ONLY");
+});
+
+test("denyVerdict denies a synthesized verdict from the analysis lane", async () => {
+  signIn(REVIEWER_ID, "dana");
+  const { reportId, verdictId } = await seedPendingReport({ synthesized: true });
+
+  const result = await actions.denyVerdict(reportId, verdictId, "the theory does not hold");
+  assert.equal(result.ok, true);
+
+  const decisions = await decisionsFor(verdictId);
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decision, "DENIED");
+  assert.equal(decisions[0].threadId, null);
+  assert.equal(decisions[0].toolCallId, null);
+  assert.equal(await reportState(reportId), "DENIED");
 });
 
 test("denyVerdict records a denial, preserves its pending binding, and moves the report to DENIED", async () => {

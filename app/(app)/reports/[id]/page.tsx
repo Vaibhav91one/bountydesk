@@ -7,6 +7,7 @@ import {
   ReportStateBadge,
   outcomeLabel,
   reportStateLabel,
+  shouldShowOutcomeBadge,
 } from "@/components/report-badges";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -166,7 +167,7 @@ function lifecycle(file: CaseFile) {
           : "Not reached",
       state: file.approval
         ? ("done" as const)
-        : past(["AWAITING_APPROVAL"])
+        : file.awaitingVerdictId || past(["AWAITING_APPROVAL"])
           ? ("current" as const)
           : ("pending" as const),
     },
@@ -385,7 +386,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                   phase={phase}
                   deliveryState={file.delivery?.state}
                 />
-                {file.verdict ? <ReportOutcomeBadge outcome={file.verdict.outcome} /> : null}
+                {file.verdict && shouldShowOutcomeBadge(file.state, file.verdict.outcome) ? (
+                  <ReportOutcomeBadge outcome={file.verdict.outcome} />
+                ) : null}
               </span>
 
               <span aria-hidden="true">·</span>

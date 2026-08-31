@@ -47,8 +47,8 @@ async function seedSubmission(
     /** Point the submission's agent_session at a different report than the decision's verdict. */
     crossSession?: boolean;
     /**
-     * A server-synthesized ANALYSIS_ONLY verdict: the report is already AWAITING_APPROVAL, the
-     * verdict outcome is ANALYSIS_ONLY, and both the session's pending markers and the decision
+     * A server-synthesized ANALYSIS_ONLY verdict: the report stays in ANALYSIS_ONLY, the verdict
+     * outcome is ANALYSIS_ONLY, and both the session's pending markers and the decision
      * carry null thread/tool-call ids (there is no TrueForge call to answer).
      */
     synthesized?: boolean;
@@ -65,7 +65,9 @@ async function seedSubmission(
       sourceRef: `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
-      ...(opts.synthesized ? { state: "AWAITING_APPROVAL" as const } : {}),
+      ...(opts.synthesized
+        ? { state: opts.decision === "DENIED" ? ("DENIED" as const) : ("ANALYSIS_ONLY" as const) }
+        : {}),
     })
     .returning({ id: dbm.report.id });
 

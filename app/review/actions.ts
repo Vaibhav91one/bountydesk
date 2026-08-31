@@ -86,12 +86,17 @@ async function decide(
           : { ok: false, error: "already decided differently" };
       }
 
+      const canDecide =
+        reportRow.state === "AWAITING_APPROVAL" ||
+        (reportRow.state === "ANALYSIS_ONLY" && v.outcome === "ANALYSIS_ONLY");
+
       // No decision exists yet, so this has to be the fresh path. A stale action call from a
-      // page rendered before the report left AWAITING_APPROVAL (cancelled, expired, or
+      // page rendered before the report left a reviewable state (cancelled, expired, or
       // already decided and moved on by some other path) must be refused here explicitly:
       // denial gets this for free from transition()'s own CAS below, but approval has no
-      // such check downstream, since DELIVERING only ever happens inside publish_verdict.
-      if (reportRow.state !== "AWAITING_APPROVAL") {
+      // such check downstream, since DELIVERING only ever happens inside publish_verdict or
+      // the synthesized-verdict submission path.
+      if (!canDecide) {
         return {
           ok: false,
           error: `report is no longer awaiting approval (state: ${reportRow.state})`,
@@ -172,7 +177,7 @@ async function decide(
       // invokes it, so nothing here moves the report on the approve path.
       if (outcome === "DENIED") {
         try {
-          await transition(reportId, "AWAITING_APPROVAL", "DENIED", tx);
+          await transition(reportId, reportRow.state, "DENIED", tx);
         } catch (error) {
           if (error instanceof ReportStateConflictError) throw new DecisionRefused(error.message);
           throw error;

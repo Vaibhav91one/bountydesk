@@ -726,7 +726,7 @@ test("pollOnce rejects a lease that cannot reach its first heartbeat", async () 
   );
 });
 
-test("a pending call carrying a full agent-drafted payload mints the verdict and moves the report", async () => {
+test("a pending ANALYSIS_ONLY draft stays in the analysis lane with a verdict to approve", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
   const client = fakeClient({
@@ -744,7 +744,7 @@ test("a pending call carrying a full agent-drafted payload mints the verdict and
   assert.equal(id, fixture.agentSessionId);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "AWAITING_APPROVAL_HARNESS");
@@ -758,7 +758,7 @@ test("a pending call carrying a full agent-drafted payload mints the verdict and
   assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
 });
 
-test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const { SYNTHESIZED_ANALYSIS_SUMMARY } = await import("@/lib/mcp/publish-verdict");
   const fixture = await seedSessionWithoutVerdict();
@@ -767,7 +767,7 @@ test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY
   await poller.pollOnce("w-synth-done", { client });
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "DONE_NO_ACTION");
@@ -785,7 +785,7 @@ test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY
   assert.equal(row.pendingVerdictId, v.id);
 });
 
-test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
   // A wrong tool name is unresolvable, which drives the refuseUnresolvablePending terminal path.
@@ -797,7 +797,7 @@ test("a refused pending call with no verdict mints a server-authored ANALYSIS_ON
   await poller.pollOnce("w-synth-refuse", { client });
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "ERROR");
@@ -842,7 +842,7 @@ test("a full draft claiming REPRODUCED for a report with no bound target never b
   assert.equal(verdicts[0].outcome, "ANALYSIS_ONLY");
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a malformed draft attempt is refused rather than silently approved as the legacy shape", async () => {

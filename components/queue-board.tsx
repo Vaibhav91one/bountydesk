@@ -7,6 +7,7 @@ import { PhaseDot, PhaseSpinner } from "@/components/phase-dot";
 import {
   ReportOutcomeBadge,
   ReportStateBadge,
+  shouldShowOutcomeBadge,
 } from "@/components/report-badges";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
@@ -185,7 +186,9 @@ export function Card({
               deliveryState={card.deliveryState}
             />
           ) : null}
-          {card.outcome ? <ReportOutcomeBadge outcome={card.outcome} /> : null}
+          {shouldShowOutcomeBadge(card.state, card.outcome) ? (
+            <ReportOutcomeBadge outcome={card.outcome} />
+          ) : null}
           {/* Nothing in the report's own state distinguishes "queued" from "an agent is
               actively working this right now" -- this badge is that difference. */}
           {card.investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
@@ -211,9 +214,8 @@ export function Card({
         </span>
       </div>
 
-      {/* Only a report with a pending call an approval can actually answer gets the button.
-          One sitting in AWAITING_APPROVAL with nothing pending would lead to a page that
-          refuses, which is worse than no button. */}
+      {/* Only a report with a pending verdict an approval can actually answer gets the button.
+          A state without that pending tuple would lead to a page whose buttons refuse. */}
       {card.awaitingVerdictId ? (
         <Button
           size="sm"
@@ -222,7 +224,8 @@ export function Card({
           render={<Link href={`/reports/${card.id}`} prefetch={linkPrefetch} />}
           className="mt-1 w-full justify-center"
         >
-          Review evidence <RollingIcon icon={ArrowRight} className="size-3.5" />
+          {card.state === "ANALYSIS_ONLY" ? "Approve verdict" : "Review evidence"}{" "}
+          <RollingIcon icon={ArrowRight} className="size-3.5" />
         </Button>
       ) : null}
     </li>

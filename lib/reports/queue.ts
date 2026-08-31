@@ -1,5 +1,6 @@
 import {
   and,
+  agentSession,
   connectedRepository,
   db,
   desc,
@@ -51,7 +52,7 @@ export type QueueCard = {
    */
   eventCount: number;
   updatedAt: Date;
-  /** The exact verdict a reviewer would answer. Only ever set in AWAITING_APPROVAL. */
+  /** The exact verdict a reviewer would answer. Also set for pending ANALYSIS_ONLY verdicts. */
   awaitingVerdictId: string | null;
   /** Whether an agent is actively working this report right now (see isAgentInvestigating). */
   investigating: boolean;
@@ -139,7 +140,11 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     deliveryState: row.deliveryState,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
-    awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.pendingVerdictId : null,
+    awaitingVerdictId:
+      row.state === "AWAITING_APPROVAL" ||
+      (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
+        ? row.pendingVerdictId
+        : null,
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
   }));
 }
@@ -198,17 +203,25 @@ export type ActiveReport = {
 /**
  * The reports in flight, for the sidebar. Most urgent first.
  *
- * Awaiting approval sorts ahead of everything else because it is the only state that is waiting
- * on the person reading the sidebar; the rest is recency. Terminal reports are excluded: a list
- * of what needs attention should not be padded with what is finished.
+ * Reports with an answerable verdict sort ahead of everything else because they are waiting on
+ * the person reading the sidebar; the rest is recency. Terminal reports are excluded: a list of
+ * what needs attention should not be padded with what is finished.
  */
 export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
   const rows = await db
     .select({ id: report.id, title: report.title, state: report.state })
     .from(report)
+    .leftJoin(agentSession, eq(agentSession.reportId, report.id))
     // Spread because TERMINAL_STATES is a readonly tuple and the operator takes a mutable array.
     .where(and(notInArray(report.state, [...TERMINAL_STATES]), isNull(report.hiddenAt)))
-    .orderBy(sql`(${report.state} = 'AWAITING_APPROVAL') desc`, desc(report.updatedAt))
+    .orderBy(
+      sql`(
+        ${report.state} in ('AWAITING_APPROVAL', 'ANALYSIS_ONLY')
+          and ${agentSession.pendingVerdictId} is not null
+          and ${agentSession.pendingApprovedContentHash} is not null
+      ) desc`,
+      desc(report.updatedAt),
+    )
     .limit(limit);
 
   return rows.map((row) => ({ ...row, phase: phaseOf(row.state) }));
@@ -290,7 +303,11 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
-    awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.awaitingVerdictId : null,
+    awaitingVerdictId:
+      row.state === "AWAITING_APPROVAL" ||
+      (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
+        ? row.awaitingVerdictId
+        : null,
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
     origin: row.repositoryFullName ?? row.channel,
     createdAt: row.createdAt,
