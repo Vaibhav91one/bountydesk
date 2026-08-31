@@ -42,6 +42,7 @@ async function seedFixture(
     tamperPayloadAfterDecision?: boolean;
     channel?: "github" | "manual";
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
+    state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
   } = {},
 ) {
   seq += 1;
@@ -54,7 +55,7 @@ async function seedFixture(
       sourceRef: opts.channel === "manual" ? `manual:${n}` : `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
-      state: "AWAITING_APPROVAL",
+      state: opts.state ?? "AWAITING_APPROVAL",
     })
     .returning({ id: dbm.report.id });
 
@@ -203,6 +204,20 @@ test("the happy path enqueues delivery, moves the report to DELIVERING, and clea
   assert.equal(pending.pendingToolCallId, null);
   assert.equal(pending.pendingVerdictId, null);
   assert.equal(pending.pendingApprovedContentHash, null);
+});
+
+test("an approved ANALYSIS_ONLY verdict publishes from the analysis lane", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    outcome: "ANALYSIS_ONLY",
+    state: "ANALYSIS_ONLY",
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(await deliveryCount(fixture.verdictId), 1);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
 });
 
 test("an approved REPRODUCED verdict publishes", async () => {

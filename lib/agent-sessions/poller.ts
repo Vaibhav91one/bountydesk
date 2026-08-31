@@ -160,14 +160,14 @@ async function refuseUnresolvablePending(
 /**
  * The shared body of the two dead-end terminal paths: move a still-investigating report to
  * ANALYSIS_ONLY, and, when it has no verdict at all, mint the server-authored ANALYSIS_ONLY
- * verdict and carry it into AWAITING_APPROVAL so a human can still approve and deliver it. The
- * alternative is what this fixes: a report parked at ANALYSIS_ONLY with nothing to approve,
- * which can never reach delivery.
+ * verdict so a human can still approve and deliver it from the Analysis only lane. The
+ * alternative is a report parked at ANALYSIS_ONLY with nothing to approve, which can never
+ * reach delivery.
  *
- * The mint and the AWAITING_APPROVAL move happen only when there is no verdict yet. A report
- * that somehow already has one (not reachable through the real driver, which mints only via
- * publish_verdict) keeps the old behavior and stops at ANALYSIS_ONLY: an existing verdict is
- * never overwritten, and a REPRODUCED claim is never advanced toward delivery from here.
+ * The mint happens only when there is no verdict yet. A report that somehow already has one
+ * (not reachable through the real driver, which mints only via publish_verdict) stays where it
+ * is: an existing verdict is never overwritten, and a reproduced claim is never advanced
+ * toward delivery from here.
  *
  * thread/tool-call markers stay null because there is no live TrueForge call to answer; the
  * relaxed pending_* check constraint allows the verdict pair set with the thread pair null.
@@ -197,7 +197,6 @@ async function endWithoutAgentVerdict(
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
       const synthesized = await synthesizeAnalysisOnlyVerdict(lease.reportId, tx);
       if (synthesized) {
-        await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
         pending = {
           pendingVerdictId: synthesized.verdictId,
           pendingApprovedContentHash: synthesized.contentHash,
@@ -240,10 +239,10 @@ async function finishWithoutApproval(
 
 /**
  * Handle a verified, genuine pending publish_verdict call: this is the only place in the
- * codebase that moves a report through ANALYSIS_ONLY into AWAITING_APPROVAL (see
- * lib/reports/states.ts). It happens here, and nowhere else, because this is the first
- * moment bounty-desk can prove the model actually asked to publish something, rather than a
- * driver or a route inferring that from a turn merely finishing.
+ * codebase that records a pending publish_verdict call against the report lifecycle. A
+ * reproduced or not-reproduced verdict moves into AWAITING_APPROVAL. An ANALYSIS_ONLY verdict
+ * stays in the Analysis only lane with an approval button, because there was nothing to
+ * reproduce and the reviewer still has to approve the exact outbound text.
  */
 async function handleVerifiedPendingCall(
   lease: AgentSessionLease,
@@ -265,7 +264,12 @@ async function handleVerifiedPendingCall(
     // The driver prepares revision 1 before it starts this turn. A later draft was not part
     // of the turn and cannot silently replace the exact payload the pending call refers to.
     const [verdictRow] = await tx
-      .select({ id: verdict.id, reportId: verdict.reportId, contentHash: verdict.contentHash })
+      .select({
+        id: verdict.id,
+        reportId: verdict.reportId,
+        contentHash: verdict.contentHash,
+        outcome: verdict.outcome,
+      })
       .from(verdict)
       .where(and(eq(verdict.reportId, lease.reportId), eq(verdict.revision, 1)))
       .limit(1);
@@ -283,10 +287,14 @@ async function handleVerifiedPendingCall(
       );
     }
 
+    const analysisOnly = verdictRow.outcome === "ANALYSIS_ONLY";
+
     if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
-      await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
-    } else if (reportRow.state === "ANALYSIS_ONLY") {
+      if (!analysisOnly) {
+        await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+      }
+    } else if (reportRow.state === "ANALYSIS_ONLY" && !analysisOnly) {
       await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
     } else if (reportRow.state === "AWAITING_APPROVAL") {
       if (
@@ -317,8 +325,9 @@ async function handleVerifiedPendingCall(
       );
       return;
     }
-    // A report already at AWAITING_APPROVAL is the idempotent retry case. Later lifecycle
-    // states are refused above, because a delayed harness result cannot reopen approval.
+    // A report already at AWAITING_APPROVAL, or an ANALYSIS_ONLY verdict already parked in the
+    // analysis lane, is the idempotent retry case. Later lifecycle states are refused above,
+    // because a delayed harness result cannot reopen approval.
 
     await release(
       lease,

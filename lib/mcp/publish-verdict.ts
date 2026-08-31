@@ -409,7 +409,7 @@ export async function enqueueApprovedVerdictDelivery(
   }
 
   const [reportRow] = await tx
-    .select({ channel: report.channel, sourceRef: report.sourceRef })
+    .select({ channel: report.channel, sourceRef: report.sourceRef, state: report.state })
     .from(report)
     .where(eq(report.id, verdictRow.reportId))
     .limit(1);
@@ -420,6 +420,13 @@ export async function enqueueApprovedVerdictDelivery(
   }
   if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
     return { ok: false, reason: "invalid GitHub delivery target" };
+  }
+
+  const canDeliver =
+    reportRow.state === "AWAITING_APPROVAL" ||
+    (reportRow.state === "ANALYSIS_ONLY" && verdictRow.outcome === "ANALYSIS_ONLY");
+  if (!canDeliver) {
+    return { ok: false, reason: `report is ${reportRow.state}; approved verdict cannot deliver` };
   }
 
   await enqueueDelivery(
@@ -437,7 +444,7 @@ export async function enqueueApprovedVerdictDelivery(
     tx,
   );
 
-  await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
+  await transition(verdictRow.reportId, reportRow.state, "DELIVERING", tx);
 
   await tx
     .update(agentSession)

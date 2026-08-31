@@ -37,6 +37,10 @@ export function outcomeLabel(outcome: string): string {
   return OUTCOME_LABEL[outcome] ?? outcome;
 }
 
+export function shouldShowOutcomeBadge(state: string, outcome: string | null): outcome is string {
+  return Boolean(outcome) && !(state === "ANALYSIS_ONLY" && outcome === "ANALYSIS_ONLY");
+}
+
 export function ReportStateBadge({
   state,
   phase,

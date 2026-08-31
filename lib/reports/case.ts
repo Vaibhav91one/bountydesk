@@ -251,7 +251,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
       // but no TrueForge call, so its thread/tool-call ids are null. Gating on the thread here
       // would hide it from review and recreate the dead end this whole flow exists to close.
       const pendingVerdictId =
-        row.state === "AWAITING_APPROVAL" &&
+        (row.state === "AWAITING_APPROVAL" || row.state === "ANALYSIS_ONLY") &&
         session?.pendingVerdictId &&
         session?.pendingApprovedContentHash
           ? session.pendingVerdictId
@@ -292,7 +292,10 @@ export async function readCase(id: string): Promise<CaseFile | null> {
        * report's own verdicts are not in doubt; what is in doubt is the call, and offering an
        * Approve button for one nobody can identify is the failure worth closing off.
        */
-      const awaitingVerdictId = pending ? pendingVerdictId : null;
+      const canApprovePending =
+        pending &&
+        (row.state === "AWAITING_APPROVAL" || pending.outcome === "ANALYSIS_ONLY");
+      const awaitingVerdictId = canApprovePending ? pendingVerdictId : null;
 
       const [newest] = await tx
         .select({
@@ -310,7 +313,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .orderBy(desc(verdict.revision))
         .limit(1);
 
-      const latest = pending ?? newest;
+      const latest = canApprovePending ? pending : newest;
 
       const [decision] = latest
         ? await tx

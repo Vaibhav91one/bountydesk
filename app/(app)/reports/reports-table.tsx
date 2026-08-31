@@ -7,7 +7,11 @@ import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
 import { PhaseDot } from "@/components/phase-dot";
-import { ReportOutcomeBadge, ReportStateBadge } from "@/components/report-badges";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+  shouldShowOutcomeBadge,
+} from "@/components/report-badges";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
@@ -111,7 +115,9 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
             phase={row.phase}
             deliveryState={row.deliveryState}
           />
-          {row.outcome ? <ReportOutcomeBadge outcome={row.outcome} /> : null}
+          {shouldShowOutcomeBadge(row.state, row.outcome) ? (
+            <ReportOutcomeBadge outcome={row.outcome} />
+          ) : null}
         </span>,
         <span key="updated" className="truncate text-meta text-muted-foreground">
           {formatStamp(new Date(row.updatedAt))}

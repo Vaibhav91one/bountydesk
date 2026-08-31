@@ -275,11 +275,11 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
 });
 
-test("a synthesized verdict with null thread markers is counted as awaiting on the board", async () => {
+test("a synthesized verdict with null thread markers is approvable in the analysis column", async () => {
   // The relaxed pending constraint allows a third shape: verdict/hash set with thread/tool-call
   // null, the server-authored ANALYSIS_ONLY verdict a dead-end run mints. The board card must
   // expose it as approvable, gating on the verdict rather than the thread.
-  const id = await seedReport("AWAITING_APPROVAL");
+  const id = await seedReport("ANALYSIS_ONLY");
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
@@ -302,7 +302,7 @@ test("a synthesized verdict with null thread markers is counted as awaiting on t
   });
 
   const columns = await queue.listQueue();
-  const cards = column(columns, "awaiting-approval").cards;
+  const cards = column(columns, "analysis-only").cards;
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
 });
 
@@ -375,18 +375,37 @@ test("phaseOf agrees with COLUMNS for every state", () => {
   }
 });
 
-test("listActiveReports puts awaiting approval first and excludes terminal states", async () => {
+test("listActiveReports puts answerable verdicts first and excludes terminal states", async () => {
   // Seeded after the terminal reports above, so recency alone would sort these to the front.
   // Awaiting approval has to beat them on urgency, not on order of insertion.
   await seedReport("TRIAGING");
   await seedReport("REPRODUCING");
-  const awaiting = await seedReport("AWAITING_APPROVAL");
+  const awaiting = await seedReport("ANALYSIS_ONLY");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: awaiting,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis",
+      payload: "the exact theoretical comment",
+      contentHash: `active-hash-${awaiting}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: awaiting,
+    capabilityToken: `active-token-${awaiting}`,
+    sessionId: `active-session-${awaiting}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `active-hash-${awaiting}`,
+  });
 
   const active = await queue.listActiveReports(5);
 
   assert.equal(active.length, 5);
-  assert.equal(active[0].id, awaiting, "awaiting approval should lead");
-  assert.equal(active[0].phase, "awaiting-approval");
+  assert.equal(active[0].id, awaiting, "an answerable verdict should lead");
+  assert.equal(active[0].phase, "analysis-only");
 
   const terminal = new Set(["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"]);
   for (const row of active) {
@@ -462,7 +481,7 @@ test("the index flags a report only when a reviewer can actually answer it", asy
     pendingApprovedContentHash: `hash-${answerable}`,
   });
 
-  const synthesized = await seedReport("AWAITING_APPROVAL");
+  const synthesized = await seedReport("ANALYSIS_ONLY");
   const [synthesizedVerdict] = await dbm.db
     .insert(dbm.verdict)
     .values({
@@ -562,11 +581,37 @@ test("the home counts split open from closed and only count answerable approvals
     pendingApprovedContentHash: `home-hash-${answerable}`,
   });
 
+  const theoretical = await seedReport("ANALYSIS_ONLY");
+  const [theoreticalVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: theoretical,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis only",
+      payload: "the exact theoretical comment",
+      contentHash: `home-hash-${theoretical}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: theoretical,
+    capabilityToken: `home-token-${theoretical}`,
+    sessionId: `home-session-${theoretical}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: theoreticalVerdict.id,
+    pendingApprovedContentHash: `home-hash-${theoretical}`,
+  });
+
   const after = await readHomeSummary();
-  assert.equal(after.reports - before.reports, 4);
-  // Three of the four are non-terminal; DELIVERED is not.
-  assert.equal(after.open - before.open, 3);
-  assert.equal(after.awaiting - before.awaiting, 1, "only the one with a pending call counts");
+  assert.equal(after.reports - before.reports, 5);
+  // Four of the five are non-terminal; DELIVERED is not.
+  assert.equal(after.open - before.open, 4);
+  assert.equal(
+    after.awaiting - before.awaiting,
+    2,
+    "only reports with a pending verdict/hash pair count",
+  );
 });
 
 test("a soft-hidden report drops off every list but still loads by its id", async () => {

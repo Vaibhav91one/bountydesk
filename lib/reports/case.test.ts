@@ -170,12 +170,12 @@ test("the approval panel opens only for a call a reviewer can answer", async () 
   assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
 });
 
-test("a synthesized verdict with null thread markers is still exposed as approvable", async () => {
+test("a synthesized verdict in the analysis lane is still exposed as approvable", async () => {
   // A dead-end run's server-authored ANALYSIS_ONLY verdict has a verdict and hash awaiting
   // approval but no TrueForge call, so pending_thread_id/pending_tool_call_id are null. Gating
   // the approval panel on the thread marker would hide it and recreate the dead end; readCase
   // must key off the verdict/hash pair instead.
-  const id = await seedReport("AWAITING_APPROVAL");
+  const id = await seedReport("ANALYSIS_ONLY");
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
