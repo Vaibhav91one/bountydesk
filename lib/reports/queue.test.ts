@@ -71,6 +71,67 @@ async function seedDeliveredVerdict(
   return row.id;
 }
 
+async function seedVerdictRevision(
+  reportId: string,
+  revision: number,
+  outcome: import("./queue").VerdictOutcome,
+): Promise<{ id: string; hash: string }> {
+  const hash = `revision-${revision}-hash-${reportId}`;
+  const [row] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId,
+      outcome,
+      summary: `revision ${revision}`,
+      payload: `payload ${revision}`,
+      contentHash: hash,
+      revision,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  return { id: row.id, hash };
+}
+
+async function seedFailedHandoff(
+  reportId: string,
+  verdictId: string,
+  payloadHash: string,
+  suffix: string,
+): Promise<void> {
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId,
+      capabilityToken: `failed-handoff-token-${suffix}`,
+      sessionId: `failed-handoff-session-${suffix}`,
+      pendingThreadId: `thread-${suffix}`,
+      pendingToolCallId: `call-${suffix}`,
+      pendingVerdictId: verdictId,
+      pendingApprovedContentHash: payloadHash,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash,
+      threadId: `thread-${suffix}`,
+      toolCallId: `call-${suffix}`,
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found",
+  });
+}
+
 function column(columns: import("./queue").QueueColumn[], key: string) {
   const found = columns.find((c) => c.key === key);
   assert.ok(found, `no column ${key}`);
@@ -214,6 +275,57 @@ test("the card carries the latest verdict revision, not the first", async () => 
 
   assert.ok(card);
   assert.equal(card.outcome, "ANALYSIS_ONLY");
+});
+
+test("an older failed handoff does not mark the latest verdict revision failed", async () => {
+  const id = await seedReport("AWAITING_APPROVAL");
+  const oldVerdict = await seedVerdictRevision(id, 1, "REPRODUCED");
+  await seedFailedHandoff(id, oldVerdict.id, oldVerdict.hash, `${id}-old`);
+  await seedVerdictRevision(id, 2, "NOT_REPRODUCED");
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+  assert.ok(card);
+  assert.equal(card.outcome, "NOT_REPRODUCED");
+  assert.equal(card.handoffFailed, false);
+  assert.equal(card.deliveryState, null);
+
+  const rows = await queue.listAllReports();
+  const row = rows.find((r) => r.id === id);
+  assert.ok(row);
+  assert.equal(row.outcome, "NOT_REPRODUCED");
+  assert.equal(row.handoffFailed, false);
+  assert.equal(row.deliveryState, null);
+});
+
+test("an older delivery does not suppress the latest revision's failed handoff", async () => {
+  const id = await seedReport("AWAITING_APPROVAL");
+  const oldVerdict = await seedVerdictRevision(id, 1, "REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId: oldVerdict.id,
+    state: "PENDING",
+    target: "github:1:issue:old-delivery",
+    approvedContentHash: oldVerdict.hash,
+    idempotencyKey: `old-delivery-${id}`,
+  });
+
+  const latestVerdict = await seedVerdictRevision(id, 2, "NOT_REPRODUCED");
+  await seedFailedHandoff(id, latestVerdict.id, latestVerdict.hash, `${id}-latest`);
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+  assert.ok(card);
+  assert.equal(card.outcome, "NOT_REPRODUCED");
+  assert.equal(card.handoffFailed, true);
+  assert.equal(card.deliveryState, null);
+
+  const rows = await queue.listAllReports();
+  const row = rows.find((r) => r.id === id);
+  assert.ok(row);
+  assert.equal(row.outcome, "NOT_REPRODUCED");
+  assert.equal(row.handoffFailed, true);
+  assert.equal(row.deliveryState, null);
 });
 
 test("eventCount counts session events, and cards sort newest first", async () => {
