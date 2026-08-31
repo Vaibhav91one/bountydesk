@@ -55,15 +55,36 @@ async function installation(
 async function repo(
   installationRowId: string,
   opts: { active?: boolean; archived?: boolean; configured?: boolean } = {},
+): Promise<string> {
+  ids += 1;
+  const [row] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({
+      installationId: installationRowId,
+      repoId: 800_000 + ids,
+      fullName: `acme/repo-${String(ids).padStart(3, "0")}`,
+      active: opts.active ?? true,
+      archivedAt: opts.archived ? new Date() : null,
+      targetProfileId: opts.configured === false ? null : targetProfileId,
+    })
+    .returning({ id: dbm.connectedRepository.id });
+
+  return row.id;
+}
+
+async function report(
+  connectedRepositoryId: string | null,
+  opts: { state?: string; hidden?: boolean } = {},
 ) {
   ids += 1;
-  await dbm.db.insert(dbm.connectedRepository).values({
-    installationId: installationRowId,
-    repoId: 800_000 + ids,
-    fullName: `acme/repo-${String(ids).padStart(3, "0")}`,
-    active: opts.active ?? true,
-    archivedAt: opts.archived ? new Date() : null,
-    targetProfileId: opts.configured === false ? null : targetProfileId,
+  await dbm.db.insert(dbm.report).values({
+    channel: "github",
+    sourceRef: `github:1:issue:${ids}`,
+    title: `report ${ids}`,
+    body: "body",
+    state: (opts.state ?? "TRIAGING") as "TRIAGING",
+    connectedRepositoryId,
+    hiddenAt: opts.hidden ? new Date() : null,
   });
 }
 
@@ -223,4 +244,49 @@ test("last synced follows repository changes, not just the installation row", as
 
   assert.ok(after > before, "the repository write moved it forward");
   assert.equal(after.getTime(), later.getTime());
+});
+
+test("a repository counts the reports it has actually sent", async () => {
+  const install = await installation();
+  const sender = await repo(install.id);
+  const quiet = await repo(install.id);
+
+  await report(sender);
+  await report(sender, { state: "AWAITING_APPROVAL" });
+  await report(sender, { state: "DELIVERED" });
+  await report(sender, { state: "DELIVERED" });
+  // Hidden rows are off every list in the product, so they are off this count too.
+  await report(sender, { state: "DELIVERED", hidden: true });
+  // Another repository's reports, and one that arrived through no repository at all.
+  await report(quiet);
+  await report(null);
+
+  const rows =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  const counted = rows.find((r) => r.connectedRepositoryId === sender);
+  assert.deepEqual(
+    { ...counted?.reports, lastReportAt: counted?.reports.lastReportAt !== null },
+    { total: 4, awaitingReview: 1, delivered: 2, lastReportAt: true },
+  );
+
+  assert.equal(rows.find((r) => r.connectedRepositoryId === quiet)?.reports.total, 1);
+});
+
+test("a repository that has sent nothing reports zeros rather than nothing", async () => {
+  // The panel draws these straight, so an absent entry would render "undefined reports".
+  const install = await installation();
+  const silent = await repo(install.id);
+
+  const rows =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  assert.deepEqual(rows.find((r) => r.connectedRepositoryId === silent)?.reports, {
+    total: 0,
+    awaitingReview: 0,
+    delivered: 0,
+    lastReportAt: null,
+  });
 });

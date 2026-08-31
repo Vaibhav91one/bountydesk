@@ -1,9 +1,13 @@
 import {
+  and,
   connectedRepository,
   db,
   eq,
   githubInstallation,
   isNull,
+  isNotNull,
+  report,
+  sql,
   targetProfile,
 } from "@/lib/db";
 
@@ -29,7 +33,65 @@ export type ConnectionRepo = {
   fullName: string;
   targetProfileName: string | null;
   status: RepoStatus;
+  /** What this repository has actually sent, which is the question an operator opens a
+   *  repository to ask. Hidden reports are left out, the same as everywhere else. */
+  reports: RepoReports;
 };
+
+export type RepoReports = {
+  total: number;
+  /** Waiting on a human right now. */
+  awaitingReview: number;
+  /** Reports whose verdict reached the issue as a comment. */
+  delivered: number;
+  lastReportAt: Date | null;
+};
+
+const NO_REPORTS: RepoReports = {
+  total: 0,
+  awaitingReview: 0,
+  delivered: 0,
+  lastReportAt: null,
+};
+
+/**
+ * How many reports each connected repository has sent, and when the last one arrived.
+ *
+ * One grouped pass rather than a count per row: the connections screen draws every repository
+ * an installation granted, and a query each would scale with the grant. Reports carry the
+ * repository they came from, so this needs no join back to the installation.
+ */
+async function reportsByRepository(): Promise<Map<string, RepoReports>> {
+  const rows = await db
+    .select({
+      connectedRepositoryId: report.connectedRepositoryId,
+      total: sql<number>`count(*)::int`,
+      awaitingReview: sql<number>`count(*) filter (where ${report.state} = 'AWAITING_APPROVAL')::int`,
+      delivered: sql<number>`count(*) filter (where ${report.state} = 'DELIVERED')::int`,
+      lastReportAt: sql<Date>`max(${report.createdAt})`,
+    })
+    .from(report)
+    .where(and(isNull(report.hiddenAt), isNotNull(report.connectedRepositoryId)))
+    .groupBy(report.connectedRepositoryId);
+
+  return new Map(
+    rows.flatMap((row) =>
+      row.connectedRepositoryId
+        ? [
+            [
+              row.connectedRepositoryId,
+              {
+                total: row.total,
+                awaitingReview: row.awaitingReview,
+                delivered: row.delivered,
+                lastReportAt: row.lastReportAt ? new Date(row.lastReportAt) : null,
+              },
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+}
 
 export type Connection = {
   installationRowId: string;
@@ -77,6 +139,7 @@ export function repoStatus(row: StatusInput): RepoStatus {
 
 /** Every live installation and the repositories it granted. Tombstoned installs are hidden. */
 export async function listConnections(): Promise<Connection[]> {
+  const reports = await reportsByRepository();
   const rows = await db
     .select({
       installationRowId: githubInstallation.id,
@@ -137,6 +200,7 @@ export async function listConnections(): Promise<Connection[]> {
       repoId: row.repoId,
       fullName: row.fullName,
       targetProfileName: row.targetProfileName,
+      reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
       status: repoStatus({
         installationSuspended: row.suspendedAt !== null,
         active: row.active ?? false,
