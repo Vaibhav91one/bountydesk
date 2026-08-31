@@ -4,11 +4,7 @@ import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import {
-  ReportOutcomeBadge,
-  ReportStateBadge,
   outcomeLabel,
-  reportStateLabel,
-  shouldShowOutcomeBadge,
 } from "@/components/report-badges";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -24,11 +20,12 @@ import {
   type CaseFile,
 } from "@/lib/reports/case";
 import { mascotState } from "@/lib/mascot/states";
-import { phaseOf } from "@/lib/reports/queue";
+import { caseStatusView } from "@/lib/reports/status-view";
 import { readToolCalls } from "@/lib/reports/tool-calls";
 
 import { ApprovalDialog } from "./approval-dialog";
 import { ArtifactsPanel } from "./artifacts-panel";
+import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { FindingsPanel } from "./findings-panel";
 import { VerdictCard } from "./verdict-card";
 import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
@@ -284,8 +281,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       : undefined;
   };
 
-  const phase = phaseOf(file.state);
-  const stateLabel = reportStateLabel(file.state, file.delivery?.state);
+  const initialStatus = caseStatusView(file);
 
   // Events, grouped onto the step they belong to. The fallback step is the one matching the
   // report's own state, so an unknown prefix lands somewhere a reader would look for it.
@@ -382,16 +378,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </h1>
 
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-meta text-muted-foreground">
-              <span className="flex flex-wrap items-center gap-1.5 text-body text-foreground">
-                <ReportStateBadge
-                  state={file.state}
-                  phase={phase}
-                  deliveryState={file.delivery?.state}
-                />
-                {file.verdict && shouldShowOutcomeBadge(file.state, file.verdict.outcome) ? (
-                  <ReportOutcomeBadge outcome={file.verdict.outcome} />
-                ) : null}
-              </span>
+              <CaseRealtimeBadges reportId={file.id} initialStatus={initialStatus} />
 
               <span aria-hidden="true">·</span>
 
@@ -444,6 +431,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                 at: event.at.toISOString().slice(11, 19),
                 detail: detailFor(event.eventKey),
               }))}
+              initialStatus={initialStatus}
             />
           ) : null}
         </div>
@@ -452,11 +440,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       <div className="flex flex-col gap-4 p-8">
         <StatusCard
           file={file}
-          stateLabel={stateLabel}
           verdictLabel={verdictLabel}
           outcomeLabel={
             file.verdict ? outcomeLabel(file.verdict.outcome) : null
           }
+          initialStatus={initialStatus}
         />
 
         {/* The pipeline beside the shape it runs through. Equal height on purpose: they are

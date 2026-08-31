@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
@@ -17,6 +18,12 @@ import {
 
 import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
 import type { Finding } from "@/lib/mcp/publish-verdict";
+import {
+  caseStatusQueryKey,
+  fetchCaseStatus,
+  shouldPollCaseStatus,
+} from "@/lib/reports/status-query";
+import type { CaseStatusView } from "@/lib/reports/status-view";
 
 import { AgentChat, type ChatTurn } from "./agent-chat";
 import { AgentTrace, type TraceRow } from "./agent-trace";
@@ -55,6 +62,7 @@ export function ApprovalDialog({
   speaker,
   chatMascot,
   events,
+  initialStatus,
 }: {
   reportId: string;
   verdictId: string;
@@ -75,8 +83,17 @@ export function ApprovalDialog({
   speaker: string;
   chatMascot: string;
   events: TraceRow[];
+  initialStatus: CaseStatusView;
 }) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const statusQuery = useQuery({
+    queryKey: caseStatusQueryKey(reportId),
+    queryFn: () => fetchCaseStatus(reportId),
+    initialData: initialStatus,
+    refetchInterval: (query) =>
+      shouldPollCaseStatus(query.state.data ?? initialStatus) ? 1500 : false,
+  });
   const [chatting, setChatting] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [topic, setTopic] = useState(TOPICS[0]);
@@ -138,6 +155,9 @@ export function ApprovalDialog({
 
   // The last thing the reviewer wrote, which is what a denial carries as its reason.
   const reason = [...turns].reverse().find((turn) => turn.from === "reviewer")?.text ?? null;
+  const currentStatus = statusQuery.data ?? initialStatus;
+  const isStillAnswerable =
+    currentStatus.awaitingVerdictId === verdictId && !currentStatus.approvalDecision;
 
   async function decide(kind: "allow" | "deny") {
     if (acting) return;
@@ -150,10 +170,13 @@ export function ApprovalDialog({
     setResult(answer);
     if (answer.ok) {
       setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
-      router.refresh();
       setOpen(false);
+      await queryClient.invalidateQueries({ queryKey: caseStatusQueryKey(reportId) });
+      router.refresh();
     }
   }
+
+  if (!isStillAnswerable) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

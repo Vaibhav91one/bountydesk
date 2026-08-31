@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
 import { mascotForState } from "@/lib/mascot/states";
 import { isAgentInvestigating, type CaseFile } from "@/lib/reports/case";
+import type { CaseStatusView } from "@/lib/reports/status-view";
+
+import { CaseRealtimeStatus } from "./case-realtime-status";
 
 /** One fact. The value is always something the database holds. */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -27,14 +30,14 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
  */
 export function StatusCard({
   file,
-  stateLabel,
   verdictLabel,
   outcomeLabel,
+  initialStatus,
 }: {
   file: CaseFile;
-  stateLabel: string;
   verdictLabel: string;
   outcomeLabel: string | null;
+  initialStatus: CaseStatusView;
 }) {
   const mascot = mascotForState(file.state);
   const hasToolCallEvents = file.events.some((e) => e.channel === "agent");
@@ -45,7 +48,7 @@ export function StatusCard({
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
         <div className="flex items-center gap-2.5">
           <h2 className="text-heading text-foreground">Current run</h2>
-          {/* Nothing in stateLabel below distinguishes "queued" from "an agent is actively
+          {/* The status text does not distinguish "queued" from "an agent is actively
               working this right now" -- this badge is that difference. */}
           {investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
         </div>
@@ -73,7 +76,9 @@ export function StatusCard({
         />
 
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Fact label="Status">{stateLabel}</Fact>
+          <Fact label="Status">
+            <CaseRealtimeStatus reportId={file.id} initialStatus={initialStatus} />
+          </Fact>
           <Fact label="Bound target">{file.target?.name ?? "None bound"}</Fact>
           <Fact label="Intake">{file.repositoryFullName ?? file.channel}</Fact>
           <Fact label={verdictLabel}>
