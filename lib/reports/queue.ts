@@ -122,7 +122,12 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       )`,
       deliveryState: sql<DeliveryState | null>`(
         select d.state from outbound_delivery d
-        where d.report_id = ${report.id}
+        where d.verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
         order by d.updated_at desc
         limit 1
       )`,
@@ -138,11 +143,16 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
         from approval_submission sub
         join approval_decision ad on ad.id = sub.approval_decision_id
         join verdict v on v.id = ad.verdict_id
-        where v.report_id = ${report.id}
+        where v.id = (
+          select latest.id from verdict latest
+          where latest.report_id = ${report.id}
+          order by latest.revision desc
+          limit 1
+        )
           and sub.state = 'FAILED'
           and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
           and not exists (
-            select 1 from outbound_delivery d where d.report_id = ${report.id}
+            select 1 from outbound_delivery d where d.verdict_id = v.id
           )
       )`,
       // Same event log eventCount reads, filtered to the poller's mirrored tool-call events:
@@ -312,7 +322,12 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       )`,
       deliveryState: sql<DeliveryState | null>`(
         select d.state from outbound_delivery d
-        where d.report_id = ${report.id}
+        where d.verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
         order by d.updated_at desc
         limit 1
       )`,
@@ -328,11 +343,16 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
         from approval_submission sub
         join approval_decision ad on ad.id = sub.approval_decision_id
         join verdict v on v.id = ad.verdict_id
-        where v.report_id = ${report.id}
+        where v.id = (
+          select latest.id from verdict latest
+          where latest.report_id = ${report.id}
+          order by latest.revision desc
+          limit 1
+        )
           and sub.state = 'FAILED'
           and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
           and not exists (
-            select 1 from outbound_delivery d where d.report_id = ${report.id}
+            select 1 from outbound_delivery d where d.verdict_id = v.id
           )
       )`,
       hasToolCallEvents: sql<boolean>`exists (
