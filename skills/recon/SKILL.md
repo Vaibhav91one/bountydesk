@@ -62,6 +62,8 @@ same as `scope_add`/`scope_remove` -- just call it, there is no grant to
 request yourself first. If the turn message says provisioning failed this
 run, there is nothing to probe; stop and draft ANALYSIS_ONLY. Otherwise,
 start Phase 1 with `probe_target {capability, method: "GET", path: "/"}`.
+The `capability` value is the exact opaque string in the turn message. Do not
+use `bountydesk`, the target name, the image name, a host, or a URL there.
 
 For a DVWA or WebGoat demo mission specifically, nothing is deployed ahead of
 time: use `bountydesk-demo-targets` to boot the target yourself inside your
