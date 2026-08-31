@@ -74,10 +74,10 @@ function startHealthServer(port: number, heartbeat: Heartbeat, signal: AbortSign
   const server = createServer((req, res) => {
     if (req.url === "/healthz") {
       // Reports on the work, not on the process: a daemon whose loops have all wedged still
-      // answers this port, which is how an approved verdict once sat undelivered behind a
-      // service the platform believed was healthy. A loop that has gone silent, or one that has
-      // failed every iteration long enough to mean a dependency is gone, fails the check so the
-      // platform restarts the worker, which is the one thing known to clear a wedge.
+      // answers this port, so a check on the process alone passes while nothing gets claimed. A
+      // loop that has gone silent, or one that has failed every iteration long enough to mean a
+      // dependency is gone, fails the check so the platform restarts the worker, which is the
+      // one thing known to clear a wedge.
       const health = heartbeat.snapshot();
       res.writeHead(health.ok ? 200 : 503, {
         "content-type": "application/json",

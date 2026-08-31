@@ -1,4 +1,5 @@
 import { mascotKeyForState, type MascotKey } from "@/lib/mascot/catalog";
+import { isStorageConfigured } from "@/lib/storage/artifacts";
 import type { Finding } from "@/lib/mcp/verdict-draft";
 import {
   isAgentInvestigating,
@@ -128,6 +129,11 @@ export type CaseLiveView = {
 
   steps: LifecycleStepView[];
   artifacts: CaseArtifactView[];
+  /** Whether this deployment can store artifact bytes at all right now. An artifact row records
+   *  whether its own upload succeeded, and the table is append-only, so a row that missed
+   *  storage stays empty for good; this says whether the next one will miss it too, which is
+   *  the part an operator can still do something about. */
+  storageConfigured: boolean;
 };
 
 /**
@@ -471,6 +477,7 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
     handoff: file.handoff,
 
     steps,
+    storageConfigured: isStorageConfigured(),
     artifacts: file.artifacts.map((art) => ({
       id: art.id,
       kind: art.kind,

@@ -11,11 +11,13 @@ import { ArtifactDownload } from "./artifact-download";
  * The rows are real artifact records (see lib/artifacts/record.ts): the investigation
  * transcript built from this session's mirrored tool calls, and the outbound verdict payload.
  * A stored artifact has a download control that mints a fresh signed URL per click; one whose
- * bytes were never uploaded says so instead of offering a link that goes nowhere. That is a fact
- * about the row, not about the deployment: storage_path records whether the upload succeeded when
- * the artifact was written, and the table is append-only, so configuring storage afterwards
- * cannot fill in a row that missed it. The content addresses below are the pinned target image
- * and the approved payload hash, both checkable today.
+ * bytes were never uploaded says so instead of offering a link that goes nowhere. Whether a row
+ * has bytes is a fact about the row: storage_path records whether that upload succeeded, and the
+ * table is append-only, so configuring storage afterwards cannot fill in a row that missed it.
+ * Whether the next run will store its bytes is a separate question, which is why the panel is
+ * told if storage is unconfigured now and says so rather than leaving an operator to read a full
+ * shelf of empty rows as history. The content addresses below are the pinned target image and
+ * the approved payload hash, both checkable today.
  */
 
 /** A human name for each artifact kind. Unknown kinds fall back to their raw value. */
@@ -49,8 +51,12 @@ export function ArtifactsPanel({
   artifacts,
   imageDigest,
   contentHash,
+  storageConfigured,
 }: {
   artifacts: CaseArtifactView[];
+  /** False when this deployment has no artifact storage configured, which is a thing an
+   *  operator can fix, unlike a row that was written without bytes. */
+  storageConfigured: boolean;
   /** The pinned image this report would be reproduced against, if one is bound. */
   imageDigest: string | null;
   /** The hash approving binds, once a verdict has been drafted. */
@@ -93,6 +99,9 @@ export function ArtifactsPanel({
                 <span className="text-meta text-muted-foreground">
                   Recorded without its bytes, so there is nothing to download. Artifact rows
                   cannot be rewritten, so only a later run stores them.
+                  {storageConfigured
+                    ? null
+                    : " Artifact storage is not configured on this deployment, so the next run will not store them either."}
                 </span>
               )}
             </li>

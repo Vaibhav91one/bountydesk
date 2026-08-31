@@ -2,7 +2,7 @@
 
 import { artifact, db, eq } from "@/lib/db";
 import { requireReviewer } from "@/lib/auth/dal";
-import { createSignedUrl } from "@/lib/storage/artifacts";
+import { createSignedUrl, isStorageConfigured } from "@/lib/storage/artifacts";
 
 export type DownloadResult = { url: string } | { error: string };
 
@@ -24,7 +24,16 @@ export async function getArtifactDownloadUrl(artifactId: string): Promise<Downlo
     .limit(1);
 
   if (!row) return { error: "artifact not found" };
-  if (!row.storagePath) return { error: "this artifact was recorded without its bytes" };
+  if (!row.storagePath) {
+    // Two different situations reach here and only one of them is fixable, so the message says
+    // which: a row written while storage was off can never be filled in (the table refuses
+    // UPDATE), but storage being off now is why the next one will be empty too.
+    return {
+      error: isStorageConfigured()
+        ? "this artifact was recorded without its bytes"
+        : "this artifact was recorded without its bytes, and artifact storage is not configured on this deployment",
+    };
+  }
 
   const url = await createSignedUrl(row.storagePath);
   if (!url) return { error: "could not generate a download link" };

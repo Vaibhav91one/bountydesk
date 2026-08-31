@@ -318,6 +318,26 @@ test("a createTurn failure retries with backoff and eventually reaches FAILED", 
   assert.equal(row.attempts, queue.MAX_ATTEMPTS);
 });
 
+test("a request that ran out its deadline does not spend one of the row's attempts", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const { client } = makeFakeClient({
+    createTurn: async () => {
+      // What AbortSignal.timeout aborts with, and what fetch rejects the call with.
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    },
+  });
+
+  await assert.rejects(worker.submitApprovalOnce("w-deadline", { client }), /timeout/i);
+
+  // The decision is as submittable as it was a minute ago, so the row keeps its budget and the
+  // loop backs off instead. Spending an attempt here would retire a live approval after eight
+  // slow minutes.
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "PENDING");
+  assert.equal(row.attempts, 0);
+});
+
 test("a retry adopts an approval turn that TrueForge already accepted", async () => {
   await drainOthers();
   const fixture = await seedSubmission({ decision: "APPROVED" });

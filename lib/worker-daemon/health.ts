@@ -2,11 +2,9 @@
  * Liveness for the daemon's loops, as opposed to liveness for the process.
  *
  * A worker whose loops have all wedged still answers HTTP, still shows as ACTIVE, and still
- * claims nothing. That happened on 2026-08-31: every loop went silent at 13:43 UTC, an approved
- * verdict sat undelivered for seven minutes, and only a manual restart brought the claims back.
- * A health check that reports on the process rather than on the work cannot see that, so this
- * module records when each loop last completed an iteration and decides when that is too long
- * ago.
+ * claims nothing, so a check that reports on the process cannot tell a working worker from a
+ * stopped one. This module records when each loop last completed an iteration and decides when
+ * that is too long ago.
  *
  * Deciding "too long" is the whole of it, and the budget has to sit above the loop's own
  * cadence. An idle loop still finishes iterations (a null claim is progress, not silence), so
@@ -31,7 +29,8 @@ export type HealthSnapshot = {
   ages: Record<string, number>;
   /** For each loop whose iterations are currently all failing, how long that has been true.
    *  Absent for a loop whose last iteration succeeded, so an empty object means no queue is
-   *  erroring. This is what names the dependency in the response when the check fails. */
+   *  erroring. Keyed by loop, which is as far as it goes: the loop's own log line says what the
+   *  failure was, this only says which queue is having it and for how long. */
   failingFor: Record<string, number>;
 };
 

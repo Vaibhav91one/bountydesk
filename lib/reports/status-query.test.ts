@@ -44,6 +44,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     handoff: null,
     steps: [],
     artifacts: [],
+    storageConfigured: true,
     ...overrides,
   };
 }

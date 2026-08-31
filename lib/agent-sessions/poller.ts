@@ -170,8 +170,12 @@ async function refuseUnresolvablePending(
  * is: an existing verdict is never overwritten, and a reproduced claim is never advanced
  * toward delivery from here.
  *
- * thread/tool-call markers stay null because there is no live TrueForge call to answer; the
- * relaxed pending_* check constraint allows the verdict pair set with the thread pair null.
+ * Every pending_* marker is cleared on the way out, and only the synthesized verdict pair is
+ * written back. The session is over and its turn status is terminal, so nothing will claim the
+ * row again: a thread and tool-call id left behind here would point at a TrueForge call that
+ * nothing can ever answer. The relaxed pending_* check constraint allows the verdict pair set
+ * with the thread pair null, which is what the synthesized verdict needs.
+ *
  * Sandbox teardown stays after the transaction commits, same reasoning as everywhere in this
  * file: a Daytona network call is not something to hold report.state's row lock across.
  */
@@ -192,13 +196,22 @@ async function endWithoutAgentVerdict(
 
     let pending: Pick<
       AgentSessionReleaseUpdate,
-      "pendingVerdictId" | "pendingApprovedContentHash"
-    > = {};
+      | "pendingThreadId"
+      | "pendingToolCallId"
+      | "pendingVerdictId"
+      | "pendingApprovedContentHash"
+    > = {
+      pendingThreadId: null,
+      pendingToolCallId: null,
+      pendingVerdictId: null,
+      pendingApprovedContentHash: null,
+    };
     if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
       const synthesized = await synthesizeAnalysisOnlyVerdict(lease.reportId, tx);
       if (synthesized) {
         pending = {
+          ...pending,
           pendingVerdictId: synthesized.verdictId,
           pendingApprovedContentHash: synthesized.contentHash,
         };
@@ -445,10 +458,24 @@ async function handleAwaitingApproval(
  * The heartbeat below renews the lease for as long as the operation runs, so an HTTP call that
  * never answers is not something a sweeper can ever recover: the lease stays fresh, the loop
  * stays inside the claim, and the queue stops making progress with nothing expired to reclaim.
- * That is how every worker loop went silent on 2026-08-31. The deadline turns that into an
- * ordinary failed claim, which the loop already knows how to log and back off from.
+ * The deadline turns that into an ordinary failed claim, which the loop already knows how to
+ * log and back off from.
+ *
+ * Per call, not per claim. A poll makes up to three sequential requests, and one budget shared
+ * across them would charge a slow first request to the ones after it, aborting calls that never
+ * had their own chance to answer.
  */
 const REQUEST_DEADLINE_MS = 30_000;
+
+/**
+ * How many deadlines one claim may spend before the claim itself is abandoned.
+ *
+ * A per-call deadline alone is only as good as the client's respect for the signal: a request
+ * that ignores an abort would hold the claim open forever, which is the wedge this file is here
+ * to prevent. Three is what a poll actually makes (getTurn, listToolCalls, getFinalSummary), so
+ * the ceiling never fires on work that is progressing.
+ */
+const CALLS_PER_CLAIM = 3;
 
 /**
  * Renews the held lease every third of its duration while `operation` runs, so a slow
@@ -460,16 +487,19 @@ const REQUEST_DEADLINE_MS = 30_000;
 async function runWithHeartbeat<T>(
   lease: AgentSessionLease,
   leaseSeconds: number,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: (deadline: () => AbortSignal) => Promise<T>,
   outerSignal?: AbortSignal,
   deadlineMs: number = REQUEST_DEADLINE_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const signal = AbortSignal.any([
-    controller.signal,
-    AbortSignal.timeout(deadlineMs),
-    ...(outerSignal ? [outerSignal] : []),
-  ]);
+  // Lease loss and the caller's own shutdown abort the whole operation. The request deadline
+  // is minted per call on top of that, which is why the operation is handed a factory rather
+  // than a signal: a shared timeout would run down across sequential requests.
+  const base = AbortSignal.any([controller.signal, ...(outerSignal ? [outerSignal] : [])]);
+  const deadline = () => AbortSignal.any([base, AbortSignal.timeout(deadlineMs)]);
+  // The ceiling on the claim as a whole, which is what ends a request that ignores its own
+  // deadline. Generous by construction: every call would have to spend its entire budget.
+  const signal = AbortSignal.any([base, AbortSignal.timeout(deadlineMs * CALLS_PER_CLAIM)]);
   const intervalMs = Math.max(
     MIN_HEARTBEAT_INTERVAL_MS,
     Math.floor((leaseSeconds * 1000) / 3),
@@ -502,7 +532,7 @@ async function runWithHeartbeat<T>(
 
   timer = setTimeout(heartbeat, intervalMs);
   try {
-    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    const result = await Promise.race([operation(deadline), leaseLoss, aborted]);
     if (signal.aborted) throw signal.reason;
     return result;
   } finally {
@@ -545,12 +575,12 @@ export async function pollOnce(
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
 
-  // A report that has finished has nothing left for its session to poll about. Nothing marked
-  // the session terminal when its report reached DELIVERED or DENIED, so the row stayed
-  // claimable and kept asking TrueForge about a turn no one was waiting on: one session was
-  // still polling twice a minute hours after its comment had shipped, holding a sandbox open
-  // with it. CANCELLED is terminal for claim(), so this is the last time the row is picked up,
-  // and finishWithoutApproval tears the sandbox down on the way out.
+  // A report that has finished has nothing left for its session to poll about. Nothing else
+  // marks the session terminal when its report reaches DELIVERED or DENIED, so without this the
+  // row stays claimable and keeps asking TrueForge about a turn no one is waiting on, holding a
+  // sandbox open with it. CANCELLED is terminal for claim(), so this is the last time the row
+  // is picked up, and finishWithoutApproval clears the pending markers and tears the sandbox
+  // down on the way out.
   const [reportRow] = await db
     .select({ state: report.state })
     .from(report)
@@ -583,13 +613,15 @@ export async function pollOnce(
     pollResult = await runWithHeartbeat(
       lease,
       leaseSeconds,
-      async (signal) => {
-        const snapshot = await client.getTurn(lease.sessionId, turnId, { signal });
+      async (deadline) => {
+        const snapshot = await client.getTurn(lease.sessionId, turnId, {
+          signal: deadline(),
+        });
         // since: only ask for what has happened past the last poll's cursor -- without it every
         // poll of a long-running turn re-reads and re-processes its entire event history, cost
         // growing with the turn's total call count rather than with how much is actually new.
         const result = await client.listToolCalls?.(lease.sessionId, turnId, {
-          signal,
+          signal: deadline(),
           since: lease.lastMirroredEventId ?? undefined,
         });
         // The agent's closing summary exists only once the turn is done: on a pending
@@ -600,7 +632,9 @@ export async function pollOnce(
           lease.finalSummary === null &&
           (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
         const finalSummary = captureSummary
-          ? ((await client.getFinalSummary?.(lease.sessionId, turnId, { signal })) ?? null)
+          ? ((await client.getFinalSummary?.(lease.sessionId, turnId, {
+              signal: deadline(),
+            })) ?? null)
           : null;
         return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
       },

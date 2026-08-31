@@ -20,6 +20,17 @@ function errorMessage(err: unknown): string {
 }
 
 /**
+ * A request that hit its own deadline, as opposed to one the caller cancelled.
+ *
+ * AbortSignal.timeout aborts with a TimeoutError, and fetch rejects with the signal's reason, so
+ * that name is what arrives here. A caller's shutdown abort is an AbortError and is handled
+ * separately, since that one does mean stop rather than try again.
+ */
+function isDeadlineExceeded(err: unknown): boolean {
+  return err instanceof Error && err.name === "TimeoutError";
+}
+
+/**
  * Raised inside the synthesized-verdict delivery transaction when enqueueApprovedVerdictDelivery
  * returns a refusal (an unpublishable outcome, a non-GitHub target, a report that has moved on).
  * A refusal is a permanent, invariant failure a retry cannot repair, so the worker turns this
@@ -33,22 +44,35 @@ class SynthesizedDeliveryError extends Error {}
  * The heartbeat below renews the lease for as long as the operation runs, so an HTTP call that
  * never answers is not something a sweeper can ever recover: the lease stays fresh, the loop
  * stays inside the claim, and the queue stops making progress with nothing expired to reclaim.
- * That is how every worker loop went silent on 2026-08-31. The deadline turns that into an
- * ordinary failed claim, which the loop already knows how to log and back off from.
+ * The deadline turns that into a claim the loop can back off from.
+ *
+ * Per call, not per claim. A submission looks for an existing turn before creating one, and one
+ * budget shared across both would charge a slow lookup to the create that follows it.
  */
 const REQUEST_DEADLINE_MS = 30_000;
+
+/**
+ * How many deadlines one claim may spend before the claim itself is abandoned. A per-call
+ * deadline is only as good as the client's respect for the signal, and a request that ignores an
+ * abort would hold the claim open forever. Two is what a submission makes.
+ */
+const CALLS_PER_CLAIM = 2;
 
 async function runWithHeartbeat<T>(
   lease: ApprovalSubmissionLease,
   leaseSeconds: number,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: (deadline: () => AbortSignal) => Promise<T>,
   outerSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
+  // Lease loss and the caller's own shutdown abort the whole operation; the request deadline is
+  // minted per call on top of that, which is why the operation is handed a factory.
+  const base = AbortSignal.any([controller.signal, ...(outerSignal ? [outerSignal] : [])]);
+  const deadline = () => AbortSignal.any([base, AbortSignal.timeout(REQUEST_DEADLINE_MS)]);
+  // The ceiling on the claim as a whole, for a request that ignores its own deadline.
   const signal = AbortSignal.any([
-    controller.signal,
-    AbortSignal.timeout(REQUEST_DEADLINE_MS),
-    ...(outerSignal ? [outerSignal] : []),
+    base,
+    AbortSignal.timeout(REQUEST_DEADLINE_MS * CALLS_PER_CLAIM),
   ]);
   const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
   let stopped = false;
@@ -79,7 +103,7 @@ async function runWithHeartbeat<T>(
 
   timer = setTimeout(heartbeat, intervalMs);
   try {
-    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    const result = await Promise.race([operation(deadline), leaseLoss, aborted]);
     if (signal.aborted) throw signal.reason;
     return result;
   } finally {
@@ -265,9 +289,13 @@ export async function submitApprovalOnce(
       const result = await runWithHeartbeat(
         lease,
         leaseSeconds,
-        async (signal) => {
-          const existing = await client.findTurnByInput?.(session.sessionId, [input], { signal });
-          return existing ?? client.createTurn(session.sessionId, [input], { signal });
+        async (deadline) => {
+          const existing = await client.findTurnByInput?.(session.sessionId, [input], {
+            signal: deadline(),
+          });
+          return existing ?? client.createTurn(session.sessionId, [input], {
+            signal: deadline(),
+          });
         },
         opts.signal,
       );
@@ -318,6 +346,19 @@ export async function submitApprovalOnce(
       });
     } catch (err) {
       if (err instanceof LeaseLostError) return lease.id;
+      // A request that ran out its deadline says nothing about this row: TrueForge was slow or
+      // hung, and the decision is as submittable as it was a minute ago. Claiming already spent
+      // an attempt, so it is handed back the same way an aborted tick hands it back, and the
+      // error is rethrown for the loop to log and back off from. Left to fail() instead, eight
+      // slow minutes would retire a live approval.
+      if (isDeadlineExceeded(err)) {
+        try {
+          await releaseUnstarted(lease);
+        } catch (releaseError) {
+          if (!(releaseError instanceof LeaseLostError)) throw releaseError;
+        }
+        throw err;
+      }
       if (opts.signal?.aborted) {
         try {
           await releaseUnstarted(lease);
@@ -332,6 +373,9 @@ export async function submitApprovalOnce(
     return lease.id;
   } catch (err) {
     if (err instanceof LeaseLostError) return lease.id;
+    // A deadline rethrown from the submission above passes straight through: it has already
+    // handed its attempt back, and it is a fact about TrueForge's latency, not about this row.
+    if (isDeadlineExceeded(err)) throw err;
     // Something failed before the row could even be evaluated (a missing FK target, an
     // unexpected read error). Still record it against the lease rather than leaving the row
     // silently stuck, unless the lease itself is what's gone.

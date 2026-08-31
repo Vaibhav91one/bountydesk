@@ -7,7 +7,7 @@
  *
  *   node --env-file-if-exists=.env.local --import tsx scripts/retire-test-reports.ts <id> <id> ...
  *   node --env-file-if-exists=.env.local --import tsx scripts/retire-test-reports.ts --commit <id>
- *   ... --expired --reason="left over from the 2026-08-31 cloud smoke run" --commit <id>
+ *   ... --expired --reason="left over from a cloud smoke run" --commit <id>
  *
  * A retired report's agent session stops polling on its next tick, and a report caught mid
  * delivery has its next delivery attempt refused and recorded. Hiding the row from the lists is a

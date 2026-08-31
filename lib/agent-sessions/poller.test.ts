@@ -611,6 +611,66 @@ test("a TrueForge call that never answers fails the claim instead of wedging the
   assert.equal(row.turnStatus, "RUNNING");
 });
 
+test("each TrueForge call gets the full deadline, not what the one before it left", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const slow = <T,>(value: T) =>
+    new Promise<T>((resolve) => setTimeout(() => resolve(value), 40));
+
+  const client: TrueForgeClient = {
+    ...fakeClient({ status: "running" }),
+    getTurn: () => slow({ status: "running" } as TurnSnapshot),
+    listToolCalls: () => slow({ calls: [], cursor: null }),
+  };
+
+  // Two calls of 40ms against a 60ms budget. Shared, the second starts with 20ms left and is
+  // aborted; per call, both have their own 60ms and the poll finishes normally.
+  assert.equal(
+    await poller.pollOnce("w-sequential", { client, requestDeadlineMs: 60 }),
+    fixture.agentSessionId,
+  );
+
+  // The poll ran to the end and wrote the snapshot it read, rather than aborting partway.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "INVESTIGATING");
+});
+
+test("ending a session for a finished report leaves no pending markers behind", async () => {
+  await drainOthers();
+  const fixture = await seedSession({ reportState: "DELIVERED" });
+  // A session parked on a pending publish_verdict call, which is the state a report reaches
+  // delivery from. All four move together or the check constraint refuses the row.
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: fixture.verdictId,
+      pendingApprovedContentHash: "hash-pending",
+    })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+
+  const client = fakeClient(() => {
+    throw new Error("pollOnce must not ask TrueForge about a delivered report");
+  });
+  await poller.pollOnce("w-clears-pending", { client });
+
+  // CANCELLED is terminal for claim() and the sweeper does not touch these columns, so anything
+  // left here would point at a TrueForge call nothing can ever answer.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "CANCELLED");
+  assert.deepEqual(
+    {
+      thread: row.pendingThreadId,
+      call: row.pendingToolCallId,
+      verdict: row.pendingVerdictId,
+      hash: row.pendingApprovedContentHash,
+    },
+    { thread: null, call: null, verdict: null, hash: null },
+  );
+});
+
 test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONLY", async () => {
   await drainOthers();
   const fixture = await seedSession();

@@ -177,6 +177,7 @@ export function CaseView({
       >
         <ArtifactsPanel
           artifacts={status.artifacts}
+          storageConfigured={status.storageConfigured}
           imageDigest={status.target?.imageDigest || null}
           contentHash={status.verdict?.contentHash ?? null}
         />
