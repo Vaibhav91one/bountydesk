@@ -48,6 +48,15 @@ const STALL_BUDGET_MS = 90_000;
  */
 const JOBS_STALL_BUDGET_MS = 300_000;
 
+/**
+ * How long a loop may fail every single iteration before /healthz calls it stale. A loop erroring
+ * this steadily is not having a bad minute: Postgres or TrueForge is unreachable from this
+ * process, and the queues' own retries have already had dozens of goes at it. Longer than the
+ * stall budget on purpose, because unlike a wedge this state is visible in the log the whole
+ * time, and a restart is only worth doing once it is clear waiting will not fix it.
+ */
+const FAILING_BUDGET_MS = 180_000;
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }
@@ -66,8 +75,9 @@ function startHealthServer(port: number, heartbeat: Heartbeat, signal: AbortSign
     if (req.url === "/healthz") {
       // Reports on the work, not on the process: a daemon whose loops have all wedged still
       // answers this port, which is how an approved verdict once sat undelivered behind a
-      // service the platform believed was healthy. A stale loop fails the check so the platform
-      // restarts the worker, which is the one thing known to clear a wedge.
+      // service the platform believed was healthy. A loop that has gone silent, or one that has
+      // failed every iteration long enough to mean a dependency is gone, fails the check so the
+      // platform restarts the worker, which is the one thing known to clear a wedge.
       const health = heartbeat.snapshot();
       res.writeHead(health.ok ? 200 : 503, {
         "content-type": "application/json",
@@ -168,13 +178,14 @@ async function main(): Promise<void> {
     startedAt: Date.now(),
     defaultBudgetMs: STALL_BUDGET_MS,
     budgets: { jobs: JOBS_STALL_BUDGET_MS },
+    failureBudgetMs: FAILING_BUDGET_MS,
   });
   startHealthServer(workerHealthPort(), heartbeat, controller.signal);
 
   console.log(`worker daemon starting, pid ${process.pid}`);
   await runDaemon(queues, {
     signal: controller.signal,
-    onProgress: (name) => heartbeat.record(name),
+    onProgress: (name, outcome) => heartbeat.record(name, Date.now(), outcome),
   });
   console.log("worker daemon stopped");
 }

@@ -229,13 +229,14 @@ test("runLoop reports progress for every iteration, whatever the iteration did",
       await noWaitSleep();
     },
     logger: silentLogger(),
-    onProgress: (name) => progress.push(name),
+    onProgress: (name, outcome) => progress.push(`${name}:${outcome}`),
   });
 
   // A claimed job, a thrown claim and an idle claim: three iterations, three reports. Only the
   // last claim reports nothing, because the signal aborted inside it. A loop that is failing is
-  // still a loop that is alive, which is the distinction /healthz is drawing.
-  assert.deepEqual(progress, ["t", "t"]);
+  // still a loop that is alive, so it reports too, and it reports the failure: health treats a
+  // run of those as its own kind of stall.
+  assert.deepEqual(progress, ["t:ok", "t:failed"]);
   assert.equal(calls, 3);
 });
 
@@ -254,10 +255,10 @@ test("runSweeper reports progress each interval, including one that failed", asy
     signal: controller.signal,
     sleep: noWaitSleep,
     logger: silentLogger(),
-    onProgress: (name) => progress.push(name),
+    onProgress: (name, outcome) => progress.push(`${name}:${outcome}`),
   });
 
-  assert.deepEqual(progress, ["t-sweep", "t-sweep"]);
+  assert.deepEqual(progress, ["t-sweep:failed", "t-sweep:ok"]);
 });
 
 test("runDaemon reports progress under each loop's own name", async () => {
@@ -280,8 +281,11 @@ test("runDaemon reports progress under each loop's own name", async () => {
     logger: silentLogger(),
     idleBackoffMs: 1,
     sweepIntervalMs: 1,
-    onProgress: (name) => progress.add(name),
+    onProgress: (name, outcome) => progress.add(`${name}:${outcome}`),
   });
 
-  assert.deepEqual([...progress].sort(), ["a", "a-sweep", "b", "b-sweep"]);
+  assert.deepEqual(
+    [...progress].sort(),
+    ["a-sweep:ok", "a:ok", "b-sweep:ok", "b:ok"],
+  );
 });

@@ -69,9 +69,17 @@ It reports on the loops rather than on the process, because a worker whose loops
 still answers this port: each loop records when it last finished an iteration, and the check fails
 with 503 once one is past its budget, which is what makes the platform restart it. An iteration
 that found nothing to claim counts, so an idle queue stays healthy, and the jobs queue has a longer
-budget because a single claim there boots a sandbox and waits for it. The queue code still treats
-Supabase and TrueForge errors through leases and retries; the health check is for the case those
-cannot reach, a claim that never returns at all.
+budget because a single claim there boots a sandbox and waits for it.
+
+Each loop also reports whether its iteration succeeded or threw, because silence is not the only
+way to stop doing work. A loop that cannot reach Postgres or TrueForge ticks steadily on its error
+backoff and would clear a check that only measures the gap between iterations, so a loop that has
+failed every iteration for longer than the failure budget fails the check too, and the response
+names it under `failingFor`. One failure means nothing there: the queues absorb a transient error
+through leases and retries, and only an unbroken run long enough to mean the dependency is gone
+counts. The check is still liveness rather than readiness, so it does not prove a dependency is
+reachable before work arrives; an idle worker with a dead Postgres reads as healthy until the first
+claim fails.
 
 Each loop needs a distinct owner id, idle backoff, jitter and a fixed concurrency limit. On
 `SIGTERM`, the process stops claiming new work and allows the lease protocol to recover anything it
@@ -85,8 +93,10 @@ Do not describe the Zerops topology as live or production-ready until all of the
 2. SQLite WAL behavior works on the mounted Local Storage volume.
 3. `sqlite3 .backup` produces a restorable copy while the service is running.
 4. Worker shutdown, restart and expired-lease recovery do not lose or duplicate work.
-5. TrueForge and the worker have useful liveness and readiness checks. The worker's side of this
-   is done: `/healthz` fails when a queue loop stops making progress.
+5. TrueForge and the worker have useful liveness and readiness checks. The worker's liveness side
+   is done: `/healthz` fails when a queue loop goes silent, and when one fails every iteration for
+   longer than the failure budget. Readiness is not: nothing checks Postgres or TrueForge before
+   the first claim, so an idle worker with a dead dependency still reads as healthy.
 6. Neither service has public access, private service names resolve only inside the project, and the
    TrueForge proxy rejects a request without the configured bearer token.
 7. Resource ceilings and billing alerts are set before the services remain online.
