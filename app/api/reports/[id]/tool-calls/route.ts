@@ -8,10 +8,11 @@ export const runtime = "nodejs";
 /**
  * Un-redacted tool-call detail for a report's investigation, keyed by TrueForge call id.
  *
- * Split off the case page's server render, which is where this used to live. It is a live call
- * to the harness with a five second abort, so every page request paid for a round trip whose
- * result only ever fills in a hover; on Vercel, where TRUEFORGE_URL is not set, it paid for a
- * throw. Behind its own query it fetches while the agent is working and stops when it is not.
+ * Its own route rather than part of the case page's render, because it is a live call to the
+ * harness with a five second abort whose result only ever fills in a hover: on its own query it
+ * is fetched while the agent is working and not at all once it stops, and a page request never
+ * waits on it. On Vercel, where TRUEFORGE_URL is not set, the call throws and the hover is
+ * simply absent.
  *
  * readToolCalls is resilient by construction: no session, no started turn, or any TrueForge
  * failure all give an empty map, and a row with no matching detail renders without a hover.

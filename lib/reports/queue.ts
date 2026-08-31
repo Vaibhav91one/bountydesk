@@ -107,19 +107,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       eventCount: sql<number>`(
         select count(*)::int from session_event e where e.report_id = ${report.id}
       )`,
-      // Gated on the verdict/hash pair and on the absence of a recorded decision. A pending
-      // tuple after approval is handoff state, not another thing a reviewer can answer.
-      pendingVerdictId: sql<string | null>`(
-        select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id}
-          and s.pending_verdict_id is not null
-          and s.pending_approved_content_hash is not null
-          and not exists (
-            select 1 from ${approvalDecision} a
-            where a.verdict_id = s.pending_verdict_id
-          )
-        limit 1
-      )`,
+      pendingVerdictId: pendingVerdictIdSql,
       deliveryState: sql<DeliveryState | null>`(
         select d.state from outbound_delivery d
         where d.verdict_id = (
@@ -189,6 +177,52 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
   }));
 }
+
+/**
+ * The verdict a reviewer can still answer for one report, or null.
+ *
+ * Gated on the verdict/hash pair and on the absence of a recorded decision. A pending tuple
+ * after approval is handoff state, not another thing a reviewer can answer.
+ *
+ * A module constant rather than a string repeated per query: everything that counts or ranks
+ * work waiting on a human reads it, and two spellings of "waiting" that disagree is a screen
+ * telling somebody there is nothing to do.
+ */
+export const pendingVerdictIdSql = sql<string | null>`(
+  select s.pending_verdict_id from agent_session s
+  where s.report_id = ${report.id}
+    and s.pending_verdict_id is not null
+    and s.pending_approved_content_hash is not null
+    and not exists (
+      select 1 from ${approvalDecision} a
+      where a.verdict_id = s.pending_verdict_id
+    )
+  limit 1
+)`;
+
+/**
+ * Whether a report is one a reviewer still owes a decision on.
+ *
+ * Two states qualify. AWAITING_APPROVAL is the reproduction path. ANALYSIS_ONLY qualifies only
+ * when its latest verdict is itself ANALYSIS_ONLY, which is the lane a dead-end run lands in
+ * with a server-authored verdict still to approve; a report parked there behind a verdict of
+ * another outcome is not waiting on anybody.
+ */
+export const awaitingReviewSql = sql<boolean>`(
+  ${pendingVerdictIdSql} is not null
+  and (
+    ${report.state} = 'AWAITING_APPROVAL'
+    or (
+      ${report.state} = 'ANALYSIS_ONLY'
+      and (
+        select v.outcome from verdict v
+        where v.report_id = ${report.id}
+        order by v.revision desc
+        limit 1
+      ) = 'ANALYSIS_ONLY'
+    )
+  )
+)`;
 
 /**
  * Every column, with its true total and at most COLUMN_LIMIT cards.

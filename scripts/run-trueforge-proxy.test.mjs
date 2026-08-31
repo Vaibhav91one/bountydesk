@@ -104,8 +104,9 @@ test("TrueForge proxy refuses wildcard bind hosts", async () => {
   assert.match(stderr, /TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces/);
 });
 
-test("TrueForge proxy allows wildcard bind hosts only with the public bind flag", async () => {
-  const upstream = await startUpstream();
+test("TrueForge proxy refuses a wildcard bind host even with the old opt-out set", async () => {
+  // There used to be a flag for this. The environment carrying it must not be a way back to
+  // binding every interface, which is why the check does not consult anything.
   const proxyPort = await freePort();
   const child = spawn(process.execPath, ["scripts/run-trueforge-proxy.mjs"], {
     cwd: process.cwd(),
@@ -115,23 +116,19 @@ test("TrueForge proxy allows wildcard bind hosts only with the public bind flag"
       TRUEFORGE_PROXY_ALLOW_PUBLIC_BIND: "1",
       TRUEFORGE_PROXY_HOSTS: "0.0.0.0",
       TRUEFORGE_PROXY_PORT: String(proxyPort),
-      TRUEFORGE_UPSTREAM_URL: upstream.url,
+      TRUEFORGE_UPSTREAM_URL: "http://127.0.0.1:1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  try {
-    await waitForProxy(child);
+  let stderr = "";
+  child.stderr.on("data", (chunk) => {
+    stderr += String(chunk);
+  });
+  const [code] = await once(child, "exit");
 
-    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/v1/docs`, {
-      headers: { authorization: "Bearer test-secret" },
-    });
-
-    assert.equal(response.status, 200);
-  } finally {
-    await stopChild(child);
-    await new Promise((resolve, reject) => upstream.server.close((error) => (error ? reject(error) : resolve())));
-  }
+  assert.equal(code, 1);
+  assert.match(stderr, /must contain only loopback or specific private interfaces/);
 });
 
 test("TrueForge proxy rejects missing and invalid bearer tokens before forwarding", async () => {

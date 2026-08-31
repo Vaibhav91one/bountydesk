@@ -5,7 +5,6 @@ import https from "node:https";
 const upstream = new URL(process.env.TRUEFORGE_UPSTREAM_URL ?? "http://127.0.0.1:8790");
 const secret = process.env.TRUEFORGE_API_KEY?.trim();
 const port = Number(process.env.TRUEFORGE_PROXY_PORT ?? 8791);
-const allowPublicBind = process.env.TRUEFORGE_PROXY_ALLOW_PUBLIC_BIND === "1";
 const hosts = (process.env.TRUEFORGE_PROXY_HOSTS ?? process.env.TRUEFORGE_PROXY_HOST ?? "127.0.0.1")
   .split(",")
   .map((host) => host.trim())
@@ -26,7 +25,10 @@ if (hosts.length === 0) {
   process.exit(1);
 }
 
-if (!allowPublicBind && hosts.some((host) => host === "0.0.0.0" || host === "::")) {
+// TrueForge is never public. A wildcard binds every interface the container has, including any
+// it gains later, so the only addresses accepted are the ones named: loopback, or the private
+// address the platform hands the service. There is deliberately no flag to turn this off.
+if (hosts.some((host) => host === "0.0.0.0" || host === "::")) {
   console.error("TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces");
   process.exit(1);
 }

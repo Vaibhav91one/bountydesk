@@ -10,6 +10,7 @@ import {
   sql,
   targetProfile,
 } from "@/lib/db";
+import { awaitingReviewSql } from "@/lib/reports/queue";
 
 /**
  * The read model behind the Integrations screen.
@@ -40,7 +41,7 @@ export type ConnectionRepo = {
 
 export type RepoReports = {
   total: number;
-  /** Waiting on a human right now. */
+  /** Reports with a verdict a reviewer can still answer, by the same rule the board uses. */
   awaitingReview: number;
   /** Reports whose verdict reached the issue as a comment. */
   delivered: number;
@@ -66,7 +67,9 @@ async function reportsByRepository(): Promise<Map<string, RepoReports>> {
     .select({
       connectedRepositoryId: report.connectedRepositoryId,
       total: sql<number>`count(*)::int`,
-      awaitingReview: sql<number>`count(*) filter (where ${report.state} = 'AWAITING_APPROVAL')::int`,
+      // The same predicate the board and the home summary rank on, so a repository cannot
+      // report nothing waiting while the queue shows a card with an Approve button.
+      awaitingReview: sql<number>`count(*) filter (where ${awaitingReviewSql})::int`,
       delivered: sql<number>`count(*) filter (where ${report.state} = 'DELIVERED')::int`,
       lastReportAt: sql<Date>`max(${report.createdAt})`,
     })

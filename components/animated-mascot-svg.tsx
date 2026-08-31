@@ -5,6 +5,13 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { MASCOT_STATES, type MascotKey } from "@/lib/mascot/catalog";
 import { cn } from "@/lib/utils";
 
+/**
+ * One request per mascot per page, shared by every card showing that state.
+ *
+ * Only a request that is in flight or that succeeded stays here. A rejected one is evicted, so a
+ * dropped connection costs the next render a retry rather than leaving that mascot blank for as
+ * long as the tab is open.
+ */
 const cache = new Map<string, Promise<string>>();
 
 function safeState(state: string): MascotKey {
@@ -24,7 +31,12 @@ async function loadMascot(state: MascotKey): Promise<string> {
       if (!response.ok) throw new Error(`Could not load mascot ${state}`);
       return response.text();
     })
-    .then((markup) => markup.replace(/^<svg width="\d+" height="\d+"/, "<svg"));
+    .then((markup) => markup.replace(/^<svg width="\d+" height="\d+"/, "<svg"))
+    .catch((error: unknown) => {
+      // Evicted before the rejection reaches the caller, so the entry never outlives the failure.
+      if (cache.get(state) === pending) cache.delete(state);
+      throw error;
+    });
 
   cache.set(state, pending);
   return pending;
@@ -43,11 +55,14 @@ export function useMascotMarkup(state: string, scope: string) {
         if (!cancelled) setLoaded({ key, markup: next });
       })
       .catch(() => {
-        if (!cancelled && key !== "idle") {
-          void loadMascot("idle").then((next) => {
+        if (cancelled || key === "idle") return;
+        // The fallback can fail too (the same dropped connection), and an unhandled rejection
+        // in a render effect is a console error for a mascot nobody can see anyway.
+        void loadMascot("idle")
+          .then((next) => {
             if (!cancelled) setLoaded({ key: "idle", markup: next });
-          });
-        }
+          })
+          .catch(() => undefined);
       });
 
     return () => {
