@@ -53,11 +53,17 @@ const client = postgres(url, {
   idle_timeout: 30,
   max_lifetime: 60 * 30,
   connect_timeout: 10,
-  // Integration tests point this at a disposable schema so a run cannot see, or be handed,
-  // another run's rows. Unset everywhere else, which leaves the server default (public).
-  ...(process.env.DATABASE_SCHEMA
-    ? { connection: { search_path: process.env.DATABASE_SCHEMA } }
-    : {}),
+  connection: {
+    // Server-side ceiling on any single statement, in milliseconds. Nothing this app runs is a
+    // long query: the claims are single-row updates and the read models are small. Without it a
+    // statement that blocks (a claim waiting on a row lock a crashed worker's transaction still
+    // holds) waits on whatever the pooler's own default happens to be, which on 2026-08-31 left
+    // a worker loop silent for three and a half minutes before the cancel arrived.
+    statement_timeout: 30_000,
+    // Integration tests point this at a disposable schema so a run cannot see, or be handed,
+    // another run's rows. Unset everywhere else, which leaves the server default (public).
+    ...(process.env.DATABASE_SCHEMA ? { search_path: process.env.DATABASE_SCHEMA } : {}),
+  },
 });
 
 export const db = drizzle(client, { schema });

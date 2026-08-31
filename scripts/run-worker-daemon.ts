@@ -105,6 +105,16 @@ async function main(): Promise<void> {
   process.once("SIGINT", () => onShutdownSignal("SIGINT"));
   process.once("SIGTERM", () => onShutdownSignal("SIGTERM"));
 
+  // Node's default is to print a raw stack and exit, which in a deployed worker is a restart with
+  // no line saying what died. Exiting is still the right answer, since a rejection nobody awaited
+  // means some part of this process is in a state it did not plan for and the lease protocol is
+  // built to recover a worker that stops: work in flight expires and a sweeper reclaims it. Say so
+  // first, so the next one is readable in the service log.
+  process.on("unhandledRejection", (reason) => {
+    console.error(`worker daemon exiting on an unhandled rejection: ${errorMessage(reason)}`);
+    process.exit(1);
+  });
+
   const analysis = createTrueforgeAnalysisDriver();
   const trueForgeClient = createTrueForgeClient();
 
