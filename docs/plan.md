@@ -1,7 +1,9 @@
 # BountyDesk — Phase-by-phase MVP plan
 
 This plan implements the frozen scope in [decisions.md](./decisions.md). A phase is complete only
-when its exit criteria pass. Deferred production features must not silently enter the hackathon MVP.
+when its exit criteria pass. Phases 0 to 6 were the hackathon MVP, whose time-box closed on
+2026-09-01; the work held out of it is in "Backlog, now active work" at the end, no longer
+deferred.
 
 ## Phase 0: Repository and review trail
 
@@ -196,7 +198,13 @@ worker code end to end; the Zerops hosting of that same worker is still the open
 **Exit:** lint/build/tests and accessibility/overflow checks pass; the demo works after reconnect and
 has all three backup paths prepared.
 
-## Explicitly deferred
+## Backlog, now active work
+
+Held out of the hackathon MVP window, which closed on 2026-09-01. These are open work now, not
+deferred: build them as tasks reach them. The safety invariants that read like scheduling below
+are not, and they still hold. Email and upload record no `DeliveryAttempt` and reach no
+`DELIVERED` until their outbound contracts exist, and no verdict ships without human approval,
+whatever the calendar says.
 
 - Reporter reply/resume (`AWAITING_REPORTER`).
 - Live-target and black-box reproduction for scope that cannot be self-hosted.
