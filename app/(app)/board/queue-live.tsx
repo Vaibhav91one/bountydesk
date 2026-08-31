@@ -1,0 +1,57 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+
+import { Column, MASCOT_ON_CARD } from "@/components/queue-board";
+import { mascotKeyForState } from "@/lib/mascot/catalog";
+import type { QueueColumnView } from "@/lib/reports/queue-view";
+import { fetchLive, listRefetchInterval, queueQueryKey } from "@/lib/reports/status-query";
+
+/**
+ * The board, keeping itself current.
+ *
+ * It used to do this with router.refresh() on a timer, which re-ran the whole server component
+ * and shipped a fresh copy of the markup for five columns to move one card between two of them.
+ * A card's state is the only thing that changes, so that is the only thing fetched.
+ */
+export function QueueLive({ initial }: { initial: QueueColumnView[] }) {
+  const { data: columns = initial } = useQuery({
+    queryKey: queueQueryKey(),
+    queryFn: () => fetchLive<QueueColumnView[]>("/api/queue"),
+    initialData: initial,
+    refetchInterval: (query) =>
+      listRefetchInterval(
+        (query.state.data ?? initial).flatMap((column) =>
+          column.cards.map((card) => card.state),
+        ),
+      ),
+  });
+
+  // Numbered across the board rather than within a column, so the mascots' drifts stay spread
+  // out even when one column holds every mascot on screen.
+  const drift = new Map<string, number>();
+  const mascots = new Map<string, ReturnType<typeof mascotKeyForState>>();
+  for (const column of columns) {
+    for (const card of column.cards) {
+      if (!MASCOT_ON_CARD.has(card.state)) continue;
+      mascots.set(card.state, mascotKeyForState(card.state));
+      drift.set(card.id, drift.size);
+    }
+  }
+
+  return (
+    // The strip scrolls, not the page: six columns do not fit the content area at 1440,
+    // and a board that pushes the whole document sideways is worse than one that does not.
+    <div className="flex-1 overflow-x-auto px-3 py-8">
+      {/* A grid rather than a flex row, so every column is the same height and the rules
+          between them run the full board instead of stopping at the tallest stack of
+          cards. divide-x draws them, which means no separator element to keep in step
+          with the column count. */}
+      <div className="grid min-h-full min-w-max auto-cols-[300px] grid-flow-col divide-x divide-border/50">
+        {columns.map((column) => (
+          <Column key={column.key} column={column} mascots={mascots} drift={drift} />
+        ))}
+      </div>
+    </div>
+  );
+}

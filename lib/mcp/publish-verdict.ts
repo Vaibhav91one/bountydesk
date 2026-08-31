@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import { z } from "zod";
-
 import {
   agentSession,
   and,
@@ -26,33 +24,15 @@ export type EnqueueApprovedVerdictDeliveryResult =
   | { ok: true; deliveryId: string }
   | { ok: false; reason: string };
 
-/**
- * The one shared shape for what an agent-drafted verdict looks like, imported by both the MCP
- * route (capability-only lookup, unchanged in this PR) and the poller (the full shape, once a
- * real agent starts drafting outcome/summary/findings instead of only echoing a capability
- * token back). One definition means the two can never quietly drift on what counts as a valid
- * draft.
- */
-export const findingSchema = z.object({
-  title: z.string().min(1).max(200),
-  severity: z.enum(["critical", "high", "medium", "low", "info"]),
-  description: z.string().min(1).max(4000),
-  evidenceRef: z.string().min(1).max(500),
-});
-
-export const verdictDraftSchema = z.object({
-  outcome: z.enum(["REPRODUCED", "NOT_REPRODUCED", "ANALYSIS_ONLY"]),
-  summary: z.string().min(1).max(2000),
-  findings: z.array(findingSchema).max(20),
-});
-
-export const publishVerdictInputSchema = verdictDraftSchema.extend({
-  capability: z.string(),
-});
-
-export type Finding = z.infer<typeof findingSchema>;
-export type VerdictDraft = z.infer<typeof verdictDraftSchema>;
-export type PublishVerdictInput = z.infer<typeof publishVerdictInputSchema>;
+export {
+  findingSchema,
+  publishVerdictInputSchema,
+  verdictDraftSchema,
+  type Finding,
+  type PublishVerdictInput,
+  type VerdictDraft,
+} from "@/lib/mcp/verdict-draft";
+import { verdictDraftSchema, type Finding, type VerdictDraft } from "@/lib/mcp/verdict-draft";
 
 export type DraftVerdictResult = { ok: true; verdictId: string } | { ok: false; reason: string };
 

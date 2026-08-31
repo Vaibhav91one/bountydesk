@@ -89,7 +89,7 @@ const QUEUE_COLUMNS = [
         outcome: null,
         deliveryState: null,
         eventCount: 1,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
       {
@@ -101,7 +101,7 @@ const QUEUE_COLUMNS = [
         outcome: null,
         deliveryState: null,
         eventCount: 1,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
     ],
@@ -120,7 +120,7 @@ const QUEUE_COLUMNS = [
         outcome: null,
         deliveryState: null,
         eventCount: 2,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
       {
@@ -132,7 +132,7 @@ const QUEUE_COLUMNS = [
         outcome: null,
         deliveryState: null,
         eventCount: 2,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
     ],
@@ -151,7 +151,7 @@ const QUEUE_COLUMNS = [
         outcome: "NOT_REPRODUCED",
         deliveryState: null,
         eventCount: 3,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: "v1",
       },
       {
@@ -163,7 +163,7 @@ const QUEUE_COLUMNS = [
         outcome: "REPRODUCED",
         deliveryState: null,
         eventCount: 4,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: "v2",
       },
     ],
@@ -179,7 +179,7 @@ const TRAVELLER = {
   outcome: null,
   deliveryState: null,
   eventCount: 2,
-  updatedAt: AT,
+  updatedAt: AT.toISOString(),
   awaitingVerdictId: null,
 } as const;
 

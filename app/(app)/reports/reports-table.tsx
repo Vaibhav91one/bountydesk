@@ -25,11 +25,12 @@ import type { IndexRow } from "@/lib/reports/queue";
  * module load. Importing one pure function from it would pull the whole pg driver into the
  * browser bundle, so the server does the lookup and sends the answer.
  */
-type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
+export type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
   updatedAt: string;
   createdAt: string;
   phase: string;
 };
+
 
 const COLUMNS = [
   { key: "report", label: "Report", width: "1.6fr" },
@@ -61,6 +62,13 @@ function matchesFilter(row: ReportRow, key: string): boolean {
   return true;
 }
 
+/**
+ * Renders whatever rows it is handed and nothing else.
+ *
+ * Deliberately free of data fetching: the landing page draws this same table over fixtures,
+ * outside the signed-in shell, where there is no QueryClient to read from and no session to
+ * poll with. reports-live.tsx is the console's wrapper that keeps the rows current.
+ */
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");

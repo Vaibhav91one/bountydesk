@@ -1,26 +1,13 @@
 import { PhaseBadge } from "@/components/phase-dot";
 import { Badge } from "@/components/ui/badge";
+import { outcomeLabel, reportStateLabel } from "@/lib/reports/labels";
 import { cn } from "@/lib/utils";
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME_LABEL: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analyzed",
-};
+export {
+  outcomeLabel,
+  reportStateLabel,
+  shouldShowOutcomeBadge,
+} from "@/lib/reports/labels";
 
 const OUTCOME_TONE: Record<string, string> = {
   REPRODUCED: "bg-emerald-500/15 text-emerald-400",
@@ -28,18 +15,6 @@ const OUTCOME_TONE: Record<string, string> = {
   INCONCLUSIVE: "bg-amber-500/15 text-amber-300",
   ANALYSIS_ONLY: "bg-phase-approval/15 text-phase-approval",
 };
-
-export function reportStateLabel(state: string, deliveryState?: string | null): string {
-  return deliveryState === "FAILED" ? "Failed" : (STATE_LABEL[state] ?? state);
-}
-
-export function outcomeLabel(outcome: string): string {
-  return OUTCOME_LABEL[outcome] ?? outcome;
-}
-
-export function shouldShowOutcomeBadge(state: string, outcome: string | null): outcome is string {
-  return Boolean(outcome) && !(state === "ANALYSIS_ONLY" && outcome === "ANALYSIS_ONLY");
-}
 
 export function ReportStateBadge({
   state,

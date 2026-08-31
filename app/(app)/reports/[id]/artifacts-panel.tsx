@@ -1,7 +1,7 @@
 import { File, Hash } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
-import type { CaseArtifact } from "@/lib/reports/case";
+import type { CaseArtifactView } from "@/lib/reports/case-view";
 
 import { ArtifactDownload } from "./artifact-download";
 
@@ -48,7 +48,7 @@ export function ArtifactsPanel({
   imageDigest,
   contentHash,
 }: {
-  artifacts: CaseArtifact[];
+  artifacts: CaseArtifactView[];
   /** The pinned image this report would be reproduced against, if one is bound. */
   imageDigest: string | null;
   /** The hash approving binds, once a verdict has been drafted. */

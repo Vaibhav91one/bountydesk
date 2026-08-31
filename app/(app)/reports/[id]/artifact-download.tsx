@@ -21,12 +21,21 @@ export function ArtifactDownload({ artifactId }: { artifactId: string }) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const result = await getArtifactDownloadUrl(artifactId);
-    setBusy(false);
-    if ("url" in result) {
-      window.open(result.url, "_blank", "noopener,noreferrer");
-    } else {
-      setError(result.error);
+
+    try {
+      const result = await getArtifactDownloadUrl(artifactId);
+      if ("url" in result) {
+        window.open(result.url, "_blank", "noopener,noreferrer");
+      } else {
+        setError(result.error);
+      }
+    } catch {
+      // The action itself failed to reach the server rather than refusing. Without this the
+      // spinner ran forever and the button never became clickable again, which reads as a
+      // download that is still working on it.
+      setError("Could not reach the server. Try again.");
+    } finally {
+      setBusy(false);
     }
   }
 
