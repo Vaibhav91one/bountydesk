@@ -50,6 +50,13 @@ test("lets TrueForge MCP connector endpoints run during landing fallback", () =>
   }
 });
 
+test("lets report realtime status endpoints run during landing fallback", () => {
+  assert.equal(
+    shouldRedirectToSource("/api/reports/00000000-0000-0000-0000-000000000000/status"),
+    false,
+  );
+});
+
 test("redirects non-landing routes to the GitHub repository", () => {
   assert.equal(SOURCE_URL, "https://github.com/Vaibhav91one/bountydesk");
 
