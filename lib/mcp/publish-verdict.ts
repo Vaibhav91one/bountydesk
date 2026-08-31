@@ -22,6 +22,9 @@ import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type PublishVerdictResult = { ok: true } | { ok: false; reason: string };
+export type EnqueueApprovedVerdictDeliveryResult =
+  | { ok: true; deliveryId: string }
+  | { ok: false; reason: string };
 
 /**
  * The one shared shape for what an agent-drafted verdict looks like, imported by both the MCP
@@ -370,7 +373,13 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
       return { ok: false, reason: "content hash mismatch" };
     }
 
-    return enqueueApprovedVerdictDelivery(tx, session.id, verdictRow, recomputedHash);
+    const enqueued = await enqueueApprovedVerdictDelivery(
+      tx,
+      session.id,
+      verdictRow,
+      recomputedHash,
+    );
+    return enqueued.ok ? { ok: true } : enqueued;
   });
 }
 
@@ -395,7 +404,7 @@ export async function enqueueApprovedVerdictDelivery(
     outcome: (typeof verdict.outcome.enumValues)[number];
   },
   approvedContentHash: string,
-): Promise<PublishVerdictResult> {
+): Promise<EnqueueApprovedVerdictDeliveryResult> {
   // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
   // human has approved it, so this only guards against a value nothing in this codebase writes
   // today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
@@ -429,7 +438,7 @@ export async function enqueueApprovedVerdictDelivery(
     return { ok: false, reason: `report is ${reportRow.state}; approved verdict cannot deliver` };
   }
 
-  await enqueueDelivery(
+  const delivery = await enqueueDelivery(
     {
       reportId: verdictRow.reportId,
       verdictId: verdictRow.id,
@@ -457,5 +466,5 @@ export async function enqueueApprovedVerdictDelivery(
     })
     .where(eq(agentSession.id, sessionId));
 
-  return { ok: true };
+  return { ok: true, deliveryId: delivery.id };
 }

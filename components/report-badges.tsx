@@ -19,7 +19,7 @@ const OUTCOME_LABEL: Record<string, string> = {
   REPRODUCED: "Reproduced",
   NOT_REPRODUCED: "Not reproduced",
   INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
+  ANALYSIS_ONLY: "Analyzed",
 };
 
 const OUTCOME_TONE: Record<string, string> = {

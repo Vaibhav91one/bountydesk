@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
@@ -75,6 +76,7 @@ export function ApprovalDialog({
   chatMascot: string;
   events: TraceRow[];
 }) {
+  const router = useRouter();
   const [chatting, setChatting] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [topic, setTopic] = useState(TOPICS[0]);
@@ -137,7 +139,10 @@ export function ApprovalDialog({
         : await denyVerdict(reportId, verdictId, reason ?? undefined);
     setActing(null);
     setResult(answer);
-    if (answer.ok) setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
+    if (answer.ok) {
+      setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
+      router.refresh();
+    }
   }
 
   return (
@@ -172,7 +177,7 @@ export function ApprovalDialog({
             >
               <CheckCircle className="mt-0.5 size-4 shrink-0" />
               {decision === "ALLOWED"
-                ? "Recorded. The submission worker relays it to the harness; nothing is posted until publish_verdict runs."
+                ? "Approved. BountyDesk is moving the exact signed verdict through delivery."
                 : "Denied. Nothing will be posted, and the report is closed on BountyDesk's side."}
             </p>
           ) : (
