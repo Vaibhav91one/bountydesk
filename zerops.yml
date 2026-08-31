@@ -88,7 +88,13 @@ zerops:
         - name: trueforge
           command: node ops/trueforge/node_modules/@truefoundry/trueforge/dist/cli.js --port 8790
         - name: proxy
-          command: TRUEFORGE_PROXY_HOSTS="127.0.0.1,$(hostname -i | awk '{print $1}')" node scripts/run-trueforge-proxy.mjs
+          command: |
+            if [ "$TRUEFORGE_PROXY_ALLOW_PUBLIC_BIND" = "1" ]; then
+              export TRUEFORGE_PROXY_HOSTS="0.0.0.0"
+            else
+              export TRUEFORGE_PROXY_HOSTS="127.0.0.1,$(hostname -i | awk '{print $1}')"
+            fi
+            node scripts/run-trueforge-proxy.mjs
         - name: bootstrap
           command: node scripts/bootstrap-trueforge.mjs
       healthCheck:

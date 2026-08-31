@@ -104,6 +104,36 @@ test("TrueForge proxy refuses wildcard bind hosts", async () => {
   assert.match(stderr, /TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces/);
 });
 
+test("TrueForge proxy allows wildcard bind hosts only with the public bind flag", async () => {
+  const upstream = await startUpstream();
+  const proxyPort = await freePort();
+  const child = spawn(process.execPath, ["scripts/run-trueforge-proxy.mjs"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      TRUEFORGE_API_KEY: "test-secret",
+      TRUEFORGE_PROXY_ALLOW_PUBLIC_BIND: "1",
+      TRUEFORGE_PROXY_HOSTS: "0.0.0.0",
+      TRUEFORGE_PROXY_PORT: String(proxyPort),
+      TRUEFORGE_UPSTREAM_URL: upstream.url,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  try {
+    await waitForProxy(child);
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/v1/docs`, {
+      headers: { authorization: "Bearer test-secret" },
+    });
+
+    assert.equal(response.status, 200);
+  } finally {
+    await stopChild(child);
+    await new Promise((resolve, reject) => upstream.server.close((error) => (error ? reject(error) : resolve())));
+  }
+});
+
 test("TrueForge proxy rejects missing and invalid bearer tokens before forwarding", async () => {
   const upstream = await startUpstream();
   const proxyPort = await freePort();
