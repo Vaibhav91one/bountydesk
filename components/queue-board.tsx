@@ -238,19 +238,24 @@ export function Column({
   mascots,
   drift,
   linkPrefetch = true,
+  emptyLabel = "Nothing here",
 }: {
   column: QueueColumnView;
   mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
   linkPrefetch?: boolean;
+  /** What an empty column says. The board overrides it while a search is running, because an
+   *  empty column then means the search missed rather than that the queue is clear. */
+  emptyLabel?: string;
 }) {
   const hidden = column.total - column.cards.length;
 
   return (
     // The last column has no rule, so without a transparent one in its place its cards
-    // come out a pixel wider than everyone else's.
-    <section className="flex flex-col gap-3 px-5 last:border-r last:border-r-transparent">
-      <header className="flex items-center gap-2.5">
+    // come out a pixel wider than everyone else's. min-h-0 is what lets the card list below
+    // scroll instead of pushing this section past the height the board gave it.
+    <section className="flex min-h-0 flex-col gap-3 px-5 last:border-r last:border-r-transparent">
+      <header className="flex shrink-0 items-center gap-2.5">
         <PhaseDot phase={column.key} />
         <h2 className="flex-1 text-body font-medium text-foreground">
           {column.label}
@@ -259,12 +264,15 @@ export function Column({
       </header>
 
       {column.cards.length === 0 ? (
-        <p className="rounded-xl border border-border/50 border-dashed bg-card/40 px-4 py-6 text-center text-meta text-muted-foreground">
-          Nothing here
+        <p className="shrink-0 rounded-xl border border-border/50 border-dashed bg-card/40 px-4 py-6 text-center text-meta text-muted-foreground">
+          {emptyLabel}
         </p>
       ) : null}
 
-      <ul className="flex flex-col gap-2.5">
+      {/* Each column scrolls its own cards. One column running long is the normal case (every
+          report starts in Triaging), and a single scroller for the board would mean scrolling
+          past that column's backlog to see whether anything is waiting on a human. */}
+      <ul className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
         {column.cards.map((card) => (
           <Card
             key={card.id}
@@ -280,7 +288,7 @@ export function Column({
       {/* Never truncate silently: a column that stopped at the limit and said nothing reads
           as "that is all of them". */}
       {hidden > 0 ? (
-        <p className="text-meta text-muted-foreground">
+        <p className="shrink-0 text-meta text-muted-foreground">
           {column.cards.length} of {column.total} shown
         </p>
       ) : null}

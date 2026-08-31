@@ -20,3 +20,31 @@ export function queueColumnViews(columns: QueueColumn[]): QueueColumnView[] {
     cards: column.cards.map((card) => ({ ...card, updatedAt: card.updatedAt.toISOString() })),
   }));
 }
+
+/**
+ * The columns as a search term leaves them.
+ *
+ * Title, source and target, because those are what somebody arrives holding. The state is not
+ * searched: the column a card sits in already says it, and matching on it would scatter hits
+ * across columns that each mean something different.
+ *
+ * A column's total becomes the number of matches, which is the honest count while a search is
+ * running. The board holds a capped number of cards per column, so this can only search the ones
+ * already on screen, and keeping the server's total would count rows the search never saw.
+ *
+ * An empty or blank term returns the columns untouched, so a caller can hand its raw input
+ * straight in rather than deciding for itself whether a search is running.
+ */
+export function searchQueue(columns: QueueColumnView[], term: string): QueueColumnView[] {
+  const needle = term.trim().toLowerCase();
+  if (needle.length === 0) return columns;
+
+  return columns.map((column) => {
+    const cards = column.cards.filter((card) =>
+      [card.title, card.sourceLabel, card.targetName ?? ""].some((field) =>
+        field.toLowerCase().includes(needle),
+      ),
+    );
+    return { ...column, cards, total: cards.length };
+  });
+}
