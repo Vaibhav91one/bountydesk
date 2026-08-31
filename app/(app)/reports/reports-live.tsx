@@ -18,7 +18,7 @@ export function ReportsLive({ initial }: { initial: ReportRow[] }) {
     queryFn: () => fetchLive<ReportRow[]>("/api/reports"),
     initialData: initial,
     refetchInterval: (query) =>
-      listRefetchInterval((query.state.data ?? initial).map((row) => row.state)),
+      listRefetchInterval(query.state.data ?? initial),
   });
 
   return <ReportsTable rows={rows} />;
