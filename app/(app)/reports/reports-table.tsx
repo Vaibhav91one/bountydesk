@@ -6,7 +6,8 @@ import { useMemo, useState } from "react";
 import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
-import { PhaseBadge, PhaseDot } from "@/components/phase-dot";
+import { PhaseDot } from "@/components/phase-dot";
+import { ReportOutcomeBadge, ReportStateBadge } from "@/components/report-badges";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
@@ -26,31 +27,9 @@ type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
   phase: string;
 };
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
-
 const COLUMNS = [
   { key: "report", label: "Report", width: "1.6fr" },
   { key: "origin", label: "Source", width: "0.9fr" },
-  // Wider than the rest: the status pill and the outcome beside it are two pieces of text,
-  // and the outcome was clipping to Reproduc…
   { key: "state", label: "Status", width: "1.4fr" },
   { key: "updated", label: "Last change", width: "0.9fr", align: "end" as const },
 ];
@@ -127,14 +106,12 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           {row.sourceLabel} · {row.origin}
         </span>,
         <span key="state" className="flex min-w-0 items-center gap-2">
-          <PhaseBadge phase={row.phase}>{STATE_LABEL[row.state] ?? row.state}</PhaseBadge>
-          {/* The outcome stays plain. Two coloured pills side by side would compete, and the
-              state is the one a reviewer scans this column for. */}
-          {row.outcome ? (
-            <span className="truncate text-meta text-muted-foreground">
-              {OUTCOME[row.outcome] ?? row.outcome}
-            </span>
-          ) : null}
+          <ReportStateBadge
+            state={row.state}
+            phase={row.phase}
+            deliveryState={row.deliveryState}
+          />
+          {row.outcome ? <ReportOutcomeBadge outcome={row.outcome} /> : null}
         </span>,
         <span key="updated" className="truncate text-meta text-muted-foreground">
           {formatStamp(new Date(row.updatedAt))}

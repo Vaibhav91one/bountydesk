@@ -7,6 +7,7 @@ import {
   inArray,
   isNull,
   notInArray,
+  outboundDelivery,
   report,
   sql,
   targetProfile,
@@ -28,6 +29,7 @@ import type { ReportState } from "@/lib/reports/states";
  */
 
 export type VerdictOutcome = "REPRODUCED" | "NOT_REPRODUCED" | "INCONCLUSIVE" | "ANALYSIS_ONLY";
+export type DeliveryState = (typeof outboundDelivery.state.enumValues)[number];
 
 export type QueueCard = {
   id: string;
@@ -39,6 +41,8 @@ export type QueueCard = {
   state: ReportState;
   /** The latest revision's outcome. null means no verdict has been drafted yet. */
   outcome: VerdictOutcome | null;
+  /** The outbox state for the newest delivery row, if approval has reached delivery. */
+  deliveryState: DeliveryState | null;
   /**
    * session_event rows, which is the run's own step log.
    *
@@ -101,6 +105,12 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
         where s.report_id = ${report.id} and s.pending_verdict_id is not null
         limit 1
       )`,
+      deliveryState: sql<DeliveryState | null>`(
+        select d.state from outbound_delivery d
+        where d.report_id = ${report.id}
+        order by d.updated_at desc
+        limit 1
+      )`,
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
       )`,
@@ -126,6 +136,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     targetName: row.targetName,
     state: row.state,
     outcome: row.outcome,
+    deliveryState: row.deliveryState,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.pendingVerdictId : null,
@@ -242,7 +253,14 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       )`,
       awaitingVerdictId: sql<string | null>`(
         select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_thread_id is not null
+        where s.report_id = ${report.id} and s.pending_verdict_id is not null
+        limit 1
+      )`,
+      deliveryState: sql<DeliveryState | null>`(
+        select d.state from outbound_delivery d
+        where d.report_id = ${report.id}
+        order by d.updated_at desc
+        limit 1
       )`,
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
@@ -268,6 +286,7 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     targetName: row.targetName,
     state: row.state,
     outcome: row.outcome,
+    deliveryState: row.deliveryState,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
