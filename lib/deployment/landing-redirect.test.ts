@@ -59,6 +59,8 @@ test("lets the console's polling endpoints run during landing fallback", () => {
     "/api/reports/00000000-0000-0000-0000-000000000000/tool-calls",
     "/api/reports",
     "/api/queue",
+    "/api/home",
+    "/api/active-reports",
   ]) {
     assert.equal(shouldRedirectToSource(pathname), false, pathname);
   }

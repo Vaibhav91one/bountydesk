@@ -20,14 +20,21 @@ export function ReportStateBadge({
   state,
   phase,
   deliveryState,
+  failed,
   label,
 }: {
   state: string;
   phase: string;
   deliveryState?: string | null;
+  /**
+   * A run that stopped somewhere other than the outbox, which the delivery state cannot say.
+   * A handoff to the harness that spent its retries leaves no delivery row at all, so without
+   * this the badge falls through to the report's own state and reads "Awaiting approval".
+   */
+  failed?: boolean;
   label?: string;
 }) {
-  if (deliveryState === "FAILED") {
+  if (failed || deliveryState === "FAILED") {
     return <Badge variant="destructive">Failed</Badge>;
   }
 

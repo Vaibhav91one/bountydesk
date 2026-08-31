@@ -84,7 +84,19 @@ export type CaseLiveView = {
   mascotKey: MascotKey;
   investigating: boolean;
   turnStatus: string | null;
+  /** Why the turn stopped, when it stopped badly. The lifecycle row shows a trimmed line. */
+  sessionError: string | null;
   eventCount: number;
+
+  /**
+   * The pipeline stopped somewhere and will not start again on its own.
+   *
+   * True for a delivery that spent its attempts and for a handoff that did, which are two
+   * different places a run can die with the same consequence for a reviewer. The badge reads
+   * this rather than the delivery state alone, so a stalled report cannot present itself as
+   * merely in progress.
+   */
+  failed: boolean;
 
   deliveryState: string | null;
   verdictOutcome: string | null;
@@ -112,6 +124,7 @@ export type CaseLiveView = {
     lastError: string | null;
     target: string;
   } | null;
+  handoff: CaseFile["handoff"];
 
   steps: LifecycleStepView[];
   artifacts: CaseArtifactView[];
@@ -140,6 +153,59 @@ const EVENT_PHASE: Record<string, string> = {
 };
 
 const TERMINAL = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
+
+/** A turn the poller gave up on. It writes the reason beside this status, never on its own. */
+function turnErrored(file: CaseFile): boolean {
+  return file.turnStatus === "ERROR";
+}
+
+/**
+ * The handoff has spent its whole retry budget, so no worker will pick it up again.
+ *
+ * Deliberately not "state is FAILED". The submission worker writes FAILED with attempts left on
+ * an error it judges unrepairable, and such a row is still claimable, so treating every FAILED
+ * as final would tell a reviewer the run is dead while it is in fact about to try again. The
+ * arithmetic is what the queue's own claim predicate uses.
+ */
+function handoffExhausted(file: CaseFile): boolean {
+  const handoff = file.handoff;
+  if (!handoff || handoff.state !== "FAILED") return false;
+
+  return handoff.attempts >= handoff.maxAttempts && !file.delivery;
+}
+
+/** What the delivery step says while the decision is still on its way to the harness. */
+function handoffNote(handoff: CaseFile["handoff"]): string | null {
+  if (!handoff) return null;
+
+  if (handoff.state === "FAILED") {
+    return handoff.attempts >= handoff.maxAttempts
+      ? `handoff failed after ${handoff.attempts} attempts`
+      : `handoff failed, retrying (${handoff.attempts}/${handoff.maxAttempts})`;
+  }
+
+  if (handoff.state === "PENDING" && handoff.attempts > 0) {
+    return `handing off, retrying (${handoff.attempts}/${handoff.maxAttempts})`;
+  }
+
+  return handoff.state === "PENDING"
+    ? "Handing off to the agent"
+    : "Handed off, waiting on the agent";
+}
+
+/**
+ * The reason a turn stopped, on one line.
+ *
+ * The text is a harness error message, so its length is not ours to predict and a lifecycle row
+ * is a single line. The whole message is not lost: it is on the view for anywhere that wants to
+ * show it in full.
+ */
+function stoppedNote(sessionError: string | null): string {
+  if (!sessionError) return "Stopped early";
+
+  const line = sessionError.split("\n")[0].trim();
+  return `Stopped: ${line.length > 60 ? `${line.slice(0, 59)}\u2026` : line}`;
+}
 
 /**
  * Which mascot stands for a lifecycle row.
@@ -178,6 +244,9 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
   const deliveryExhausted =
     deliveryFailed && (file.delivery?.attempts ?? 0) >= (file.delivery?.maxAttempts ?? 0);
 
+  const handoff = file.handoff;
+  const handoffDead = handoffExhausted(file);
+
   return [
     {
       key: "intake",
@@ -188,19 +257,27 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
     {
       key: "investigation",
       label: "Investigation",
-      note: file.verdict
-        ? `${investigationSteps} ${investigationSteps === 1 ? "step" : "steps"} recorded`
-        : investigating
-          ? "In progress"
-          : "Not started",
-      // Done the moment a verdict exists: the live path mints revision 1 only once the agent
-      // calls publish_verdict, which is also the last thing that happens in its turn (see
-      // lib/mcp/publish-verdict.ts), so a verdict existing means the investigation is over.
-      state: file.verdict
-        ? ("done" as const)
-        : investigating
-          ? ("current" as const)
-          : ("pending" as const),
+      // A turn that errored still leaves a verdict behind: the poller synthesizes an
+      // ANALYSIS_ONLY one so the report reaches a reviewer rather than vanishing. That made a
+      // crashed run and a finished run draw the same row, which is why the error outranks the
+      // verdict here.
+      note: turnErrored(file)
+        ? stoppedNote(file.sessionError)
+        : file.verdict
+          ? `${investigationSteps} ${investigationSteps === 1 ? "step" : "steps"} recorded`
+          : investigating
+            ? "In progress"
+            : "Not started",
+      // Otherwise done the moment a verdict exists: the live path mints revision 1 only once
+      // the agent calls publish_verdict, which is also the last thing that happens in its turn
+      // (see lib/mcp/publish-verdict.ts), so a verdict existing means the turn is over.
+      state: turnErrored(file)
+        ? ("skipped" as const)
+        : file.verdict
+          ? ("done" as const)
+          : investigating
+            ? ("current" as const)
+            : ("pending" as const),
     },
     {
       key: "verdict",
@@ -234,16 +311,24 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
           ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
           : file.delivery
             ? file.delivery.state.toLowerCase()
-            : "Not enqueued",
-      state: deliveryFailed
+            : // No delivery row yet. On the harness-backed path that is not necessarily "not
+              // started": the handoff has to reach TrueForge and come back through
+              // publish_verdict before an outbox row exists at all, so a handoff that died
+              // leaves this step honestly reporting "Not enqueued" forever.
+              handoffNote(handoff) ?? "Not enqueued",
+      state: deliveryFailed || handoffDead
         ? ("skipped" as const)
-        : file.state === "DELIVERED"
-          ? ("done" as const)
-          : file.state === "DELIVERING"
-            ? ("current" as const)
-            : past(TERMINAL)
-              ? ("skipped" as const)
-              : ("pending" as const),
+        : // A handoff still in flight, including one that failed but has attempts left. Once a
+          // delivery row exists the handoff has done its job and the outbox is the story.
+          handoff && !file.delivery
+          ? ("current" as const)
+          : file.state === "DELIVERED"
+            ? ("done" as const)
+            : file.state === "DELIVERING"
+              ? ("current" as const)
+              : past(TERMINAL)
+                ? ("skipped" as const)
+                : ("pending" as const),
     },
   ];
 }
@@ -257,6 +342,11 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
  * signed should not be told their own click did not happen.
  */
 function caseStateLabel(file: CaseFile, deliveryState: string | null): string {
+  // Ahead of the approved-but-not-yet-delivering case below: a report whose handoff died is
+  // also AWAITING_APPROVAL with an APPROVED decision on it, and "Approved" is exactly the
+  // reading that made a permanently stuck report look like one that was still moving.
+  if (handoffExhausted(file)) return "Failed";
+
   if (file.state === "AWAITING_APPROVAL" && file.approval?.decision === "APPROVED") {
     return "Approved";
   }
@@ -328,7 +418,12 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
     mascotKey: mascotKeyForState(file.state),
     investigating,
     turnStatus: file.turnStatus,
+    sessionError: file.sessionError,
     eventCount: file.events.length,
+    failed:
+      (deliveryState === "FAILED" &&
+        (file.delivery?.attempts ?? 0) >= (file.delivery?.maxAttempts ?? 0)) ||
+      handoffExhausted(file),
 
     deliveryState,
     verdictOutcome,
@@ -373,6 +468,7 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
       : null,
 
     delivery: file.delivery,
+    handoff: file.handoff,
 
     steps,
     artifacts: file.artifacts.map((art) => ({

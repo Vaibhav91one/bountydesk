@@ -19,6 +19,8 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     mascotKey: "ingest",
     investigating: false,
     turnStatus: null,
+    sessionError: null,
+    failed: false,
     eventCount: 0,
     deliveryState: null,
     verdictOutcome: null,
@@ -33,6 +35,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     verdict: null,
     approval: null,
     delivery: null,
+    handoff: null,
     steps: [],
     artifacts: [],
     ...overrides,
@@ -97,5 +100,46 @@ test("tool-call detail is only fetched while the agent is working", () => {
 test("a list stops polling once every row on it has stopped moving", () => {
   assert.equal(listRefetchInterval(["DELIVERED", "AWAITING_APPROVAL"]), 4000);
   assert.equal(listRefetchInterval(["DELIVERED", "DENIED"]), false);
-  assert.equal(listRefetchInterval([]), false);
+});
+
+const handoff = (overrides: Partial<NonNullable<CaseLiveView["handoff"]>>) => ({
+  state: "PENDING",
+  attempts: 0,
+  maxAttempts: 8,
+  lastError: null,
+  ...overrides,
+});
+
+test("a handoff that ran out of attempts stops the poll", () => {
+  // The report stays AWAITING_APPROVAL forever, so without this rule it is asked about every
+  // 1.5 seconds for as long as the tab is open, waiting on a delivery nothing will enqueue.
+  const dead = view({
+    state: "AWAITING_APPROVAL",
+    handoff: handoff({ state: "FAILED", attempts: 8 }),
+  });
+  assert.equal(caseRefetchInterval(dead), false);
+
+  const retrying = view({
+    state: "AWAITING_APPROVAL",
+    handoff: handoff({ state: "FAILED", attempts: 3 }),
+  });
+  assert.equal(caseRefetchInterval(retrying), 5000, "still worth watching");
+
+  // A delivery exists, so the handoff got through and its stale FAILED means nothing.
+  const delivered = view({
+    state: "DELIVERING",
+    handoff: handoff({ state: "FAILED", attempts: 8 }),
+    delivery: {
+      state: "SENT",
+      attempts: 1,
+      maxAttempts: 8,
+      lastError: null,
+      target: "issues/18",
+    },
+  });
+  assert.equal(caseRefetchInterval(delivered), 1500);
+});
+
+test("an empty list keeps polling, because the first report has to arrive somehow", () => {
+  assert.equal(listRefetchInterval([]), 4000);
 });

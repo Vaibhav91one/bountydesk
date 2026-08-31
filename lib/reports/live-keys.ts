@@ -2,7 +2,9 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import {
+  activeReportsQueryKey,
   caseStatusQueryKey,
+  homeSummaryQueryKey,
   queueQueryKey,
   reportsIndexQueryKey,
 } from "@/lib/reports/status-query";
@@ -65,5 +67,10 @@ export async function refreshReportViews(
     client.invalidateQueries({ queryKey: caseStatusQueryKey(reportId) }),
     client.invalidateQueries({ queryKey: queueQueryKey() }),
     client.invalidateQueries({ queryKey: reportsIndexQueryKey() }),
+    // Both poll slowly, because on their own they are ambient. A decision is the one moment
+    // they are certain to be wrong, and waiting out an interval to correct the count a
+    // reviewer just changed is the version of this that feels broken.
+    client.invalidateQueries({ queryKey: homeSummaryQueryKey() }),
+    client.invalidateQueries({ queryKey: activeReportsQueryKey() }),
   ]);
 }

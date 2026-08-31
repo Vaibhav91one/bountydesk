@@ -61,6 +61,9 @@ export type CaseFile = {
    * agentSession): RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION |
    * ERROR | CANCELLED. Null when no session exists yet for this report. */
   turnStatus: string | null;
+  /** Why the session stopped, when it stopped badly. Written by the poller alongside a
+   * turnStatus of ERROR (lib/agent-sessions/poller.ts). Null on a run that went fine. */
+  sessionError: string | null;
   /** The agent's own closing message for this investigation (reproduction steps, finding,
    * remediation), captured by the poller. Null until a turn produces one. Rendered as text, never
    * HTML, and never the outbound comment. */
@@ -79,6 +82,22 @@ export type CaseFile = {
     maxAttempts: number;
     lastError: string | null;
     target: string;
+  } | null;
+  /**
+   * Whether the reviewer's decision ever reached the harness.
+   *
+   * Null for a synthesized verdict, which the approval action enqueues inline without a harness
+   * round-trip, and null before anyone has decided. Present only on the harness-backed path,
+   * where this row is what triggers delivery: a failed handoff means no delivery row is ever
+   * written, so the delivery step reads "not enqueued" for a report that is permanently stuck.
+   */
+  handoff: {
+    /** PENDING | SUBMITTED | ACKNOWLEDGED | FAILED. */
+    state: string;
+    attempts: number;
+    /** MAX_ATTEMPTS from the submission queue. A constant there, not a column on the row. */
+    maxAttempts: number;
+    lastError: string | null;
   } | null;
   /** The exact verdict a reviewer can answer right now, or null if there is no pending call. */
   awaitingVerdictId: string | null;

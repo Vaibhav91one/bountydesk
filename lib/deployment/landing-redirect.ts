@@ -21,6 +21,8 @@ const passthroughPaths = new Set([
   // path, and a redirected poll is a board that silently never updates on a preview URL.
   "/api/reports",
   "/api/queue",
+  "/api/home",
+  "/api/active-reports",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/", "/api/reports/"];

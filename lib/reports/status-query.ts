@@ -27,6 +27,14 @@ export function reportsIndexQueryKey() {
   return ["reports-index"] as const;
 }
 
+export function homeSummaryQueryKey() {
+  return ["home-summary"] as const;
+}
+
+export function activeReportsQueryKey() {
+  return ["active-reports"] as const;
+}
+
 /**
  * A reviewer whose session expired should end up at the login page, not watching a poll fail
  * quietly forever.
@@ -89,6 +97,17 @@ export function caseRefetchInterval(status: CaseLiveView): number | false {
     return false;
   }
 
+  // The decision never reached the harness and has no attempts left. Nothing produces a
+  // delivery row from here, so the report stays non-terminal forever and the poll below would
+  // ask about it every 1.5 seconds for as long as the tab is open.
+  if (
+    status.handoff?.state === "FAILED" &&
+    status.handoff.attempts >= status.handoff.maxAttempts &&
+    !status.delivery
+  ) {
+    return false;
+  }
+
   if (TERMINAL_STATES.includes(status.state)) return false;
   if (status.state === "AWAITING_APPROVAL") return 5000;
 
@@ -100,7 +119,20 @@ export function toolCallsRefetchInterval(status: CaseLiveView): number | false {
   return status.investigating ? 5000 : false;
 }
 
-/** The queue and the reports index both stop once every row on screen has stopped moving. */
+/**
+ * The queue and the reports index both stop once every row on screen has stopped moving.
+ *
+ * An empty list keeps polling. It holds no unfinished work, but it is also the state a console
+ * sits in before its first report ever arrives, and stopping there means never noticing one.
+ */
 export function listRefetchInterval(states: string[]): number | false {
+  if (states.length === 0) return 4000;
+
   return states.some((state) => !TERMINAL_STATES.includes(state)) ? 4000 : false;
 }
+
+/**
+ * Surfaces with no report states to reason about: the home counts, and the sidebar's list while
+ * it is on screen. Slower than a list, because nothing here is a run being watched.
+ */
+export const AMBIENT_REFETCH_MS = 10_000;
