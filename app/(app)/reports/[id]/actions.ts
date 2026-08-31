@@ -24,7 +24,7 @@ export async function getArtifactDownloadUrl(artifactId: string): Promise<Downlo
     .limit(1);
 
   if (!row) return { error: "artifact not found" };
-  if (!row.storagePath) return { error: "storage not configured" };
+  if (!row.storagePath) return { error: "this artifact was recorded without its bytes" };
 
   const url = await createSignedUrl(row.storagePath);
   if (!url) return { error: "could not generate a download link" };

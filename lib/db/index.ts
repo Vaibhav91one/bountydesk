@@ -44,6 +44,15 @@ const client = postgres(url, {
   prepare: false,
   ssl: isLoopback ? false : "require",
   max: Number(process.env.DATABASE_POOL_MAX ?? 10),
+  // Seconds, all three. A connection the Supabase pooler drops without a FIN still looks open
+  // from here, and the next query on it waits forever rather than failing: in the worker, whose
+  // loops share a pool of four, that is enough to stop every queue at once with nothing in the
+  // logs. Retiring connections before the pooler does keeps a dead socket out of the pool, and
+  // the connect timeout means a pooler that has stopped answering fails a claim instead of
+  // holding it.
+  idle_timeout: 30,
+  max_lifetime: 60 * 30,
+  connect_timeout: 10,
   // Integration tests point this at a disposable schema so a run cannot see, or be handed,
   // another run's rows. Unset everywhere else, which leaves the server default (public).
   ...(process.env.DATABASE_SCHEMA

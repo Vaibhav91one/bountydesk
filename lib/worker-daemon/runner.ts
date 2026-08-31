@@ -39,6 +39,13 @@ function withJitter(baseMs: number, jitter: () => number): number {
 
 export type ClaimOnce = (signal: AbortSignal) => Promise<string | null>;
 
+/**
+ * Called once per completed iteration, whatever the iteration did. An idle loop and a failing
+ * loop are both alive, so both report progress; only a loop stuck inside its own claim goes
+ * quiet, which is exactly what lib/worker-daemon/health.ts is watching for.
+ */
+export type OnProgress = (name: string) => void;
+
 export type RunLoopOptions = {
   signal: AbortSignal;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -46,6 +53,7 @@ export type RunLoopOptions = {
   logger?: Logger;
   idleBackoffMs?: number;
   errorBackoffMs?: number;
+  onProgress?: OnProgress;
 };
 
 /**
@@ -77,11 +85,13 @@ export async function runLoop(
     } catch (error) {
       if (opts.signal.aborted) return;
       logger.error(`[${name}] claim failed: ${errorMessage(error)}`);
+      opts.onProgress?.(name);
       await sleep(withJitter(errorBackoffMs, jitter), opts.signal);
       continue;
     }
 
     if (opts.signal.aborted) return;
+    opts.onProgress?.(name);
 
     if (claimedId) {
       logger.log(`[${name}] claimed ${claimedId}`);
@@ -97,6 +107,7 @@ export type RunSweeperOptions = {
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   logger?: Logger;
   intervalMs?: number;
+  onProgress?: OnProgress;
 };
 
 /**
@@ -120,6 +131,7 @@ export async function runSweeper(
     } catch (error) {
       logger.error(`[${name}] sweep failed: ${errorMessage(error)}`);
     }
+    opts.onProgress?.(name);
     if (opts.signal.aborted) return;
     await sleep(intervalMs, opts.signal);
   }
@@ -139,6 +151,7 @@ export type RunDaemonOptions = {
   idleBackoffMs?: number;
   errorBackoffMs?: number;
   sweepIntervalMs?: number;
+  onProgress?: OnProgress;
 };
 
 /**
@@ -156,12 +169,14 @@ export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Pr
         logger: opts.logger,
         idleBackoffMs: opts.idleBackoffMs,
         errorBackoffMs: opts.errorBackoffMs,
+        onProgress: opts.onProgress,
       }),
       runSweeper(`${queue.name}-sweep`, queue.sweepOnce, {
         signal: opts.signal,
         sleep: opts.sleep,
         logger: opts.logger,
         intervalMs: opts.sweepIntervalMs,
+        onProgress: opts.onProgress,
       }),
     ]),
   );

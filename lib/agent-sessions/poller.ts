@@ -5,6 +5,7 @@ import {
   synthesizeAnalysisOnlyVerdict,
 } from "@/lib/mcp/publish-verdict";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
+import { isTerminal } from "@/lib/reports/states";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
   createTrueForgeClient,
@@ -439,6 +440,17 @@ async function handleAwaitingApproval(
 }
 
 /**
+ * A ceiling on one TrueForge call, independent of the lease.
+ *
+ * The heartbeat below renews the lease for as long as the operation runs, so an HTTP call that
+ * never answers is not something a sweeper can ever recover: the lease stays fresh, the loop
+ * stays inside the claim, and the queue stops making progress with nothing expired to reclaim.
+ * That is how every worker loop went silent on 2026-08-31. The deadline turns that into an
+ * ordinary failed claim, which the loop already knows how to log and back off from.
+ */
+const REQUEST_DEADLINE_MS = 30_000;
+
+/**
  * Renews the held lease every third of its duration while `operation` runs, so a slow
  * `getTurn` call (event pagination, a sluggish TrueForge) can't outlive its own lease and get
  * reclaimed by a sweeper running on a shorter, independent cadence than the tick route's
@@ -450,11 +462,14 @@ async function runWithHeartbeat<T>(
   leaseSeconds: number,
   operation: (signal: AbortSignal) => Promise<T>,
   outerSignal?: AbortSignal,
+  deadlineMs: number = REQUEST_DEADLINE_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const signal = outerSignal
-    ? AbortSignal.any([controller.signal, outerSignal])
-    : controller.signal;
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(deadlineMs),
+    ...(outerSignal ? [outerSignal] : []),
+  ]);
   const intervalMs = Math.max(
     MIN_HEARTBEAT_INTERVAL_MS,
     Math.floor((leaseSeconds * 1000) / 3),
@@ -511,7 +526,13 @@ async function runWithHeartbeat<T>(
  */
 export async function pollOnce(
   owner: string,
-  opts: { leaseSeconds?: number; client?: TrueForgeClient; signal?: AbortSignal } = {},
+  opts: {
+    leaseSeconds?: number;
+    client?: TrueForgeClient;
+    signal?: AbortSignal;
+    /** Only set by tests, which cannot wait out the real deadline. */
+    requestDeadlineMs?: number;
+  } = {},
 ): Promise<string | null> {
   if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
@@ -523,6 +544,25 @@ export async function pollOnce(
   }
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
+
+  // A report that has finished has nothing left for its session to poll about. Nothing marked
+  // the session terminal when its report reached DELIVERED or DENIED, so the row stayed
+  // claimable and kept asking TrueForge about a turn no one was waiting on: one session was
+  // still polling twice a minute hours after its comment had shipped, holding a sandbox open
+  // with it. CANCELLED is terminal for claim(), so this is the last time the row is picked up,
+  // and finishWithoutApproval tears the sandbox down on the way out.
+  const [reportRow] = await db
+    .select({ state: report.state })
+    .from(report)
+    .where(eq(report.id, lease.reportId))
+    .limit(1);
+
+  if (reportRow && isTerminal(reportRow.state)) {
+    return finishWithoutApproval(lease, {
+      turnStatus: "CANCELLED",
+      lastError: `report is ${reportRow.state}; nothing left for this session to poll`,
+    });
+  }
 
   if (!lease.turnId) {
     // The driver created the session but has not started a turn yet; nothing to ask
@@ -565,6 +605,7 @@ export async function pollOnce(
         return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
       },
       opts.signal,
+      opts.requestDeadlineMs,
     );
   } catch (error) {
     if (isTrueForgeNotFoundError(error)) {

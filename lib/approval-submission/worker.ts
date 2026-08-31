@@ -27,6 +27,17 @@ function errorMessage(err: unknown): string {
  */
 class SynthesizedDeliveryError extends Error {}
 
+/**
+ * A ceiling on one TrueForge call, independent of the lease.
+ *
+ * The heartbeat below renews the lease for as long as the operation runs, so an HTTP call that
+ * never answers is not something a sweeper can ever recover: the lease stays fresh, the loop
+ * stays inside the claim, and the queue stops making progress with nothing expired to reclaim.
+ * That is how every worker loop went silent on 2026-08-31. The deadline turns that into an
+ * ordinary failed claim, which the loop already knows how to log and back off from.
+ */
+const REQUEST_DEADLINE_MS = 30_000;
+
 async function runWithHeartbeat<T>(
   lease: ApprovalSubmissionLease,
   leaseSeconds: number,
@@ -34,9 +45,11 @@ async function runWithHeartbeat<T>(
   outerSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
-  const signal = outerSignal
-    ? AbortSignal.any([controller.signal, outerSignal])
-    : controller.signal;
+  const signal = AbortSignal.any([
+    controller.signal,
+    AbortSignal.timeout(REQUEST_DEADLINE_MS),
+    ...(outerSignal ? [outerSignal] : []),
+  ]);
   const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;

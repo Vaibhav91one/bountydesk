@@ -27,10 +27,26 @@ import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
 
+import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
 
 const LEASE_SECONDS = 60;
 const DEFAULT_WORKER_HEALTH_PORT = 8080;
+
+/**
+ * How long a loop may go without finishing an iteration before /healthz calls it stale. Well
+ * clear of the cadences a healthy loop keeps (a 5s error backoff, a 30s sweep interval) and
+ * still inside what the platform will act on: Zerops checks every 30s and restarts after 60s of
+ * failures, so a wedge is caught in about two minutes rather than sitting until someone notices.
+ */
+const STALL_BUDGET_MS = 90_000;
+
+/**
+ * The jobs queue gets its own budget because one claim there legitimately takes minutes: it
+ * boots a sandbox and waits on a 90s readiness poll plus 30s HTTP calls before the iteration
+ * ends. Restarting the worker mid-provision would throw that away and start it again.
+ */
+const JOBS_STALL_BUDGET_MS = 300_000;
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
@@ -45,14 +61,19 @@ function workerHealthPort(): number {
   return port;
 }
 
-function startHealthServer(port: number, signal: AbortSignal): Server {
+function startHealthServer(port: number, heartbeat: Heartbeat, signal: AbortSignal): Server {
   const server = createServer((req, res) => {
     if (req.url === "/healthz") {
-      res.writeHead(200, {
+      // Reports on the work, not on the process: a daemon whose loops have all wedged still
+      // answers this port, which is how an approved verdict once sat undelivered behind a
+      // service the platform believed was healthy. A stale loop fails the check so the platform
+      // restarts the worker, which is the one thing known to clear a wedge.
+      const health = heartbeat.snapshot();
+      res.writeHead(health.ok ? 200 : 503, {
         "content-type": "application/json",
         "cache-control": "no-store",
       });
-      res.end(JSON.stringify({ ok: true, service: "bountydesk-worker" }));
+      res.end(JSON.stringify({ service: "bountydesk-worker", ...health }));
       return;
     }
 
@@ -83,8 +104,6 @@ async function main(): Promise<void> {
   };
   process.once("SIGINT", () => onShutdownSignal("SIGINT"));
   process.once("SIGTERM", () => onShutdownSignal("SIGTERM"));
-
-  startHealthServer(workerHealthPort(), controller.signal);
 
   const analysis = createTrueforgeAnalysisDriver();
   const trueForgeClient = createTrueForgeClient();
@@ -132,8 +151,21 @@ async function main(): Promise<void> {
     },
   ];
 
+  // runDaemon runs a claim loop and a sweeper per queue, and /healthz watches all of them, so
+  // the names come from the specs above rather than from a second list that could drift.
+  const heartbeat = createHeartbeat({
+    names: queues.flatMap((queue) => [queue.name, `${queue.name}-sweep`]),
+    startedAt: Date.now(),
+    defaultBudgetMs: STALL_BUDGET_MS,
+    budgets: { jobs: JOBS_STALL_BUDGET_MS },
+  });
+  startHealthServer(workerHealthPort(), heartbeat, controller.signal);
+
   console.log(`worker daemon starting, pid ${process.pid}`);
-  await runDaemon(queues, { signal: controller.signal });
+  await runDaemon(queues, {
+    signal: controller.signal,
+    onProgress: (name) => heartbeat.record(name),
+  });
   console.log("worker daemon stopped");
 }
 

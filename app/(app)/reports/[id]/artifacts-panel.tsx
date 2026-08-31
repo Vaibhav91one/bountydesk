@@ -11,8 +11,10 @@ import { ArtifactDownload } from "./artifact-download";
  * The rows are real artifact records (see lib/artifacts/record.ts): the investigation
  * transcript built from this session's mirrored tool calls, and the outbound verdict payload.
  * A stored artifact has a download control that mints a fresh signed URL per click; one whose
- * bytes were never uploaded (Storage not configured, or an upload that failed) says so instead
- * of offering a link that goes nowhere. The content addresses below are the pinned target image
+ * bytes were never uploaded says so instead of offering a link that goes nowhere. That is a fact
+ * about the row, not about the deployment: storage_path records whether the upload succeeded when
+ * the artifact was written, and the table is append-only, so configuring storage afterwards
+ * cannot fill in a row that missed it. The content addresses below are the pinned target image
  * and the approved payload hash, both checkable today.
  */
 
@@ -89,7 +91,8 @@ export function ArtifactsPanel({
                 <ArtifactDownload artifactId={art.id} />
               ) : (
                 <span className="text-meta text-muted-foreground">
-                  Recorded. Storage not configured, so the bytes are not downloadable.
+                  Recorded without its bytes, so there is nothing to download. Artifact rows
+                  cannot be rewritten, so only a later run stores them.
                 </span>
               )}
             </li>

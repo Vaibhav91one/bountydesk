@@ -77,8 +77,8 @@ export function VerdictBody({ summary, findings }: { summary: string; findings: 
  * and downloads the exact comment body. The download prefers the stored verdict-payload
  * artifact's signed URL (lib/storage/artifacts.ts), the same path ArtifactsPanel uses, so the
  * bytes a reviewer saves are the ones the delivery worker will send. When those bytes are not
- * stored (Storage not configured, or the sign failing), it falls back to a Blob of the payload
- * text this page already holds, so the button is never a dead link.
+ * stored, or the sign fails, it falls back to a Blob of the payload text this page already
+ * holds, so the button is never a dead link.
  */
 export function VerdictDialog({
   outcomeLabel,

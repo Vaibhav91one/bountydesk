@@ -76,6 +76,7 @@ async function seedSession(
       | "REPRODUCING"
       | "ANALYSIS_ONLY"
       | "AWAITING_APPROVAL"
+      | "DELIVERED"
       | "CANCELLED";
     sandboxId?: string;
   } = {},
@@ -564,9 +565,50 @@ test("a pending call cannot attach approval state to a terminal report", async (
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "CANCELLED");
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "ERROR");
+  // The poll ends the session before it ever looks at the pending call: a finished report has
+  // nothing to approve. The in-transaction check in handleVerifiedPendingCall stays as the
+  // backstop for a report that goes terminal after this point in the same poll.
+  assert.equal(row.turnStatus, "CANCELLED");
   assert.equal(row.pendingThreadId, null);
   assert.match(row.lastError ?? "", /report is CANCELLED/);
+});
+
+test("a session whose report already shipped stops polling instead of spinning forever", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  const fixture = await seedSession({ reportState: "DELIVERED", sandboxId: "sandbox-shipped" });
+  const client = fakeClient(() => {
+    throw new Error("pollOnce must not ask TrueForge about a delivered report");
+  });
+
+  assert.equal(await poller.pollOnce("w-delivered", { client }), fixture.agentSessionId);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "CANCELLED");
+  assert.match(row.lastError ?? "", /report is DELIVERED/);
+  assert.deepEqual(deleteSandboxCalls, ["sandbox-shipped"]);
+  // CANCELLED is terminal for claim(), so the row is out of the queue for good rather than
+  // coming back every 30 seconds.
+  assert.equal(await queue.claim("w-delivered-again", 60), null);
+});
+
+test("a TrueForge call that never answers fails the claim instead of wedging the loop", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client: TrueForgeClient = {
+    ...fakeClient({ status: "running" }),
+    getTurn: () => new Promise<TurnSnapshot>(() => {}),
+  };
+
+  await assert.rejects(
+    poller.pollOnce("w-hung", { client, requestDeadlineMs: 20 }),
+    (error: unknown) => error instanceof Error && /timed? ?out|abort/i.test(error.message),
+  );
+
+  // The lease is left to expire for the sweeper, exactly as any other failed poll would, and
+  // the turn status is untouched: a call that never answered says nothing about the turn.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "RUNNING");
 });
 
 test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONLY", async () => {
