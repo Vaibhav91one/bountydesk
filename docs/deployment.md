@@ -65,8 +65,13 @@ remain bounded, authenticated adapters for local and manual diagnostics. Shared 
 should keep their retry, deadline and sweep behavior aligned with the daemon.
 
 The worker exposes its own `/healthz` listener on `WORKER_HEALTH_PORT` for Zerops liveness checks.
-The health listener reports process liveness; the queue code still treats Supabase and TrueForge
-errors through leases and retries.
+It reports on the loops rather than on the process, because a worker whose loops have all wedged
+still answers this port: each loop records when it last finished an iteration, and the check fails
+with 503 once one is past its budget, which is what makes the platform restart it. An iteration
+that found nothing to claim counts, so an idle queue stays healthy, and the jobs queue has a longer
+budget because a single claim there boots a sandbox and waits for it. The queue code still treats
+Supabase and TrueForge errors through leases and retries; the health check is for the case those
+cannot reach, a claim that never returns at all.
 
 Each loop needs a distinct owner id, idle backoff, jitter and a fixed concurrency limit. On
 `SIGTERM`, the process stops claiming new work and allows the lease protocol to recover anything it
@@ -80,7 +85,8 @@ Do not describe the Zerops topology as live or production-ready until all of the
 2. SQLite WAL behavior works on the mounted Local Storage volume.
 3. `sqlite3 .backup` produces a restorable copy while the service is running.
 4. Worker shutdown, restart and expired-lease recovery do not lose or duplicate work.
-5. TrueForge and the worker have useful liveness and readiness checks.
+5. TrueForge and the worker have useful liveness and readiness checks. The worker's side of this
+   is done: `/healthz` fails when a queue loop stops making progress.
 6. Neither service has public access, private service names resolve only inside the project, and the
    TrueForge proxy rejects a request without the configured bearer token.
 7. Resource ceilings and billing alerts are set before the services remain online.
