@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { CaretDown } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import { cn } from "@/lib/utils";
 
 import { StepBadge, type StepState } from "./lifecycle-step";
@@ -13,8 +15,8 @@ export type LifecycleStep = {
   label: string;
   note: string;
   state: StepState;
-  /** Inline SVG for the mascot standing in for this phase, id-prefixed by the page. */
-  mascot: string;
+  /** The mascot standing in for this phase. Loaded client-side so the RSC payload stays small. */
+  mascot: MascotKey;
   // detail is the live tool-call arguments and result for a mirrored tool-call event, matched
   // by id in the page. Present only on "agent.tool_call:<name>" rows whose detail TrueForge
   // still holds; every other row leaves it undefined and shows no hover.
@@ -60,13 +62,13 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
 
               {/* Agent Bounty doing the thing the row names. A phase nobody reached is drawn
                   faint rather than swapped for a placeholder: it is the same step, not yet. */}
-              <span
-                aria-hidden="true"
+              <AnimatedMascotSvg
+                state={step.mascot}
+                scope={`lifecycle-${step.key}`}
                 className={cn(
                   "size-12 shrink-0 [&>svg]:block [&>svg]:size-full",
                   step.state === "pending" && "opacity-40",
                 )}
-                dangerouslySetInnerHTML={{ __html: step.mascot }}
               />
 
               <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">

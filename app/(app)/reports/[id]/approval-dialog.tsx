@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import {
   caseStatusQueryKey,
@@ -60,7 +61,9 @@ export function ApprovalDialog({
   reproductionRan,
   findings,
   speaker,
+  speakerScope,
   chatMascot,
+  chatMascotScope,
   events,
   initialStatus,
 }: {
@@ -79,9 +82,10 @@ export function ApprovalDialog({
   reproductionRan: boolean;
   /** What the agent's own investigation found, beyond the summary. May be empty. */
   findings: Finding[];
-  /** Agent Bounty, inline SVG, id-prefixed by the page so two copies cannot collide. */
-  speaker: string;
-  chatMascot: string;
+  speaker: MascotKey;
+  speakerScope: string;
+  chatMascot: MascotKey;
+  chatMascotScope: string;
   events: TraceRow[];
   initialStatus: CaseStatusView;
 }) {
@@ -243,7 +247,9 @@ export function ApprovalDialog({
                 contentHash={contentHash}
                 destination={destination}
                 speaker={speaker}
+                speakerScope={speakerScope}
                 chatMascot={chatMascot}
+                chatMascotScope={chatMascotScope}
                 onChat={() => setChatting(true)}
                 approve={() => decide("allow")}
                 approving={acting === "allow"}

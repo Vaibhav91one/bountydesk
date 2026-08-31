@@ -3,7 +3,7 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { requireReviewer } from "@/lib/auth/dal";
 import { Column, MASCOT_ON_CARD } from "@/components/queue-board";
 import { listQueue } from "@/lib/reports/queue";
-import { MASCOT_FOR_STATE, mascotState } from "@/lib/mascot/states";
+import { MASCOT_FOR_STATE } from "@/lib/mascot/catalog";
 
 export const metadata = { title: "Review queue · BountyDesk" };
 
@@ -12,13 +12,11 @@ export default async function BoardPage() {
   const columns = await listQueue();
   const total = columns.reduce((sum, column) => sum + column.total, 0);
 
-  // Read once per state rather than once per card: two reports reproducing share the file, and
-  // only the ids need to differ, which happens at render.
   const present = new Set(columns.flatMap((c) => c.cards.map((card) => card.state)));
   const mascots = new Map(
     [...present]
       .filter((state) => MASCOT_ON_CARD.has(state))
-      .map((state) => [state, mascotState(MASCOT_FOR_STATE[state])] as const),
+      .map((state) => [state, MASCOT_FOR_STATE[state]] as const),
   );
 
   // Numbered across the board rather than within a column, so the drifts stay spread out even

@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import { cn } from "@/lib/utils";
 
@@ -57,7 +59,9 @@ export function VerdictCard({
   contentHash,
   destination,
   speaker,
+  speakerScope = "speaker",
   chatMascot,
+  chatMascotScope = "chat",
   onChat,
   approve,
   approving,
@@ -78,9 +82,11 @@ export function VerdictCard({
   revision: number;
   contentHash: string;
   destination: string;
-  /** Agent Bounty, inline SVG. The comment is what it drafted, so it says so. */
-  speaker: string;
-  chatMascot: string;
+  /** Agent Bounty. The comment is what it drafted, so it says so. */
+  speaker: MascotKey;
+  speakerScope?: string;
+  chatMascot: MascotKey;
+  chatMascotScope?: string;
   onChat?: () => void;
   approve?: () => void;
   approving?: boolean;
@@ -116,10 +122,10 @@ export function VerdictCard({
         {/* Attributed, because a reviewer approving a comment should be able to see at a
             glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
         <div className="flex gap-3">
-          <span
-            aria-hidden="true"
+          <AnimatedMascotSvg
+            state={speaker}
+            scope={speakerScope}
             className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
-            dangerouslySetInnerHTML={{ __html: speaker }}
           />
 
           <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -223,10 +229,10 @@ export function VerdictCard({
           <Button size="sm" variant="outline" onClick={onChat} disabled title="Coming soon">
             {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
                 should look like it. */}
-            <span
-              aria-hidden="true"
+            <AnimatedMascotSvg
+              state={chatMascot}
+              scope={chatMascotScope}
               className="-my-1 size-6 shrink-0 [&>svg]:block [&>svg]:size-full"
-              dangerouslySetInnerHTML={{ __html: chatMascot }}
             />
             Chat with Agent Bounty
             <span className="text-meta text-muted-foreground">Coming soon</span>

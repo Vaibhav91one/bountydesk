@@ -1,11 +1,12 @@
 import { GitHubLight } from "developer-icons";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
-import { mascotForState } from "@/lib/mascot/states";
+import { mascotKeyForState } from "@/lib/mascot/catalog";
 import { isAgentInvestigating, type CaseFile } from "@/lib/reports/case";
 import type { CaseStatusView } from "@/lib/reports/status-view";
 
@@ -39,7 +40,7 @@ export function StatusCard({
   outcomeLabel: string | null;
   initialStatus: CaseStatusView;
 }) {
-  const mascot = mascotForState(file.state);
+  const mascot = mascotKeyForState(file.state);
   const hasToolCallEvents = file.events.some((e) => e.channel === "agent");
   const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, hasToolCallEvents);
 
@@ -65,14 +66,10 @@ export function StatusCard({
       </header>
 
       <div className="flex flex-col gap-6 p-5 sm:flex-row sm:items-center">
-        {/* The id prefix is per state, so two mascots for two different states could never
-            share ids even if both were on one page. */}
-        <span
-          aria-hidden="true"
+        <AnimatedMascotSvg
+          state={mascot}
+          scope="status"
           className="size-32 shrink-0 self-center [&>svg]:block [&>svg]:size-full"
-          dangerouslySetInnerHTML={{
-            __html: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__status__`),
-          }}
         />
 
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">

@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { phaseOf } from "@/lib/reports/columns";
 import type { QueueCard, QueueColumn } from "@/lib/reports/queue";
-import type { MascotState } from "@/lib/mascot/states";
+import type { MascotKey } from "@/lib/mascot/catalog";
 
 /**
  * Which states get Agent Bounty on the card: every one still in the pipeline.
@@ -103,7 +103,7 @@ export function Card({
 }: {
   card: QueueCard;
   showState: boolean;
-  mascot?: MascotState;
+  mascot?: MascotKey;
   index: number;
   linkPrefetch?: boolean;
 }) {
@@ -162,13 +162,8 @@ export function Card({
             second copy's animation would drive the first. */}
         {mascot ? (
           <MascotFloat
-            // Every id in the file is prefixed with the state key, so re-prefixing with this
-            // card's id keeps two cards in the same state from sharing them. Without it the
-            // second copy's animation would drive the first.
-            markup={mascot.markup.replaceAll(
-              `${mascot.key}__`,
-              `${mascot.key}__${card.id.slice(0, 8)}__`,
-            )}
+            state={mascot}
+            scope={`card-${card.id.slice(0, 8)}`}
             seconds={float.seconds}
             delay={float.delay}
             y={float.y}
@@ -239,7 +234,7 @@ export function Column({
   linkPrefetch = true,
 }: {
   column: QueueColumn;
-  mascots: Map<string, MascotState>;
+  mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
   linkPrefetch?: boolean;
 }) {

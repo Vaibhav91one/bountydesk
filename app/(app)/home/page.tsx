@@ -19,8 +19,8 @@ import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import { listConnections } from "@/lib/github/connections";
 import { readHomeSummary } from "@/lib/home/summary";
-import { mascotState } from "@/lib/mascot/states";
 import { cn } from "@/lib/utils";
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 
 export const metadata = { title: "Home · BountyDesk" };
 
@@ -97,7 +97,6 @@ function RouteCard({
 
 export default async function HomePage() {
   await requireReviewer();
-  const mascot = mascotState("idle");
   // Two reads rather than one snapshot, deliberately: the GitHub grant and the report counts
   // describe different things and no card claims a relationship between them. readHomeSummary
   // takes its own transaction, so the numbers that do sit beside each other agree.
@@ -110,13 +109,10 @@ export default async function HomePage() {
   return (
     <main className="flex flex-1 flex-col gap-8 p-8">
       <header className="flex items-center gap-4">
-        {/* Inlined rather than an <img>: the animation lives in a <style> block inside the
-            file and an image does not reliably run it. The site preloader carries its own copy
-            under a different id prefix, so the two can sit on the page together. */}
-        <span
-          aria-hidden="true"
+        <AnimatedMascotSvg
+          state="idle"
+          scope="home"
           className="size-24 shrink-0 [&>svg]:block [&>svg]:size-full"
-          dangerouslySetInnerHTML={{ __html: mascot.markup }}
         />
         <div className="flex flex-col gap-2">
           {/* brand-soft rather than --brand: the accent at full strength is a 3:1 on this

@@ -3,7 +3,7 @@
 import { Card } from "@/components/queue-board";
 import { PhaseDot } from "@/components/phase-dot";
 import type { QueueCard, QueueColumn } from "@/lib/reports/queue";
-import type { MascotState } from "@/lib/mascot/states";
+import type { MascotKey } from "@/lib/mascot/catalog";
 
 import { TravellingRow, useTravellingCard } from "./queue-demo";
 
@@ -23,7 +23,7 @@ export function QueuePreview({
 }: {
   columns: QueueColumn[];
   traveller: QueueCard;
-  mascots: Map<string, MascotState>;
+  mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
   linkPrefetch?: boolean;
 }) {
