@@ -19,7 +19,7 @@ const passthroughPaths = new Set([
   "/api/mcp/scope-guard",
 ]);
 
-const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];
+const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/", "/api/reports/"];
 
 type LandingRedirectEnv = Record<string, string | undefined>;
 
