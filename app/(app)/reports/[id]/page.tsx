@@ -19,7 +19,7 @@ import {
   verdictFindings,
   type CaseFile,
 } from "@/lib/reports/case";
-import { mascotState } from "@/lib/mascot/states";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import { caseStatusView } from "@/lib/reports/status-view";
 import { readToolCalls } from "@/lib/reports/tool-calls";
 
@@ -98,7 +98,7 @@ function stepMascot(
   key: string,
   state: StepState,
   file: CaseFile,
-): Parameters<typeof mascotState>[0] {
+): MascotKey {
   if (key === "intake") return "ingest";
   if (key === "investigation") {
     // idle when it has not been reached: scanning belongs to the verdict row below, and two
@@ -308,13 +308,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   }
 
   const steps: LifecycleStep[] = lifecycle(file).map((step) => {
-    const mascot = mascotState(stepMascot(step.key, step.state, file));
     return {
       ...step,
-      // Two rows can land on the same mascot, and the artwork carries ids. Without a per-row
-      // prefix the second copy's gradients resolve against the first one's defs and it draws
-      // wrong, which is the same trap status-card.tsx works around.
-      mascot: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${step.key}__`),
+      mascot: stepMascot(step.key, step.state, file),
       events: eventsByStep.get(step.key) ?? [],
     };
   });
@@ -325,12 +321,6 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // download prefers its signed URL and falls back to the payload text when it is absent.
   const payloadArtifactId =
     file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null;
-
-  // Same id-prefix trap as the lifecycle rows: several mascots share one page.
-  const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
-    const mascot = mascotState(key);
-    return mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${slot}__`);
-  };
 
   /**
    * Whose verdict this is.
@@ -423,8 +413,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               targetName={file.target?.name ?? null}
               reproductionRan={!drafted}
               findings={findings}
-              speaker={prefixed("awaiting-approval", "speaker")}
-              chatMascot={prefixed("greeting", "chat")}
+              speaker="awaiting-approval"
+              speakerScope="approval-speaker"
+              chatMascot="greeting"
+              chatMascotScope="approval-chat"
               events={file.events.map((event) => ({
                 seq: event.seq,
                 type: event.type,
@@ -498,8 +490,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             revision={file.verdict.revision}
             contentHash={file.verdict.contentHash}
             destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
-            speaker={prefixed("awaiting-approval", "record")}
-            chatMascot={prefixed("greeting", "record-chat")}
+            speaker="awaiting-approval"
+            speakerScope="record-speaker"
+            chatMascot="greeting"
+            chatMascotScope="record-chat"
             decision={
               file.approval
                 ? {

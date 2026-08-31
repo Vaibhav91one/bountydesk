@@ -15,7 +15,7 @@ import { SiteHeader } from "@/components/site-header";
 import { MarqueeAlongSvgPath } from "@/components/ui/marquee-along-svg-path";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MASCOT_FOR_STATE, mascotState } from "@/lib/mascot/states";
+import { MASCOT_FOR_STATE } from "@/lib/mascot/catalog";
 
 import {
   INTEGRATIONS,
@@ -369,7 +369,7 @@ export default function LandingPage() {
   const queueMascots = new Map(
     queueStates
       .filter((state) => MASCOT_ON_CARD.has(state))
-      .map((state) => [state, mascotState(MASCOT_FOR_STATE[state])] as const),
+      .map((state) => [state, MASCOT_FOR_STATE[state]] as const),
   );
 
   const queueDrift = new Map<string, number>([["moving", 0]]);

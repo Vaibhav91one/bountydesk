@@ -1,6 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+export {
+  MASCOT_FOR_STATE,
+  MASCOT_STATES,
+  mascotKeyForState,
+  type MascotKey,
+} from "./catalog";
+import { MASCOT_STATES, mascotKeyForState, type MascotKey } from "./catalog";
+
 /**
  * The mascot states, as inline SVG markup.
  *
@@ -12,23 +20,6 @@ import { join } from "node:path";
  * them come from a second board (bountydesk-mascot-animation) whose own idle duplicates
  * this one's, which is why the splitter takes that board with --only.
  */
-export const MASCOT_STATES = [
-  "idle",
-  "ingest",
-  "scanning",
-  "reproducing",
-  "canary-found",
-  "awaiting-approval",
-  "delivered",
-  "celebrating",
-  "denied",
-  "out-of-scope",
-  "infra-hiccup",
-  "greeting",
-  "chilling",
-  "cowboy",
-] as const;
-
 export type MascotState = { key: string; markup: string };
 
 /**
@@ -58,35 +49,11 @@ export function mascotStates(): MascotState[] {
 }
 
 /** One state, for the places that want a single mascot rather than the whole strip. */
-export function mascotState(key: (typeof MASCOT_STATES)[number]): MascotState {
+export function mascotState(key: MascotKey): MascotState {
   return { key, markup: read(key) };
 }
 
-/**
- * Which mascot stands for a report in each state.
- *
- * One map rather than one per screen. The board and the case file both draw Agent Bounty from
- * a report's state, and two tables would be two chances for the same report to be doing
- * different things depending on which page you were looking at.
- *
- * ANALYSIS_ONLY gets scanning: the report was read and weighed, which is the part that did
- * happen, and infra-hiccup is left for the lifecycle row where reproduction was skipped.
- * Cancelled and expired get idle, because nothing happened to them and nothing is going to.
- */
-export const MASCOT_FOR_STATE: Record<string, (typeof MASCOT_STATES)[number]> = {
-  TRIAGING: "ingest",
-  REPRODUCING: "reproducing",
-  ANALYSIS_ONLY: "scanning",
-  AWAITING_APPROVAL: "awaiting-approval",
-  DELIVERING: "delivered",
-  DELIVERED: "celebrating",
-  DENIED: "denied",
-  OUT_OF_SCOPE: "out-of-scope",
-  CANCELLED: "idle",
-  EXPIRED: "idle",
-};
-
 /** The mascot for a state, ready to inline. Falls back to idle for anything unmapped. */
 export function mascotForState(state: string): MascotState {
-  return mascotState(MASCOT_FOR_STATE[state] ?? "idle");
+  return mascotState(mascotKeyForState(state));
 }

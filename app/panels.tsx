@@ -4,10 +4,10 @@ import { Parallax } from "@/components/parallax";
 import Link from "next/link";
 import { ArrowRight, Prohibit, Signature } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { PhaseBadge } from "@/components/phase-dot";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { mascotState } from "@/lib/mascot/states";
 
 /**
  * The illustrations on the landing page, built from the product's own tokens.
@@ -73,14 +73,6 @@ function Row({
 
 /** The hero panel: the moment the whole product exists for. */
 export function ApprovalPanel() {
-  // Prefixed the way every other render site does it, so a second mascot added to this page
-  // later cannot have its gradients resolve against this one's.
-  const mascot = mascotState("awaiting-approval");
-  const speaker = mascot.markup.replaceAll(
-    `${mascot.key}__`,
-    `${mascot.key}__hero__`,
-  );
-
   return (
     <Panel label="Sign the verdict" header={false}>
       <div className="flex flex-col gap-4 p-5">
@@ -94,10 +86,10 @@ export function ApprovalPanel() {
         <div className="flex gap-3 rounded-md border border-border/50 bg-background p-4">
           {/* The same attribution the real verdict card makes, mascot and all: a reviewer
               approving a comment should see at a glance whose words they are. */}
-          <span
-            aria-hidden="true"
+          <AnimatedMascotSvg
+            state="awaiting-approval"
+            scope="hero"
             className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
-            dangerouslySetInnerHTML={{ __html: speaker }}
           />
 
           <div className="flex min-w-0 flex-1 flex-col gap-2.5">
