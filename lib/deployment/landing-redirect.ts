@@ -9,7 +9,12 @@ const passthroughPaths = new Set([
   "/logo-small.svg",
   "/logo-tick.svg",
   "/trix.svg",
+  "/api/auth/github",
+  "/api/auth/github/callback",
+  "/api/auth/logout",
+  "/api/github/setup",
   "/api/health",
+  "/api/intake/github",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];

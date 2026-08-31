@@ -32,6 +32,18 @@ test("keeps the landing page and its assets on Vercel", () => {
   }
 });
 
+test("lets GitHub connection endpoints run during landing fallback", () => {
+  for (const pathname of [
+    "/api/auth/github",
+    "/api/auth/github/callback",
+    "/api/auth/logout",
+    "/api/github/setup",
+    "/api/intake/github",
+  ]) {
+    assert.equal(shouldRedirectToSource(pathname), false, pathname);
+  }
+});
+
 test("redirects non-landing routes to the GitHub repository", () => {
   assert.equal(SOURCE_URL, "https://github.com/Vaibhav91one/bountydesk");
 
@@ -40,7 +52,7 @@ test("redirects non-landing routes to the GitHub repository", () => {
     "/home",
     "/reports",
     "/reports/r1",
-    "/api/intake/github",
+    "/api/internal/jobs/tick",
     "/terms",
     "/privacy",
     "/anything-else.txt",
