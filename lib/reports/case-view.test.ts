@@ -64,7 +64,9 @@ function toolCallEvent(seq: number) {
     seq,
     type: "agent.tool_call:probe_target",
     channel: "agent",
-    data: {},
+    // Shaped as the poller mirrors it: the tool name and the allowlisted preview the hover
+    // falls back to when live detail is out of reach.
+    data: { toolName: "probe_target", argumentsPreview: `{"call":${seq}}` },
     eventKey: `agent.tool_call:call-${seq}`,
     at: AT,
   };
@@ -91,6 +93,11 @@ test("a live run reads as investigating, with no verdict yet", () => {
   // The two tool calls land on the investigation row, and carry the key the hover matches on.
   assert.equal(step(view, "investigation").events.length, 2);
   assert.equal(step(view, "investigation").events[0].eventKey, "agent.tool_call:call-1");
+
+  // The mirrored tool name and preview ride along, so the hover has something to show even
+  // where the live TrueForge detail never arrives.
+  assert.equal(step(view, "investigation").events[0].toolName, "probe_target");
+  assert.equal(step(view, "investigation").events[0].argsPreview, '{"call":1}');
 });
 
 test("a turn that has started but done nothing is not yet investigating", () => {

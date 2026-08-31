@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import type { LifecycleEventView } from "@/lib/reports/case-view";
 import type { ToolCallView } from "@/lib/reports/tool-call-view";
 
-import { ToolCallHover } from "./tool-call-detail";
+import { ToolCallHover, type ToolCallFallback } from "./tool-call-detail";
 
 /**
  * The pixel-grid loader, ported from a loading-state component.
@@ -81,6 +81,13 @@ export function AgentTrace({
       ? details?.[eventKey.slice(TOOL_CALL_PREFIX.length)]
       : undefined;
 
+  // The always-present source: a tool-call row carries the mirrored tool name and preview, so
+  // the hover opens even where the live detail above never arrives.
+  const fallbackFor = (row: LifecycleEventView): ToolCallFallback | null =>
+    row.toolName && row.argsPreview
+      ? { toolName: row.toolName, argsPreview: row.argsPreview }
+      : null;
+
   return (
     <div className="flex flex-col">
       <button
@@ -126,7 +133,7 @@ export function AgentTrace({
                     aria-hidden="true"
                     className="size-3 shrink-0 text-phase-delivered"
                   />
-                  <ToolCallHover detail={detailFor(row.eventKey)}>
+                  <ToolCallHover detail={detailFor(row.eventKey)} fallback={fallbackFor(row)}>
                     <span className="min-w-0 flex-1 truncate text-meta text-foreground">
                       {row.type}
                     </span>

@@ -4,12 +4,12 @@ import { useState } from "react";
 import { CaretDown } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
-import type { LifecycleStepView } from "@/lib/reports/case-view";
+import type { LifecycleEventView, LifecycleStepView } from "@/lib/reports/case-view";
 import type { ToolCallView } from "@/lib/reports/tool-call-view";
 import { cn } from "@/lib/utils";
 
 import { StepBadge } from "./lifecycle-step";
-import { ToolCallHover } from "./tool-call-detail";
+import { ToolCallHover, type ToolCallFallback } from "./tool-call-detail";
 
 const TOOL_CALL_PREFIX = "agent.tool_call:";
 
@@ -43,6 +43,13 @@ export function LifecycleList({
     eventKey?.startsWith(TOOL_CALL_PREFIX)
       ? details?.[eventKey.slice(TOOL_CALL_PREFIX.length)]
       : undefined;
+
+  // The always-present source: the mirrored tool name and preview, so a tool-call row hovers
+  // even where the live detail never arrives (the Vercel tier cannot reach the harness).
+  const fallbackFor = (event: LifecycleEventView): ToolCallFallback | null =>
+    event.toolName && event.argsPreview
+      ? { toolName: event.toolName, argsPreview: event.argsPreview }
+      : null;
 
   return (
     // h-full and justify-between: the panel is stretched to the diagram beside it, and rows
@@ -106,7 +113,7 @@ export function LifecycleList({
                   <ul className="flex flex-col gap-1.5">
                     {step.events.map((event) => (
                       <li key={event.seq} className="flex items-center gap-4">
-                        <ToolCallHover detail={detailFor(event.eventKey)}>
+                        <ToolCallHover detail={detailFor(event.eventKey)} fallback={fallbackFor(event)}>
                           <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
                             {event.type}
                           </span>

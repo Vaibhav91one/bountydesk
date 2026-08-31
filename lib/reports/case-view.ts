@@ -37,6 +37,12 @@ export type LifecycleEventView = {
   at: string;
   /** "agent.tool_call:<trueforge id>" on a mirrored tool call, null on everything else. */
   eventKey: string | null;
+  /** The tool's name, and the allowlisted argument preview the poller mirrored, on a tool-call
+   *  row. This is what the hover falls back to when the live TrueForge detail is out of reach,
+   *  which is every request on the Vercel tier, where the harness is not routable. The same
+   *  already-sanitised subset the transcript artifact is built from, so it carries no secret. */
+  toolName: string | null;
+  argsPreview: string | null;
 };
 
 export type StepState = "done" | "current" | "pending" | "skipped";
@@ -391,11 +397,17 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
   for (const event of file.events) {
     const key = EVENT_PHASE[event.channel] ?? fallback;
     const bucket = eventsByStep.get(key) ?? [];
+    const mirrored =
+      event.data && typeof event.data === "object"
+        ? (event.data as { toolName?: unknown; argumentsPreview?: unknown })
+        : {};
     bucket.push({
       seq: event.seq,
       type: event.type,
       at: event.at.toISOString().slice(11, 19),
       eventKey: event.eventKey,
+      toolName: typeof mirrored.toolName === "string" ? mirrored.toolName : null,
+      argsPreview: typeof mirrored.argumentsPreview === "string" ? mirrored.argumentsPreview : null,
     });
     eventsByStep.set(key, bucket);
   }
