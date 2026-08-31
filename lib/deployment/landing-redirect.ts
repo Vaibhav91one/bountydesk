@@ -17,6 +17,10 @@ const passthroughPaths = new Set([
   "/api/intake/github",
   "/api/mcp/publish-verdict",
   "/api/mcp/scope-guard",
+  // The console's own list polls. The "/api/reports/" prefix below does not cover the bare
+  // path, and a redirected poll is a board that silently never updates on a preview URL.
+  "/api/reports",
+  "/api/queue",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/", "/api/reports/"];

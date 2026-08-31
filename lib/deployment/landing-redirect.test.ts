@@ -50,11 +50,18 @@ test("lets TrueForge MCP connector endpoints run during landing fallback", () =>
   }
 });
 
-test("lets report realtime status endpoints run during landing fallback", () => {
-  assert.equal(
-    shouldRedirectToSource("/api/reports/00000000-0000-0000-0000-000000000000/status"),
-    false,
-  );
+test("lets the console's polling endpoints run during landing fallback", () => {
+  // A redirected poll is not a visible failure. The page renders, then quietly never updates
+  // again, which is why the bare /api/reports path is listed as well: the "/api/reports/"
+  // prefix that covers the two below does not match it.
+  for (const pathname of [
+    "/api/reports/00000000-0000-0000-0000-000000000000/status",
+    "/api/reports/00000000-0000-0000-0000-000000000000/tool-calls",
+    "/api/reports",
+    "/api/queue",
+  ]) {
+    assert.equal(shouldRedirectToSource(pathname), false, pathname);
+  }
 });
 
 test("redirects non-landing routes to the GitHub repository", () => {

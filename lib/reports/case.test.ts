@@ -313,7 +313,7 @@ test("a reporter is only linked when the handle could actually be a GitHub login
 });
 
 test("every report state maps to a mascot that exists", async () => {
-  const { MASCOT_FOR_STATE, MASCOT_STATES } = await import("@/lib/mascot/states");
+  const { MASCOT_FOR_STATE, MASCOT_STATES } = await import("@/lib/mascot/catalog");
   const { TERMINAL_STATES } = await import("./states");
 
   const all = [

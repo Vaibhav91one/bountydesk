@@ -1,8 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
@@ -19,15 +18,12 @@ import {
 import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
-import {
-  caseStatusQueryKey,
-  fetchCaseStatus,
-  shouldPollCaseStatus,
-} from "@/lib/reports/status-query";
-import type { CaseStatusView } from "@/lib/reports/status-view";
+import type { LifecycleEventView } from "@/lib/reports/case-view";
+import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
+import type { ToolCallView } from "@/lib/reports/tool-call-view";
 
 import { AgentChat, type ChatTurn } from "./agent-chat";
-import { AgentTrace, type TraceRow } from "./agent-trace";
+import { AgentTrace } from "./agent-trace";
 import { VerdictCard } from "./verdict-card";
 
 /** The tabs on the chat, and the thing each one answers about. */
@@ -65,7 +61,7 @@ export function ApprovalDialog({
   chatMascot,
   chatMascotScope,
   events,
-  initialStatus,
+  details,
 }: {
   reportId: string;
   verdictId: string;
@@ -86,18 +82,10 @@ export function ApprovalDialog({
   speakerScope: string;
   chatMascot: MascotKey;
   chatMascotScope: string;
-  events: TraceRow[];
-  initialStatus: CaseStatusView;
+  events: LifecycleEventView[];
+  details?: Record<string, ToolCallView>;
 }) {
-  const router = useRouter();
   const queryClient = useQueryClient();
-  const statusQuery = useQuery({
-    queryKey: caseStatusQueryKey(reportId),
-    queryFn: () => fetchCaseStatus(reportId),
-    initialData: initialStatus,
-    refetchInterval: (query) =>
-      shouldPollCaseStatus(query.state.data ?? initialStatus) ? 1500 : false,
-  });
   const [chatting, setChatting] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [topic, setTopic] = useState(TOPICS[0]);
@@ -159,9 +147,6 @@ export function ApprovalDialog({
 
   // The last thing the reviewer wrote, which is what a denial carries as its reason.
   const reason = [...turns].reverse().find((turn) => turn.from === "reviewer")?.text ?? null;
-  const currentStatus = statusQuery.data ?? initialStatus;
-  const isStillAnswerable =
-    currentStatus.awaitingVerdictId === verdictId && !currentStatus.approvalDecision;
 
   async function decide(kind: "allow" | "deny") {
     if (acting) return;
@@ -172,15 +157,18 @@ export function ApprovalDialog({
         : await denyVerdict(reportId, verdictId, reason ?? undefined);
     setActing(null);
     setResult(answer);
-    if (answer.ok) {
-      setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
-      setOpen(false);
-      await queryClient.invalidateQueries({ queryKey: caseStatusQueryKey(reportId) });
-      router.refresh();
-    }
-  }
+    if (!answer.ok) return;
 
-  if (!isStillAnswerable) return null;
+    setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
+    setOpen(false);
+
+    // The action has already committed by the time it returns, so writing the decision into the
+    // cache is not optimism, it is the same fact a round trip earlier. It is what takes this
+    // button off the screen and puts the signed record in its place on the next render; the
+    // refetch behind it fills in everything the server derives from the decision.
+    applyDecisionOptimistically(queryClient, reportId, kind === "allow" ? "APPROVED" : "DENIED");
+    await refreshReportViews(queryClient, reportId);
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -207,7 +195,7 @@ export function ApprovalDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-5 p-5">
-          <AgentTrace rows={events} />
+          <AgentTrace rows={events} details={details} />
 
           {decision ? (
             <p

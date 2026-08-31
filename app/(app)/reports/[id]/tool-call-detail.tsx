@@ -1,6 +1,7 @@
 "use client";
 
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import type { ToolCallView } from "@/lib/reports/tool-call-view";
 
 /**
  * The un-redacted arguments and result of one tool call, shown on hover over the step that names
@@ -18,12 +19,6 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
  * response are shown, not interpreted.
  */
 
-/** The serializable slice of a ToolCallDetail a step needs to render its hover. */
-export type ToolCallView = {
-  toolName: string;
-  argumentsJson: string;
-  result: string | null;
-};
 
 function pretty(argumentsJson: string): string {
   try {

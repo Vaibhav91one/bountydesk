@@ -2,7 +2,7 @@
 
 import { Card } from "@/components/queue-board";
 import { PhaseDot } from "@/components/phase-dot";
-import type { QueueCard, QueueColumn } from "@/lib/reports/queue";
+import type { QueueCardView, QueueColumnView } from "@/lib/reports/queue-view";
 import type { MascotKey } from "@/lib/mascot/catalog";
 
 import { TravellingRow, useTravellingCard } from "./queue-demo";
@@ -21,8 +21,8 @@ export function QueuePreview({
   drift,
   linkPrefetch = true,
 }: {
-  columns: QueueColumn[];
-  traveller: QueueCard;
+  columns: QueueColumnView[];
+  traveller: QueueCardView;
   mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
   linkPrefetch?: boolean;
@@ -54,7 +54,7 @@ export function QueuePreview({
                 <Card
                   // A distinct id per column: the row exists in both so it has something to
                   // collapse and something to open, and two elements cannot share a DOM id.
-                  card={{ ...traveller, id: `${traveller.id}-${index}`, state } as QueueCard}
+                  card={{ ...traveller, id: `${traveller.id}-${index}`, state } as QueueCardView}
                   showState={false}
                   mascot={mascots.get(state)}
                   index={drift.get("moving") ?? 0}

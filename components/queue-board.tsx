@@ -13,7 +13,7 @@ import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { phaseOf } from "@/lib/reports/columns";
-import type { QueueCard, QueueColumn } from "@/lib/reports/queue";
+import type { QueueCardView, QueueColumnView } from "@/lib/reports/queue-view";
 import type { MascotKey } from "@/lib/mascot/catalog";
 
 /**
@@ -85,8 +85,8 @@ function driftAt(index: number) {
 }
 
 /** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
-function age(from: Date): string {
-  const minutes = Math.floor((Date.now() - from.getTime()) / 60_000);
+function age(from: string): string {
+  const minutes = Math.floor((Date.now() - new Date(from).getTime()) / 60_000);
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
@@ -101,7 +101,7 @@ export function Card({
   index,
   linkPrefetch = true,
 }: {
-  card: QueueCard;
+  card: QueueCardView;
   showState: boolean;
   mascot?: MascotKey;
   index: number;
@@ -233,7 +233,7 @@ export function Column({
   drift,
   linkPrefetch = true,
 }: {
-  column: QueueColumn;
+  column: QueueColumnView;
   mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
   linkPrefetch?: boolean;

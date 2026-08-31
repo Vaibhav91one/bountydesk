@@ -3,26 +3,32 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { ReportOutcomeBadge, ReportStateBadge } from "@/components/report-badges";
+import type { CaseLiveView } from "@/lib/reports/case-view";
 import {
+  caseRefetchInterval,
   caseStatusQueryKey,
   fetchCaseStatus,
-  shouldPollCaseStatus,
 } from "@/lib/reports/status-query";
-import type { CaseStatusView } from "@/lib/reports/status-view";
 
+/**
+ * The state and outcome badges in the page header.
+ *
+ * Separate from CaseView because it sits inside the header's identity block, beside the title
+ * and the reporter, rather than in the body. It shares the query key, so the two mount one
+ * request between them and can never show different states at the same moment.
+ */
 export function CaseRealtimeBadges({
   reportId,
   initialStatus,
 }: {
   reportId: string;
-  initialStatus: CaseStatusView;
+  initialStatus: CaseLiveView;
 }) {
   const { data = initialStatus } = useQuery({
     queryKey: caseStatusQueryKey(reportId),
     queryFn: () => fetchCaseStatus(reportId),
     initialData: initialStatus,
-    refetchInterval: (query) =>
-      shouldPollCaseStatus(query.state.data ?? initialStatus) ? 1500 : false,
+    refetchInterval: (query) => caseRefetchInterval(query.state.data ?? initialStatus),
   });
 
   return (
