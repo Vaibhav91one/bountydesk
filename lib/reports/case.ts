@@ -287,15 +287,13 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         : [];
 
       /**
-       * A pending id that names no verdict of this report is a broken tuple, so nothing is
-       * awaiting a decision here. The page still shows the record, read-only, because the
-       * report's own verdicts are not in doubt; what is in doubt is the call, and offering an
-       * Approve button for one nobody can identify is the failure worth closing off.
+       * A pending id that names no verdict of this report is a broken tuple, so the pending
+       * verdict is not shown as answerable. The page still shows the record, read-only, because
+       * the report's own verdicts are not in doubt.
        */
-      const canApprovePending =
+      const canShowPending =
         pending &&
         (row.state === "AWAITING_APPROVAL" || pending.outcome === "ANALYSIS_ONLY");
-      const awaitingVerdictId = canApprovePending ? pendingVerdictId : null;
 
       const [newest] = await tx
         .select({
@@ -313,7 +311,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .orderBy(desc(verdict.revision))
         .limit(1);
 
-      const latest = canApprovePending ? pending : newest;
+      const latest = canShowPending && pending ? pending : newest;
 
       const [decision] = latest
         ? await tx
@@ -326,6 +324,8 @@ export async function readCase(id: string): Promise<CaseFile | null> {
             .from(approvalDecision)
             .where(eq(approvalDecision.verdictId, latest.id))
         : [];
+
+      const awaitingVerdictId = canShowPending && !decision ? pendingVerdictId : null;
 
       // Keyed on the verdict, not the report. A report can carry a delivery per revision, and
       // a report-only predicate returns whichever row the planner reached first, so the page

@@ -1,6 +1,7 @@
 import {
   and,
   agentSession,
+  approvalDecision,
   connectedRepository,
   db,
   desc,
@@ -97,13 +98,17 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       eventCount: sql<number>`(
         select count(*)::int from session_event e where e.report_id = ${report.id}
       )`,
-      // Gated on the verdict/hash pair, not the thread: a synthesized ANALYSIS_ONLY verdict (a
-      // dead-end run) has a verdict awaiting approval but no TrueForge call, so its thread id is
-      // null. The check constraint pairs pending_verdict_id with pending_approved_content_hash,
-      // so pending_verdict_id alone answers the question and stays in step with case.ts.
+      // Gated on the verdict/hash pair and on the absence of a recorded decision. A pending
+      // tuple after approval is handoff state, not another thing a reviewer can answer.
       pendingVerdictId: sql<string | null>`(
         select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_verdict_id is not null
+        where s.report_id = ${report.id}
+          and s.pending_verdict_id is not null
+          and s.pending_approved_content_hash is not null
+          and not exists (
+            select 1 from ${approvalDecision} a
+            where a.verdict_id = s.pending_verdict_id
+          )
         limit 1
       )`,
       deliveryState: sql<DeliveryState | null>`(
@@ -219,6 +224,10 @@ export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
         ${report.state} in ('AWAITING_APPROVAL', 'ANALYSIS_ONLY')
           and ${agentSession.pendingVerdictId} is not null
           and ${agentSession.pendingApprovedContentHash} is not null
+          and not exists (
+            select 1 from ${approvalDecision} a
+            where a.verdict_id = ${agentSession.pendingVerdictId}
+          )
       ) desc`,
       desc(report.updatedAt),
     )
@@ -266,7 +275,13 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       )`,
       awaitingVerdictId: sql<string | null>`(
         select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_verdict_id is not null
+        where s.report_id = ${report.id}
+          and s.pending_verdict_id is not null
+          and s.pending_approved_content_hash is not null
+          and not exists (
+            select 1 from ${approvalDecision} a
+            where a.verdict_id = s.pending_verdict_id
+          )
         limit 1
       )`,
       deliveryState: sql<DeliveryState | null>`(

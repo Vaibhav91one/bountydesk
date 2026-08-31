@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
+import { AutoRefresh } from "@/components/auto-refresh";
 import {
   ReportOutcomeBadge,
   ReportStateBadge,
@@ -353,6 +354,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
   return (
     <main className="flex flex-1 flex-col">
+      <AutoRefresh intervalMs={2500} />
       {/* 53px on the right, so the approval button's edge meets the Open on GitHub button in
           the card below it: the page's own p-8 is 32, the card's border is 1, and its header
           pads by px-5. Written as pl/pr rather than px with an override, because two utilities
