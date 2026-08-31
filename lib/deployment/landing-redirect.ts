@@ -15,6 +15,8 @@ const passthroughPaths = new Set([
   "/api/github/setup",
   "/api/health",
   "/api/intake/github",
+  "/api/mcp/publish-verdict",
+  "/api/mcp/scope-guard",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/"];
