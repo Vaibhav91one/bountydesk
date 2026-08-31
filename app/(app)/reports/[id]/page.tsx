@@ -2,7 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
-import { PhaseDot } from "@/components/phase-dot";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+  outcomeLabel,
+  reportStateLabel,
+} from "@/components/report-badges";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -30,26 +35,6 @@ import { StatusCard } from "./status-card";
 import type { ToolCallView } from "./tool-call-detail";
 
 export const metadata = { title: "Case file · BountyDesk" };
-
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
 
 function Panel({
   title,
@@ -131,6 +116,7 @@ function stepMascot(
 function lifecycle(file: CaseFile) {
   const terminal = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
   const past = (states: string[]) => states.includes(file.state);
+  const deliveryFailed = file.delivery?.state === "FAILED";
 
   // The step's own step log, not the dead REPRODUCING report state: nothing transitions into
   // REPRODUCING under the agent-authored model, so a step fed from it would sit on "Coming
@@ -189,7 +175,9 @@ function lifecycle(file: CaseFile) {
       label: "Delivery",
       note: file.delivery ? file.delivery.state.toLowerCase() : "Not enqueued",
       state:
-        file.state === "DELIVERED"
+        deliveryFailed
+          ? ("skipped" as const)
+          : file.state === "DELIVERED"
           ? ("done" as const)
           : file.state === "DELIVERING"
             ? ("current" as const)
@@ -295,6 +283,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   };
 
   const phase = phaseOf(file.state);
+  const stateLabel = reportStateLabel(file.state, file.delivery?.state);
 
   // Events, grouped onto the step they belong to. The fallback step is the one matching the
   // report's own state, so an unknown prefix lands somewhere a reader would look for it.
@@ -390,9 +379,13 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </h1>
 
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-meta text-muted-foreground">
-              <span className="flex items-center gap-2 text-body text-foreground">
-                <PhaseDot phase={phase} />
-                {STATE_LABEL[file.state] ?? file.state}
+              <span className="flex flex-wrap items-center gap-1.5 text-body text-foreground">
+                <ReportStateBadge
+                  state={file.state}
+                  phase={phase}
+                  deliveryState={file.delivery?.state}
+                />
+                {file.verdict ? <ReportOutcomeBadge outcome={file.verdict.outcome} /> : null}
               </span>
 
               <span aria-hidden="true">·</span>
@@ -431,7 +424,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
               payload={file.verdict.payload}
               payloadArtifactId={payloadArtifactId}
               outcome={file.verdict.outcome}
-              outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
+              outcomeLabel={outcomeLabel(file.verdict.outcome)}
               summary={file.verdict.summary}
               revision={file.verdict.revision}
               destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
@@ -454,10 +447,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
       <div className="flex flex-col gap-4 p-8">
         <StatusCard
           file={file}
-          stateLabel={STATE_LABEL[file.state] ?? file.state}
+          stateLabel={stateLabel}
           verdictLabel={verdictLabel}
           outcomeLabel={
-            file.verdict ? (OUTCOME[file.verdict.outcome] ?? file.verdict.outcome) : null
+            file.verdict ? outcomeLabel(file.verdict.outcome) : null
           }
         />
 
@@ -506,7 +499,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             payload={file.verdict.payload}
             payloadArtifactId={payloadArtifactId}
             outcome={file.verdict.outcome}
-            outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
+            outcomeLabel={outcomeLabel(file.verdict.outcome)}
             summary={file.verdict.summary}
             findings={findings}
             revision={file.verdict.revision}

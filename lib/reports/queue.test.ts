@@ -53,6 +53,24 @@ async function seedReport(
   return row.id;
 }
 
+async function seedDeliveredVerdict(
+  reportId: string,
+  outcome: import("./queue").VerdictOutcome = "REPRODUCED",
+): Promise<string> {
+  const [row] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId,
+      outcome,
+      summary: `summary for ${reportId}`,
+      payload: `payload for ${reportId}`,
+      contentHash: `delivery-hash-${reportId}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  return row.id;
+}
+
 function column(columns: import("./queue").QueueColumn[], key: string) {
   const found = columns.find((c) => c.key === key);
   assert.ok(found, `no column ${key}`);
@@ -139,6 +157,27 @@ test("a delivered report is terminal, and still does not sit in Closed", async (
   for (const state of TERMINAL_STATES) {
     assert.ok(queue.COLUMNS.some((c) => c.states.includes(state)), `${state} has no column`);
   }
+});
+
+test("a failed delivery remains in the delivery lane with its outbox state", async () => {
+  const id = await seedReport("DELIVERING");
+  const verdictId = await seedDeliveredVerdict(id, "NOT_REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId,
+    state: "FAILED",
+    target: "github:1:issue:failed-delivery",
+    approvedContentHash: `delivery-hash-${id}`,
+    idempotencyKey: `failed-delivery-${id}`,
+    lastError: "GitHub delivery failed",
+  });
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "delivered").cards.find((c) => c.id === id);
+
+  assert.ok(card, "failed delivery should still be in the delivery column");
+  assert.equal(card.deliveryState, "FAILED");
+  assert.equal(card.outcome, "NOT_REPRODUCED");
 });
 
 test("a report with no target and no verdict reads as exactly that", async () => {
@@ -423,10 +462,33 @@ test("the index flags a report only when a reviewer can actually answer it", asy
     pendingApprovedContentHash: `hash-${answerable}`,
   });
 
+  const synthesized = await seedReport("AWAITING_APPROVAL");
+  const [synthesizedVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: synthesized,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis only",
+      payload: "the exact theoretical comment",
+      contentHash: `hash-${synthesized}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: synthesized,
+    capabilityToken: `token-${synthesized}`,
+    sessionId: `session-${synthesized}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: synthesizedVerdict.id,
+    pendingApprovedContentHash: `hash-${synthesized}`,
+  });
+
   const rows = await queue.listAllReports();
   const byId = new Map(rows.map((row) => [row.id, row]));
   assert.equal(byId.get(stranded)?.awaitingVerdictId, null);
   assert.equal(byId.get(answerable)?.awaitingVerdictId, v.id);
+  assert.equal(byId.get(synthesized)?.awaitingVerdictId, synthesizedVerdict.id);
 });
 
 test("the index carries the latest verdict revision, not the first", async () => {
@@ -446,6 +508,24 @@ test("the index carries the latest verdict revision, not the first", async () =>
   }
 
   const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.equal(row?.outcome, "REPRODUCED");
+});
+
+test("the index carries failed delivery state beside the verdict outcome", async () => {
+  const id = await seedReport("DELIVERING");
+  const verdictId = await seedDeliveredVerdict(id, "REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId,
+    state: "FAILED",
+    target: "github:1:issue:index-failed-delivery",
+    approvedContentHash: `delivery-hash-${id}`,
+    idempotencyKey: `index-failed-delivery-${id}`,
+    lastError: "GitHub delivery failed",
+  });
+
+  const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.equal(row?.deliveryState, "FAILED");
   assert.equal(row?.outcome, "REPRODUCED");
 });
 

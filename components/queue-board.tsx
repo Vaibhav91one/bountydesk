@@ -4,6 +4,10 @@ import { MascotFloat } from "@/components/mascot-float";
 import { ArrowRight } from "@phosphor-icons/react/ssr";
 
 import { PhaseDot, PhaseSpinner } from "@/components/phase-dot";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+} from "@/components/report-badges";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,27 +40,6 @@ export const MASCOT_ON_CARD = new Set([
  * drawing of it. Nothing here reads the database: it takes the rows it is given, which is what
  * lets one caller pass a live snapshot and another pass an example.
  */
-
-/** How a verdict outcome reads to a reviewer, rather than how it reads to the database. */
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
-
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
 
 /**
  * The states something is actively doing, as opposed to one that is waiting.
@@ -124,15 +107,20 @@ export function Card({
   linkPrefetch?: boolean;
 }) {
   const phase = phaseOf(card.state);
-  const running = RUNNING.has(card.state);
+  const failedDelivery = card.deliveryState === "FAILED";
+  const running = !failedDelivery && RUNNING.has(card.state);
   const float = driftAt(index);
 
   const status = card.awaitingVerdictId
     ? "Needs review"
+    : failedDelivery
+      ? "Delivery failed"
     : running
       ? RUNNING_LABEL[card.state]
+      : card.state === "DELIVERED"
+        ? "Comment delivered"
       : card.outcome
-        ? (OUTCOME[card.outcome] ?? card.outcome)
+        ? "Verdict drafted"
         : "No verdict yet";
 
   return (
@@ -188,13 +176,16 @@ export function Card({
         ) : null}
       </div>
 
-      {showState || card.investigating ? (
+      {showState || card.investigating || card.outcome ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {showState ? (
-            <Badge variant={card.state === "DELIVERED" ? "success" : "outline"}>
-              {STATE_LABEL[card.state] ?? card.state}
-            </Badge>
+            <ReportStateBadge
+              state={card.state}
+              phase={phase}
+              deliveryState={card.deliveryState}
+            />
           ) : null}
+          {card.outcome ? <ReportOutcomeBadge outcome={card.outcome} /> : null}
           {/* Nothing in the report's own state distinguishes "queued" from "an agent is
               actively working this right now" -- this badge is that difference. */}
           {card.investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
