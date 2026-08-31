@@ -37,10 +37,15 @@ import { verdictDraftSchema, type Finding, type VerdictDraft } from "@/lib/mcp/v
 export type DraftVerdictResult = { ok: true; verdictId: string } | { ok: false; reason: string };
 
 function renderFinding(finding: Finding, index: number): string {
-  // A subheading carrying the severity, then the description, then the evidence reference on its
-  // own line. GitHub renders this as a heading and two paragraphs; the reviewer's UI reads the
-  // same structured fields directly rather than this string.
-  return `### ${index + 1}. ${finding.title} (${finding.severity.toUpperCase()})\n\n${finding.description}\n\nEvidence: ${finding.evidenceRef}`;
+  // A subheading carrying the severity, then the description. GitHub renders this as a heading
+  // and a paragraph; the reviewer's UI reads the same structured fields directly rather than
+  // this string.
+  //
+  // The evidence reference the agent cited is deliberately not in here. It names a file inside
+  // the harness sandbox, so on a public issue it is a path the reporter cannot open and would
+  // read as a broken link to proof. The reference is kept on the verdict and written into the
+  // findings artifact a reviewer can download.
+  return `### ${index + 1}. ${finding.title} (${finding.severity.toUpperCase()})\n\n${finding.description}`;
 }
 
 /**

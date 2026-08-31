@@ -527,7 +527,9 @@ test("draftVerdictFromPendingCall accepts ANALYSIS_ONLY with no bound target and
   assert.ok(row.payload.includes("Nothing conclusive found from a read of the report alone."));
   assert.ok(row.payload.includes("Reflected parameter in search"));
   assert.ok(row.payload.includes("MEDIUM"));
-  assert.ok(row.payload.includes("scope-guard-log:1"));
+  // The reference the agent cited stays on the verdict and goes into the findings artifact, but
+  // never into the comment: on a public issue it points at a file only the harness can open.
+  assert.equal(row.payload.includes("scope-guard-log:1"), false);
   const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
   assert.equal(row.payload.split(marker).length, 2, "marker must appear exactly once");
   assert.equal(row.contentHash, computeContentHash(row.payload));

@@ -131,7 +131,12 @@ export function CaseView({
 
       {/* No card around it. The table carries its own border, and a "Findings" header over a
           column already headed Finding was chrome saying the same word twice. */}
-      {status.verdict ? <FindingsPanel findings={status.verdict.findings} /> : null}
+      {status.verdict ? (
+        <FindingsPanel
+          findings={status.verdict.findings}
+          findingsArtifactId={status.verdict.findingsArtifactId}
+        />
+      ) : null}
 
       {/* Once the gate has closed there is no dialog to open, and the comment that went out
           would otherwise be nowhere on this page. The same card, with the decision in place
@@ -141,6 +146,7 @@ export function CaseView({
         <VerdictCard
           payload={status.verdict.payload}
           payloadArtifactId={status.verdict.payloadArtifactId}
+          findingsArtifactId={status.verdict.findingsArtifactId}
           outcome={status.verdict.outcome}
           outcomeLabel={status.verdict.outcomeLabel}
           summary={status.verdict.summary}

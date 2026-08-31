@@ -21,8 +21,8 @@ export type TableColumn = {
   label: string;
   /** A CSS grid track. Numbers as fractions, so columns stay proportional at any width. */
   width: string;
-  /** Right-aligned, for counts and timestamps. */
-  align?: "start" | "end";
+  /** Right-aligned for counts and timestamps, centred for a cell that holds one badge. */
+  align?: "start" | "center" | "end";
   /**
    * This column holds controls of its own.
    *
@@ -127,6 +127,7 @@ export function FilterTable({
                   "px-4 py-2.5 text-meta text-muted-foreground",
                   index < columns.length - 1 && "border-r border-border/50",
                   column.align === "end" && "text-right",
+                  column.align === "center" && "text-center",
                 )}
               >
                 {column.label}
@@ -169,6 +170,7 @@ function cellClass(columns: TableColumn[], index: number) {
     "flex min-w-0 items-center px-4 py-3 text-body",
     index < columns.length - 1 && "border-r border-border/50",
     columns[index]?.align === "end" && "justify-end",
+    columns[index]?.align === "center" && "justify-center",
   );
 }
 

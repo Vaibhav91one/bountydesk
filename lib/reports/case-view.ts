@@ -73,6 +73,7 @@ export type CaseVerdictView = {
   verdictLabel: string;
   reproductionRan: boolean;
   payloadArtifactId: string | null;
+  findingsArtifactId: string | null;
 };
 
 export type CaseLiveView = {
@@ -461,6 +462,11 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
           // it. The download prefers its signed URL and falls back to the payload text.
           payloadArtifactId:
             file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null,
+          // What the findings table and the sheet offer in place of the evidence reference the
+          // agent cited: that reference names a file inside the harness, which is not something
+          // a reviewer can open.
+          findingsArtifactId:
+            file.artifacts.find((art) => art.kind === "findings-evidence")?.id ?? null,
         }
       : null,
 

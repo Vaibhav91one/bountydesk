@@ -14,16 +14,21 @@ import {
 } from "@/components/ui/sheet";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
+import { ArtifactDownload } from "./artifact-download";
+import { FindingDescription } from "./finding-description";
+
 /**
  * What the agent's own investigation found, as a table on the same primitive the reports list
  * uses (components/filter-table.tsx).
  *
- * Each row is the agent's claim, not a certified fact: the evidence column points at what backs
- * it (an artifact path, a scope-guard audit-log entry, an OSV id), so a reviewer can go check
- * rather than take the description on faith. The row clamps the long fields to two lines so a
- * verbose finding cannot blow out the table; the untruncated text lives in the sheet a row
- * opens. An empty list means the run drafted a verdict with nothing beyond its summary, which
- * the summary itself already says.
+ * Each row is the agent's claim, not a certified fact. What backs it is the findings file the run
+ * recorded, which a reviewer can download and read; the reference the agent cited names a path
+ * inside the harness sandbox, and printing that on screen offered a check nobody could perform.
+ *
+ * The row clamps the long fields to two lines so a verbose finding cannot blow out the table. The
+ * untruncated text lives in the sheet a row opens, laid out as the agent wrote it: reproduction
+ * steps as steps. An empty list means the run drafted a verdict with nothing beyond its summary,
+ * which the summary itself already says.
  */
 
 const SEVERITY_VARIANT: Record<Finding["severity"], "destructive" | "default" | "secondary" | "outline"> = {
@@ -35,12 +40,20 @@ const SEVERITY_VARIANT: Record<Finding["severity"], "destructive" | "default" | 
 };
 
 const COLUMNS = [
-  { key: "title", label: "Finding", width: "1.5fr" },
-  { key: "severity", label: "Severity", width: "0.6fr" },
-  { key: "evidence", label: "Evidence", width: "1fr" },
+  { key: "title", label: "Finding", width: "2fr" },
+  // One badge, centred under its own heading: left-aligned it drifted away from a header that
+  // sits over a much wider track than the badge needs.
+  { key: "severity", label: "Severity", width: "0.7fr", align: "center" as const },
 ];
 
-export function FindingsPanel({ findings }: { findings: Finding[] }) {
+export function FindingsPanel({
+  findings,
+  findingsArtifactId,
+}: {
+  findings: Finding[];
+  /** The recorded findings file, when one was stored. */
+  findingsArtifactId?: string | null;
+}) {
   // The row a reviewer opened, or none. base-ui's Dialog gives the sheet its focus trap,
   // Escape-to-close and aria wiring, so this component only decides which finding it shows.
   const [selected, setSelected] = useState<Finding | null>(null);
@@ -68,9 +81,6 @@ export function FindingsPanel({ findings }: { findings: Finding[] }) {
       <Badge key="severity" variant={SEVERITY_VARIANT[finding.severity]}>
         {finding.severity}
       </Badge>,
-      <span key="evidence" className="line-clamp-2 min-w-0 font-mono text-meta break-all text-muted-foreground">
-        {finding.evidenceRef}
-      </span>,
     ],
   }));
 
@@ -78,8 +88,19 @@ export function FindingsPanel({ findings }: { findings: Finding[] }) {
     <>
       <FilterTable columns={COLUMNS} rows={rows} label="Findings" empty="No findings drafted." />
 
+      {findingsArtifactId ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-meta text-muted-foreground">
+            Every finding above, with the evidence each one cites.
+          </span>
+          <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
+        </div>
+      ) : null}
+
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent side="right" className="no-scrollbar gap-0 overflow-y-auto sm:max-w-md">
+        {/* Wider than the repository panel next door: a finding carries reproduction steps, and
+            a request line with a payload in it wrapped four times at that width. */}
+        <SheetContent side="right" className="no-scrollbar gap-0 overflow-y-auto sm:max-w-2xl">
           {selected ? (
             <>
               <SheetHeader className="gap-3 border-b border-border/50 p-6">
@@ -89,23 +110,21 @@ export function FindingsPanel({ findings }: { findings: Finding[] }) {
                 </SheetDescription>
               </SheetHeader>
 
-              <div className="flex flex-col gap-5 p-6">
-                <section className="flex flex-col gap-2">
-                  <h3 className="text-meta text-muted-foreground">Description</h3>
-                  {/* The full text, shown not interpreted: the agent may have read
-                      prompt-injection content off an untrusted target, so its prose is
-                      rendered verbatim. whitespace-pre-wrap keeps the breaks it wrote. */}
-                  <p className="whitespace-pre-wrap break-words text-body text-foreground">
-                    {selected.description}
-                  </p>
-                </section>
+              <div className="flex flex-col gap-6 p-6">
+                {/* The full text, shown not interpreted: the agent may have read
+                    prompt-injection content off an untrusted target, so its prose stays prose
+                    and the layout comes only from structure already in it. */}
+                <FindingDescription description={selected.description} />
 
-                <section className="flex flex-col gap-2">
-                  <h3 className="text-meta text-muted-foreground">Evidence</h3>
-                  <p className="font-mono text-meta break-all text-muted-foreground">
-                    {selected.evidenceRef}
-                  </p>
-                </section>
+                {findingsArtifactId ? (
+                  <section className="flex flex-col items-start gap-2 border-t border-border/50 pt-5">
+                    <h3 className="text-meta text-muted-foreground">Evidence</h3>
+                    <p className="text-body text-muted-foreground">
+                      The run recorded every finding and the evidence it cites as a file.
+                    </p>
+                    <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
+                  </section>
+                ) : null}
               </div>
             </>
           ) : null}

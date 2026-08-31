@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import { artifact, db, eq, sessionEvent, verdict } from "@/lib/db";
+import type { Finding } from "@/lib/mcp/verdict-draft";
+import { verdictFindings } from "@/lib/reports/case-facts";
 import { uploadArtifact } from "@/lib/storage/artifacts";
 
 /**
@@ -15,6 +17,10 @@ import { uploadArtifact } from "@/lib/storage/artifacts";
  *     carries no raw secret, grant token or capability token.
  *   - verdict-payload: the exact outbound comment body, which the reviewer approves and GitHub
  *     receives.
+ *   - findings-evidence: each finding the agent drafted, with the description and the reference
+ *     it cited for it. Written only when a run produced findings. This is what the case file
+ *     offers instead of printing a sandbox path on screen: the path names a file inside the
+ *     harness that a reviewer cannot open, while this is a file they can.
  *
  * Best-effort by design: a Storage outage or a failed insert is logged and swallowed, never
  * thrown, because an artifact is a record of a run and a successful, human-approvable verdict
@@ -25,7 +31,7 @@ import { uploadArtifact } from "@/lib/storage/artifacts";
 
 const CONTENT_TYPE = "text/markdown";
 
-type ArtifactKind = "investigation-transcript" | "verdict-payload";
+type ArtifactKind = "investigation-transcript" | "verdict-payload" | "findings-evidence";
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -71,6 +77,43 @@ export async function buildTranscript(reportId: string, verdictId: string): Prom
   return lines.join("\n");
 }
 
+/**
+ * The findings as a file, in the order the agent drafted them.
+ *
+ * Built from the stored draft, which is the same allowlisted text the case file renders, so this
+ * carries nothing the screen does not. Deliberately not built from the live tool-call detail:
+ * those arguments and results hold capability tokens, grant tokens and canary values, and
+ * lib/reports/tool-calls.ts keeps them out of every durable table on purpose.
+ */
+export function buildFindingsEvidence(
+  reportId: string,
+  verdictId: string,
+  findings: Finding[],
+): string {
+  const lines = [
+    "# Findings",
+    "",
+    `Report: ${reportId}`,
+    `Verdict: ${verdictId}`,
+    "",
+  ];
+
+  findings.forEach((finding, index) => {
+    lines.push(
+      `## ${index + 1}. ${finding.title}`,
+      "",
+      `Severity: ${finding.severity}`,
+      "",
+      finding.description,
+      "",
+      `Evidence reference: ${finding.evidenceRef}`,
+      "",
+    );
+  });
+
+  return lines.join("\n");
+}
+
 async function recordOne(
   reportId: string,
   verdictId: string,
@@ -104,7 +147,7 @@ async function recordOne(
 export async function recordVerdictArtifacts(reportId: string, verdictId: string): Promise<void> {
   try {
     const [verdictRow] = await db
-      .select({ payload: verdict.payload })
+      .select({ payload: verdict.payload, evidence: verdict.evidence })
       .from(verdict)
       .where(eq(verdict.id, verdictId))
       .limit(1);
@@ -113,6 +156,18 @@ export async function recordVerdictArtifacts(reportId: string, verdictId: string
     const transcript = await buildTranscript(reportId, verdictId);
     await recordOne(reportId, verdictId, "investigation-transcript", transcript);
     await recordOne(reportId, verdictId, "verdict-payload", verdictRow.payload);
+
+    // Only when there is something to write. A verdict with no findings would otherwise leave an
+    // empty file the case file has to offer and a reviewer has to open to learn nothing.
+    const findings = verdictFindings(verdictRow.evidence);
+    if (findings.length > 0) {
+      await recordOne(
+        reportId,
+        verdictId,
+        "findings-evidence",
+        buildFindingsEvidence(reportId, verdictId, findings),
+      );
+    }
   } catch (error) {
     console.error(
       `artifact recording for verdict ${verdictId} failed: ${error instanceof Error ? error.message : String(error)}`,

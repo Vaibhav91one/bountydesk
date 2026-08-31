@@ -55,6 +55,7 @@ export function CaseApproval({
       contentHash={status.verdict.contentHash}
       payload={status.verdict.payload}
       payloadArtifactId={status.verdict.payloadArtifactId}
+      findingsArtifactId={status.verdict.findingsArtifactId}
       outcome={status.verdict.outcome}
       outcomeLabel={status.verdict.outcomeLabel}
       summary={status.verdict.summary}

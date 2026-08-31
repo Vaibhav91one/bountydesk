@@ -16,6 +16,8 @@ import {
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
 import { getArtifactDownloadUrl } from "./actions";
+import { ArtifactDownload } from "./artifact-download";
+import { FindingDescription } from "./finding-description";
 
 const SEVERITY_VARIANT: Record<
   Finding["severity"],
@@ -36,19 +38,32 @@ const SEVERITY_VARIANT: Record<
  * agent's own text, and the agent may have read prompt-injection content off an untrusted
  * target, so every field is shown as text, never as HTML and never through a markdown renderer
  * that could interpret it. break-words and break-all keep a long unbroken token from widening
- * the card or the dialog; whitespace-pre-wrap keeps the breaks the agent wrote.
+ * the card or the dialog.
+ *
+ * The evidence reference a finding cites is not shown. It names a file inside the harness
+ * sandbox, which is a path a reviewer cannot open and cannot check; the findings file the run
+ * recorded is offered instead, and it carries the references with it.
  */
-export function VerdictBody({ summary, findings }: { summary: string; findings: Finding[] }) {
+export function VerdictBody({
+  summary,
+  findings,
+  findingsArtifactId,
+}: {
+  summary: string;
+  findings: Finding[];
+  /** The recorded findings file, when one was stored. */
+  findingsArtifactId?: string | null;
+}) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       <p className="whitespace-pre-wrap break-words text-body text-foreground">{summary}</p>
 
       {findings.length > 0 ? (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           {findings.map((finding, index) => (
             <div
               key={index}
-              className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border/50 bg-background p-3"
+              className="flex min-w-0 flex-col gap-2.5 rounded-md border border-border/50 bg-background p-4"
             >
               <span className="flex flex-wrap items-center gap-2">
                 <span className="break-words text-body font-medium text-foreground">
@@ -56,14 +71,18 @@ export function VerdictBody({ summary, findings }: { summary: string; findings: 
                 </span>
                 <Badge variant={SEVERITY_VARIANT[finding.severity]}>{finding.severity}</Badge>
               </span>
-              <p className="whitespace-pre-wrap break-words text-meta text-muted-foreground">
-                {finding.description}
-              </p>
-              <span className="break-all font-mono text-meta text-muted-foreground">
-                Evidence: {finding.evidenceRef}
-              </span>
+              <FindingDescription description={finding.description} />
             </div>
           ))}
+
+          {findingsArtifactId ? (
+            <span className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/50 border-dashed px-4 py-3">
+              <span className="text-meta text-muted-foreground">
+                Every finding above, with the evidence each one cites.
+              </span>
+              <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
+            </span>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -87,6 +106,7 @@ export function VerdictDialog({
   findings,
   payload,
   payloadArtifactId,
+  findingsArtifactId,
 }: {
   outcomeLabel: string;
   revision: number;
@@ -96,6 +116,8 @@ export function VerdictDialog({
   payload: string;
   /** The stored verdict-payload artifact, when one exists. Null falls straight to the Blob. */
   payloadArtifactId: string | null;
+  /** The stored findings file, when one exists. */
+  findingsArtifactId?: string | null;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -151,7 +173,11 @@ export function VerdictDialog({
         </DialogHeader>
 
         <div className="min-w-0 p-5">
-          <VerdictBody summary={summary} findings={findings} />
+          <VerdictBody
+            summary={summary}
+            findings={findings}
+            findingsArtifactId={findingsArtifactId}
+          />
         </div>
 
         <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border/50 bg-card px-5 py-3">

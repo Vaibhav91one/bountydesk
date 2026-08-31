@@ -32,7 +32,7 @@ after(async () => {
 
 let seq = 0;
 
-async function seedVerdictWithEvents() {
+async function seedVerdictWithEvents(findings?: unknown[]) {
   seq += 1;
   const n = seq;
 
@@ -49,6 +49,7 @@ async function seedVerdictWithEvents() {
       summary: "s",
       payload: `verdict payload ${n}`,
       contentHash: `hash-${n}`,
+      ...(findings ? { evidence: { source: "agent-drafted", findings } } : {}),
     })
     .returning({ id: dbm.verdict.id });
 
@@ -161,4 +162,59 @@ test("an artifact row cannot be updated or deleted", async () => {
     dbm.db.delete(dbm.artifact).where(dbm.eq(dbm.artifact.id, row.id)),
     isAppendOnly,
   );
+});
+
+test("a run with findings records them as a file a reviewer can download", async () => {
+  // The evidence reference is what the case file used to print on screen. It stays out of the
+  // UI and out of the comment, and lands here instead, where a reviewer can save it.
+  const { reportId, verdictId } = await seedVerdictWithEvents([
+    {
+      title: "Unauthenticated SQL injection in product search",
+      severity: "critical",
+      description: "Steps to reproduce:\n1) GET /rest/products/search?q=apple",
+      evidenceRef: "/opt/tf/tool-results/sqli_response.json",
+    },
+  ]);
+
+  await record.recordVerdictArtifacts(reportId, verdictId);
+
+  const rows = await dbm.db
+    .select()
+    .from(dbm.artifact)
+    .where(dbm.eq(dbm.artifact.reportId, reportId));
+
+  const evidence = rows.find((row) => row.kind === "findings-evidence");
+  assert.ok(evidence, "a run with findings records the findings file");
+  assert.equal(evidence.contentType, "text/markdown");
+  assert.equal(evidence.sha256.length, 64);
+});
+
+test("a run with no findings records no findings file", async () => {
+  // An empty file is worse than none: the panel would offer a download that teaches nothing.
+  const { reportId, verdictId } = await seedVerdictWithEvents();
+
+  await record.recordVerdictArtifacts(reportId, verdictId);
+
+  const rows = await dbm.db
+    .select()
+    .from(dbm.artifact)
+    .where(dbm.eq(dbm.artifact.reportId, reportId));
+
+  assert.equal(rows.some((row) => row.kind === "findings-evidence"), false);
+});
+
+test("the findings file carries each finding and the reference it cited", () => {
+  const text = record.buildFindingsEvidence("report-1", "verdict-1", [
+    {
+      title: "Unauthenticated SQL injection in product search",
+      severity: "critical",
+      description: "Steps to reproduce:\n1) GET /rest/products/search?q=apple",
+      evidenceRef: "/opt/tf/tool-results/sqli_response.json",
+    },
+  ]);
+
+  assert.match(text, /## 1\. Unauthenticated SQL injection in product search/);
+  assert.match(text, /Severity: critical/);
+  assert.match(text, /1\) GET \/rest\/products\/search\?q=apple/);
+  assert.match(text, /Evidence reference: \/opt\/tf\/tool-results\/sqli_response\.json/);
 });
