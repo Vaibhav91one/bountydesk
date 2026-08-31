@@ -30,7 +30,23 @@ export function landingRedirectEnabled(env: LandingRedirectEnv = process.env) {
   return env.VERCEL === "1" || env.BOUNTYDESK_LANDING_REDIRECT === "1";
 }
 
-export function shouldRedirectToSource(pathname: string) {
+function configuredAppHost(env: LandingRedirectEnv): string | null {
+  const raw = env.APP_BASE_URL?.trim();
+  if (!raw) return null;
+
+  try {
+    return new URL(raw).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+export function shouldRedirectToSource(
+  pathname: string,
+  host?: string | null,
+  env: LandingRedirectEnv = process.env,
+) {
+  if (host && host.toLowerCase() === configuredAppHost(env)) return false;
   if (passthroughPaths.has(pathname)) return false;
 
   return !passthroughPrefixes.some((prefix) => pathname.startsWith(prefix));

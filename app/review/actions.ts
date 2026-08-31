@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import { requireReviewer } from "@/lib/auth/dal";
 import {
   agentSession,
@@ -11,6 +13,8 @@ import {
   report,
   verdict,
 } from "@/lib/db";
+import { deliverById } from "@/lib/delivery/worker";
+import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
@@ -23,6 +27,20 @@ export type ActionResult = { ok: boolean; error?: string };
  * the rollback.
  */
 class DecisionRefused extends Error {}
+
+function revalidateReportViews(reportId: string) {
+  for (const path of ["/board", `/reports/${reportId}`, "/reports", "/home"]) {
+    try {
+      revalidatePath(path);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("static generation store missing")) continue;
+      console.error(
+        `could not revalidate ${path}: ${message}`,
+      );
+    }
+  }
+}
 
 /**
  * The shared body of allowVerdict and denyVerdict: load and lock the report and session,
@@ -42,8 +60,9 @@ async function decide(
   reviewer: string,
   note: string | undefined,
 ): Promise<ActionResult> {
+  let immediateDeliveryId: string | null = null;
   try {
-    return await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
       const [reportRow] = await tx
         .select({ state: report.state })
         .from(report)
@@ -78,12 +97,29 @@ async function decide(
         .where(eq(approvalDecision.verdictId, v.id));
 
       if (existing) {
-        // Idempotent replay: the report was already decided (by this call landing twice, or
-        // by the pending columns having been cleared for it already). Matching the earlier
-        // outcome is a no-op success; disagreeing is refused rather than silently ignored.
-        return existing.decision === outcome
-          ? { ok: true }
-          : { ok: false, error: "already decided differently" };
+        if (existing.decision !== outcome) {
+          return { ok: false, error: "already decided differently" };
+        }
+        const noHarnessCall = session.pendingThreadId === null && session.pendingToolCallId === null;
+        if (
+          noHarnessCall &&
+          outcome === "APPROVED" &&
+          reportRow.state === "ANALYSIS_ONLY" &&
+          v.outcome === "ANALYSIS_ONLY" &&
+          session.pendingVerdictId === v.id &&
+          session.pendingApprovedContentHash &&
+          computeContentHash(v.payload) === session.pendingApprovedContentHash
+        ) {
+          const enqueued = await enqueueApprovedVerdictDelivery(
+            tx,
+            session.id,
+            { id: v.id, reportId: v.reportId, outcome: v.outcome },
+            session.pendingApprovedContentHash,
+          );
+          if (!enqueued.ok) throw new DecisionRefused(enqueued.reason);
+          immediateDeliveryId = enqueued.deliveryId;
+        }
+        return { ok: true };
       }
 
       const canDecide =
@@ -118,6 +154,7 @@ async function decide(
         return { ok: false, error: "no pending approval for this report" };
       }
       const pending = session;
+      const noHarnessCall = pending.pendingThreadId === null && pending.pendingToolCallId === null;
 
       // Defense in depth: never act on a stored hash without recomputing it from the exact
       // bytes right before using it. This should never actually differ.
@@ -165,16 +202,29 @@ async function decide(
         decisionId = raced.id;
       }
 
-      // Best-effort informational for the submission worker: it tells TrueForge about the
-      // decision, but it is not what bounty-desk's own state depends on.
-      await tx
-        .insert(approvalSubmission)
-        .values({ agentSessionId: pending.id, approvalDecisionId: decisionId, state: "PENDING" })
-        .onConflictDoNothing({ target: approvalSubmission.approvalDecisionId });
+      if (noHarnessCall && outcome === "APPROVED") {
+        const enqueued = await enqueueApprovedVerdictDelivery(
+          tx,
+          pending.id,
+          { id: v.id, reportId: v.reportId, outcome: v.outcome },
+          pending.pendingApprovedContentHash,
+        );
+        if (!enqueued.ok) throw new DecisionRefused(enqueued.reason);
+        immediateDeliveryId = enqueued.deliveryId;
+      } else if (!noHarnessCall) {
+        // Best-effort informational for the submission worker: it tells TrueForge about the
+        // decision, but it is not what bounty-desk's own state depends on. Synthesized
+        // analysis-only verdicts have no harness call to answer, so approving them goes
+        // straight to the outbox above and denying them closes locally below.
+        await tx
+          .insert(approvalSubmission)
+          .values({ agentSessionId: pending.id, approvalDecisionId: decisionId, state: "PENDING" })
+          .onConflictDoNothing({ target: approvalSubmission.approvalDecisionId });
+      }
 
-      // A denial is final on bounty-desk's side immediately. An approval is not: DELIVERING
-      // only happens inside the real publish_verdict tool handler, once TrueForge actually
-      // invokes it, so nothing here moves the report on the approve path.
+      // A denial is final on bounty-desk's side immediately. Harness-backed approvals still
+      // move only when TrueForge invokes publish_verdict; synthesized analysis-only approvals
+      // have no harness call to answer, so the outbox write above is their publish step.
       if (outcome === "DENIED") {
         try {
           await transition(reportId, reportRow.state, "DENIED", tx);
@@ -190,6 +240,23 @@ async function decide(
 
       return { ok: true };
     });
+    if (result.ok && immediateDeliveryId) {
+      try {
+        await deliverById(
+          immediateDeliveryId,
+          `review-action-delivery-${immediateDeliveryId}`,
+          { leaseSeconds: 20 },
+        );
+      } catch (error) {
+        console.error(
+          `delivery ${immediateDeliveryId}: immediate post after approval failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    revalidateReportViews(reportId);
+    return result;
   } catch (error) {
     if (error instanceof DecisionRefused) return { ok: false, error: error.message };
     throw error;
@@ -197,10 +264,10 @@ async function decide(
 }
 
 /**
- * Record that a human approved the pending verdict. This never talks to TrueForge and never
- * moves the report to DELIVERING itself: it only records the decision and queues it for the
- * approval-submission worker to relay. The actual delivery transition happens only inside the
- * real publish_verdict tool handler, once TrueForge genuinely invokes it.
+ * Record that a human approved the pending verdict. Harness-backed approvals are queued for
+ * the approval-submission worker to relay to TrueForge. Synthesized analysis-only verdicts have
+ * no TrueForge call to answer, so the same approval records consent and queues the GitHub
+ * delivery directly.
  *
  * `verdictId` must be the exact id the review page rendered, not resolved fresh here: the
  * reviewer approves what they saw, not whatever happens to be pending at click time.

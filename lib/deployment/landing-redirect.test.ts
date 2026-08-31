@@ -66,3 +66,16 @@ test("redirects non-landing routes to the GitHub repository", () => {
     assert.equal(shouldRedirectToSource(pathname), true, pathname);
   }
 });
+
+test("does not redirect the configured app host", () => {
+  const env = {
+    APP_BASE_URL: "https://app.bounty-desk.vaibhav.quest",
+    BOUNTYDESK_LANDING_REDIRECT: "1",
+  };
+
+  assert.equal(
+    shouldRedirectToSource("/login", "app.bounty-desk.vaibhav.quest", env),
+    false,
+  );
+  assert.equal(shouldRedirectToSource("/login", "bounty-desk.vaibhav.quest", env), true);
+});

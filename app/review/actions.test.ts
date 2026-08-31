@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import test, { after, before, mock } from "node:test";
+import test, { after, before, beforeEach, mock } from "node:test";
 
 import { computeContentHash } from "@/lib/verdicts/hash";
 
@@ -20,11 +20,25 @@ process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
 process.env.AUTH_SECRET = "b".repeat(32);
 
 let cookieValue: string | undefined;
+let deliverCalls: { deliveryId: string; owner: string }[] = [];
 mock.module("next/headers", {
   namedExports: {
     cookies: async () => ({
       get: (name: string) => (cookieValue ? { name, value: cookieValue } : undefined),
     }),
+  },
+});
+mock.module("next/cache", {
+  namedExports: {
+    revalidatePath: () => undefined,
+  },
+});
+mock.module("@/lib/delivery/worker", {
+  namedExports: {
+    deliverById: async (deliveryId: string, owner: string) => {
+      deliverCalls.push({ deliveryId, owner });
+      return deliveryId;
+    },
   },
 });
 
@@ -45,6 +59,10 @@ before(async () => {
 after(async () => {
   await dbm?.client.end({ timeout: 5 });
   await schema?.drop();
+});
+
+beforeEach(() => {
+  deliverCalls = [];
 });
 
 function signIn(userId: number, login = "reviewer") {
@@ -68,17 +86,19 @@ async function seedPendingReport({
   pendingHash,
   synthesized,
   state,
+  channel = "manual",
 }: {
   pendingHash?: string;
   synthesized?: boolean;
   state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
+  channel?: "manual" | "github";
 } = {}) {
   seq += 1;
   const [reportRow] = await dbm.db
     .insert(dbm.report)
     .values({
-      channel: "manual",
-      sourceRef: `manual:${seq}`,
+      channel,
+      sourceRef: channel === "github" ? `github:1:issue:${seq}` : `manual:${seq}`,
       title: `Report ${seq}`,
       body: "body",
       state: state ?? (synthesized ? "ANALYSIS_ONLY" : "AWAITING_APPROVAL"),
@@ -132,6 +152,13 @@ async function submissionsFor(agentSessionId: string) {
     .where(dbm.eq(dbm.approvalSubmission.agentSessionId, agentSessionId));
 }
 
+async function deliveriesFor(reportId: string) {
+  return dbm.db
+    .select()
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.reportId, reportId));
+}
+
 async function reportState(reportId: string) {
   const [row] = await dbm.db
     .select({ state: dbm.report.state })
@@ -174,7 +201,10 @@ test("allowVerdict records an approval but never moves the report itself", async
 
 test("allowVerdict approves a synthesized verdict with null thread/tool-call markers", async () => {
   signIn(REVIEWER_ID, "carol");
-  const { reportId, verdictId, agentSessionId } = await seedPendingReport({ synthesized: true });
+  const { reportId, verdictId, agentSessionId } = await seedPendingReport({
+    synthesized: true,
+    channel: "github",
+  });
 
   const result = await actions.allowVerdict(reportId, verdictId);
   assert.equal(result.ok, true);
@@ -187,12 +217,57 @@ test("allowVerdict approves a synthesized verdict with null thread/tool-call mar
   assert.equal(decisions[0].threadId, null);
   assert.equal(decisions[0].toolCallId, null);
 
-  // The submission is still enqueued, exactly as the agent path enqueues it.
   const submissions = await submissionsFor(agentSessionId);
-  assert.equal(submissions.length, 1);
-  assert.equal(submissions[0].state, "PENDING");
+  assert.equal(submissions.length, 0);
 
-  assert.equal(await reportState(reportId), "ANALYSIS_ONLY");
+  const deliveries = await deliveriesFor(reportId);
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].verdictId, verdictId);
+  assert.equal(deliveries[0].target, `github:1:issue:${seq}`);
+  assert.deepEqual(deliverCalls, [
+    {
+      deliveryId: deliveries[0].id,
+      owner: `review-action-delivery-${deliveries[0].id}`,
+    },
+  ]);
+  assert.equal(await reportState(reportId), "DELIVERING");
+});
+
+test("allowVerdict repairs an already approved synthesized verdict with no delivery", async () => {
+  signIn(REVIEWER_ID, "erin");
+  const { reportId, verdictId } = await seedPendingReport({
+    synthesized: true,
+    channel: "github",
+  });
+  const [sessionRow] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId,
+    reviewer: "erin",
+    decision: "APPROVED",
+    payloadHash: sessionRow.pendingApprovedContentHash!,
+    threadId: null,
+    toolCallId: null,
+  });
+
+  const result = await actions.allowVerdict(reportId, verdictId);
+  assert.equal(result.ok, true);
+
+  const decisions = await decisionsFor(verdictId);
+  assert.equal(decisions.length, 1);
+
+  const deliveries = await deliveriesFor(reportId);
+  assert.equal(deliveries.length, 1);
+  assert.deepEqual(deliverCalls, [
+    {
+      deliveryId: deliveries[0].id,
+      owner: `review-action-delivery-${deliveries[0].id}`,
+    },
+  ]);
+  assert.equal(await reportState(reportId), "DELIVERING");
 });
 
 test("denyVerdict denies a synthesized verdict from the analysis lane", async () => {
