@@ -25,13 +25,15 @@ if (hosts.length === 0) {
   process.exit(1);
 }
 
-// TrueForge is never public. A wildcard binds every interface the container has, including any
-// it gains later, so the only addresses accepted are the ones named: loopback, or the private
-// address the platform hands the service. There is deliberately no flag to turn this off.
-if (hosts.some((host) => host === "0.0.0.0" || host === "::")) {
-  console.error("TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces");
-  process.exit(1);
-}
+// The proxy is the authenticated boundary in front of TrueForge, which is why it may bind a
+// routable interface: a managed host (Zerops here) forwards its ingress to whatever address the
+// container is listening on, and loopback plus the private IP the platform reports through
+// `hostname -i` is not reliably that address. A wildcard bind covers it. What keeps that safe is
+// the bearer check every request goes through, and the fact that the raw TrueForge agent server
+// upstream stays on loopback (TRUEFORGE_UPSTREAM_URL is 127.0.0.1): the wildcard exposes only
+// this authenticated hop, never the agent API behind it. The bearer is not optional, enforced
+// above: the process refuses to start with no TRUEFORGE_API_KEY, so a wildcard bind can never be
+// an unauthenticated one.
 
 const hopByHopHeaders = new Set([
   "connection",

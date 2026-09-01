@@ -88,8 +88,13 @@ zerops:
         - name: trueforge
           command: node ops/trueforge/node_modules/@truefoundry/trueforge/dist/cli.js --port 8790
         - name: proxy
+          # Bind every interface: Zerops forwards its HTTP ingress to the container, and neither
+          # loopback nor the IPv6 that hostname -i reports first is the address it targets, so a
+          # narrower bind is unreachable from the ingress and answers 502. Safe because this hop
+          # authenticates every request with TRUEFORGE_API_KEY, and the raw agent server it
+          # fronts stays on 127.0.0.1:8790.
           command: |
-            export TRUEFORGE_PROXY_HOSTS="127.0.0.1,$(hostname -i | awk '{print $1}')"
+            export TRUEFORGE_PROXY_HOSTS="0.0.0.0"
             node scripts/run-trueforge-proxy.mjs
         - name: bootstrap
           command: node scripts/bootstrap-trueforge.mjs

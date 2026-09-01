@@ -97,8 +97,11 @@ Do not describe the Zerops topology as live or production-ready until all of the
    is done: `/healthz` fails when a queue loop goes silent, and when one fails every iteration for
    longer than the failure budget. Readiness is not: nothing checks Postgres or TrueForge before
    the first claim, so an idle worker with a dead dependency still reads as healthy.
-6. Neither service has public access, private service names resolve only inside the project, and the
-   TrueForge proxy rejects a request without the configured bearer token.
+6. The raw TrueForge agent server has no public access: it binds `127.0.0.1:8790`, and only the
+   proxy reaches it. The proxy is the authenticated boundary and is deliberately reachable, so
+   the Vercel app can register providers and read harness state through it; it binds `0.0.0.0`
+   because the managed host forwards ingress to the container, and it rejects any request without
+   the configured bearer token. Private service names still resolve only inside the project.
 7. Resource ceilings and billing alerts are set before the services remain online.
 8. One real report completes the Track A approval path through the deployed worker.
 

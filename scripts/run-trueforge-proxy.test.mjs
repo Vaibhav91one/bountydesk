@@ -83,14 +83,15 @@ async function stopChild(child) {
   await Promise.race([once(child, "exit"), delay(3000).then(() => child.kill("SIGKILL"))]);
 }
 
-test("TrueForge proxy refuses wildcard bind hosts", async () => {
+test("TrueForge proxy refuses to start without a bearer secret", async () => {
+  // The bearer is what lets the proxy bind a routable interface at all, so a proxy with no
+  // secret must not run: an unauthenticated hop in front of the agent server is the one thing
+  // the bind must never be.
+  const { TRUEFORGE_API_KEY, ...envNoSecret } = process.env;
+  void TRUEFORGE_API_KEY;
   const child = spawn(process.execPath, ["scripts/run-trueforge-proxy.mjs"], {
     cwd: process.cwd(),
-    env: {
-      ...process.env,
-      TRUEFORGE_API_KEY: "test-secret",
-      TRUEFORGE_PROXY_HOSTS: "127.0.0.1,0.0.0.0",
-    },
+    env: { ...envNoSecret, TRUEFORGE_PROXY_HOSTS: "0.0.0.0" },
     stdio: ["ignore", "ignore", "pipe"],
   });
 
@@ -101,34 +102,38 @@ test("TrueForge proxy refuses wildcard bind hosts", async () => {
   const [code] = await once(child, "exit");
 
   assert.equal(code, 1);
-  assert.match(stderr, /TRUEFORGE_PROXY_HOSTS must contain only loopback or specific private interfaces/);
+  assert.match(stderr, /TRUEFORGE_API_KEY must be set/);
 });
 
-test("TrueForge proxy refuses a wildcard bind host even with the old opt-out set", async () => {
-  // There used to be a flag for this. The environment carrying it must not be a way back to
-  // binding every interface, which is why the check does not consult anything.
+test("TrueForge proxy serves on a wildcard bind once a bearer is set", async () => {
+  // A managed host forwards its ingress to whatever the container listens on, so the proxy has
+  // to be able to bind the wide interface. Authenticated, so this is the boundary, not a hole.
+  const upstream = await startUpstream();
   const proxyPort = await freePort();
   const child = spawn(process.execPath, ["scripts/run-trueforge-proxy.mjs"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       TRUEFORGE_API_KEY: "test-secret",
-      TRUEFORGE_PROXY_ALLOW_PUBLIC_BIND: "1",
       TRUEFORGE_PROXY_HOSTS: "0.0.0.0",
       TRUEFORGE_PROXY_PORT: String(proxyPort),
-      TRUEFORGE_UPSTREAM_URL: "http://127.0.0.1:1",
+      TRUEFORGE_UPSTREAM_URL: upstream.url,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
 
-  let stderr = "";
-  child.stderr.on("data", (chunk) => {
-    stderr += String(chunk);
-  });
-  const [code] = await once(child, "exit");
-
-  assert.equal(code, 1);
-  assert.match(stderr, /must contain only loopback or specific private interfaces/);
+  try {
+    await waitForProxy(child);
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/api/v1/docs`, {
+      headers: { authorization: "Bearer test-secret" },
+    });
+    assert.equal(response.status, 200);
+  } finally {
+    await stopChild(child);
+    await new Promise((resolve, reject) =>
+      upstream.server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
 });
 
 test("TrueForge proxy rejects missing and invalid bearer tokens before forwarding", async () => {
