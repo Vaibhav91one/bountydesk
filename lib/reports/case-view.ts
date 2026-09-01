@@ -475,10 +475,13 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
           payloadArtifactId:
             file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null,
           // What the findings table and the sheet offer in place of the evidence reference the
-          // agent cited: that reference names a file inside the harness, which is not something
-          // a reviewer can open.
+          // agent cited. Only when the bytes actually landed: artifact recording is best-effort
+          // and writes a row with no stored path when storage is off or an upload failed, and a
+          // download keyed to such a row would only error. Null here makes the views fall back
+          // to showing the reference inline, so a reviewer is never left with neither.
           findingsArtifactId:
-            file.artifacts.find((art) => art.kind === "findings-evidence")?.id ?? null,
+            file.artifacts.find((art) => art.kind === "findings-evidence" && art.stored)?.id ??
+            null,
         }
       : null,
 

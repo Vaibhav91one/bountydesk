@@ -116,15 +116,26 @@ export function FindingsPanel({
                     and the layout comes only from structure already in it. */}
                 <FindingDescription description={selected.description} />
 
-                {findingsArtifactId ? (
-                  <section className="flex flex-col items-start gap-2 border-t border-border/50 pt-5">
-                    <h3 className="text-meta text-muted-foreground">Evidence</h3>
-                    <p className="text-body text-muted-foreground">
-                      The run recorded every finding and the evidence it cites as a file.
+                <section className="flex flex-col items-start gap-2 border-t border-border/50 pt-5">
+                  <h3 className="text-meta text-muted-foreground">Evidence</h3>
+                  {findingsArtifactId ? (
+                    <>
+                      <p className="text-body text-muted-foreground">
+                        The run recorded every finding and the evidence it cites as a file.
+                      </p>
+                      <ArtifactDownload
+                        artifactId={findingsArtifactId}
+                        label="Download findings"
+                      />
+                    </>
+                  ) : (
+                    // No downloadable file, so the citation the agent gave is the only evidence
+                    // there is. It names a path inside the harness sandbox.
+                    <p className="font-mono text-meta break-all text-muted-foreground">
+                      {selected.evidenceRef}
                     </p>
-                    <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
-                  </section>
-                ) : null}
+                  )}
+                </section>
               </div>
             </>
           ) : null}

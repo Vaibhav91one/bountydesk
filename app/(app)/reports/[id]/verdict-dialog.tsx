@@ -40,9 +40,10 @@ const SEVERITY_VARIANT: Record<
  * that could interpret it. break-words and break-all keep a long unbroken token from widening
  * the card or the dialog.
  *
- * The evidence reference a finding cites is not shown. It names a file inside the harness
- * sandbox, which is a path a reviewer cannot open and cannot check; the findings file the run
- * recorded is offered instead, and it carries the references with it.
+ * The evidence reference a finding cites is not shown when the findings file is downloadable:
+ * that reference names a file inside the harness sandbox, and the file the run recorded carries
+ * the references with it. When no downloadable file exists (storage off, or a failed upload),
+ * the reference is shown inline instead, because it is then the only citation a reviewer has.
  */
 export function VerdictBody({
   summary,
@@ -72,6 +73,11 @@ export function VerdictBody({
                 <Badge variant={SEVERITY_VARIANT[finding.severity]}>{finding.severity}</Badge>
               </span>
               <FindingDescription description={finding.description} />
+              {findingsArtifactId ? null : (
+                <span className="break-all font-mono text-meta text-muted-foreground">
+                  Evidence: {finding.evidenceRef}
+                </span>
+              )}
             </div>
           ))}
 

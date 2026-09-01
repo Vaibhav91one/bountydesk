@@ -80,10 +80,12 @@ export async function buildTranscript(reportId: string, verdictId: string): Prom
 /**
  * The findings as a file, in the order the agent drafted them.
  *
- * Built from the stored draft, which is the same allowlisted text the case file renders, so this
- * carries nothing the screen does not. Deliberately not built from the live tool-call detail:
- * those arguments and results hold capability tokens, grant tokens and canary values, and
- * lib/reports/tool-calls.ts keeps them out of every durable table on purpose.
+ * Built from the stored draft: the same allowlisted fields the case file renders, plus each
+ * finding's evidence reference, which the screen omits (it names a path inside the harness
+ * sandbox) and this file keeps, because the reference is the citation a reviewer downloads the
+ * file to get. Deliberately not built from the live tool-call detail: those arguments and
+ * results hold capability tokens, grant tokens and canary values, and lib/reports/tool-calls.ts
+ * keeps them out of every durable table on purpose.
  */
 export function buildFindingsEvidence(
   reportId: string,

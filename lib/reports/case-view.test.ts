@@ -274,6 +274,32 @@ test("every field crossing the wire survives JSON", () => {
   assert.equal(view.verdict?.payloadArtifactId, "a1");
 });
 
+test("a findings file is offered only once its bytes are stored", () => {
+  const build = (stored: boolean) =>
+    caseLiveView(
+      caseFile({
+        state: "AWAITING_APPROVAL",
+        verdict: verdict(),
+        artifacts: [
+          {
+            id: "f1",
+            kind: "findings-evidence",
+            sha256: "beef",
+            bytes: 10,
+            contentType: "text/markdown",
+            stored,
+            createdAt: AT,
+          },
+        ],
+      }),
+    );
+
+  // A row with bytes is a real download; one without (storage off, or a failed upload) would
+  // only error, so the views fall back to the inline reference instead.
+  assert.equal(build(true).verdict?.findingsArtifactId, "f1");
+  assert.equal(build(false).verdict?.findingsArtifactId, null);
+});
+
 function handoff(overrides: Partial<NonNullable<CaseFile["handoff"]>> = {}) {
   return { state: "PENDING", attempts: 0, maxAttempts: 8, lastError: null, ...overrides };
 }
