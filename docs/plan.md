@@ -1,9 +1,8 @@
 # BountyDesk — Phase-by-phase MVP plan
 
 This plan implements the frozen scope in [decisions.md](./decisions.md). A phase is complete only
-when its exit criteria pass. Phases 0 to 6 were the hackathon MVP, whose time-box closed on
-2026-09-01; the work held out of it is in "Backlog, now active work" at the end, no longer
-deferred.
+when its exit criteria pass. Phases 0 to 6 were the hackathon MVP, whose window is now closed;
+the "Backlog" section at the end says which held-out work that opens up and which stays deferred.
 
 ## Phase 0: Repository and review trail
 
@@ -198,18 +197,31 @@ worker code end to end; the Zerops hosting of that same worker is still the open
 **Exit:** lint/build/tests and accessibility/overflow checks pass; the demo works after reconnect and
 has all three backup paths prepared.
 
-## Backlog, now active work
+## Backlog
 
-Held out of the hackathon MVP window, which closed on 2026-09-01. These are open work now, not
-deferred: build them as tasks reach them. The safety invariants that read like scheduling below
-are not, and they still hold. Email and upload record no `DeliveryAttempt` and reach no
-`DELIVERED` until their outbound contracts exist, and no verdict ships without human approval,
-whatever the calendar says.
+The hackathon MVP window is closed, so the features held out of it for time are open work now.
+That change is only about the ones held for time. Two other groups in this list are not: the
+production deferrals recorded in [decisions.md](./decisions.md)'s "Deferred (real product)" are
+scope decisions, not time, and stay deferred there; and the permanent non-goals are never
+"active" at all, because they are the safety gates this whole design exists to keep.
 
-- Reporter reply/resume (`AWAITING_REPORTER`).
+Now active, held out of the MVP window for time:
+
+- Reporter reply/resume (`AWAITING_REPORTER`), once reporter-reply correlation ships.
+- Outbound delivery adapters for email and upload. Building them means their verified-recipient
+  identity and transport-receipt contract first: until that exists, the app records no
+  `DeliveryAttempt` and moves no such report to `DELIVERED`. That gate is a contract, not a date,
+  so it holds while this item is active.
+- The reviewer-to-agent conversation behind the parked "Chat with Agent Bounty" control, and
+  manifest-driven multi-target onboarding (see AGENTS.md's backlog section).
+- The private-repository policy (`POLICY_REFUSED`).
+
+Still deferred, by scope rather than time (unchanged from decisions.md):
+
 - Live-target and black-box reproduction for scope that cannot be self-hosted.
-- Outbound delivery adapters for email and upload, including verified recipient identity and a
-  transport receipt. Until those contracts exist, the app must not record a `DeliveryAttempt`
-  or move one of these reports to `DELIVERED`.
 - Production multi-tenancy/RBAC, encrypted tenant secret storage and microVM isolation rollout.
-- Automatic semantic-duplicate closure, automated severity, or any verdict without human approval.
+
+Never active, because they are the invariants, not deferred work:
+
+- Any verdict without human approval, automatic semantic-duplicate closure, or automated
+  severity. Human approval of the exact bytes is the gate, and no phase turns it off.

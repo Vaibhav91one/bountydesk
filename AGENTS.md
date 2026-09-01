@@ -287,15 +287,17 @@ summary is ambiguous, defer to those records and ask rather than guess.
 
 ## Backlog, now active work
 
-The hackathon MVP time-box closed on 2026-09-01. The items below were held out of that window,
-and they are open work now, not deferred. Build them when a task reaches them rather than
-pointing at a freeze.
+The hackathon MVP window is closed. The items below were held out of it for time, and they are
+open work now, not deferred: build them when a task reaches them rather than pointing at a freeze.
+This is only about the ones held for time. The production deferrals in `docs/decisions.md`'s
+"Deferred (real product)" (black-box and live-target reproduction, multi-tenancy and RBAC) are
+scope decisions, not the time-box, and stay deferred there.
 
-What the end of the time-box does not change is the safety invariants, which were never about
-the schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until
-their verified-recipient and transport-receipt contracts exist. `AWAITING_REPORTER` still is not
-emitted until reporter-reply correlation ships. Every verdict is still human-approved. Those hold
-whether or not there is time on the clock.
+What the end of the window does not change is the safety invariants, which were never about the
+schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until their
+verified-recipient and transport-receipt contracts exist. `AWAITING_REPORTER` still is not emitted
+until reporter-reply correlation ships. Every verdict is still human-approved, which no phase ever
+turns off. Those hold whether or not there is time on the clock.
 
 The parked surfaces, so a plan knows where they live:
 
