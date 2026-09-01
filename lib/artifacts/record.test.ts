@@ -32,13 +32,33 @@ after(async () => {
 
 let seq = 0;
 
-async function seedVerdictWithEvents(findings?: unknown[]) {
+async function seedVerdictWithEvents(findings?: unknown[], dockerfileText?: string) {
   seq += 1;
   const n = seq;
 
+  let targetProfileId: string | null = null;
+  if (dockerfileText !== undefined) {
+    const [target] = await dbm.db
+      .insert(dbm.targetProfile)
+      .values({
+        name: `target-${n}`,
+        imageName: `ghcr.io/acme/t${n}`,
+        imageDigest: `sha256:${"a".repeat(64)}`,
+        dockerfileText,
+      })
+      .returning({ id: dbm.targetProfile.id });
+    targetProfileId = target.id;
+  }
+
   const [r] = await dbm.db
     .insert(dbm.report)
-    .values({ channel: "github", sourceRef: `github:9:issue:${n}`, title: `r${n}`, body: "b" })
+    .values({
+      channel: "github",
+      sourceRef: `github:9:issue:${n}`,
+      title: `r${n}`,
+      body: "b",
+      ...(targetProfileId ? { targetProfileId } : {}),
+    })
     .returning({ id: dbm.report.id });
 
   const [v] = await dbm.db
@@ -217,4 +237,30 @@ test("the findings file carries each finding and the reference it cited", () => 
   assert.match(text, /Severity: critical/);
   assert.match(text, /1\) GET \/rest\/products\/search\?q=apple/);
   assert.match(text, /Evidence reference: \/opt\/tf\/tool-results\/sqli_response\.json/);
+});
+
+test("a report bound to an onboarded target records the Dockerfile as an artifact", async () => {
+  const { reportId, verdictId } = await seedVerdictWithEvents(undefined, "FROM node:20\nCMD node server.js");
+
+  await record.recordVerdictArtifacts(reportId, verdictId);
+
+  const rows = await dbm.db
+    .select()
+    .from(dbm.artifact)
+    .where(dbm.eq(dbm.artifact.reportId, reportId));
+  const dockerfile = rows.find((row) => row.kind === "target-dockerfile");
+  assert.ok(dockerfile, "a bound onboarded target records its Dockerfile");
+  assert.equal(dockerfile.contentType, "text/markdown");
+});
+
+test("a target-less report records no Dockerfile artifact", async () => {
+  const { reportId, verdictId } = await seedVerdictWithEvents();
+
+  await record.recordVerdictArtifacts(reportId, verdictId);
+
+  const rows = await dbm.db
+    .select()
+    .from(dbm.artifact)
+    .where(dbm.eq(dbm.artifact.reportId, reportId));
+  assert.equal(rows.some((row) => row.kind === "target-dockerfile"), false);
 });

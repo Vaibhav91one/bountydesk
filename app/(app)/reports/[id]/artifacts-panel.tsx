@@ -24,6 +24,8 @@ import { ArtifactDownload } from "./artifact-download";
 const KIND_LABEL: Record<string, string> = {
   "investigation-transcript": "Investigation transcript",
   "verdict-payload": "Verdict payload",
+  "findings-evidence": "Findings",
+  "target-dockerfile": "Target Dockerfile",
 };
 
 function formatBytes(bytes: number): string {

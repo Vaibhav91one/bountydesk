@@ -8,6 +8,7 @@ import {
   eq,
   report,
   REPORT_TERMINAL_STATES,
+  targetProfile,
   verdict,
   type Executor,
 } from "@/lib/db";
@@ -54,17 +55,32 @@ function renderFinding(finding: Finding, index: number): string {
  * words never reach the outbound comment unrendered, which matters doubly here since the
  * agent may have absorbed prompt-injection content while probing an untrusted target.
  */
-export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft): string {
+export type TargetRef = { imageName: string; imageDigest: string };
+
+export function buildAgentDraftedPayload(
+  verdictId: string,
+  draft: VerdictDraft,
+  targetRef?: TargetRef | null,
+): string {
   const findingsBlock =
     draft.findings.length > 0
       ? `\n\n## Findings\n\n${draft.findings.map(renderFinding).join("\n\n")}`
       : "";
 
+  // The target the report was reproduced against, named by its durable digest, when the target
+  // came through the onboarding pipeline. The digest is stable and checkable; a signed download
+  // URL would expire and, being non-deterministic, would also change the content hash the human
+  // approved. This line is part of the hashed, approved bytes, so a reviewer sees it before
+  // signing and the delivery worker posts it verbatim.
+  const targetBlock = targetRef
+    ? `\n\n## Target image\n\n${targetRef.imageName}@${targetRef.imageDigest}`
+    : "";
+
   // The outcome heads the comment on its own line, in the outbound comment's own words, rather
   // than left for the free-form summary to convey: a draft's `summary` is validated only for
   // length, not for agreeing with its own `outcome`, so the approved text must state the
   // persisted outcome plainly instead of relying on the agent's prose to get it right.
-  const body = `## Outcome: ${draft.outcome}\n\n## Summary\n\n${draft.summary}${findingsBlock}`;
+  const body = `## Outcome: ${draft.outcome}\n\n## Summary\n\n${draft.summary}${findingsBlock}${targetBlock}`;
   return `${body}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
 }
 
@@ -199,7 +215,20 @@ async function persistAgentDraftedVerdict(
   const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
   if (!allowed.ok) return allowed;
 
-  const payload = buildAgentDraftedPayload(verdictId, draft);
+  // The image the report was reproduced against, if it has a bound target with a digest. Cited
+  // in the approved comment; absent for a target-less report, which simply gets no target line.
+  const [targetRow] = await tx
+    .select({ imageName: targetProfile.imageName, imageDigest: targetProfile.imageDigest })
+    .from(report)
+    .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  const targetRef =
+    targetRow?.imageName && targetRow.imageDigest
+      ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
+      : null;
+
+  const payload = buildAgentDraftedPayload(verdictId, draft, targetRef);
   const row = await ensureInitialVerdict(
     {
       id: verdictId,

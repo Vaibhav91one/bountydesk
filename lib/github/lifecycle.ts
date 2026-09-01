@@ -10,6 +10,7 @@ import {
   sql,
   type Executor,
 } from "@/lib/db";
+import { enqueue as enqueueOnboarding } from "@/lib/build-onboarding/queue";
 
 /**
  * The App-lifecycle side of intake: who installed us, on which repositories, and whether
@@ -134,6 +135,36 @@ async function grantRepositories(
         updatedAt: new Date(),
       },
     });
+
+  // A repository granted but not yet bound to a target cannot be reproduced against
+  // (activeRepository requires target_profile_id). Kick off onboarding for exactly those, in the
+  // same transaction so a redelivered webhook does not double it (enqueue is idempotent on
+  // repo_id anyway). A repo that already has a target is skipped: rebuilding a live target is a
+  // separate, human-initiated rotation, not something a connect webhook should trigger.
+  const unbound = await tx
+    .select({ repoId: connectedRepository.repoId, fullName: connectedRepository.fullName })
+    .from(connectedRepository)
+    .where(
+      and(
+        eq(connectedRepository.installationId, installationRowId),
+        inArray(
+          connectedRepository.repoId,
+          repositories.map((repo) => repo.id),
+        ),
+        isNull(connectedRepository.targetProfileId),
+      ),
+    );
+
+  for (const repo of unbound) {
+    await enqueueOnboarding(
+      {
+        repoId: repo.repoId,
+        repoFullName: repo.fullName,
+        sourceRef: `https://github.com/${repo.fullName}.git`,
+      },
+      tx,
+    );
+  }
 }
 
 /**

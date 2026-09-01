@@ -26,6 +26,9 @@ import { submitApprovalOnce } from "@/lib/approval-submission/worker";
 import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
+import { onboardOnce } from "@/lib/build-onboarding/worker";
+import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
+import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -47,6 +50,13 @@ const STALL_BUDGET_MS = 90_000;
  * ends. Restarting the worker mid-provision would throw that away and start it again.
  */
 const JOBS_STALL_BUDGET_MS = 300_000;
+
+/**
+ * The build-onboarding loop spends a single claim building an image inside a sandbox, which can
+ * run up to the build sandbox's ttl. Its stall budget clears that so /healthz does not read a
+ * legitimate long build as a wedged loop.
+ */
+const BUILD_ONBOARDING_STALL_BUDGET_MS = 1_920_000;
 
 /**
  * How long a loop may fail every single iteration before /healthz calls it stale. A loop erroring
@@ -135,6 +145,8 @@ async function main(): Promise<void> {
   const agentSessionsOwner = `daemon-agent-sessions-${randomUUID()}`;
   const approvalSubmissionOwner = `daemon-approval-submission-${randomUUID()}`;
   const deliveryOwner = `daemon-delivery-${randomUUID()}`;
+  const onboardingOwner = `daemon-build-onboarding-${randomUUID()}`;
+  const buildDriver = createDaytonaBuildDriver();
 
   const queues: QueueSpec[] = [
     {
@@ -169,6 +181,17 @@ async function main(): Promise<void> {
         deliverOnce(deliveryOwner, { leaseSeconds: LEASE_SECONDS, signal }),
       sweepOnce: sweepDeliveries,
     },
+    {
+      name: "build-onboarding",
+      claimOnce: (signal) =>
+        onboardOnce(onboardingOwner, {
+          buildDriver,
+          agentClient: trueForgeClient,
+          leaseSeconds: LEASE_SECONDS,
+          signal,
+        }),
+      sweepOnce: sweepOnboarding,
+    },
   ];
 
   // runDaemon runs a claim loop and a sweeper per queue, and /healthz watches all of them, so
@@ -177,7 +200,10 @@ async function main(): Promise<void> {
     names: queues.flatMap((queue) => [queue.name, `${queue.name}-sweep`]),
     startedAt: Date.now(),
     defaultBudgetMs: STALL_BUDGET_MS,
-    budgets: { jobs: JOBS_STALL_BUDGET_MS },
+    budgets: {
+      jobs: JOBS_STALL_BUDGET_MS,
+      "build-onboarding": BUILD_ONBOARDING_STALL_BUDGET_MS,
+    },
     failureBudgetMs: FAILING_BUDGET_MS,
   });
   startHealthServer(workerHealthPort(), heartbeat, controller.signal);

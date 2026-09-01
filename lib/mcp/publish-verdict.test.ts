@@ -622,3 +622,28 @@ test("buildAgentDraftedPayload states the outcome on its own line, independent o
 
   assert.ok(payload.startsWith("## Outcome: REPRODUCED"));
 });
+
+test("buildAgentDraftedPayload cites the target image digest only when a target ref is given", async () => {
+  const draft = {
+    outcome: "REPRODUCED" as const,
+    summary: "reproduced the injection",
+    findings: [],
+  };
+  const digest = `sha256:${"a".repeat(64)}`;
+
+  const withTarget = publishVerdictModule.buildAgentDraftedPayload("v1", draft, {
+    imageName: "ghcr.io/acme/widget",
+    imageDigest: digest,
+  });
+  assert.match(withTarget, /## Target image/);
+  assert.match(withTarget, new RegExp(`ghcr\\.io/acme/widget@${digest}`));
+
+  const withoutTarget = publishVerdictModule.buildAgentDraftedPayload("v1", draft);
+  assert.equal(withoutTarget.includes("## Target image"), false);
+
+  // The marker is still last, and appears exactly once, in both.
+  for (const body of [withTarget, withoutTarget]) {
+    assert.equal(body.split("<!-- bountydesk-delivery:v1 -->").length, 2);
+    assert.ok(body.trimEnd().endsWith("<!-- bountydesk-delivery:v1 -->"));
+  }
+});

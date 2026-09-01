@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { artifact, db, eq, sessionEvent, verdict } from "@/lib/db";
+import { artifact, db, eq, report, sessionEvent, targetProfile, verdict } from "@/lib/db";
 import type { Finding } from "@/lib/mcp/verdict-draft";
 import { verdictFindings } from "@/lib/reports/case-facts";
 import { uploadArtifact } from "@/lib/storage/artifacts";
@@ -31,7 +31,11 @@ import { uploadArtifact } from "@/lib/storage/artifacts";
 
 const CONTENT_TYPE = "text/markdown";
 
-type ArtifactKind = "investigation-transcript" | "verdict-payload" | "findings-evidence";
+type ArtifactKind =
+  | "investigation-transcript"
+  | "verdict-payload"
+  | "findings-evidence"
+  | "target-dockerfile";
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -169,6 +173,20 @@ export async function recordVerdictArtifacts(reportId: string, verdictId: string
         "findings-evidence",
         buildFindingsEvidence(reportId, verdictId, findings),
       );
+    }
+
+    // The Dockerfile the target was built from, when the target came through onboarding. A
+    // target has no report of its own, so the durable file is attached to each report drafted
+    // against it, keyed by this verdict. Null for the hand-built demo target, which never went
+    // through the pipeline and has no stored Dockerfile.
+    const [targetRow] = await db
+      .select({ dockerfileText: targetProfile.dockerfileText })
+      .from(report)
+      .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+      .where(eq(report.id, reportId))
+      .limit(1);
+    if (targetRow?.dockerfileText) {
+      await recordOne(reportId, verdictId, "target-dockerfile", targetRow.dockerfileText);
     }
   } catch (error) {
     console.error(

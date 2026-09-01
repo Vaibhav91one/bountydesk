@@ -11,7 +11,9 @@ import { trueforgeApiKey, trueforgeUrl } from "@/lib/env";
  * itself via `listTurnEvents`).
  */
 export interface TrueForgeClient {
-  createSession(opts?: { signal?: AbortSignal }): Promise<{ sessionId: string }>;
+  /** `agentName` selects which registered agent runs the session, defaulting to the managed
+   *  "bountydesk" report agent. The onboarding pipeline passes the target-onboarding agent. */
+  createSession(opts?: { signal?: AbortSignal; agentName?: string }): Promise<{ sessionId: string }>;
   deleteSession(sessionId: string, opts?: { signal?: AbortSignal }): Promise<void>;
   /** `createTurn` starts a turn and returns immediately; the SDK documents it as generally
    * `running` while execution continues in the background. Nothing about a fresh turn implies
@@ -285,7 +287,7 @@ export function createTrueForgeClient(opts: { fetchImpl?: typeof fetch } = {}): 
   return {
     async createSession(requestOpts) {
       const res = await client.sessions.create(
-        { agent: { name: "bountydesk" } },
+        { agent: { name: requestOpts?.agentName ?? "bountydesk" } },
         { abortSignal: requestOpts?.signal },
       );
       return { sessionId: res.data.id };
