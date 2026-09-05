@@ -34,6 +34,14 @@ zerops:
         TRUEFORGE_URL: http://trueforge:8791
         DATABASE_POOL_MAX: "4"
         WORKER_HEALTH_PORT: "8080"
+        # Target onboarding (lib/build-onboarding). Non-secret config only; DAYTONA_API_KEY and
+        # GHCR_PUSH_TOKEN are set as service secrets, not here. BUILD_BASE_SNAPSHOT is the
+        # DinD-capable Daytona snapshot the build sandbox boots from; BUILD_EGRESS_ALLOWLIST is
+        # the only network a build may reach (git host, image registries and their blob CDNs),
+        # verified live to be the set a docker build actually pulls from.
+        BUILD_BASE_SNAPSHOT: bountydesk-build-dind
+        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org"
+        GHCR_NAMESPACE: ghcr.io/vaibhav91one
       start: npm run worker:daemon
       healthCheck:
         httpGet:
