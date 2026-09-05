@@ -10,6 +10,7 @@ import {
   advance,
   claim,
   fail,
+  releaseUnstarted,
   renew,
   LeaseLostError,
   type OnboardingLease,
@@ -98,7 +99,15 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
     }
   } catch (error) {
     if (error instanceof LeaseLostError) return lease.id;
-    if (deps.signal?.aborted) return lease.id;
+    // Shutdown, not a real failure: hand the claim back so the row is retryable at once rather
+    // than held until the lease expires and the sweeper reclaims it, matching runOnce's abort
+    // path in lib/jobs/worker.ts. A lost lease here means another worker already has it.
+    if (deps.signal?.aborted) {
+      await releaseUnstarted(lease).catch((e) => {
+        if (!(e instanceof LeaseLostError)) throw e;
+      });
+      return lease.id;
+    }
     await fail(lease, error instanceof Error ? error.message : String(error)).catch((e) => {
       if (!(e instanceof LeaseLostError)) throw e;
     });

@@ -44,6 +44,9 @@ type InstallationPayload = {
 type RepositoryPayload = {
   id: number;
   full_name: string;
+  /** GitHub sends this on every repository object in installation webhooks. Absent is treated
+   *  as private (fail closed): onboarding only builds a repository it can clone anonymously. */
+  private?: boolean;
 };
 
 type LifecyclePayload = {
@@ -141,16 +144,22 @@ async function grantRepositories(
   // same transaction so a redelivered webhook does not double it (enqueue is idempotent on
   // repo_id anyway). A repo that already has a target is skipped: rebuilding a live target is a
   // separate, human-initiated rotation, not something a connect webhook should trigger.
+  //
+  // Only public repositories: the App holds no Contents permission, so a private repo cannot be
+  // cloned anonymously and its build would only ever fail. The private-repository policy refuses
+  // reproduction until Contents is deliberately granted (see AGENTS.md), which is not built, so a
+  // private repo is left unbound rather than queued for a build that cannot succeed. A repo whose
+  // payload omits `private` is treated as private and skipped, failing closed.
+  const publicRepoIds = repositories.filter((repo) => repo.private === false).map((repo) => repo.id);
+  if (publicRepoIds.length === 0) return;
+
   const unbound = await tx
     .select({ repoId: connectedRepository.repoId, fullName: connectedRepository.fullName })
     .from(connectedRepository)
     .where(
       and(
         eq(connectedRepository.installationId, installationRowId),
-        inArray(
-          connectedRepository.repoId,
-          repositories.map((repo) => repo.id),
-        ),
+        inArray(connectedRepository.repoId, publicRepoIds),
         isNull(connectedRepository.targetProfileId),
       ),
     );

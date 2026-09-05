@@ -88,7 +88,31 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
       repoFullName: input.repoFullName,
       sourceRef: input.sourceRef,
     })
-    .onConflictDoNothing({ target: targetOnboarding.repoId });
+    .onConflictDoUpdate({
+      target: targetOnboarding.repoId,
+      // A FAILED onboarding is requeued from the start with the corrected source, its build
+      // outputs and attempt budget cleared. Any other existing state (a build in flight, a
+      // proposal awaiting a human, a configured target) is left exactly as it is: the setWhere
+      // below makes the update a no-op for those, so this stays idempotent for work in progress.
+      set: {
+        state: "PENDING_BUILD",
+        repoFullName: input.repoFullName,
+        sourceRef: input.sourceRef,
+        imageName: null,
+        imageDigest: null,
+        snapshotId: null,
+        buildMarker: null,
+        dockerfileText: null,
+        proposedManifest: null,
+        approvedBy: null,
+        approvedAt: null,
+        attempts: 0,
+        nextAttemptAt: new Date(),
+        lastError: null,
+        updatedAt: new Date(),
+      },
+      setWhere: eq(targetOnboarding.state, "FAILED"),
+    });
 }
 
 /** Take exactly one claimable row, atomically. Same shape as approval_submission's claim. */
@@ -174,6 +198,25 @@ function heldBy(lease: OnboardingLease) {
     eq(targetOnboarding.fence, lease.fence),
     sql`${targetOnboarding.leaseExpiresAt} > now()`,
   );
+}
+
+/**
+ * Return a claim the worker could not run (the process is shutting down) without consuming its
+ * attempt budget, and drop the lease so the row is immediately claimable again. Same shape as
+ * lib/approval-submission/queue.ts's releaseUnstarted.
+ */
+export async function releaseUnstarted(lease: OnboardingLease): Promise<void> {
+  const updated = await db
+    .update(targetOnboarding)
+    .set({
+      attempts: sql`greatest(${targetOnboarding.attempts} - 1, 0)`,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: targetOnboarding.id });
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
 /** Extend a held lease without changing its owner or fence. */

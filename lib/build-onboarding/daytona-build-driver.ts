@@ -53,8 +53,13 @@ export function createDaytonaBuildDriver(): BuildDriver {
       const ghcrNamespace = requireEnv("GHCR_NAMESPACE").replace(/\/+$/, "");
       const pushToken = requireSecret("GHCR_PUSH_TOKEN");
 
-      const imageName = `${ghcrNamespace}/${repoSlug(input.repoFullName)}`;
+      const slug = repoSlug(input.repoFullName);
+      const imageName = `${ghcrNamespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
+      // The clone target is derived from the server-held repository name, not from any
+      // caller-supplied ref: nothing an operator or another channel passes can redirect the
+      // clone to a different repository than the one this onboarding row is for.
+      const cloneUrl = `https://github.com/${input.repoFullName}.git`;
 
       const sandbox = await createBuildSandbox(
         {
@@ -69,7 +74,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
       );
 
       try {
-        await run(sandbox, `git clone --depth 1 ${shellArg(input.sourceRef)} /work/source`);
+        await run(sandbox, `git clone --depth 1 ${shellArg(cloneUrl)} /work/source`);
         // The resolved commit is the build marker the reproduction path re-verifies, so it is
         // both baked into the image and returned, and the two must be the same value.
         const buildMarker = (
@@ -85,12 +90,20 @@ export function createDaytonaBuildDriver(): BuildDriver {
           await run(sandbox, "cat /work/source/Dockerfile")
         ).result;
 
-        await run(
-          sandbox,
-          `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`,
-        );
+        // Build first, with no credential in the sandbox: the Dockerfile is the customer's
+        // untrusted code and must not run alongside a reusable push token.
         await run(sandbox, `cd /work/source && docker build -t ${imageRef} .`);
-        await run(sandbox, `docker push ${imageRef}`);
+        // Only now introduce the push credential, use it, and remove it before anything else
+        // runs, so it is present for the push and nothing more.
+        try {
+          await run(
+            sandbox,
+            `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`,
+          );
+          await run(sandbox, `docker push ${imageRef}`);
+        } finally {
+          await run(sandbox, "docker logout ghcr.io").catch(() => undefined);
+        }
         const digest = (
           await run(
             sandbox,
@@ -130,10 +143,13 @@ async function run(sandbox: Sandbox, command: string): Promise<ExecResult> {
   return result;
 }
 
-/** owner/name -> name, the last path segment, lowercased for a registry path. */
-function repoSlug(repoFullName: string): string {
-  const name = repoFullName.split("/").pop() ?? repoFullName;
-  return name.toLowerCase().replace(/[^a-z0-9._-]/g, "-");
+/**
+ * owner/name -> a registry-safe, collision-free slug, lowercased. The whole owner/name is kept,
+ * not just the final segment: alice/api and bob/api are different targets and must not share an
+ * image tag or a snapshot name.
+ */
+export function repoSlug(repoFullName: string): string {
+  return repoFullName.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 /** Single-quote a value for a shell command line. */

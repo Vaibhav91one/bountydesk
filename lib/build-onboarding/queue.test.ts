@@ -142,3 +142,37 @@ test("sweepExpiredLeases releases a row whose worker died mid-claim", async () =
   const reclaimed = await queue.claim("w-after-sweep", 60);
   assert.ok(reclaimed);
 });
+
+test("enqueue requeues a FAILED row but leaves an in-progress one alone", async () => {
+  const repoId = 800_200;
+  await queue.enqueue({ repoId, repoFullName: "acme/r", sourceRef: "https://x/r.git" });
+
+  // A FAILED row is reset to PENDING_BUILD with the corrected source.
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED", imageDigest: `sha256:${"a".repeat(64)}`, lastError: "boom" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  await queue.enqueue({ repoId, repoFullName: "acme/r", sourceRef: "https://x/r-fixed.git" });
+
+  const [row] = await dbm.db
+    .select({ state: dbm.targetOnboarding.state, sourceRef: dbm.targetOnboarding.sourceRef, imageDigest: dbm.targetOnboarding.imageDigest, lastError: dbm.targetOnboarding.lastError })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal(row.state, "PENDING_BUILD");
+  assert.equal(row.sourceRef, "https://x/r-fixed.git");
+  assert.equal(row.imageDigest, null);
+  assert.equal(row.lastError, null);
+
+  // A row mid-flight is not disturbed by a duplicate enqueue.
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "AWAITING_APPROVAL" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  await queue.enqueue({ repoId, repoFullName: "acme/r", sourceRef: "https://x/should-be-ignored.git" });
+  const [inFlight] = await dbm.db
+    .select({ state: dbm.targetOnboarding.state, sourceRef: dbm.targetOnboarding.sourceRef })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal(inFlight.state, "AWAITING_APPROVAL");
+  assert.equal(inFlight.sourceRef, "https://x/r-fixed.git");
+});
