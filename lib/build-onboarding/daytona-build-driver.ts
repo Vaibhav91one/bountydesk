@@ -90,6 +90,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
           await run(sandbox, "cat /work/source/Dockerfile")
         ).result;
 
+        await startDockerDaemon(sandbox);
         // Build first, with no credential in the sandbox: the Dockerfile is the customer's
         // untrusted code and must not run alongside a reusable push token.
         await run(sandbox, `cd /work/source && docker build -t ${imageRef} .`);
@@ -136,11 +137,26 @@ export function createDaytonaBuildDriver(): BuildDriver {
 /** Run a build command and fail loudly on a non-zero exit: a silent build failure must never
  *  reach snapshot registration. */
 async function run(sandbox: Sandbox, command: string): Promise<ExecResult> {
-  const result = await execute(sandbox, command, BUILD_TIMEOUT_S);
+  // Through a shell: the build steps use `cd`, `&&` and pipes, which Daytona's execute does not
+  // provide on its own (it runs the string, not a login shell).
+  const result = await execute(sandbox, `sh -lc ${shellArg(command)}`, BUILD_TIMEOUT_S);
   if (result.exitCode !== 0) {
     throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(0, 400)}`);
   }
   return result;
+}
+
+/**
+ * Start the Docker daemon and wait for it to answer.
+ *
+ * The DinD base image ships dockerd but Daytona runs its own init, so the daemon is not up until
+ * we start it. Every docker command below depends on this having run first.
+ */
+async function startDockerDaemon(sandbox: Sandbox): Promise<void> {
+  await run(
+    sandbox,
+    "dockerd >/tmp/dockerd.log 2>&1 & for i in $(seq 1 30); do docker version >/dev/null 2>&1 && exit 0; sleep 1; done; echo 'docker daemon did not start' >&2; cat /tmp/dockerd.log >&2; exit 1",
+  );
 }
 
 /**

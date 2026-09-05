@@ -500,7 +500,10 @@ export async function createBuildSandbox(
     snapshot: snapshot.id,
     ttlMinutes: spec.ttlMinutes,
     networkBlockAll: false,
-    networkAllowList: hosts.join(","),
+    // Daytona's domainAllowList restricts egress to these hostnames; networkAllowList is for
+    // CIDR ranges and would reject a hostname. The build needs names (a git host, a registry),
+    // so this is the domain field.
+    domainAllowList: hosts.join(","),
     public: false,
     autoDeleteInterval: 0,
     labels: { ...spec.labels, [PURPOSE_LABEL]: BUILD_PURPOSE },
