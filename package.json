@@ -17,6 +17,8 @@
     "seed:target": "node --env-file-if-exists=.env.local --import tsx scripts/seed-target.ts",
     "seed:reports": "node --env-file-if-exists=.env.local --import tsx scripts/seed-reports.ts",
     "rotate:target": "node --env-file-if-exists=.env.local --import tsx scripts/rotate-target.ts",
+    "enqueue:onboarding": "node --env-file-if-exists=.env.local --import tsx scripts/enqueue-onboarding.ts",
+    "approve:onboarding": "node --env-file-if-exists=.env.local --import tsx scripts/approve-onboarding.ts",
     "quarantine:stale-target": "node --env-file-if-exists=.env.local --import tsx scripts/quarantine-stale-target.ts",
     "spike:daytona": "node --env-file-if-exists=.env.local --import tsx scripts/spike-daytona.ts",
     "probe:daytona-sandbox": "node --env-file-if-exists=.env.local --import tsx scripts/probe-daytona-sandbox.ts",
@@ -25,12 +27,15 @@
     "worker:jobs": "node --env-file-if-exists=.env.local --import tsx scripts/run-worker-once.ts",
     "worker:delivery": "node --env-file-if-exists=.env.local --import tsx scripts/run-delivery-once.ts",
     "worker:daemon": "node --env-file-if-exists=.env.local --import tsx scripts/run-worker-daemon.ts",
-    "test": "node --env-file-if-exists=.env.local --import tsx --experimental-test-module-mocks --test \"lib/**/*.test.ts\" \"app/**/*.test.ts\""
+    "worker:healthcheck": "node --env-file-if-exists=.env.local scripts/worker-healthcheck.mjs",
+    "trueforge:proxy": "node --env-file-if-exists=.env.local scripts/run-trueforge-proxy.mjs",
+    "test": "node --env-file-if-exists=.env.local --import tsx --experimental-test-module-mocks --test \"lib/**/*.test.ts\" \"app/**/*.test.ts\" \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@tanstack/react-query": "^5.102.8",
     "@truefoundry/trueforge-sdk": "0.1.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before, mock } from "node:test";
 
+import { TrueForgeApi } from "@truefoundry/trueforge-sdk";
+
 import type {
   ObservedToolCall,
   PendingToolCall,
@@ -74,6 +76,7 @@ async function seedSession(
       | "REPRODUCING"
       | "ANALYSIS_ONLY"
       | "AWAITING_APPROVAL"
+      | "DELIVERED"
       | "CANCELLED";
     sandboxId?: string;
   } = {},
@@ -562,9 +565,110 @@ test("a pending call cannot attach approval state to a terminal report", async (
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "CANCELLED");
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "ERROR");
+  // The poll ends the session before it ever looks at the pending call: a finished report has
+  // nothing to approve. The in-transaction check in handleVerifiedPendingCall stays as the
+  // backstop for a report that goes terminal after this point in the same poll.
+  assert.equal(row.turnStatus, "CANCELLED");
   assert.equal(row.pendingThreadId, null);
   assert.match(row.lastError ?? "", /report is CANCELLED/);
+});
+
+test("a session whose report already shipped stops polling instead of spinning forever", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  const fixture = await seedSession({ reportState: "DELIVERED", sandboxId: "sandbox-shipped" });
+  const client = fakeClient(() => {
+    throw new Error("pollOnce must not ask TrueForge about a delivered report");
+  });
+
+  assert.equal(await poller.pollOnce("w-delivered", { client }), fixture.agentSessionId);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "CANCELLED");
+  assert.match(row.lastError ?? "", /report is DELIVERED/);
+  assert.deepEqual(deleteSandboxCalls, ["sandbox-shipped"]);
+  // CANCELLED is terminal for claim(), so the row is out of the queue for good rather than
+  // coming back every 30 seconds.
+  assert.equal(await queue.claim("w-delivered-again", 60), null);
+});
+
+test("a TrueForge call that never answers fails the claim instead of wedging the loop", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client: TrueForgeClient = {
+    ...fakeClient({ status: "running" }),
+    getTurn: () => new Promise<TurnSnapshot>(() => {}),
+  };
+
+  await assert.rejects(
+    poller.pollOnce("w-hung", { client, requestDeadlineMs: 20 }),
+    (error: unknown) => error instanceof Error && /timed? ?out|abort/i.test(error.message),
+  );
+
+  // The lease is left to expire for the sweeper, exactly as any other failed poll would, and
+  // the turn status is untouched: a call that never answered says nothing about the turn.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "RUNNING");
+});
+
+test("each TrueForge call gets the full deadline, not what the one before it left", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const slow = <T,>(value: T) =>
+    new Promise<T>((resolve) => setTimeout(() => resolve(value), 40));
+
+  const client: TrueForgeClient = {
+    ...fakeClient({ status: "running" }),
+    getTurn: () => slow({ status: "running" } as TurnSnapshot),
+    listToolCalls: () => slow({ calls: [], cursor: null }),
+  };
+
+  // Two calls of 40ms against a 60ms budget. Shared, the second starts with 20ms left and is
+  // aborted; per call, both have their own 60ms and the poll finishes normally.
+  assert.equal(
+    await poller.pollOnce("w-sequential", { client, requestDeadlineMs: 60 }),
+    fixture.agentSessionId,
+  );
+
+  // The poll ran to the end and wrote the snapshot it read, rather than aborting partway.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "INVESTIGATING");
+});
+
+test("ending a session for a finished report leaves no pending markers behind", async () => {
+  await drainOthers();
+  const fixture = await seedSession({ reportState: "DELIVERED" });
+  // A session parked on a pending publish_verdict call, which is the state a report reaches
+  // delivery from. All four move together or the check constraint refuses the row.
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: fixture.verdictId,
+      pendingApprovedContentHash: "hash-pending",
+    })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+
+  const client = fakeClient(() => {
+    throw new Error("pollOnce must not ask TrueForge about a delivered report");
+  });
+  await poller.pollOnce("w-clears-pending", { client });
+
+  // CANCELLED is terminal for claim() and the sweeper does not touch these columns, so anything
+  // left here would point at a TrueForge call nothing can ever answer.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "CANCELLED");
+  assert.deepEqual(
+    {
+      thread: row.pendingThreadId,
+      call: row.pendingToolCallId,
+      verdict: row.pendingVerdictId,
+      hash: row.pendingApprovedContentHash,
+    },
+    { thread: null, call: null, verdict: null, hash: null },
+  );
 });
 
 test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONLY", async () => {
@@ -578,6 +682,50 @@ test("an error snapshot sets ERROR and moves unfinished analysis to ANALYSIS_ONL
   assert.equal(row.turnStatus, "ERROR");
   assert.equal(row.lastError, "the model blew up");
   assert.equal(row.pendingThreadId, null);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
+test("a missing TrueForge session is marked terminal instead of retried forever", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({ status: "running" });
+  client.getTurn = async () => {
+    throw new TrueForgeApi.NotFoundError(
+      { error: { message: "Session not found: session-1" } },
+      undefined as never,
+    );
+  };
+
+  const id = await poller.pollOnce("w-missing-session", { client });
+  assert.equal(id, fixture.agentSessionId);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /TrueForge session or turn was not found/);
+  assert.equal(row.leaseOwner, null);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
+test("a 404-shaped TrueForge error is marked terminal even when it is not the SDK class", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({ status: "running" });
+  client.getTurn = async () => {
+    throw Object.assign(new Error("Session not found: session-2"), {
+      name: "NotFoundError",
+      statusCode: 404,
+    });
+  };
+
+  await poller.pollOnce("w-missing-session-plain", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /Session not found/);
 
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "ANALYSIS_ONLY");
@@ -680,7 +828,7 @@ test("pollOnce rejects a lease that cannot reach its first heartbeat", async () 
   );
 });
 
-test("a pending call carrying a full agent-drafted payload mints the verdict and moves the report", async () => {
+test("a pending ANALYSIS_ONLY draft stays in the analysis lane with a verdict to approve", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
   const client = fakeClient({
@@ -698,7 +846,7 @@ test("a pending call carrying a full agent-drafted payload mints the verdict and
   assert.equal(id, fixture.agentSessionId);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "AWAITING_APPROVAL_HARNESS");
@@ -712,7 +860,7 @@ test("a pending call carrying a full agent-drafted payload mints the verdict and
   assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
 });
 
-test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const { SYNTHESIZED_ANALYSIS_SUMMARY } = await import("@/lib/mcp/publish-verdict");
   const fixture = await seedSessionWithoutVerdict();
@@ -721,7 +869,7 @@ test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY
   await poller.pollOnce("w-synth-done", { client });
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "DONE_NO_ACTION");
@@ -739,7 +887,7 @@ test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY
   assert.equal(row.pendingVerdictId, v.id);
 });
 
-test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict awaiting approval", async () => {
+test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
   // A wrong tool name is unresolvable, which drives the refuseUnresolvablePending terminal path.
@@ -751,7 +899,7 @@ test("a refused pending call with no verdict mints a server-authored ANALYSIS_ON
   await poller.pollOnce("w-synth-refuse", { client });
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "ERROR");
@@ -796,7 +944,7 @@ test("a full draft claiming REPRODUCED for a report with no bound target never b
   assert.equal(verdicts[0].outcome, "ANALYSIS_ONLY");
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "AWAITING_APPROVAL");
+  assert.equal(rep.state, "ANALYSIS_ONLY");
 });
 
 test("a malformed draft attempt is refused rather than silently approved as the legacy shape", async () => {

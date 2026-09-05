@@ -1,6 +1,7 @@
 "use client";
 
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
@@ -18,10 +19,10 @@ const COLUMNS = [
   { key: "repository", label: "Repository", width: "1.6fr" },
   { key: "target", label: "Bound target", width: "1fr" },
   { key: "status", label: "Status", width: "1fr" },
-  // A fixed track, not a fraction. Reconfigure and Remove repository measure 111 and 156
-  // with an 8 gap, and a proportional column dropped below that at this table's width and
-  // stacked them. The table scrolls sideways rather than the buttons wrapping.
-  { key: "action", label: "", width: "20rem", align: "end" as const, controls: true },
+  // A fixed track, not a fraction: Reconfigure is the widest label the button takes and a
+  // proportional column dropped under it at this table's width and wrapped it. The table
+  // scrolls sideways instead.
+  { key: "action", label: "", width: "10rem", align: "end" as const, controls: true },
 ];
 
 /**
@@ -52,12 +53,24 @@ export type RepositoryRow = {
   /** The raw status, which is what the chips filter on. `label` is what a person reads. */
   status: RepoStatus;
   fullName: string;
+  /** The two halves of fullName, split server-side. */
+  owner: string;
+  name: string;
   label: string;
   hint: string;
   target: string | null;
   repoId: number;
   configured: boolean;
   connected: boolean;
+  reportCount: number;
+  awaitingReview: number;
+  delivered: number;
+  /** ISO strings, because these cross from a server component into a client one. */
+  lastReportAt: string | null;
+  lastSyncedAt: string;
+  /** GitHub's own repository-access screen for this installation, or null when the account
+   *  type was never recorded and the right path cannot be worked out. */
+  manageUrl: string | null;
 };
 
 /**
@@ -101,7 +114,24 @@ export function ConnectionTabs({
 }) {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string>("all");
-  const [open, setOpen] = useState<string | null>(null);
+
+  // Which repository's panel is open lives in the URL, so the panel can be linked to and
+  // reopens on a reload. Named by owner/name rather than by row id: the link is something a
+  // person pastes to a colleague, and a uuid tells them nothing about where it goes.
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const open = params.get("repo");
+
+  // replace rather than push, so Back leaves the connections page instead of stepping through
+  // every panel that was opened on the way here.
+  function showRepository(fullName: string | null) {
+    const next = new URLSearchParams(params.toString());
+    if (fullName) next.set("repo", fullName);
+    else next.delete("repo");
+    const search = next.toString();
+    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+  }
 
   const needle = query.trim().toLowerCase();
   const rows: TableRow[] = repositories.map((repo) => ({
@@ -109,7 +139,7 @@ export function ConnectionTabs({
     // The row opens the panel. FilterTable stretches this over the row from the first cell
     // and leaves the later cells above it, so Configure configures and does not also open a
     // sheet behind itself.
-    onSelect: () => setOpen(repo.id),
+    onSelect: () => showRepository(repo.fullName),
     hidden:
       !inGroup(repo.status, group) ||
       (needle.length > 0 &&
@@ -215,8 +245,8 @@ export function ConnectionTabs({
             />
 
             <RepositorySheet
-              repo={repositories.find((r) => r.id === open) ?? null}
-              onOpenChange={(next) => !next && setOpen(null)}
+              repo={repositories.find((r) => r.fullName === open) ?? null}
+              onOpenChange={(next) => !next && showRepository(null)}
             />
           </div>
         )}

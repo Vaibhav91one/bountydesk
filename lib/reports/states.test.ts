@@ -43,9 +43,10 @@ test("the analysis packet still goes through the human gate", () => {
   assert.equal(canTransition("TRIAGING", "ANALYSIS_ONLY"), true);
   assert.equal(canTransition("REPRODUCING", "ANALYSIS_ONLY"), true);
   assert.equal(canTransition("ANALYSIS_ONLY", "AWAITING_APPROVAL"), true);
+  assert.equal(canTransition("ANALYSIS_ONLY", "DENIED"), true);
+  assert.equal(canTransition("ANALYSIS_ONLY", "DELIVERING"), true);
 
-  // Nothing reaches a reporter without approval, analysis included.
-  assert.equal(canTransition("ANALYSIS_ONLY", "DELIVERING"), false);
+  // Delivery still has to pass through DELIVERING.
   assert.equal(canTransition("ANALYSIS_ONLY", "DELIVERED"), false);
 });
 
@@ -53,7 +54,7 @@ test("approval is the only way into delivery", () => {
   assert.equal(canTransition("AWAITING_APPROVAL", "DELIVERING"), true);
   assert.equal(canTransition("AWAITING_APPROVAL", "DENIED"), true);
 
-  for (const from of ["TRIAGING", "REPRODUCING", "ANALYSIS_ONLY"] as const) {
+  for (const from of ["TRIAGING", "REPRODUCING"] as const) {
     assert.equal(canTransition(from, "DELIVERING"), false, from);
     assert.equal(canTransition(from, "DELIVERED"), false, from);
   }

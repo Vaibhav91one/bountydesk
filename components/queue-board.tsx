@@ -4,12 +4,17 @@ import { MascotFloat } from "@/components/mascot-float";
 import { ArrowRight } from "@phosphor-icons/react/ssr";
 
 import { PhaseDot, PhaseSpinner } from "@/components/phase-dot";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+  shouldShowOutcomeBadge,
+} from "@/components/report-badges";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { phaseOf } from "@/lib/reports/columns";
-import type { QueueCard, QueueColumn } from "@/lib/reports/queue";
-import type { MascotState } from "@/lib/mascot/states";
+import type { QueueCardView, QueueColumnView } from "@/lib/reports/queue-view";
+import type { MascotKey } from "@/lib/mascot/catalog";
 
 /**
  * Which states get Agent Bounty on the card: every one still in the pipeline.
@@ -36,27 +41,6 @@ export const MASCOT_ON_CARD = new Set([
  * drawing of it. Nothing here reads the database: it takes the rows it is given, which is what
  * lets one caller pass a live snapshot and another pass an example.
  */
-
-/** How a verdict outcome reads to a reviewer, rather than how it reads to the database. */
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
-
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
 
 /**
  * The states something is actively doing, as opposed to one that is waiting.
@@ -101,8 +85,8 @@ function driftAt(index: number) {
 }
 
 /** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
-function age(from: Date): string {
-  const minutes = Math.floor((Date.now() - from.getTime()) / 60_000);
+function age(from: string): string {
+  const minutes = Math.floor((Date.now() - new Date(from).getTime()) / 60_000);
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
@@ -115,22 +99,34 @@ export function Card({
   showState,
   mascot,
   index,
+  linkPrefetch = true,
 }: {
-  card: QueueCard;
+  card: QueueCardView;
   showState: boolean;
-  mascot?: MascotState;
+  mascot?: MascotKey;
   index: number;
+  linkPrefetch?: boolean;
 }) {
   const phase = phaseOf(card.state);
-  const running = RUNNING.has(card.state);
+  const failedDelivery = card.deliveryState === "FAILED";
+  // A dead handoff never produced a delivery row, so it cannot show up as a failed delivery.
+  // Left out, the card reads "Needs review" for a report a reviewer has already answered.
+  const stalled = failedDelivery || card.handoffFailed;
+  const running = !stalled && RUNNING.has(card.state);
   const float = driftAt(index);
 
-  const status = card.awaitingVerdictId
+  const status = card.handoffFailed
+    ? "Handoff failed"
+    : card.awaitingVerdictId
     ? "Needs review"
+    : failedDelivery
+      ? "Delivery failed"
     : running
       ? RUNNING_LABEL[card.state]
+      : card.state === "DELIVERED"
+        ? "Comment delivered"
       : card.outcome
-        ? (OUTCOME[card.outcome] ?? card.outcome)
+        ? "Verdict drafted"
         : "No verdict yet";
 
   return (
@@ -150,6 +146,7 @@ export function Card({
               guessing. */}
           <Link
             href={`/reports/${card.id}`}
+            prefetch={linkPrefetch}
             title={card.title}
             className="line-clamp-2 cursor-pointer text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"
           >
@@ -170,13 +167,8 @@ export function Card({
             second copy's animation would drive the first. */}
         {mascot ? (
           <MascotFloat
-            // Every id in the file is prefixed with the state key, so re-prefixing with this
-            // card's id keeps two cards in the same state from sharing them. Without it the
-            // second copy's animation would drive the first.
-            markup={mascot.markup.replaceAll(
-              `${mascot.key}__`,
-              `${mascot.key}__${card.id.slice(0, 8)}__`,
-            )}
+            state={mascot}
+            scope={`card-${card.id.slice(0, 8)}`}
             seconds={float.seconds}
             delay={float.delay}
             y={float.y}
@@ -185,12 +177,18 @@ export function Card({
         ) : null}
       </div>
 
-      {showState || card.investigating ? (
+      {showState || card.investigating || card.outcome ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {showState ? (
-            <Badge variant={card.state === "DELIVERED" ? "success" : "outline"}>
-              {STATE_LABEL[card.state] ?? card.state}
-            </Badge>
+            <ReportStateBadge
+              state={card.state}
+              phase={phase}
+              deliveryState={card.deliveryState}
+              failed={card.handoffFailed}
+            />
+          ) : null}
+          {shouldShowOutcomeBadge(card.state, card.outcome) ? (
+            <ReportOutcomeBadge outcome={card.outcome} />
           ) : null}
           {/* Nothing in the report's own state distinguishes "queued" from "an agent is
               actively working this right now" -- this badge is that difference. */}
@@ -217,18 +215,18 @@ export function Card({
         </span>
       </div>
 
-      {/* Only a report with a pending call an approval can actually answer gets the button.
-          One sitting in AWAITING_APPROVAL with nothing pending would lead to a page that
-          refuses, which is worse than no button. */}
+      {/* Only a report with a pending verdict an approval can actually answer gets the button.
+          A state without that pending tuple would lead to a page whose buttons refuse. */}
       {card.awaitingVerdictId ? (
         <Button
           size="sm"
           variant="outline"
           nativeButton={false}
-          render={<Link href={`/reports/${card.id}`} />}
+          render={<Link href={`/reports/${card.id}`} prefetch={linkPrefetch} />}
           className="mt-1 w-full justify-center"
         >
-          Review evidence <RollingIcon icon={ArrowRight} className="size-3.5" />
+          {card.state === "ANALYSIS_ONLY" ? "Approve verdict" : "Review evidence"}{" "}
+          <RollingIcon icon={ArrowRight} className="size-3.5" />
         </Button>
       ) : null}
     </li>
@@ -239,18 +237,25 @@ export function Column({
   column,
   mascots,
   drift,
+  linkPrefetch = true,
+  emptyLabel = "Nothing here",
 }: {
-  column: QueueColumn;
-  mascots: Map<string, MascotState>;
+  column: QueueColumnView;
+  mascots: Map<string, MascotKey>;
   drift: Map<string, number>;
+  linkPrefetch?: boolean;
+  /** What an empty column says. The board overrides it while a search is running, because an
+   *  empty column then means the search missed rather than that the queue is clear. */
+  emptyLabel?: string;
 }) {
   const hidden = column.total - column.cards.length;
 
   return (
     // The last column has no rule, so without a transparent one in its place its cards
-    // come out a pixel wider than everyone else's.
-    <section className="flex flex-col gap-3 px-5 last:border-r last:border-r-transparent">
-      <header className="flex items-center gap-2.5">
+    // come out a pixel wider than everyone else's. min-h-0 is what lets the card list below
+    // scroll instead of pushing this section past the height the board gave it.
+    <section className="flex min-h-0 flex-col gap-3 px-5 last:border-r last:border-r-transparent">
+      <header className="flex shrink-0 items-center gap-2.5">
         <PhaseDot phase={column.key} />
         <h2 className="flex-1 text-body font-medium text-foreground">
           {column.label}
@@ -259,12 +264,15 @@ export function Column({
       </header>
 
       {column.cards.length === 0 ? (
-        <p className="rounded-xl border border-border/50 border-dashed bg-card/40 px-4 py-6 text-center text-meta text-muted-foreground">
-          Nothing here
+        <p className="shrink-0 rounded-xl border border-border/50 border-dashed bg-card/40 px-4 py-6 text-center text-meta text-muted-foreground">
+          {emptyLabel}
         </p>
       ) : null}
 
-      <ul className="flex flex-col gap-2.5">
+      {/* Each column scrolls its own cards. One column running long is the normal case (every
+          report starts in Triaging), and a single scroller for the board would mean scrolling
+          past that column's backlog to see whether anything is waiting on a human. */}
+      <ul className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
         {column.cards.map((card) => (
           <Card
             key={card.id}
@@ -272,6 +280,7 @@ export function Column({
             index={drift.get(card.id) ?? 0}
             showState={column.states.length > 1}
             mascot={mascots.get(card.state)}
+            linkPrefetch={linkPrefetch}
           />
         ))}
       </ul>
@@ -279,7 +288,7 @@ export function Column({
       {/* Never truncate silently: a column that stopped at the limit and said nothing reads
           as "that is all of them". */}
       {hidden > 0 ? (
-        <p className="text-meta text-muted-foreground">
+        <p className="shrink-0 text-meta text-muted-foreground">
           {column.cards.length} of {column.total} shown
         </p>
       ) : null}

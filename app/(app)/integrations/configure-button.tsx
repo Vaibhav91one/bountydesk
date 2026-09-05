@@ -23,16 +23,12 @@ export function ConfigureButton({
   return (
     <form action={action} className="flex flex-col gap-2">
       <input type="hidden" name="repoId" value={repoId} />
-      <div className="flex flex-nowrap gap-2">
-        <Button type="submit" size="sm" loading={pending}>
-          {label}
-        </Button>
-        {/* No unbind helper exists yet, and a wrong one either re-opens intake or wrongly
-            closes it. Disabled beats a button that lies about what it does. */}
-        <Button type="button" size="sm" variant="outline" disabled title="Coming soon">
-          Remove repository
-        </Button>
-      </div>
+      {/* One control. Unbinding a repository has no helper behind it, and a disabled button
+          for it was a permanent "coming soon" taking up half the row. Removing the App's
+          access to a repository is GitHub's own screen, which the panel links to. */}
+      <Button type="submit" size="sm" loading={pending}>
+        {label}
+      </Button>
       {result && !result.ok ? (
         <p role="alert" className="text-sm text-destructive">
           {result.error}

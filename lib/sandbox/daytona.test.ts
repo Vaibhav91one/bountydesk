@@ -9,6 +9,8 @@ import {
   MAX_TTL_MINUTES,
   UnsafeSandboxSpec,
   assertSafeSpec,
+  createBuildSandbox,
+  createSnapshot,
   assertSandboxGone,
   assertSnapshotImage,
   assertSnapshotLimits,
@@ -496,4 +498,36 @@ test("a command timeout must be whole seconds within our own ceiling", async () 
   for (const seconds of [0, -1, 1.5, MAX_EXEC_SECONDS + 1, Number.NaN]) {
     await assert.rejects(execute(sandbox, "echo ok", seconds), UnsafeSandboxSpec, String(seconds));
   }
+});
+
+test("a build sandbox refuses an empty egress allow-list before any network call", async () => {
+  // An empty list must fail closed, never widen to "network open".
+  await assert.rejects(
+    createBuildSandbox(
+      { snapshot: "base-dind", cpu: 2, memoryGb: 4, diskGb: 20, ttlMinutes: 30 },
+      [],
+    ),
+    UnsafeSandboxSpec,
+  );
+  await assert.rejects(
+    createBuildSandbox(
+      { snapshot: "base-dind", cpu: 2, memoryGb: 4, diskGb: 20, ttlMinutes: 30 },
+      ["   "],
+    ),
+    UnsafeSandboxSpec,
+  );
+});
+
+test("createSnapshot refuses a digest-pinned image name", async () => {
+  // Daytona rejects @sha256: in POST /snapshots; catch it at the seam with a clear reason.
+  await assert.rejects(
+    createSnapshot({
+      name: "x",
+      image: `ghcr.io/acme/x@sha256:${"a".repeat(64)}`,
+      cpu: 2,
+      memoryGb: 4,
+      diskGb: 20,
+    }),
+    UnsafeSandboxSpec,
+  );
 });

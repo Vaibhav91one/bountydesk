@@ -6,7 +6,12 @@ import { useMemo, useState } from "react";
 import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
-import { PhaseBadge, PhaseDot } from "@/components/phase-dot";
+import { PhaseDot } from "@/components/phase-dot";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+  shouldShowOutcomeBadge,
+} from "@/components/report-badges";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
@@ -20,37 +25,16 @@ import type { IndexRow } from "@/lib/reports/queue";
  * module load. Importing one pure function from it would pull the whole pg driver into the
  * browser bundle, so the server does the lookup and sends the answer.
  */
-type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
+export type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
   updatedAt: string;
   createdAt: string;
   phase: string;
 };
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
 
 const COLUMNS = [
   { key: "report", label: "Report", width: "1.6fr" },
   { key: "origin", label: "Source", width: "0.9fr" },
-  // Wider than the rest: the status pill and the outcome beside it are two pieces of text,
-  // and the outcome was clipping to Reproduc…
   { key: "state", label: "Status", width: "1.4fr" },
   { key: "updated", label: "Last change", width: "0.9fr", align: "end" as const },
 ];
@@ -78,6 +62,13 @@ function matchesFilter(row: ReportRow, key: string): boolean {
   return true;
 }
 
+/**
+ * Renders whatever rows it is handed and nothing else.
+ *
+ * Deliberately free of data fetching: the landing page draws this same table over fixtures,
+ * outside the signed-in shell, where there is no QueryClient to read from and no session to
+ * poll with. reports-live.tsx is the console's wrapper that keeps the rows current.
+ */
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -127,13 +118,14 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           {row.sourceLabel} · {row.origin}
         </span>,
         <span key="state" className="flex min-w-0 items-center gap-2">
-          <PhaseBadge phase={row.phase}>{STATE_LABEL[row.state] ?? row.state}</PhaseBadge>
-          {/* The outcome stays plain. Two coloured pills side by side would compete, and the
-              state is the one a reviewer scans this column for. */}
-          {row.outcome ? (
-            <span className="truncate text-meta text-muted-foreground">
-              {OUTCOME[row.outcome] ?? row.outcome}
-            </span>
+          <ReportStateBadge
+            state={row.state}
+            phase={row.phase}
+            deliveryState={row.deliveryState}
+            failed={row.handoffFailed}
+          />
+          {shouldShowOutcomeBadge(row.state, row.outcome) ? (
+            <ReportOutcomeBadge outcome={row.outcome} />
           ) : null}
         </span>,
         <span key="updated" className="truncate text-meta text-muted-foreground">

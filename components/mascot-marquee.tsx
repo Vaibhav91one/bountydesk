@@ -1,4 +1,7 @@
-import type { MascotState } from "@/lib/mascot/states";
+import { type CSSProperties } from "react";
+
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import { cn } from "@/lib/utils";
 
 /** Seconds each mascot takes to travel one slot. The whole loop is this times the count. */
@@ -21,17 +24,12 @@ export function MascotMarquee({
   direction = "vertical",
   className,
 }: {
-  states: MascotState[];
+  states: MascotKey[];
   size?: number;
   direction?: "vertical" | "horizontal";
   className?: string;
 }) {
   const sideways = direction === "horizontal";
-  const second = states.map((state) => ({
-    key: `${state.key}-b`,
-    markup: state.markup.replaceAll(`${state.key}__`, `${state.key}__b__`),
-  }));
-
   return (
     // Spans, not divs: this lives inside a paragraph. aria-hidden because the headline already
     // says what he is, and fourteen state names read mid-sentence would only get in the way.
@@ -59,12 +57,13 @@ export function MascotMarquee({
           ["--marquee-travel" as string]: `-${states.length * size}px`,
         }}
       >
-        {[...states, ...second].map((state) => (
-          <span
-            key={state.key}
-            className="block shrink-0 [&>svg]:block [&>svg]:size-full"
-            style={{ width: size, height: size }}
-            dangerouslySetInnerHTML={{ __html: state.markup }}
+        {[...states, ...states].map((state, index) => (
+          <AnimatedMascotSvg
+            key={`${state}-${index}`}
+            state={state}
+            scope={`marquee-${index}`}
+            className="shrink-0"
+            style={{ width: size, height: size } as CSSProperties}
           />
         ))}
       </span>

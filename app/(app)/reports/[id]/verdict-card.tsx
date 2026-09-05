@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +51,7 @@ function Meter({ bars, tone }: { bars: number; tone: string }) {
 export function VerdictCard({
   payload,
   payloadArtifactId,
+  findingsArtifactId,
   outcome,
   outcomeLabel,
   summary,
@@ -57,7 +60,9 @@ export function VerdictCard({
   contentHash,
   destination,
   speaker,
+  speakerScope = "speaker",
   chatMascot,
+  chatMascotScope = "chat",
   onChat,
   approve,
   approving,
@@ -70,6 +75,8 @@ export function VerdictCard({
   payload: string;
   /** The stored verdict-payload artifact, when one exists. */
   payloadArtifactId: string | null;
+  /** The stored findings file, when one exists. Offered in place of a sandbox path. */
+  findingsArtifactId?: string | null;
   outcome: string;
   outcomeLabel: string;
   /** The agent's own summary and findings, rendered as text (never as HTML) by VerdictBody. */
@@ -78,9 +85,11 @@ export function VerdictCard({
   revision: number;
   contentHash: string;
   destination: string;
-  /** Agent Bounty, inline SVG. The comment is what it drafted, so it says so. */
-  speaker: string;
-  chatMascot: string;
+  /** Agent Bounty. The comment is what it drafted, so it says so. */
+  speaker: MascotKey;
+  speakerScope?: string;
+  chatMascot: MascotKey;
+  chatMascotScope?: string;
   onChat?: () => void;
   approve?: () => void;
   approving?: boolean;
@@ -110,16 +119,17 @@ export function VerdictCard({
             findings={findings}
             payload={payload}
             payloadArtifactId={payloadArtifactId}
+            findingsArtifactId={findingsArtifactId}
           />
         </div>
 
         {/* Attributed, because a reviewer approving a comment should be able to see at a
             glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
         <div className="flex gap-3">
-          <span
-            aria-hidden="true"
+          <AnimatedMascotSvg
+            state={speaker}
+            scope={speakerScope}
             className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
-            dangerouslySetInnerHTML={{ __html: speaker }}
           />
 
           <div className="flex min-w-0 flex-1 flex-col gap-2">
@@ -132,7 +142,11 @@ export function VerdictCard({
                 payload: the bytes the hash in the drawer binds are unchanged, and rendering the
                 agent's fields as text is safe by construction where interpreting its markdown
                 would not be. */}
-            <VerdictBody summary={summary} findings={findings} />
+            <VerdictBody
+              summary={summary}
+              findings={findings}
+              findingsArtifactId={findingsArtifactId}
+            />
           </div>
         </div>
       </div>
@@ -182,17 +196,23 @@ export function VerdictCard({
       </div>
 
       {/* Pinned: the comment can be long enough to scroll the decision off the screen, and a
-          reviewer should never have to hunt for the button they came here to press. */}
-      <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-3 border-t border-border/50 bg-card px-4 py-3">
-        <span className="flex items-center gap-2">
+          reviewer should never have to hunt for the button they came here to press.
+
+          The reading sits left and the decision right, and they hold those sides. An earlier
+          flex-wrap here let the button group wrap under the meter the moment a label grew (a
+          button entering its loading state is enough), which moved the buttons mid-click. The
+          row keeps its axis and the meter gives up width instead: it truncates, the buttons do
+          not move. Below sm the two stack deliberately, in that order. */}
+      <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-border/50 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <span className="flex min-w-0 items-center gap-2">
           <Meter bars={evidence.bars} tone={evidence.tone} />
-          <span className="text-meta text-muted-foreground">{evidence.label}</span>
+          <span className="truncate text-meta text-muted-foreground">{evidence.label}</span>
         </span>
 
         {/* No approve handler is what makes this card a record rather than a decision. */}
         {!approve ? (
           decision ? (
-            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 sm:justify-end">
               <span
                 className={cn(
                   "text-body",
@@ -209,13 +229,13 @@ export function VerdictCard({
               </span>
             </span>
           ) : (
-            <span className="text-meta text-muted-foreground">
+            <span className="text-meta text-muted-foreground sm:text-right">
               Not decided. Approval only opens while the harness is holding a pending
               publish_verdict call.
             </span>
           )
         ) : (
-        <span className="flex items-center gap-2">
+        <span className="flex shrink-0 items-center justify-end gap-2">
           {/* Not approving is meant to be a conversation, and the conversation is not built.
               Parked rather than removed: the panel behind it works, but nothing a reviewer
               typed would reach the harness, so offering it would promise a channel that does
@@ -223,10 +243,10 @@ export function VerdictCard({
           <Button size="sm" variant="outline" onClick={onChat} disabled title="Coming soon">
             {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
                 should look like it. */}
-            <span
-              aria-hidden="true"
+            <AnimatedMascotSvg
+              state={chatMascot}
+              scope={chatMascotScope}
               className="-my-1 size-6 shrink-0 [&>svg]:block [&>svg]:size-full"
-              dangerouslySetInnerHTML={{ __html: chatMascot }}
             />
             Chat with Agent Bounty
             <span className="text-meta text-muted-foreground">Coming soon</span>

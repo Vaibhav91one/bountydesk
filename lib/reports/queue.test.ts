@@ -53,6 +53,85 @@ async function seedReport(
   return row.id;
 }
 
+async function seedDeliveredVerdict(
+  reportId: string,
+  outcome: import("./queue").VerdictOutcome = "REPRODUCED",
+): Promise<string> {
+  const [row] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId,
+      outcome,
+      summary: `summary for ${reportId}`,
+      payload: `payload for ${reportId}`,
+      contentHash: `delivery-hash-${reportId}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  return row.id;
+}
+
+async function seedVerdictRevision(
+  reportId: string,
+  revision: number,
+  outcome: import("./queue").VerdictOutcome,
+): Promise<{ id: string; hash: string }> {
+  const hash = `revision-${revision}-hash-${reportId}`;
+  const [row] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId,
+      outcome,
+      summary: `revision ${revision}`,
+      payload: `payload ${revision}`,
+      contentHash: hash,
+      revision,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  return { id: row.id, hash };
+}
+
+async function seedFailedHandoff(
+  reportId: string,
+  verdictId: string,
+  payloadHash: string,
+  suffix: string,
+): Promise<void> {
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId,
+      capabilityToken: `failed-handoff-token-${suffix}`,
+      sessionId: `failed-handoff-session-${suffix}`,
+      pendingThreadId: `thread-${suffix}`,
+      pendingToolCallId: `call-${suffix}`,
+      pendingVerdictId: verdictId,
+      pendingApprovedContentHash: payloadHash,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash,
+      threadId: `thread-${suffix}`,
+      toolCallId: `call-${suffix}`,
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found",
+  });
+}
+
 function column(columns: import("./queue").QueueColumn[], key: string) {
   const found = columns.find((c) => c.key === key);
   assert.ok(found, `no column ${key}`);
@@ -141,6 +220,27 @@ test("a delivered report is terminal, and still does not sit in Closed", async (
   }
 });
 
+test("a failed delivery remains in the delivery lane with its outbox state", async () => {
+  const id = await seedReport("DELIVERING");
+  const verdictId = await seedDeliveredVerdict(id, "NOT_REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId,
+    state: "FAILED",
+    target: "github:1:issue:failed-delivery",
+    approvedContentHash: `delivery-hash-${id}`,
+    idempotencyKey: `failed-delivery-${id}`,
+    lastError: "GitHub delivery failed",
+  });
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "delivered").cards.find((c) => c.id === id);
+
+  assert.ok(card, "failed delivery should still be in the delivery column");
+  assert.equal(card.deliveryState, "FAILED");
+  assert.equal(card.outcome, "NOT_REPRODUCED");
+});
+
 test("a report with no target and no verdict reads as exactly that", async () => {
   const id = await seedReport("TRIAGING", { target: false });
   const columns = await queue.listQueue();
@@ -175,6 +275,57 @@ test("the card carries the latest verdict revision, not the first", async () => 
 
   assert.ok(card);
   assert.equal(card.outcome, "ANALYSIS_ONLY");
+});
+
+test("an older failed handoff does not mark the latest verdict revision failed", async () => {
+  const id = await seedReport("AWAITING_APPROVAL");
+  const oldVerdict = await seedVerdictRevision(id, 1, "REPRODUCED");
+  await seedFailedHandoff(id, oldVerdict.id, oldVerdict.hash, `${id}-old`);
+  await seedVerdictRevision(id, 2, "NOT_REPRODUCED");
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+  assert.ok(card);
+  assert.equal(card.outcome, "NOT_REPRODUCED");
+  assert.equal(card.handoffFailed, false);
+  assert.equal(card.deliveryState, null);
+
+  const rows = await queue.listAllReports();
+  const row = rows.find((r) => r.id === id);
+  assert.ok(row);
+  assert.equal(row.outcome, "NOT_REPRODUCED");
+  assert.equal(row.handoffFailed, false);
+  assert.equal(row.deliveryState, null);
+});
+
+test("an older delivery does not suppress the latest revision's failed handoff", async () => {
+  const id = await seedReport("AWAITING_APPROVAL");
+  const oldVerdict = await seedVerdictRevision(id, 1, "REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId: oldVerdict.id,
+    state: "PENDING",
+    target: "github:1:issue:old-delivery",
+    approvedContentHash: oldVerdict.hash,
+    idempotencyKey: `old-delivery-${id}`,
+  });
+
+  const latestVerdict = await seedVerdictRevision(id, 2, "NOT_REPRODUCED");
+  await seedFailedHandoff(id, latestVerdict.id, latestVerdict.hash, `${id}-latest`);
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+  assert.ok(card);
+  assert.equal(card.outcome, "NOT_REPRODUCED");
+  assert.equal(card.handoffFailed, true);
+  assert.equal(card.deliveryState, null);
+
+  const rows = await queue.listAllReports();
+  const row = rows.find((r) => r.id === id);
+  assert.ok(row);
+  assert.equal(row.outcome, "NOT_REPRODUCED");
+  assert.equal(row.handoffFailed, true);
+  assert.equal(row.deliveryState, null);
 });
 
 test("eventCount counts session events, and cards sort newest first", async () => {
@@ -227,6 +378,35 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
     pendingApprovedContentHash: `hash-${id}`,
   });
 
+  const decided = await seedReport("AWAITING_APPROVAL");
+  const [decidedVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: decided,
+      outcome: "REPRODUCED",
+      summary: "reproduced",
+      payload: "the exact comment",
+      contentHash: `hash-${decided}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: decided,
+    capabilityToken: `token-${decided}`,
+    sessionId: `session-${decided}`,
+    pendingThreadId: "thread-decided",
+    pendingToolCallId: "call-decided",
+    pendingVerdictId: decidedVerdict.id,
+    pendingApprovedContentHash: `hash-${decided}`,
+  });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: decidedVerdict.id,
+    reviewer: "someone",
+    decision: "APPROVED",
+    payloadHash: `hash-${decided}`,
+    threadId: "thread-decided",
+    toolCallId: "call-decided",
+  });
+
   const columns = await queue.listQueue();
   const cards = column(columns, "awaiting-approval").cards;
 
@@ -234,13 +414,14 @@ test("awaitingVerdictId is set only when there is a call a reviewer can answer",
   // nothing to answer.
   assert.equal(cards.find((c) => c.id === withoutCall)?.awaitingVerdictId, null);
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
+  assert.equal(cards.find((c) => c.id === decided)?.awaitingVerdictId, null);
 });
 
-test("a synthesized verdict with null thread markers is counted as awaiting on the board", async () => {
+test("a synthesized verdict with null thread markers is approvable in the analysis column", async () => {
   // The relaxed pending constraint allows a third shape: verdict/hash set with thread/tool-call
   // null, the server-authored ANALYSIS_ONLY verdict a dead-end run mints. The board card must
   // expose it as approvable, gating on the verdict rather than the thread.
-  const id = await seedReport("AWAITING_APPROVAL");
+  const id = await seedReport("ANALYSIS_ONLY");
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
@@ -263,7 +444,7 @@ test("a synthesized verdict with null thread markers is counted as awaiting on t
   });
 
   const columns = await queue.listQueue();
-  const cards = column(columns, "awaiting-approval").cards;
+  const cards = column(columns, "analysis-only").cards;
   assert.equal(cards.find((c) => c.id === id)?.awaitingVerdictId, v.id);
 });
 
@@ -336,18 +517,37 @@ test("phaseOf agrees with COLUMNS for every state", () => {
   }
 });
 
-test("listActiveReports puts awaiting approval first and excludes terminal states", async () => {
+test("listActiveReports puts answerable verdicts first and excludes terminal states", async () => {
   // Seeded after the terminal reports above, so recency alone would sort these to the front.
   // Awaiting approval has to beat them on urgency, not on order of insertion.
   await seedReport("TRIAGING");
   await seedReport("REPRODUCING");
-  const awaiting = await seedReport("AWAITING_APPROVAL");
+  const awaiting = await seedReport("ANALYSIS_ONLY");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: awaiting,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis",
+      payload: "the exact theoretical comment",
+      contentHash: `active-hash-${awaiting}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: awaiting,
+    capabilityToken: `active-token-${awaiting}`,
+    sessionId: `active-session-${awaiting}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `active-hash-${awaiting}`,
+  });
 
   const active = await queue.listActiveReports(5);
 
   assert.equal(active.length, 5);
-  assert.equal(active[0].id, awaiting, "awaiting approval should lead");
-  assert.equal(active[0].phase, "awaiting-approval");
+  assert.equal(active[0].id, awaiting, "an answerable verdict should lead");
+  assert.equal(active[0].phase, "analysis-only");
 
   const terminal = new Set(["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"]);
   for (const row of active) {
@@ -423,10 +623,33 @@ test("the index flags a report only when a reviewer can actually answer it", asy
     pendingApprovedContentHash: `hash-${answerable}`,
   });
 
+  const synthesized = await seedReport("ANALYSIS_ONLY");
+  const [synthesizedVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: synthesized,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis only",
+      payload: "the exact theoretical comment",
+      contentHash: `hash-${synthesized}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: synthesized,
+    capabilityToken: `token-${synthesized}`,
+    sessionId: `session-${synthesized}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: synthesizedVerdict.id,
+    pendingApprovedContentHash: `hash-${synthesized}`,
+  });
+
   const rows = await queue.listAllReports();
   const byId = new Map(rows.map((row) => [row.id, row]));
   assert.equal(byId.get(stranded)?.awaitingVerdictId, null);
   assert.equal(byId.get(answerable)?.awaitingVerdictId, v.id);
+  assert.equal(byId.get(synthesized)?.awaitingVerdictId, synthesizedVerdict.id);
 });
 
 test("the index carries the latest verdict revision, not the first", async () => {
@@ -446,6 +669,24 @@ test("the index carries the latest verdict revision, not the first", async () =>
   }
 
   const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.equal(row?.outcome, "REPRODUCED");
+});
+
+test("the index carries failed delivery state beside the verdict outcome", async () => {
+  const id = await seedReport("DELIVERING");
+  const verdictId = await seedDeliveredVerdict(id, "REPRODUCED");
+  await dbm.db.insert(dbm.outboundDelivery).values({
+    reportId: id,
+    verdictId,
+    state: "FAILED",
+    target: "github:1:issue:index-failed-delivery",
+    approvedContentHash: `delivery-hash-${id}`,
+    idempotencyKey: `index-failed-delivery-${id}`,
+    lastError: "GitHub delivery failed",
+  });
+
+  const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.equal(row?.deliveryState, "FAILED");
   assert.equal(row?.outcome, "REPRODUCED");
 });
 
@@ -482,11 +723,37 @@ test("the home counts split open from closed and only count answerable approvals
     pendingApprovedContentHash: `home-hash-${answerable}`,
   });
 
+  const theoretical = await seedReport("ANALYSIS_ONLY");
+  const [theoreticalVerdict] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: theoretical,
+      outcome: "ANALYSIS_ONLY",
+      summary: "theoretical analysis only",
+      payload: "the exact theoretical comment",
+      contentHash: `home-hash-${theoretical}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: theoretical,
+    capabilityToken: `home-token-${theoretical}`,
+    sessionId: `home-session-${theoretical}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: theoreticalVerdict.id,
+    pendingApprovedContentHash: `home-hash-${theoretical}`,
+  });
+
   const after = await readHomeSummary();
-  assert.equal(after.reports - before.reports, 4);
-  // Three of the four are non-terminal; DELIVERED is not.
-  assert.equal(after.open - before.open, 3);
-  assert.equal(after.awaiting - before.awaiting, 1, "only the one with a pending call counts");
+  assert.equal(after.reports - before.reports, 5);
+  // Four of the five are non-terminal; DELIVERED is not.
+  assert.equal(after.open - before.open, 4);
+  assert.equal(
+    after.awaiting - before.awaiting,
+    2,
+    "only reports with a pending verdict/hash pair count",
+  );
 });
 
 test("a soft-hidden report drops off every list but still loads by its id", async () => {
@@ -553,4 +820,69 @@ test("a decision on a hidden report drops off the home decisions count", async (
 
   const after = (await readHomeSummary()).decisions;
   assert.equal(before - after, 1, "a decision on a hidden report must not count on the home card");
+});
+
+test("a decision the harness never received shows on the board as a failed run", async () => {
+  // No outbound_delivery row exists, because publish_verdict never fired, so deliveryState
+  // cannot carry this. Without handoffFailed the card reads "Needs review" for a report the
+  // reviewer already answered, and nothing on the board says it is stuck.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "REPRODUCED",
+      summary: "the payload executes",
+      payload: "comment",
+      contentHash: `handoff-hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: id,
+      capabilityToken: `handoff-token-${id}`,
+      sessionId: `handoff-session-${id}`,
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: `handoff-hash-${id}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId: v.id,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash: `handoff-hash-${id}`,
+      threadId: "thread-1",
+      toolCallId: "call-1",
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found",
+  });
+
+  const columns = await queue.listQueue();
+  const card = column(columns, "awaiting-approval").cards.find((c) => c.id === id);
+
+  assert.ok(card);
+  assert.equal(card.handoffFailed, true);
+  assert.equal(card.deliveryState, null, "nothing was ever enqueued");
+
+  // A report whose handoff is still being retried is not dead yet and must not say so.
+  const live = await seedReport("AWAITING_APPROVAL");
+  const columnsAgain = await queue.listQueue();
+  assert.equal(
+    columnsAgain.flatMap((c) => c.cards).find((c) => c.id === live)?.handoffFailed,
+    false,
+  );
 });

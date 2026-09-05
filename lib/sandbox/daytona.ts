@@ -7,12 +7,15 @@ import { requireSecret } from "@/lib/env";
  * AWS S3 client, socket.io, tar and busboy to do things we never do. What we need is five
  * calls, and five calls should not cost twenty dependencies.
  *
- * This module provisions reproduction sandboxes and nothing else. There is no build class yet,
- * because a build sandbox needs a dependency egress allow list, and the only place those hosts
- * may come from is a server-held TargetProfile that does not exist yet. An allow-list argument
- * with nowhere trustworthy to get its value from is worse than no argument: it looks like a
- * control while being a hole. So the whole capability is absent, and consequently there is no
- * argument anywhere in this file that grants a sandbox network access.
+ * This module provisions two kinds of sandbox. The reproduction sandbox (createSandbox) has no
+ * network at all: networkBlockAll is a constant there, not an argument, so no caller can ask for
+ * network by supplying a field. The build sandbox (createBuildSandbox) is the one place that
+ * grants egress, and only to a caller-supplied allow-list that must come from a server-held
+ * source (lib/build-onboarding), never from report text, a cloned repo's own scripts, or model
+ * output. An empty allow-list is refused rather than treated as "network open": an allow-list
+ * with nowhere trustworthy to get its value from is a hole disguised as a control, so the build
+ * capability fails closed when its list is missing. The two paths are separate functions on
+ * purpose: nothing that grants network can be reached from the reproduction path.
  */
 const API = "https://app.daytona.io/api";
 
@@ -22,6 +25,9 @@ const TIMEOUT_MS = 30_000;
 /** Stamped on everything this module creates, so an abandoned sandbox can be found again. */
 export const PURPOSE_LABEL = "bountydesk.purpose";
 export const PURPOSE = "reproduction";
+/** Build sandboxes carry their own purpose so a teardown sweep can tell them from a
+ *  reproduction sandbox and clean up an abandoned build without touching a live run. */
+export const BUILD_PURPOSE = "build";
 
 /**
  * Our ceiling, not the provider's. Daytona is happy to keep a sandbox alive far longer than any
@@ -439,4 +445,110 @@ export type SnapshotInfo = {
 /** Look up what a snapshot claims to be, so the request can be recorded beside the result. */
 export async function getSnapshot(id: string): Promise<SnapshotInfo> {
   return call<SnapshotInfo>(`/snapshots/${encodeURIComponent(id)}`);
+}
+
+/**
+ * The build sandbox: the one path in this file that grants a sandbox network access.
+ *
+ * Boots from a server-held base snapshot (a Docker-in-Docker image, so the onboarding pipeline
+ * can run `docker build` inside it) with egress limited to `egressAllowList`. That list is the
+ * whole safety story, so it must come from a server-held source and is refused when empty: an
+ * empty list must never silently become "network open". The base snapshot is our own, so its
+ * image is not digest-checked the way a reproduction snapshot's is; what a build sandbox runs is
+ * untrusted, but it holds no app secret beyond a push credential and is torn down after the
+ * snapshot is registered.
+ */
+export type BuildSandboxSpec = {
+  /** A server-held DinD base snapshot to boot the builder from. */
+  snapshot: string;
+  cpu: number;
+  memoryGb: number;
+  diskGb: number;
+  ttlMinutes: number;
+  labels?: Record<string, string>;
+};
+
+export async function createBuildSandbox(
+  spec: BuildSandboxSpec,
+  egressAllowList: string[],
+): Promise<Sandbox> {
+  const hosts = egressAllowList.map((h) => h.trim()).filter(Boolean);
+  if (hosts.length === 0) {
+    // Fail closed. A build sandbox with no allow-list is either a misconfiguration or an attempt
+    // to widen it to everything; neither may be treated as "network open".
+    throw new UnsafeSandboxSpec("a build sandbox requires a non-empty, server-held egress allow-list");
+  }
+  if (typeof spec.snapshot !== "string" || !spec.snapshot) {
+    throw new UnsafeSandboxSpec("build sandbox snapshot must be a server-held identifier");
+  }
+  if (spec.cpu <= 0 || spec.memoryGb <= 0 || spec.diskGb <= 0 || spec.ttlMinutes <= 0) {
+    throw new UnsafeSandboxSpec("cpu, memory, disk and ttl must all be positive");
+  }
+  if (!Number.isInteger(spec.ttlMinutes) || spec.ttlMinutes > MAX_TTL_MINUTES) {
+    throw new UnsafeSandboxSpec(`ttl must be a whole number of minutes, at most ${MAX_TTL_MINUTES}`);
+  }
+
+  const snapshot = await getSnapshot(spec.snapshot);
+  if (snapshot.state !== "active") {
+    throw new UnsafeSandboxSpec(`build snapshot ${spec.snapshot} is ${snapshot.state}, not active`);
+  }
+  if (!snapshot.id) {
+    throw new UnsafeSandboxSpec(`build snapshot ${spec.snapshot} resolved without an immutable id`);
+  }
+
+  const body = {
+    snapshot: snapshot.id,
+    ttlMinutes: spec.ttlMinutes,
+    networkBlockAll: false,
+    // Daytona's domainAllowList restricts egress to these hostnames; networkAllowList is for
+    // CIDR ranges and would reject a hostname. The build needs names (a git host, a registry),
+    // so this is the domain field.
+    domainAllowList: hosts.join(","),
+    public: false,
+    autoDeleteInterval: 0,
+    labels: { ...spec.labels, [PURPOSE_LABEL]: BUILD_PURPOSE },
+  };
+
+  const created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
+  if (typeof created.id !== "string" || !created.id) {
+    throw new DaytonaError(`build provisioning returned no sandbox id: ${JSON.stringify(created).slice(0, 200)}`);
+  }
+  if (created.public !== false) {
+    await destroyRejected(created.id, created.public === true ? "came up public" : "did not report whether it is public");
+  }
+  return created;
+}
+
+/**
+ * Register a Daytona snapshot from an already-pushed image, so a later reproduction can boot it.
+ *
+ * `image` must be a tag reference, not digest-pinned: Daytona's `POST /api/snapshots` rejects an
+ * imageName containing `@sha256:` as an invalid reference (see lib/targets/configure.ts). The tag
+ * is not the pin that matters at reproduction time; buildMarkerCheck re-proves image identity from
+ * inside the booted sandbox, which is what the reproduction path actually trusts.
+ */
+export type CreateSnapshotSpec = {
+  name: string;
+  image: string;
+  cpu: number;
+  memoryGb: number;
+  diskGb: number;
+};
+
+export async function createSnapshot(spec: CreateSnapshotSpec): Promise<SnapshotInfo> {
+  if (spec.image.includes("@sha256:")) {
+    throw new UnsafeSandboxSpec(
+      "Daytona rejects a digest-pinned imageName in POST /snapshots; register the tag and let buildMarkerCheck verify identity",
+    );
+  }
+  return call<SnapshotInfo>("/snapshots", {
+    method: "POST",
+    body: JSON.stringify({
+      name: spec.name,
+      imageName: spec.image,
+      cpu: spec.cpu,
+      memory: spec.memoryGb,
+      disk: spec.diskGb,
+    }),
+  });
 }

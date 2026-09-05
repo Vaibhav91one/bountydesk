@@ -275,6 +275,25 @@ test("happy path: no existing marker, post succeeds, report is delivered", async
   assert.equal(attempts[0].responseStatus, 201);
 });
 
+test("deliverById sends only the requested delivery row", async () => {
+  await drainOthers();
+  const older = await seedFixture();
+  const requested = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+
+  const id = await worker.deliverById(requested.deliveryId, "w-targeted", { deps });
+  assert.equal(id, requested.deliveryId);
+
+  assert.equal(calls.postComment, 1);
+  assert.equal((await deliveryRow(requested.deliveryId)).state, "SENT");
+  assert.equal((await reportRow(requested.reportId)).state, "DELIVERED");
+
+  const olderDelivery = await deliveryRow(older.deliveryId);
+  assert.equal(olderDelivery.state, "PENDING");
+  assert.equal(olderDelivery.attempts, 0);
+  assert.equal((await reportRow(older.reportId)).state, "DELIVERING");
+});
+
 test("a transient postComment failure retries and succeeds on the next attempt", async () => {
   await drainOthers();
   const fixture = await seedFixture();

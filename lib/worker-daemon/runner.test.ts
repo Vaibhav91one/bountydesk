@@ -209,3 +209,83 @@ test("runDaemon runs every queue's loop and sweeper concurrently and resolves af
   assert.ok(claimed.a > 0 && claimed.b > 0, "both queues' loops must have run");
   assert.ok(swept.a > 0 && swept.b > 0, "both queues' sweepers must have run");
 });
+
+test("runLoop reports progress for every iteration, whatever the iteration did", async () => {
+  const controller = new AbortController();
+  const progress: string[] = [];
+  let calls = 0;
+
+  const claimOnce = async () => {
+    calls += 1;
+    if (calls === 1) return "job-1";
+    if (calls === 2) throw new Error("claim blew up");
+    if (calls >= 3) controller.abort();
+    return null;
+  };
+
+  await runLoop("t", claimOnce, {
+    signal: controller.signal,
+    sleep: async () => {
+      await noWaitSleep();
+    },
+    logger: silentLogger(),
+    onProgress: (name, outcome) => progress.push(`${name}:${outcome}`),
+  });
+
+  // A claimed job, a thrown claim and an idle claim: three iterations, three reports. Only the
+  // last claim reports nothing, because the signal aborted inside it. A loop that is failing is
+  // still a loop that is alive, so it reports too, and it reports the failure: health treats a
+  // run of those as its own kind of stall.
+  assert.deepEqual(progress, ["t:ok", "t:failed"]);
+  assert.equal(calls, 3);
+});
+
+test("runSweeper reports progress each interval, including one that failed", async () => {
+  const controller = new AbortController();
+  const progress: string[] = [];
+  let sweeps = 0;
+
+  const sweepOnce = async () => {
+    sweeps += 1;
+    if (sweeps === 1) throw new Error("sweep failed once");
+    if (sweeps >= 2) controller.abort();
+  };
+
+  await runSweeper("t-sweep", sweepOnce, {
+    signal: controller.signal,
+    sleep: noWaitSleep,
+    logger: silentLogger(),
+    onProgress: (name, outcome) => progress.push(`${name}:${outcome}`),
+  });
+
+  assert.deepEqual(progress, ["t-sweep:failed", "t-sweep:ok"]);
+});
+
+test("runDaemon reports progress under each loop's own name", async () => {
+  const controller = new AbortController();
+  const progress = new Set<string>();
+
+  const queue = (name: "a" | "b"): QueueSpec => ({
+    name,
+    claimOnce: async () => null,
+    sweepOnce: async () => undefined,
+  });
+
+  setTimeout(() => controller.abort(), 20);
+
+  await runDaemon([queue("a"), queue("b")], {
+    signal: controller.signal,
+    sleep: async () => {
+      await noWaitSleep();
+    },
+    logger: silentLogger(),
+    idleBackoffMs: 1,
+    sweepIntervalMs: 1,
+    onProgress: (name, outcome) => progress.add(`${name}:${outcome}`),
+  });
+
+  assert.deepEqual(
+    [...progress].sort(),
+    ["a-sweep:ok", "a:ok", "b-sweep:ok", "b:ok"],
+  );
+});

@@ -1,5 +1,7 @@
 import {
   and,
+  agentSession,
+  approvalDecision,
   connectedRepository,
   db,
   desc,
@@ -7,11 +9,13 @@ import {
   inArray,
   isNull,
   notInArray,
+  outboundDelivery,
   report,
   sql,
   targetProfile,
   type Executor,
 } from "@/lib/db";
+import { MAX_ATTEMPTS as HANDOFF_MAX_ATTEMPTS } from "@/lib/approval-submission/queue";
 import { COLUMNS, phaseOf } from "@/lib/reports/columns";
 import { isAgentInvestigating } from "@/lib/reports/case";
 import { TERMINAL_STATES } from "@/lib/reports/states";
@@ -28,6 +32,7 @@ import type { ReportState } from "@/lib/reports/states";
  */
 
 export type VerdictOutcome = "REPRODUCED" | "NOT_REPRODUCED" | "INCONCLUSIVE" | "ANALYSIS_ONLY";
+export type DeliveryState = (typeof outboundDelivery.state.enumValues)[number];
 
 export type QueueCard = {
   id: string;
@@ -39,6 +44,16 @@ export type QueueCard = {
   state: ReportState;
   /** The latest revision's outcome. null means no verdict has been drafted yet. */
   outcome: VerdictOutcome | null;
+  /** The outbox state for the newest delivery row, if approval has reached delivery. */
+  deliveryState: DeliveryState | null;
+  /**
+   * The reviewer's decision never reached the harness and has run out of retries.
+   *
+   * Separate from deliveryState because the two failures happen at different points and only
+   * one of them leaves a row behind: a dead handoff means no delivery was ever enqueued, so
+   * the absence of a delivery state is exactly what makes it invisible.
+   */
+  handoffFailed: boolean;
   /**
    * session_event rows, which is the run's own step log.
    *
@@ -47,7 +62,7 @@ export type QueueCard = {
    */
   eventCount: number;
   updatedAt: Date;
-  /** The exact verdict a reviewer would answer. Only ever set in AWAITING_APPROVAL. */
+  /** The exact verdict a reviewer would answer. Also set for pending ANALYSIS_ONLY verdicts. */
   awaitingVerdictId: string | null;
   /** Whether an agent is actively working this report right now (see isAgentInvestigating). */
   investigating: boolean;
@@ -92,17 +107,41 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       eventCount: sql<number>`(
         select count(*)::int from session_event e where e.report_id = ${report.id}
       )`,
-      // Gated on the verdict/hash pair, not the thread: a synthesized ANALYSIS_ONLY verdict (a
-      // dead-end run) has a verdict awaiting approval but no TrueForge call, so its thread id is
-      // null. The check constraint pairs pending_verdict_id with pending_approved_content_hash,
-      // so pending_verdict_id alone answers the question and stays in step with case.ts.
-      pendingVerdictId: sql<string | null>`(
-        select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_verdict_id is not null
+      pendingVerdictId: pendingVerdictIdSql,
+      deliveryState: sql<DeliveryState | null>`(
+        select d.state from outbound_delivery d
+        where d.verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
+        order by d.updated_at desc
         limit 1
       )`,
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
+      )`,
+      // A decision that never reached the harness, with no attempts left. It leaves no
+      // outbound_delivery row at all, so deliveryState above is null and the card would
+      // otherwise read as merely awaiting approval for a report that is permanently stuck.
+      // MAX_ATTEMPTS is a constant in the submission queue rather than a column here.
+      handoffFailed: sql<boolean>`exists (
+        select 1
+        from approval_submission sub
+        join approval_decision ad on ad.id = sub.approval_decision_id
+        join verdict v on v.id = ad.verdict_id
+        where v.id = (
+          select latest.id from verdict latest
+          where latest.report_id = ${report.id}
+          order by latest.revision desc
+          limit 1
+        )
+          and sub.state = 'FAILED'
+          and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
+          and not exists (
+            select 1 from outbound_delivery d where d.verdict_id = v.id
+          )
       )`,
       // Same event log eventCount reads, filtered to the poller's mirrored tool-call events:
       // the one signal isAgentInvestigating trusts that a RUNNING/INVESTIGATING turn has
@@ -126,12 +165,64 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     targetName: row.targetName,
     state: row.state,
     outcome: row.outcome,
+    deliveryState: row.deliveryState,
+    handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
-    awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.pendingVerdictId : null,
+    awaitingVerdictId:
+      row.state === "AWAITING_APPROVAL" ||
+      (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
+        ? row.pendingVerdictId
+        : null,
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
   }));
 }
+
+/**
+ * The verdict a reviewer can still answer for one report, or null.
+ *
+ * Gated on the verdict/hash pair and on the absence of a recorded decision. A pending tuple
+ * after approval is handoff state, not another thing a reviewer can answer.
+ *
+ * A module constant rather than a string repeated per query: everything that counts or ranks
+ * work waiting on a human reads it, and two spellings of "waiting" that disagree is a screen
+ * telling somebody there is nothing to do.
+ */
+export const pendingVerdictIdSql = sql<string | null>`(
+  select s.pending_verdict_id from agent_session s
+  where s.report_id = ${report.id}
+    and s.pending_verdict_id is not null
+    and s.pending_approved_content_hash is not null
+    and not exists (
+      select 1 from ${approvalDecision} a
+      where a.verdict_id = s.pending_verdict_id
+    )
+  limit 1
+)`;
+
+/**
+ * Whether a report is one a reviewer still owes a decision on.
+ *
+ * Two states qualify. AWAITING_APPROVAL is the reproduction path. ANALYSIS_ONLY qualifies only
+ * when its latest verdict is itself ANALYSIS_ONLY, which is the lane a dead-end run lands in
+ * with a server-authored verdict still to approve; a report parked there behind a verdict of
+ * another outcome is not waiting on anybody.
+ */
+export const awaitingReviewSql = sql<boolean>`(
+  ${pendingVerdictIdSql} is not null
+  and (
+    ${report.state} = 'AWAITING_APPROVAL'
+    or (
+      ${report.state} = 'ANALYSIS_ONLY'
+      and (
+        select v.outcome from verdict v
+        where v.report_id = ${report.id}
+        order by v.revision desc
+        limit 1
+      ) = 'ANALYSIS_ONLY'
+    )
+  )
+)`;
 
 /**
  * Every column, with its true total and at most COLUMN_LIMIT cards.
@@ -187,17 +278,29 @@ export type ActiveReport = {
 /**
  * The reports in flight, for the sidebar. Most urgent first.
  *
- * Awaiting approval sorts ahead of everything else because it is the only state that is waiting
- * on the person reading the sidebar; the rest is recency. Terminal reports are excluded: a list
- * of what needs attention should not be padded with what is finished.
+ * Reports with an answerable verdict sort ahead of everything else because they are waiting on
+ * the person reading the sidebar; the rest is recency. Terminal reports are excluded: a list of
+ * what needs attention should not be padded with what is finished.
  */
 export async function listActiveReports(limit = 5): Promise<ActiveReport[]> {
   const rows = await db
     .select({ id: report.id, title: report.title, state: report.state })
     .from(report)
+    .leftJoin(agentSession, eq(agentSession.reportId, report.id))
     // Spread because TERMINAL_STATES is a readonly tuple and the operator takes a mutable array.
     .where(and(notInArray(report.state, [...TERMINAL_STATES]), isNull(report.hiddenAt)))
-    .orderBy(sql`(${report.state} = 'AWAITING_APPROVAL') desc`, desc(report.updatedAt))
+    .orderBy(
+      sql`(
+        ${report.state} in ('AWAITING_APPROVAL', 'ANALYSIS_ONLY')
+          and ${agentSession.pendingVerdictId} is not null
+          and ${agentSession.pendingApprovedContentHash} is not null
+          and not exists (
+            select 1 from ${approvalDecision} a
+            where a.verdict_id = ${agentSession.pendingVerdictId}
+          )
+      ) desc`,
+      desc(report.updatedAt),
+    )
     .limit(limit);
 
   return rows.map((row) => ({ ...row, phase: phaseOf(row.state) }));
@@ -242,10 +345,49 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
       )`,
       awaitingVerdictId: sql<string | null>`(
         select s.pending_verdict_id from agent_session s
-        where s.report_id = ${report.id} and s.pending_thread_id is not null
+        where s.report_id = ${report.id}
+          and s.pending_verdict_id is not null
+          and s.pending_approved_content_hash is not null
+          and not exists (
+            select 1 from ${approvalDecision} a
+            where a.verdict_id = s.pending_verdict_id
+          )
+        limit 1
+      )`,
+      deliveryState: sql<DeliveryState | null>`(
+        select d.state from outbound_delivery d
+        where d.verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
+        order by d.updated_at desc
+        limit 1
       )`,
       turnStatus: sql<string | null>`(
         select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
+      )`,
+      // A decision that never reached the harness, with no attempts left. It leaves no
+      // outbound_delivery row at all, so deliveryState above is null and the card would
+      // otherwise read as merely awaiting approval for a report that is permanently stuck.
+      // MAX_ATTEMPTS is a constant in the submission queue rather than a column here.
+      handoffFailed: sql<boolean>`exists (
+        select 1
+        from approval_submission sub
+        join approval_decision ad on ad.id = sub.approval_decision_id
+        join verdict v on v.id = ad.verdict_id
+        where v.id = (
+          select latest.id from verdict latest
+          where latest.report_id = ${report.id}
+          order by latest.revision desc
+          limit 1
+        )
+          and sub.state = 'FAILED'
+          and sub.attempts >= ${HANDOFF_MAX_ATTEMPTS}
+          and not exists (
+            select 1 from outbound_delivery d where d.verdict_id = v.id
+          )
       )`,
       hasToolCallEvents: sql<boolean>`exists (
         select 1 from session_event e
@@ -268,10 +410,16 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     targetName: row.targetName,
     state: row.state,
     outcome: row.outcome,
+    deliveryState: row.deliveryState,
+    handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,
     updatedAt: row.updatedAt,
     // Only a report that is genuinely waiting on a reviewer, the same pair the case file tests.
-    awaitingVerdictId: row.state === "AWAITING_APPROVAL" ? row.awaitingVerdictId : null,
+    awaitingVerdictId:
+      row.state === "AWAITING_APPROVAL" ||
+      (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
+        ? row.awaitingVerdictId
+        : null,
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
     origin: row.repositoryFullName ?? row.channel,
     createdAt: row.createdAt,

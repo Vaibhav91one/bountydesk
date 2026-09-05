@@ -47,8 +47,8 @@ async function seedSubmission(
     /** Point the submission's agent_session at a different report than the decision's verdict. */
     crossSession?: boolean;
     /**
-     * A server-synthesized ANALYSIS_ONLY verdict: the report is already AWAITING_APPROVAL, the
-     * verdict outcome is ANALYSIS_ONLY, and both the session's pending markers and the decision
+     * A server-synthesized ANALYSIS_ONLY verdict: the report stays in ANALYSIS_ONLY, the verdict
+     * outcome is ANALYSIS_ONLY, and both the session's pending markers and the decision
      * carry null thread/tool-call ids (there is no TrueForge call to answer).
      */
     synthesized?: boolean;
@@ -65,7 +65,9 @@ async function seedSubmission(
       sourceRef: `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
-      ...(opts.synthesized ? { state: "AWAITING_APPROVAL" as const } : {}),
+      ...(opts.synthesized
+        ? { state: opts.decision === "DENIED" ? ("DENIED" as const) : ("ANALYSIS_ONLY" as const) }
+        : {}),
     })
     .returning({ id: dbm.report.id });
 
@@ -314,6 +316,26 @@ test("a createTurn failure retries with backoff and eventually reaches FAILED", 
   const row = await submissionRow(fixture.submissionId);
   assert.equal(row.state, "FAILED");
   assert.equal(row.attempts, queue.MAX_ATTEMPTS);
+});
+
+test("a request that ran out its deadline does not spend one of the row's attempts", async () => {
+  await drainOthers();
+  const fixture = await seedSubmission({ decision: "APPROVED" });
+  const { client } = makeFakeClient({
+    createTurn: async () => {
+      // What AbortSignal.timeout aborts with, and what fetch rejects the call with.
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    },
+  });
+
+  await assert.rejects(worker.submitApprovalOnce("w-deadline", { client }), /timeout/i);
+
+  // The decision is as submittable as it was a minute ago, so the row keeps its budget and the
+  // loop backs off instead. Spending an attempt here would retire a live approval after eight
+  // slow minutes.
+  const row = await submissionRow(fixture.submissionId);
+  assert.equal(row.state, "PENDING");
+  assert.equal(row.attempts, 0);
 });
 
 test("a retry adopts an approval turn that TrueForge already accepted", async () => {

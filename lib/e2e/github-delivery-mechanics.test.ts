@@ -106,7 +106,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   assert.equal(res.status, 202);
 
   // Step 2: the real worker, with the real stub analysis driver, carries the job to DONE and
-  // the report to AWAITING_APPROVAL with an immutable ANALYSIS_ONLY verdict.
+  // leaves the report in ANALYSIS_ONLY with an immutable verdict to approve.
   const jobId = await runOnce("e2e-worker", { analysis: stubAnalysisDriver });
   assert.ok(jobId, "the enqueued job should have been claimable");
 
@@ -116,7 +116,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
     .where(dbm.eq(dbm.report.sourceRef, `github:${repoId}:issue:${issueNumber}`))
     .limit(1);
   assert.ok(reportRow);
-  assert.equal(reportRow.state, "AWAITING_APPROVAL");
+  assert.equal(reportRow.state, "ANALYSIS_ONLY");
 
   const [verdictRow] = await dbm.db
     .select()
@@ -132,7 +132,7 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
 
   // Step 3: stand in for the human approval that A4's native TrueForge gate will provide.
   // This is test-only scaffolding, not a production approval path.
-  await transition(reportRow.id, "AWAITING_APPROVAL", "DELIVERING");
+  await transition(reportRow.id, "ANALYSIS_ONLY", "DELIVERING");
   await dbm.db.insert(dbm.approvalDecision).values({
     verdictId: verdictRow.id,
     reviewer: "test-reviewer",

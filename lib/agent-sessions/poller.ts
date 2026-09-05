@@ -5,12 +5,15 @@ import {
   synthesizeAnalysisOnlyVerdict,
 } from "@/lib/mcp/publish-verdict";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
+import { isTerminal } from "@/lib/reports/states";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
   createTrueForgeClient,
+  isTrueForgeNotFoundError,
   type ObservedToolCall,
   type PendingToolCall,
   type TrueForgeClient,
+  type TurnSnapshot,
 } from "@/lib/trueforge/client";
 
 import {
@@ -158,17 +161,21 @@ async function refuseUnresolvablePending(
 /**
  * The shared body of the two dead-end terminal paths: move a still-investigating report to
  * ANALYSIS_ONLY, and, when it has no verdict at all, mint the server-authored ANALYSIS_ONLY
- * verdict and carry it into AWAITING_APPROVAL so a human can still approve and deliver it. The
- * alternative is what this fixes: a report parked at ANALYSIS_ONLY with nothing to approve,
- * which can never reach delivery.
+ * verdict so a human can still approve and deliver it from the Analysis only lane. The
+ * alternative is a report parked at ANALYSIS_ONLY with nothing to approve, which can never
+ * reach delivery.
  *
- * The mint and the AWAITING_APPROVAL move happen only when there is no verdict yet. A report
- * that somehow already has one (not reachable through the real driver, which mints only via
- * publish_verdict) keeps the old behavior and stops at ANALYSIS_ONLY: an existing verdict is
- * never overwritten, and a REPRODUCED claim is never advanced toward delivery from here.
+ * The mint happens only when there is no verdict yet. A report that somehow already has one
+ * (not reachable through the real driver, which mints only via publish_verdict) stays where it
+ * is: an existing verdict is never overwritten, and a reproduced claim is never advanced
+ * toward delivery from here.
  *
- * thread/tool-call markers stay null because there is no live TrueForge call to answer; the
- * relaxed pending_* check constraint allows the verdict pair set with the thread pair null.
+ * Every pending_* marker is cleared on the way out, and only the synthesized verdict pair is
+ * written back. The session is over and its turn status is terminal, so nothing will claim the
+ * row again: a thread and tool-call id left behind here would point at a TrueForge call that
+ * nothing can ever answer. The relaxed pending_* check constraint allows the verdict pair set
+ * with the thread pair null, which is what the synthesized verdict needs.
+ *
  * Sandbox teardown stays after the transaction commits, same reasoning as everywhere in this
  * file: a Daytona network call is not something to hold report.state's row lock across.
  */
@@ -189,14 +196,22 @@ async function endWithoutAgentVerdict(
 
     let pending: Pick<
       AgentSessionReleaseUpdate,
-      "pendingVerdictId" | "pendingApprovedContentHash"
-    > = {};
+      | "pendingThreadId"
+      | "pendingToolCallId"
+      | "pendingVerdictId"
+      | "pendingApprovedContentHash"
+    > = {
+      pendingThreadId: null,
+      pendingToolCallId: null,
+      pendingVerdictId: null,
+      pendingApprovedContentHash: null,
+    };
     if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
       const synthesized = await synthesizeAnalysisOnlyVerdict(lease.reportId, tx);
       if (synthesized) {
-        await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
         pending = {
+          ...pending,
           pendingVerdictId: synthesized.verdictId,
           pendingApprovedContentHash: synthesized.contentHash,
         };
@@ -238,10 +253,10 @@ async function finishWithoutApproval(
 
 /**
  * Handle a verified, genuine pending publish_verdict call: this is the only place in the
- * codebase that moves a report through ANALYSIS_ONLY into AWAITING_APPROVAL (see
- * lib/reports/states.ts). It happens here, and nowhere else, because this is the first
- * moment bounty-desk can prove the model actually asked to publish something, rather than a
- * driver or a route inferring that from a turn merely finishing.
+ * codebase that records a pending publish_verdict call against the report lifecycle. A
+ * reproduced or not-reproduced verdict moves into AWAITING_APPROVAL. An ANALYSIS_ONLY verdict
+ * stays in the Analysis only lane with an approval button, because there was nothing to
+ * reproduce and the reviewer still has to approve the exact outbound text.
  */
 async function handleVerifiedPendingCall(
   lease: AgentSessionLease,
@@ -263,7 +278,12 @@ async function handleVerifiedPendingCall(
     // The driver prepares revision 1 before it starts this turn. A later draft was not part
     // of the turn and cannot silently replace the exact payload the pending call refers to.
     const [verdictRow] = await tx
-      .select({ id: verdict.id, reportId: verdict.reportId, contentHash: verdict.contentHash })
+      .select({
+        id: verdict.id,
+        reportId: verdict.reportId,
+        contentHash: verdict.contentHash,
+        outcome: verdict.outcome,
+      })
       .from(verdict)
       .where(and(eq(verdict.reportId, lease.reportId), eq(verdict.revision, 1)))
       .limit(1);
@@ -281,10 +301,14 @@ async function handleVerifiedPendingCall(
       );
     }
 
+    const analysisOnly = verdictRow.outcome === "ANALYSIS_ONLY";
+
     if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
-      await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
-    } else if (reportRow.state === "ANALYSIS_ONLY") {
+      if (!analysisOnly) {
+        await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+      }
+    } else if (reportRow.state === "ANALYSIS_ONLY" && !analysisOnly) {
       await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
     } else if (reportRow.state === "AWAITING_APPROVAL") {
       if (
@@ -315,8 +339,9 @@ async function handleVerifiedPendingCall(
       );
       return;
     }
-    // A report already at AWAITING_APPROVAL is the idempotent retry case. Later lifecycle
-    // states are refused above, because a delayed harness result cannot reopen approval.
+    // A report already at AWAITING_APPROVAL, or an ANALYSIS_ONLY verdict already parked in the
+    // analysis lane, is the idempotent retry case. Later lifecycle states are refused above,
+    // because a delayed harness result cannot reopen approval.
 
     await release(
       lease,
@@ -428,6 +453,31 @@ async function handleAwaitingApproval(
 }
 
 /**
+ * A ceiling on one TrueForge call, independent of the lease.
+ *
+ * The heartbeat below renews the lease for as long as the operation runs, so an HTTP call that
+ * never answers is not something a sweeper can ever recover: the lease stays fresh, the loop
+ * stays inside the claim, and the queue stops making progress with nothing expired to reclaim.
+ * The deadline turns that into an ordinary failed claim, which the loop already knows how to
+ * log and back off from.
+ *
+ * Per call, not per claim. A poll makes up to three sequential requests, and one budget shared
+ * across them would charge a slow first request to the ones after it, aborting calls that never
+ * had their own chance to answer.
+ */
+const REQUEST_DEADLINE_MS = 30_000;
+
+/**
+ * How many deadlines one claim may spend before the claim itself is abandoned.
+ *
+ * A per-call deadline alone is only as good as the client's respect for the signal: a request
+ * that ignores an abort would hold the claim open forever, which is the wedge this file is here
+ * to prevent. Three is what a poll actually makes (getTurn, listToolCalls, getFinalSummary), so
+ * the ceiling never fires on work that is progressing.
+ */
+const CALLS_PER_CLAIM = 3;
+
+/**
  * Renews the held lease every third of its duration while `operation` runs, so a slow
  * `getTurn` call (event pagination, a sluggish TrueForge) can't outlive its own lease and get
  * reclaimed by a sweeper running on a shorter, independent cadence than the tick route's
@@ -437,13 +487,19 @@ async function handleAwaitingApproval(
 async function runWithHeartbeat<T>(
   lease: AgentSessionLease,
   leaseSeconds: number,
-  operation: (signal: AbortSignal) => Promise<T>,
+  operation: (deadline: () => AbortSignal) => Promise<T>,
   outerSignal?: AbortSignal,
+  deadlineMs: number = REQUEST_DEADLINE_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const signal = outerSignal
-    ? AbortSignal.any([controller.signal, outerSignal])
-    : controller.signal;
+  // Lease loss and the caller's own shutdown abort the whole operation. The request deadline
+  // is minted per call on top of that, which is why the operation is handed a factory rather
+  // than a signal: a shared timeout would run down across sequential requests.
+  const base = AbortSignal.any([controller.signal, ...(outerSignal ? [outerSignal] : [])]);
+  const deadline = () => AbortSignal.any([base, AbortSignal.timeout(deadlineMs)]);
+  // The ceiling on the claim as a whole, which is what ends a request that ignores its own
+  // deadline. Generous by construction: every call would have to spend its entire budget.
+  const signal = AbortSignal.any([base, AbortSignal.timeout(deadlineMs * CALLS_PER_CLAIM)]);
   const intervalMs = Math.max(
     MIN_HEARTBEAT_INTERVAL_MS,
     Math.floor((leaseSeconds * 1000) / 3),
@@ -476,7 +532,7 @@ async function runWithHeartbeat<T>(
 
   timer = setTimeout(heartbeat, intervalMs);
   try {
-    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    const result = await Promise.race([operation(deadline), leaseLoss, aborted]);
     if (signal.aborted) throw signal.reason;
     return result;
   } finally {
@@ -500,7 +556,13 @@ async function runWithHeartbeat<T>(
  */
 export async function pollOnce(
   owner: string,
-  opts: { leaseSeconds?: number; client?: TrueForgeClient; signal?: AbortSignal } = {},
+  opts: {
+    leaseSeconds?: number;
+    client?: TrueForgeClient;
+    signal?: AbortSignal;
+    /** Only set by tests, which cannot wait out the real deadline. */
+    requestDeadlineMs?: number;
+  } = {},
 ): Promise<string | null> {
   if (opts.signal?.aborted) return null;
   const leaseSeconds = opts.leaseSeconds ?? 60;
@@ -513,6 +575,25 @@ export async function pollOnce(
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
 
+  // A report that has finished has nothing left for its session to poll about. Nothing else
+  // marks the session terminal when its report reaches DELIVERED or DENIED, so without this the
+  // row stays claimable and keeps asking TrueForge about a turn no one is waiting on, holding a
+  // sandbox open with it. CANCELLED is terminal for claim(), so this is the last time the row
+  // is picked up, and finishWithoutApproval clears the pending markers and tears the sandbox
+  // down on the way out.
+  const [reportRow] = await db
+    .select({ state: report.state })
+    .from(report)
+    .where(eq(report.id, lease.reportId))
+    .limit(1);
+
+  if (reportRow && isTerminal(reportRow.state)) {
+    return finishWithoutApproval(lease, {
+      turnStatus: "CANCELLED",
+      lastError: `report is ${reportRow.state}; nothing left for this session to poll`,
+    });
+  }
+
   if (!lease.turnId) {
     // The driver created the session but has not started a turn yet; nothing to ask
     // TrueForge about.
@@ -522,32 +603,56 @@ export async function pollOnce(
   const turnId = lease.turnId;
 
   const client = opts.client ?? createTrueForgeClient();
-  const { snapshot, toolCalls, cursor, finalSummary } = await runWithHeartbeat(
-    lease,
-    leaseSeconds,
-    async (signal) => {
-      const snapshot = await client.getTurn(lease.sessionId, turnId, { signal });
-      // since: only ask for what has happened past the last poll's cursor -- without it every
-      // poll of a long-running turn re-reads and re-processes its entire event history, cost
-      // growing with the turn's total call count rather than with how much is actually new.
-      const result = await client.listToolCalls?.(lease.sessionId, turnId, {
-        signal,
-        since: lease.lastMirroredEventId ?? undefined,
+  let pollResult: {
+    snapshot: TurnSnapshot;
+    toolCalls: ObservedToolCall[];
+    cursor: string | null;
+    finalSummary: string | null;
+  };
+  try {
+    pollResult = await runWithHeartbeat(
+      lease,
+      leaseSeconds,
+      async (deadline) => {
+        const snapshot = await client.getTurn(lease.sessionId, turnId, {
+          signal: deadline(),
+        });
+        // since: only ask for what has happened past the last poll's cursor -- without it every
+        // poll of a long-running turn re-reads and re-processes its entire event history, cost
+        // growing with the turn's total call count rather than with how much is actually new.
+        const result = await client.listToolCalls?.(lease.sessionId, turnId, {
+          signal: deadline(),
+          since: lease.lastMirroredEventId ?? undefined,
+        });
+        // The agent's closing summary exists only once the turn is done: on a pending
+        // publish_verdict call (the agent-authored path) or a turn that finished without one.
+        // Fetched once, inside the heartbeat like the calls above, and only while the turn is
+        // still running would it be premature or absent.
+        const captureSummary =
+          lease.finalSummary === null &&
+          (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
+        const finalSummary = captureSummary
+          ? ((await client.getFinalSummary?.(lease.sessionId, turnId, {
+              signal: deadline(),
+            })) ?? null)
+          : null;
+        return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
+      },
+      opts.signal,
+      opts.requestDeadlineMs,
+    );
+  } catch (error) {
+    if (isTrueForgeNotFoundError(error)) {
+      return finishWithoutApproval(lease, {
+        turnStatus: "ERROR",
+        lastError: `TrueForge session or turn was not found: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       });
-      // The agent's closing summary exists only once the turn is done: on a pending
-      // publish_verdict call (the agent-authored path) or a turn that finished without one.
-      // Fetched once, inside the heartbeat like the calls above, and only while the turn is
-      // still running would it be premature or absent.
-      const captureSummary =
-        lease.finalSummary === null &&
-        (snapshot.status === "awaiting_approval" || snapshot.status === "done_no_action");
-      const finalSummary = captureSummary
-        ? ((await client.getFinalSummary?.(lease.sessionId, turnId, { signal })) ?? null)
-        : null;
-      return { snapshot, toolCalls: result?.calls ?? [], cursor: result?.cursor ?? null, finalSummary };
-    },
-    opts.signal,
-  );
+    }
+    throw error;
+  }
+  const { snapshot, toolCalls, cursor, finalSummary } = pollResult;
 
   // Mirrored regardless of the turn's status: a call already made is a call already made,
   // whether the turn is still running, has errored, or is sitting on a pending approval.

@@ -1,0 +1,9 @@
+{
+  "name": "bountydesk-trueforge-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@truefoundry/trueforge": "0.1.4",
+    "@truefoundry/trueforge-sdk": "0.1.3"
+  }
+}

@@ -3,9 +3,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 
 import type { Icon } from "@phosphor-icons/react";
 import type { ActiveReport } from "@/lib/reports/queue";
+import {
+  AMBIENT_REFETCH_MS,
+  activeReportsQueryKey,
+  fetchLive,
+} from "@/lib/reports/status-query";
 import {
   BookOpen,
   CaretUpDown,
@@ -68,6 +74,19 @@ export function AppSidebar({
   activeReports?: ActiveReport[];
 }) {
   const pathname = usePathname();
+
+  // Only while the list is on screen. It renders under /board and nowhere else (see the
+  // SidebarMenuSub below), so polling it from the settings page would be a query per reviewer
+  // per tick for something nobody can see. The layout's server-rendered copy is the seed, so
+  // the list is right on arrival and this only keeps it that way.
+  const { data: reports = activeReports } = useQuery({
+    queryKey: activeReportsQueryKey(),
+    queryFn: () => fetchLive<ActiveReport[]>("/api/active-reports"),
+    initialData: activeReports,
+    enabled: pathname === "/board",
+    refetchInterval: AMBIENT_REFETCH_MS,
+  });
+
   const { isMobile, setOpenMobile } = useSidebar();
   // The sidebar provider persists across navigation, so a mobile tap that doesn't clear
   // openMobile leaves the sheet and backdrop covering the destination page.
@@ -128,9 +147,9 @@ export function AppSidebar({
                   {/* What is in the queue, not just that a queue exists. Only under the open
                       route: five report titles under every nav item would be a second menu
                       competing with the first. SidebarMenuSub hides itself on the rail. */}
-                  {item.href === "/board" && pathname === "/board" && activeReports.length > 0 ? (
+                  {item.href === "/board" && pathname === "/board" && reports.length > 0 ? (
                     <SidebarMenuSub>
-                      {activeReports.map((report) => (
+                      {reports.map((report) => (
                         <SidebarMenuSubItem key={report.id}>
                           <SidebarMenuSubButton
                             size="sm"

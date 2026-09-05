@@ -7,7 +7,6 @@ import { RollingIcon } from "@/components/rolling-icon";
 import { MASCOT_ON_CARD } from "@/components/queue-board";
 import { Parallax } from "@/components/parallax";
 import { Reveal } from "@/components/reveal";
-import { SmoothScroll } from "@/components/smooth-scroll";
 import { TopBar } from "@/components/top-bar";
 import { TextAnimate } from "@/components/ui/text-animate";
 import { SandboxDiagram } from "@/components/sandbox-diagram";
@@ -16,7 +15,7 @@ import { SiteHeader } from "@/components/site-header";
 import { MarqueeAlongSvgPath } from "@/components/ui/marquee-along-svg-path";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MASCOT_FOR_STATE, mascotState } from "@/lib/mascot/states";
+import { MASCOT_FOR_STATE } from "@/lib/mascot/catalog";
 
 import {
   INTEGRATIONS,
@@ -88,8 +87,10 @@ const QUEUE_COLUMNS = [
         targetName: "juice-shop-v17.3.0",
         state: "TRIAGING",
         outcome: null,
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 1,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
       {
@@ -99,8 +100,10 @@ const QUEUE_COLUMNS = [
         targetName: "juice-shop-v17.3.0",
         state: "TRIAGING",
         outcome: null,
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 1,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
     ],
@@ -117,8 +120,10 @@ const QUEUE_COLUMNS = [
         targetName: "juice-shop-v17.3.0",
         state: "REPRODUCING",
         outcome: null,
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 2,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
       {
@@ -128,8 +133,10 @@ const QUEUE_COLUMNS = [
         targetName: "juice-shop-v17.3.0",
         state: "REPRODUCING",
         outcome: null,
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 2,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: null,
       },
     ],
@@ -145,9 +152,11 @@ const QUEUE_COLUMNS = [
         sourceLabel: "#175156",
         targetName: "juice-shop-v17.3.0",
         state: "AWAITING_APPROVAL",
-        outcome: "ANALYSIS_ONLY",
+        outcome: "NOT_REPRODUCED",
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 3,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: "v1",
       },
       {
@@ -157,8 +166,10 @@ const QUEUE_COLUMNS = [
         targetName: "juice-shop-v17.3.0",
         state: "AWAITING_APPROVAL",
         outcome: "REPRODUCED",
+        deliveryState: null,
+        handoffFailed: false,
         eventCount: 4,
-        updatedAt: AT,
+        updatedAt: AT.toISOString(),
         awaitingVerdictId: "v2",
       },
     ],
@@ -172,8 +183,10 @@ const TRAVELLER = {
   sourceLabel: "#175153",
   targetName: "juice-shop-v17.3.0",
   outcome: null,
+  deliveryState: null,
+  handoffFailed: false,
   eventCount: 2,
-  updatedAt: AT,
+  updatedAt: AT.toISOString(),
   awaitingVerdictId: null,
 } as const;
 
@@ -183,13 +196,15 @@ const REPORT_ROWS = [
     title: "Auth bypass via SQL injection on login",
     sourceLabel: "#175156",
     targetName: "juice-shop-v17.3.0",
-    state: "AWAITING_APPROVAL" as const,
+    state: "ANALYSIS_ONLY" as const,
     outcome: "ANALYSIS_ONLY" as const,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 3,
     awaitingVerdictId: "v1",
     investigating: false,
     origin: "Vaibhav91one/juice-shop",
-    phase: "awaiting-approval",
+    phase: "analysis-only",
     updatedAt: AT.toISOString(),
     createdAt: AT.toISOString(),
   },
@@ -200,6 +215,8 @@ const REPORT_ROWS = [
     targetName: "juice-shop-v17.3.0",
     state: "DELIVERED" as const,
     outcome: "REPRODUCED" as const,
+    deliveryState: "SENT" as const,
+    handoffFailed: false,
     eventCount: 3,
     awaitingVerdictId: null,
     investigating: false,
@@ -215,6 +232,8 @@ const REPORT_ROWS = [
     targetName: null,
     state: "ANALYSIS_ONLY" as const,
     outcome: "ANALYSIS_ONLY" as const,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 3,
     awaitingVerdictId: null,
     investigating: false,
@@ -230,6 +249,8 @@ const REPORT_ROWS = [
     targetName: "juice-shop-v17.3.0",
     state: "OUT_OF_SCOPE" as const,
     outcome: null,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 1,
     awaitingVerdictId: null,
     investigating: false,
@@ -245,6 +266,8 @@ const REPORT_ROWS = [
     targetName: "juice-shop-v17.3.0",
     state: "AWAITING_APPROVAL" as const,
     outcome: "REPRODUCED" as const,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 4,
     awaitingVerdictId: "v2",
     investigating: false,
@@ -260,6 +283,8 @@ const REPORT_ROWS = [
     targetName: "juice-shop-v17.3.0",
     state: "REPRODUCING" as const,
     outcome: null,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 2,
     awaitingVerdictId: null,
     investigating: false,
@@ -275,11 +300,30 @@ const REPORT_ROWS = [
     targetName: "juice-shop-v17.3.0",
     state: "TRIAGING" as const,
     outcome: null,
+    deliveryState: null,
+    handoffFailed: false,
     eventCount: 1,
     awaitingVerdictId: null,
     investigating: false,
     origin: "Vaibhav91one/juice-shop",
     phase: "triaging",
+    updatedAt: AT.toISOString(),
+    createdAt: AT.toISOString(),
+  },
+  {
+    id: "r8",
+    title: "Rate limit bypass on coupon redemption",
+    sourceLabel: "#175160",
+    targetName: "juice-shop-v17.3.0",
+    state: "DELIVERED" as const,
+    outcome: "NOT_REPRODUCED" as const,
+    deliveryState: "FAILED" as const,
+    handoffFailed: false,
+    eventCount: 4,
+    awaitingVerdictId: null,
+    investigating: false,
+    origin: "Vaibhav91one/juice-shop",
+    phase: "delivered",
     updatedAt: AT.toISOString(),
     createdAt: AT.toISOString(),
   },
@@ -340,7 +384,7 @@ export default function LandingPage() {
   const queueMascots = new Map(
     queueStates
       .filter((state) => MASCOT_ON_CARD.has(state))
-      .map((state) => [state, mascotState(MASCOT_FOR_STATE[state])] as const),
+      .map((state) => [state, MASCOT_FOR_STATE[state]] as const),
   );
 
   const queueDrift = new Map<string, number>([["moving", 0]]);
@@ -353,10 +397,8 @@ export default function LandingPage() {
 
   return (
     <div className="flex min-h-full flex-1 flex-col">
-      <SmoothScroll />
-
       <TopBar>
-        <SiteHeader sticky={false} entrance />
+        <SiteHeader sticky={false} entrance appLinkPrefetch={false} />
       </TopBar>
 
       <main className="flex flex-1 flex-col">
@@ -413,7 +455,7 @@ export default function LandingPage() {
             <Button
               size="lg"
               nativeButton={false}
-              render={<Link href="/login" />}
+              render={<Link href="/login" prefetch={false} />}
               className="rounded-full px-6"
             >
               <RollingIcon icon={Sparkle} weight="fill" className="size-4" />{" "}
@@ -514,7 +556,7 @@ export default function LandingPage() {
                       size="sm"
                       variant="outline"
                       nativeButton={false}
-                      render={<Link href="/login" />}
+                      render={<Link href="/login" prefetch={false} />}
                       className="w-full justify-center"
                     >
                       <RollingIcon icon={GitHubLight} className="size-4" />{" "}
@@ -570,6 +612,7 @@ export default function LandingPage() {
               slowdownOnHover
               draggable
               grabCursor
+              enableRollingZIndex={false}
               className="relative left-1/2 w-[2200px] -translate-x-1/2"
             >
               {MASCOTS.map((state) => (
@@ -657,6 +700,7 @@ export default function LandingPage() {
                       }
                       mascots={queueMascots}
                       drift={queueDrift}
+                      linkPrefetch={false}
                     />
                   </div>
                 </Inert>
@@ -698,7 +742,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <SiteFooter />
+      <SiteFooter appLinkPrefetch={false} />
     </div>
   );
 }

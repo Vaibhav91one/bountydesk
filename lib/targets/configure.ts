@@ -71,6 +71,10 @@ export type ConfigureTargetInput = TargetPin & {
   repoId: number;
   targetName?: string;
   targetDefinition?: TargetDefinition;
+  /** The Dockerfile the target image was built from, when the target came through the
+   *  onboarding pipeline. Stored on the profile so a report against it can offer the file for
+   *  download; not part of the pinned identity, so it is never compared in the drift check. */
+  dockerfileText?: string;
 };
 
 export type ConfigureJuiceShopTargetInput = Omit<
@@ -134,6 +138,7 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
         snapshotId: input.snapshotId,
         config,
         scopeRules: definition.scopeRules,
+        dockerfileText: input.dockerfileText ?? null,
       })
       .onConflictDoNothing({ target: targetProfile.name })
       .returning();
@@ -252,6 +257,7 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
         snapshotId: input.snapshotId,
         config,
         scopeRules: definition.scopeRules,
+        ...(input.dockerfileText !== undefined ? { dockerfileText: input.dockerfileText } : {}),
         updatedAt: new Date(),
       })
       .where(eq(targetProfile.id, target.id))

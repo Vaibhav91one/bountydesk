@@ -44,11 +44,26 @@ const client = postgres(url, {
   prepare: false,
   ssl: isLoopback ? false : "require",
   max: Number(process.env.DATABASE_POOL_MAX ?? 10),
-  // Integration tests point this at a disposable schema so a run cannot see, or be handed,
-  // another run's rows. Unset everywhere else, which leaves the server default (public).
-  ...(process.env.DATABASE_SCHEMA
-    ? { connection: { search_path: process.env.DATABASE_SCHEMA } }
-    : {}),
+  // Seconds, all three. A connection the Supabase pooler drops without a FIN still looks open
+  // from here, and the next query on it waits forever rather than failing: in the worker, whose
+  // loops share a pool of four, that is enough to stop every queue at once with nothing in the
+  // logs. Retiring connections before the pooler does keeps a dead socket out of the pool, and
+  // the connect timeout means a pooler that has stopped answering fails a claim instead of
+  // holding it.
+  idle_timeout: 30,
+  max_lifetime: 60 * 30,
+  connect_timeout: 10,
+  connection: {
+    // Server-side ceiling on any single statement, in milliseconds. Nothing this app runs is a
+    // long query: the claims are single-row updates and the read models are small. Without it a
+    // statement that blocks (a claim waiting on a row lock a crashed worker's transaction still
+    // holds) waits on whatever the pooler's own default happens to be, which is minutes of a
+    // silent worker loop before the cancel arrives.
+    statement_timeout: 30_000,
+    // Integration tests point this at a disposable schema so a run cannot see, or be handed,
+    // another run's rows. Unset everywhere else, which leaves the server default (public).
+    ...(process.env.DATABASE_SCHEMA ? { search_path: process.env.DATABASE_SCHEMA } : {}),
+  },
 });
 
 export const db = drizzle(client, { schema });
