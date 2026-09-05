@@ -109,6 +109,28 @@ Start with one TrueForge replica and SQLite. Add Postgres and Valkey only for di
 Oracle Always Free is an optional disposable experiment, not the deployment target. Its capacity
 and allowance can change without changing this architecture.
 
+## Target onboarding
+
+The build-onboarding worker (lib/build-onboarding) clones a connected repository, builds its image
+in a Docker-in-Docker Daytona sandbox, pushes it to GHCR, registers a Daytona snapshot from it, and
+after a reviewer approves the proposed manifest, verifies it offline and writes the TargetProfile.
+Running it live needs three things set up, all confirmed against the live Daytona account:
+
+- A DinD base snapshot the build sandbox boots from. Register it once from a docker:dind image and
+  name it in `BUILD_BASE_SNAPSHOT` (the default `bountydesk-build-dind` is a `docker:28.3.3-dind`
+  snapshot at 2 vCPU / 4 GiB / 10 GiB, the per-sandbox disk cap on the current tier).
+- A GHCR push credential on the worker (`GHCR_PUSH_TOKEN`, `write:packages`), plus `GHCR_NAMESPACE`
+  and the `BUILD_EGRESS_ALLOWLIST` (already in zerops.yml). The allow-list is the exact set a
+  docker build reaches: the git host, the registries, and their blob CDNs (Docker Hub serves layers
+  from a CloudFront host that is not the registry endpoint, so it is listed separately).
+- A GHCR read credential on Daytona, not the worker. Onboarding images are pushed private, and
+  Daytona pulls the image server-side when it builds the snapshot, so it needs its own credential:
+  `POST https://app.daytona.io/api/docker-registry` with the ghcr.io url and a `read:packages`
+  token. Without it a snapshot from a private image fails with an unauthorized pull.
+
+Build resources are `BUILD_CPU`, `BUILD_MEMORY_GB`, `BUILD_DISK_GB` (defaults 2 / 4 / 10), raised
+for a larger tier. A build that outgrows them fails with the provider's own limit message.
+
 ## Vercel
 
 PR #69 deliberately redirects every non-landing route on Vercel to the GitHub repository. Keep that

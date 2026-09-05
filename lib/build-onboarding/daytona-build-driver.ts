@@ -36,11 +36,21 @@ import {
  *   GHCR_PUSH_TOKEN       a token authorised to push to the target ghcr namespace
  *   GHCR_NAMESPACE        e.g. ghcr.io/vaibhav91one
  */
-const BUILD_CPU = 2;
-const BUILD_MEMORY_GB = 4;
-const BUILD_DISK_GB = 20;
-const BUILD_TTL_MINUTES = 30;
+// Sized to fit a modest Daytona tier by default (10 GiB disk is a common per-sandbox cap), and
+// overridable for a larger one. A build that needs more than the default fails with the
+// provider's own limit message, which names the ceiling to raise.
+const BUILD_CPU = numEnv("BUILD_CPU", 2);
+const BUILD_MEMORY_GB = numEnv("BUILD_MEMORY_GB", 4);
+const BUILD_DISK_GB = numEnv("BUILD_DISK_GB", 10);
+const BUILD_TTL_MINUTES = numEnv("BUILD_TTL_MINUTES", 30);
 const BUILD_TIMEOUT_S = 300;
+
+function numEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 export function createDaytonaBuildDriver(): BuildDriver {
   return {

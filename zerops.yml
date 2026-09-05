@@ -40,7 +40,7 @@ zerops:
         # the only network a build may reach (git host, image registries and their blob CDNs),
         # verified live to be the set a docker build actually pulls from.
         BUILD_BASE_SNAPSHOT: bountydesk-build-dind
-        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org"
+        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,pkg-containers.githubusercontent.com,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org"
         GHCR_NAMESPACE: ghcr.io/vaibhav91one
       start: npm run worker:daemon
       healthCheck:
