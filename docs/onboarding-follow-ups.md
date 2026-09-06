@@ -68,8 +68,21 @@ Future work: give `configureTarget` a path that binds a target to a `repoId` wit
 `connected_repository`, for email, upload and other non-GitHub sources, while keeping the
 connected-repo check for GitHub-sourced targets.
 
+## The build egress allowlist is per-ecosystem
+
+A target's own build pulls from its language package host, so `BUILD_EGRESS_ALLOWLIST` has to name
+that host or the build fails closed. It started with the git host, the image registries and their
+blob CDNs, and npm. Alpine's `dl-cdn.alpinelinux.org` and PyPI's `pypi.org` and
+`files.pythonhosted.org` were added for Python or Alpine targets. A target on another ecosystem
+needs its hosts added too: Debian and Ubuntu apt (`deb.debian.org`, `security.debian.org`),
+Composer (`repo.packagist.org`), Maven Central (`repo.maven.apache.org`), and so on. This stays an
+allowlist, so an unlisted ecosystem is refused rather than reaching anywhere, and the reproduction
+sandbox is untouched and stays offline. A cleaner long-term shape is a per-ecosystem allowlist the
+platform selects from the target's detected build system, rather than one growing global list.
+
 ## Resolved
 
 The no-egress oracle now accepts `wget` as well as `curl` (see `classifyEgressProbe` in
 `lib/sandbox/provision.ts`), so a target built on a minimal base such as busybox or alpine clears
-`verifyNoEgress`. This removed the first blocker the live run hit.
+`verifyNoEgress`. The readiness probe (`waitForAppReady`) accepts `wget` the same way. This removed
+the first blockers the live run hit.

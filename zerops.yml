@@ -37,10 +37,14 @@ zerops:
         # Target onboarding (lib/build-onboarding). Non-secret config only; DAYTONA_API_KEY and
         # GHCR_PUSH_TOKEN are set as service secrets, not here. BUILD_BASE_SNAPSHOT is the
         # DinD-capable Daytona snapshot the build sandbox boots from; BUILD_EGRESS_ALLOWLIST is
-        # the only network a build may reach (git host, image registries and their blob CDNs),
-        # verified live to be the set a docker build actually pulls from.
+        # the only network a build may reach (git host, image registries and their blob CDNs, and
+        # the language package hosts a target's own build pulls from). It stays an allowlist: a
+        # target whose ecosystem is not listed here fails the build rather than reaching anywhere.
+        # Add hosts per ecosystem as targets need them (npm, Alpine apk and PyPI are here; apt,
+        # Packagist or Maven Central would come next). The reproduction sandbox is unaffected and
+        # stays fully offline.
         BUILD_BASE_SNAPSHOT: bountydesk-build-dind
-        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,pkg-containers.githubusercontent.com,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org"
+        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,pkg-containers.githubusercontent.com,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org,dl-cdn.alpinelinux.org,pypi.org,files.pythonhosted.org"
         GHCR_NAMESPACE: ghcr.io/vaibhav91one
       start: npm run worker:daemon
       healthCheck:
