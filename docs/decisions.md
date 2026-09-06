@@ -585,3 +585,52 @@ Cross-references:
 - **Q17, unchanged.** The session/turn lifecycle is the same: one session per report, the
   initial turn ends on a pending `publish_verdict` call, and the human's decision is carried by a
   new chained turn bound to `threadId` and `toolCallId`, never a resume of the original turn.
+
+### Q23 — Onboarding any repo: an offline-first admission ladder (2026-09-06)
+
+Onboarding accepted only a repo whose root Dockerfile builds one self-contained image that serves
+HTTP and boots offline. That fits DSVW and Juice Shop and nothing that needs a database, a build
+context in a subdirectory, a non-npm/pip ecosystem, or more than one service. The decision here is
+how to admit arbitrary repos without weakening the reproduction guarantees Q16, Q18 and Q20 rest on.
+
+The hard constraint is fixed and stays fixed: the reproduction sandbox boots exactly one image with
+no network. `createSandbox` hardcodes `networkBlockAll: true`, sends one snapshot and no
+env/secrets, and Daytona as wrapped runs one container per snapshot. So a datastore cannot be a
+second container at reproduction time; it has to live inside the single image, with its data seeded
+at build so every fresh sandbox starts identical and the canary oracle stays reproducible. This is
+the model Q18 already chose for Juice Shop.
+
+A repo is admitted by trying tiers in priority order, and the strength of a verdict degrades
+honestly as the tier weakens:
+
+- **Tier A, offline single image (default, always tried first).** A pre-build classifier reads the
+  source and emits a build plan (`lib/build-onboarding/build-plan.ts`) naming one of three
+  strategies, each of which produces one pinned image: `dockerfile` (a Dockerfile path, context
+  subdir and non-secret build args), `image` (`FROM` a pinned published image plus the build
+  marker), or `compose-synth` (parse `compose.yml`, and for the supported shape of one app service
+  plus known datastores, synthesize a self-contained Dockerfile that installs the datastore into the
+  app image, rewrites the DB host to loopback, seeds at build, and starts both from one entrypoint).
+  The synthesis generalizes Sentinel's `sandbox-setup/dvwa.sh`. This tier keeps full isolation,
+  determinism and the canary-backed `REPRODUCED`.
+- **Tier R, static reachability pre-check (any repo, no boot).** The check Konvu's product is built
+  on: does the reported symbol get imported and invoked, is the code path reachable, are the
+  exploit's conditions present, decided without running the app. It gates and prioritizes whether a
+  live reproduction is worth starting, and it lets a run that cannot reproduce end as an evidenced
+  `ANALYSIS_ONLY` rather than a bare failure. It never lifts a verdict past the authorization gate.
+- **Tier B, externally-hosted running target (last resort, separately gated).** For a repo that
+  cannot become one offline image, a reviewer may opt the target into reaching a running instance the
+  customer already operates (a staging URL, or a self-hosted runner in their cluster, which is how
+  Konvu ships). The boundary moves from an offline sandbox to scope-guard plus an egress allowlist
+  scoped to that one endpoint. Such a target is not isolated or immutable, so it cannot carry a
+  canary-backed `REPRODUCED` unless the environment exposes a seed/reset/oracle path; the default
+  outcome is a clearly labelled non-isolated `ANALYSIS_ONLY`. It needs an explicit opt-in beyond the
+  normal approval because it relaxes the isolation invariant.
+
+What does not change: the authorization gate from Q22 holds at every tier, so no tier fakes a
+stronger verdict than its isolation earns; the human still installs the App and approves the built
+target, and Tier B adds one more explicit opt-in. Rejected outright is running the customer's
+compose, or any Docker daemon, inside the reproduction sandbox: it would need egress to pull images
+and would drag untrusted multi-container orchestration into the one place the design keeps offline
+and single-artifact. The genuine multi-container topology Q18 and Q20 sketch (separate PoC, target
+and oracle containers the platform runs) stays unbuilt; Tier B reaches a customer-run target
+instead of the platform orchestrating containers.
