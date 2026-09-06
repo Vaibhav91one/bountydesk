@@ -227,10 +227,14 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
     throw new Error("reproduction sandbox came up with a non-empty egress allow list");
   }
 
-  const haveCurl = await execute(sandbox, "command -v curl >/dev/null && echo CURL_PRESENT", 15);
-  throwIfAborted(signal);
-  if (!haveCurl.result.includes("CURL_PRESENT")) {
-    throw new Error("curl is not available in the sandbox, so the egress probes prove nothing");
+  // The probe needs an HTTP client inside the target image. curl is preferred, but minimal
+  // bases (busybox, alpine) ship wget instead, so it is accepted as a fallback. With neither
+  // the probe cannot run, and we refuse to certify rather than assume the block held.
+  const tool = await egressProbeTool(sandbox, signal);
+  if (!tool) {
+    throw new Error(
+      "neither curl nor wget is available in the sandbox, so the egress probes prove nothing",
+    );
   }
 
   // IP literals only, deliberately: networkBlockAll blocks DNS resolution too, not just the
@@ -241,29 +245,119 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
     "http://1.1.1.1",
     "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
   ];
-  const denial = "Internet is restricted";
 
   for (const url of probes) {
     throwIfAborted(signal);
+    const probe = await runEgressProbe(sandbox, tool, url);
+    throwIfAborted(signal);
+    const verdict = classifyEgressProbe(probe);
+    if (verdict === "blocked") continue;
+    if (verdict === "reached") {
+      throw new Error(`reproduction sandbox reached ${url} despite networkBlockAll`);
+    }
+    // Neither a proven block nor a proven reach: fail closed rather than certify no egress.
+    throw new Error(
+      `egress probe for ${url} was inconclusive (${tool}): ${probe.detail.slice(0, 200)}`,
+    );
+  }
+}
+
+async function egressProbeTool(
+  sandbox: Sandbox,
+  signal?: AbortSignal,
+): Promise<"curl" | "wget" | null> {
+  const found = await execute(
+    sandbox,
+    "if command -v curl >/dev/null 2>&1; then echo TOOL=curl; " +
+      "elif command -v wget >/dev/null 2>&1; then echo TOOL=wget; else echo TOOL=none; fi",
+    15,
+  );
+  throwIfAborted(signal);
+  if (found.result.includes("TOOL=curl")) return "curl";
+  if (found.result.includes("TOOL=wget")) return "wget";
+  return null;
+}
+
+export type EgressProbeResult = {
+  tool: "curl" | "wget";
+  exitCode: number;
+  status: string | null;
+  body: string;
+  stderr: string;
+  detail: string;
+};
+
+async function runEgressProbe(
+  sandbox: Sandbox,
+  tool: "curl" | "wget",
+  url: string,
+): Promise<EgressProbeResult> {
+  if (tool === "curl") {
     const script = [
       ": > /tmp/bountydesk-egress.body",
       `curl -sS --max-time 8 -o /tmp/bountydesk-egress.body -w '%{http_code}' '${url}' > /tmp/bountydesk-egress.status 2>/tmp/bountydesk-egress.err`,
-      "echo \"PROBE curl_exit=$? status=$(cat /tmp/bountydesk-egress.status)\"",
+      "echo \"PROBE exit=$? status=$(cat /tmp/bountydesk-egress.status)\"",
       "echo \"BODY $(head -c 120 /tmp/bountydesk-egress.body | tr -d '\\n')\"",
     ].join("; ");
     const result = await execute(sandbox, script, 20);
-    throwIfAborted(signal);
-    const parsed = /PROBE curl_exit=(\d+) status=(\d*)/.exec(result.result);
-    if (result.exitCode !== 0 || !parsed) {
-      throw new Error(`egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`);
+    const parsed = /PROBE exit=(\d+) status=(\d*)/.exec(result.result);
+    if (!parsed) {
+      throw new Error(
+        `egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`,
+      );
     }
-
     const status = parsed[2] === "" || parsed[2] === "000" ? null : parsed[2];
     const body = /BODY (.*)/.exec(result.result)?.[1]?.trim() ?? "";
-    if (status === "403" && body.includes(denial)) continue;
-
-    throw new Error(`reproduction sandbox reached ${url} despite networkBlockAll`);
+    return { tool, exitCode: Number(parsed[1]), status, body, stderr: "", detail: result.result };
   }
+
+  // wget, deliberately without -q: the "403 Forbidden" server-error line then reaches stderr on
+  // both busybox and GNU wget, which is the proof the interception proxy denied the request.
+  const script = [
+    ": > /tmp/bountydesk-egress.body",
+    `wget -T 8 -O /tmp/bountydesk-egress.body '${url}' 2>/tmp/bountydesk-egress.err`,
+    "echo \"PROBE exit=$?\"",
+    "echo \"ERR $(head -c 200 /tmp/bountydesk-egress.err | tr -d '\\n')\"",
+    "echo \"BODY $(head -c 120 /tmp/bountydesk-egress.body | tr -d '\\n')\"",
+  ].join("; ");
+  const result = await execute(sandbox, script, 20);
+  const parsed = /PROBE exit=(\d+)/.exec(result.result);
+  if (!parsed) {
+    throw new Error(
+      `egress probe did not run (exit ${result.exitCode}): ${result.result.slice(0, 200)}`,
+    );
+  }
+  const stderr = /ERR (.*)/.exec(result.result)?.[1]?.trim() ?? "";
+  const body = /BODY (.*)/.exec(result.result)?.[1]?.trim() ?? "";
+  return { tool, exitCode: Number(parsed[1]), status: null, body, stderr, detail: result.result };
+}
+
+/**
+ * Decide what one egress probe proved. Pure, so the security logic is unit-tested without a
+ * live sandbox. `blocked` is the only pass: positive proof the interception proxy denied the
+ * request (its 403 plus the "Internet is restricted" body for curl, its 403 server-error line
+ * or that body for wget). `reached` means the probe got through to a real service, which fails
+ * the check. `inconclusive` means neither was established, and the caller fails closed. Open
+ * egress can never read as `blocked`: a real answer is a 2xx (curl status, or wget exit 0),
+ * both of which fall through to `reached`.
+ */
+export function classifyEgressProbe(
+  probe: Pick<EgressProbeResult, "tool" | "exitCode" | "status" | "body" | "stderr">,
+): "blocked" | "reached" | "inconclusive" {
+  const denial = "Internet is restricted";
+  if (probe.tool === "curl") {
+    if (probe.status === "403" && probe.body.includes(denial)) return "blocked";
+    return "reached";
+  }
+  if (probe.exitCode === 0) return "reached";
+  if (
+    /(?:^|\D)403(?:\D|$)/.test(probe.stderr) ||
+    /forbidden/i.test(probe.stderr) ||
+    probe.body.includes(denial)
+  ) {
+    return "blocked";
+  }
+  return "inconclusive";
 }
 
 /**
