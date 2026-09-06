@@ -193,10 +193,19 @@ async function waitForAppReady(
 ): Promise<void> {
   throwIfAborted(signal);
   if (startCommand) {
-    const started = await execute(sandbox, startCommand, 10);
-    if (started.exitCode !== 0) {
-      throw new Error(`sandbox ${sandbox.id} app start failed: ${started.result.slice(0, 200)}`);
-    }
+    // A server start command runs in the foreground and never returns, so waiting for it to exit
+    // would always time out. Launch it detached in its own session (setsid) and background it, so
+    // it outlives this exec, then let the readiness poll below decide whether it actually came up.
+    // A start command that fails to bind leaves the port unanswered, which the poll reports as a
+    // timeout with the app's log, so the failure is still visible.
+    const escaped = startCommand.replace(/'/g, "'\\''");
+    // </dev/null detaches stdin too, so nothing the app inherits is still tied to this exec's
+    // channel and the process is not signalled when the exec returns.
+    await execute(
+      sandbox,
+      `setsid sh -c '${escaped}' </dev/null >/tmp/bountydesk-app.log 2>&1 & echo launched`,
+      10,
+    );
   }
 
   const deadline = Date.now() + timeoutMs;
@@ -207,7 +216,10 @@ async function waitForAppReady(
       `sandbox ${sandbox.id} has neither curl nor wget, so app readiness cannot be checked`,
     );
   }
-  const url = `http://localhost:${port}${probePath}`;
+  // 127.0.0.1, not localhost: on some base images localhost resolves to ::1 first, and a target
+  // that binds 0.0.0.0 (IPv4) is then unreachable over IPv6 and reads as never-ready. The IPv4
+  // literal reaches the common 0.0.0.0 bind directly.
+  const url = `http://127.0.0.1:${port}${probePath}`;
   // wget has no per-request status readout as portable as curl's -w, so a clean fetch counts as
   // ready and anything else as not-yet: the loop only needs to know the app answered.
   const probe =
@@ -223,7 +235,22 @@ async function waitForAppReady(
     await delay(READINESS_POLL_MS, signal);
   }
 
-  throw new Error(`sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms`);
+  // A verbose probe distinguishes the two ways readiness fails: a connection error means the app
+  // is not listening (it never bound or did not survive), while an HTTP status shows it answered
+  // but not with a 2xx on this path. The app log tail catches a crash message either way.
+  const diag = startCommand
+    ? (
+        await execute(
+          sandbox,
+          `wget -S -O /dev/null -T 5 ${url} 2>&1 | head -4; echo "-- log: $(tail -c 250 /tmp/bountydesk-app.log 2>/dev/null | tr '\\n' ' ')"`,
+          15,
+        )
+      ).result.trim()
+    : "";
+  throw new Error(
+    `sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms` +
+      (diag ? `; ${diag}` : ""),
+  );
 }
 
 /**
