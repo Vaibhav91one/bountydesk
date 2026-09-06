@@ -3,7 +3,7 @@
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
+import { Eye, Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow } from "@/components/filter-table";
 import { Badge } from "@/components/ui/badge";
@@ -167,9 +167,11 @@ export function ConnectionTabs({
       <Button
         key="action"
         size="sm"
-        variant="outline"
+        variant="ghost"
+        className="text-brand-soft hover:text-brand-soft"
         onClick={() => showRepository(repo.fullName)}
       >
+        <Eye />
         View
       </Button>,
     ],
