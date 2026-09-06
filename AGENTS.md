@@ -296,7 +296,11 @@ installation creates the connected repo, a build worker clones that repo in a bu
 dependency egress, the platform reads or asks an onboarding agent to propose target metadata,
 builds and verifies a Daytona snapshot, then writes or rotates the server-side `TargetProfile`.
 The later reproduction run still uses a no-egress sandbox and the agent still interacts with the
-target only through `probe_target` and approval-gated `probe_target_write`.
+target only through `probe_target` and approval-gated `probe_target_write`. The pipeline is built
+and live-proven through build, snapshot, manifest proposal and approval; the open follow-ups from
+that first run, a pluggable and ephemeral registry handoff to replace the GHCR-specific one, the
+onboarding agent's start-command model, and non-GitHub target writes, are in
+[`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md).
 
 Target repositories must stay passive test applications. Do not rely on repo-local scripts such
 as `detect.sh` as the authority for reproduction. Startup commands, readiness checks, image pins,
