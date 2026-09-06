@@ -147,7 +147,7 @@ test("enqueue requeues a FAILED row but leaves an in-progress one alone", async 
   const repoId = 800_200;
   await queue.enqueue({ repoId, repoFullName: "acme/r", sourceRef: "https://x/r.git" });
 
-  // A FAILED row is reset to PENDING_BUILD with the corrected source.
+  // A FAILED row is reset to PENDING_PLAN with the corrected source, so it re-classifies and rebuilds.
   await dbm.db
     .update(dbm.targetOnboarding)
     .set({ state: "FAILED", imageDigest: `sha256:${"a".repeat(64)}`, lastError: "boom" })
@@ -158,7 +158,7 @@ test("enqueue requeues a FAILED row but leaves an in-progress one alone", async 
     .select({ state: dbm.targetOnboarding.state, sourceRef: dbm.targetOnboarding.sourceRef, imageDigest: dbm.targetOnboarding.imageDigest, lastError: dbm.targetOnboarding.lastError })
     .from(dbm.targetOnboarding)
     .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
-  assert.equal(row.state, "PENDING_BUILD");
+  assert.equal(row.state, "PENDING_PLAN");
   assert.equal(row.sourceRef, "https://x/r-fixed.git");
   assert.equal(row.imageDigest, null);
   assert.equal(row.lastError, null);

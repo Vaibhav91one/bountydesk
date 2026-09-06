@@ -69,6 +69,8 @@ export type ComposeDatastore = {
  *  the subset of the target manifest the plan can decide up front from the source; `imageName`,
  *  digest and snapshot are filled by the build, not here. */
 export type RuntimeShape = {
+  /** The target profile name, lowercase and derived from the repo (DVWA becomes "dvwa"). */
+  name: string;
   /** Loopback base URL; the port lives here, matching the manifest's single source of the port. */
   baseUrl: string;
   readinessPath: string;
@@ -102,6 +104,16 @@ type BuildInputs =
       /** The one service that serves HTTP; its build/image becomes the base of the synthesized image. */
       appService: string;
       datastores: ComposeDatastore[];
+      /** The app service's build context and Dockerfile from the compose file, so the driver builds
+       *  the app image first and the synthesized image is FROM it. Default context ".", Dockerfile. */
+      appContext?: string;
+      appDockerfile?: string;
+      /** Literal file rewrites so a config that names the compose datastore service reaches 127.0.0.1
+       *  instead (DVWA's config.inc.php). Env-based apps use envOverrides and need none of these. */
+      configRewrites?: Array<{ file: string; from: string; to: string }>;
+      /** Environment values to set in the synthesized image, e.g. a DB host env the app reads, set to
+       *  127.0.0.1 so the app reaches the bundled datastore on loopback. */
+      envOverrides?: Record<string, string>;
     }
   | {
       strategy: "not-flattenable";
@@ -137,13 +149,13 @@ export function parseBuildPlan(input: unknown): BuildPlan {
   }
   const plan = input as Record<string, unknown>;
 
-  const strategy = str(plan, "strategy");
-  if (!BUILD_STRATEGIES.includes(strategy as BuildStrategy)) {
+  const strategy = str(plan, "strategy") as BuildStrategy;
+  if (!BUILD_STRATEGIES.includes(strategy)) {
     throw new Error(`build plan strategy must be one of ${BUILD_STRATEGIES.join(", ")}`);
   }
 
-  const ecosystem = str(plan, "ecosystem");
-  if (!ECOSYSTEMS.includes(ecosystem as Ecosystem)) {
+  const ecosystem = str(plan, "ecosystem") as Ecosystem;
+  if (!ECOSYSTEMS.includes(ecosystem)) {
     throw new Error(`build plan ecosystem must be one of ${ECOSYSTEMS.join(", ")}`);
   }
 
@@ -181,16 +193,37 @@ export function parseBuildPlan(input: unknown): BuildPlan {
   const composePath = relPath(str(plan, "composePath"), "composePath");
   const appService = serviceName(str(plan, "appService"), "appService");
   const datastores = parseDatastores(plan.datastores);
+  const appContext = optStr(plan, "appContext");
+  const appDockerfile = optStr(plan, "appDockerfile");
   return {
     strategy,
     ecosystem,
     composePath,
     appService,
     datastores,
+    ...(appContext ? { appContext: relPath(appContext, "appContext") } : {}),
+    ...(appDockerfile ? { appDockerfile: relPath(appDockerfile, "appDockerfile") } : {}),
+    ...(plan.configRewrites !== undefined ? { configRewrites: parseRewrites(plan.configRewrites) } : {}),
+    ...(plan.envOverrides !== undefined ? { envOverrides: parseBuildArgs(plan.envOverrides) } : {}),
     seed,
     runtime,
     ...withHosts(extraEgressHosts),
   };
+}
+
+function parseRewrites(input: unknown): Array<{ file: string; from: string; to: string }> {
+  if (!Array.isArray(input)) throw new Error("build plan configRewrites must be an array");
+  return input.map((raw, i) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error(`build plan configRewrites[${i}] must be an object`);
+    }
+    const r = raw as Record<string, unknown>;
+    return {
+      file: containerPath(str(r, "file"), `configRewrites[${i}].file`),
+      from: singleLine(str(r, "from"), `configRewrites[${i}].from`),
+      to: singleLine(str(r, "to"), `configRewrites[${i}].to`),
+    };
+  });
 }
 
 function parseRuntime(input: unknown): RuntimeShape {
@@ -199,6 +232,10 @@ function parseRuntime(input: unknown): RuntimeShape {
   }
   const runtime = input as Record<string, unknown>;
 
+  const name = str(runtime, "name");
+  if (!PROFILE_NAME_RE.test(name)) {
+    throw new Error("build plan runtime name must be lowercase letters, numbers, dot, dash or underscore");
+  }
   const baseUrl = str(runtime, "baseUrl");
   validateLocalHttpBaseUrl(baseUrl);
   const readinessPath = normalizePath(str(runtime, "readinessPath"), "readinessPath");
@@ -226,12 +263,40 @@ function parseRuntime(input: unknown): RuntimeShape {
   if (scopeRules !== undefined) validateScopeRules(scopeRules);
 
   return {
+    name,
     baseUrl,
     readinessPath,
     ...(startCommand ? { startCommand } : {}),
     ...(warmupSeconds !== undefined ? { warmupSeconds } : {}),
     ...(envPrefix ? { envPrefix } : {}),
     ...(scopeRules !== undefined ? { scopeRules: scopeRules as unknown[] } : {}),
+  };
+}
+
+const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/;
+
+/**
+ * Build the flat manifest object the driver-produced image needs, from the plan's runtime shape.
+ * The plan decided the runtime up front from the source; the image name only exists after the build,
+ * so it is supplied here. The result is fed to `parseTargetManifest`, which is the one validator that
+ * turns a manifest into a stored target definition, so the plan and the manifest cannot disagree.
+ */
+export function planToManifest(
+  plan: BuildPlan,
+  context: { repoFullName: string; imageName: string },
+): Record<string, unknown> {
+  if (!plan.runtime) throw new Error("build plan has no runtime shape to derive a manifest from");
+  const r = plan.runtime;
+  return {
+    name: r.name,
+    repoFullName: context.repoFullName,
+    imageName: context.imageName,
+    baseUrl: r.baseUrl,
+    readinessPath: r.readinessPath,
+    ...(r.startCommand ? { startCommand: r.startCommand } : {}),
+    ...(r.warmupSeconds !== undefined ? { warmupSeconds: r.warmupSeconds } : {}),
+    ...(r.envPrefix ? { envPrefix: r.envPrefix } : {}),
+    ...(r.scopeRules ? { scopeRules: r.scopeRules } : {}),
   };
 }
 
@@ -312,6 +377,15 @@ function withHosts(hosts: string[]): { extraEgressHosts?: string[] } {
 function relPath(value: string, key: string): string {
   if (!PATH_SEGMENT_RE.test(value) || value.startsWith("/") || value.includes("..")) {
     throw new Error(`build plan ${key} must be a repo-relative path with no traversal`);
+  }
+  return value;
+}
+
+/** An absolute or relative path inside the built container (a config file to rewrite). Rejects
+ *  traversal and shell-hostile characters, since it flows into a build command. */
+function containerPath(value: string, key: string): string {
+  if (!/^\/?[A-Za-z0-9._/-]+$/.test(value) || value.includes("..")) {
+    throw new Error(`build plan ${key} must be a plain container path with no traversal`);
   }
   return value;
 }

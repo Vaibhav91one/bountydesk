@@ -4,6 +4,7 @@ import test from "node:test";
 import { parseBuildPlan, type BuildPlan } from "./build-plan";
 
 const runtime = {
+  name: "demo",
   baseUrl: "http://localhost:8080",
   readinessPath: "/",
 };
@@ -41,7 +42,7 @@ test("a compose-synth plan carries the app service, datastores and an http seed"
     appService: "dvwa",
     datastores: [{ service: "db", engine: "mariadb", dbName: "dvwa", user: "dvwa", password: "p" }],
     seed: { kind: "http", method: "GET", path: "/setup.php" },
-    runtime: { baseUrl: "http://localhost:80", readinessPath: "/login.php", warmupSeconds: 45 },
+    runtime: { name: "dvwa", baseUrl: "http://localhost:80", readinessPath: "/login.php", warmupSeconds: 45 },
     extraEgressHosts: ["deb.debian.org"],
   });
   if (plan.strategy !== "compose-synth") throw new Error("narrowing");
@@ -81,7 +82,7 @@ test("a non-loopback runtime baseUrl is rejected", () => {
       parseBuildPlan({
         strategy: "dockerfile",
         ecosystem: "none",
-        runtime: { baseUrl: "http://example.com", readinessPath: "/" },
+        runtime: { name: "demo", baseUrl: "http://example.com", readinessPath: "/" },
       }),
     /must point at loopback/,
   );

@@ -24,6 +24,8 @@ export type SynthesizeInput = {
   /** In-place edits to the app's config so it reaches the datastore on 127.0.0.1 rather than the
    *  compose service name. Each is a literal search/replace in one file. */
   configRewrites?: Array<{ file: string; from: string; to: string }>;
+  /** Environment values baked into the image, e.g. a DB host env the app reads set to 127.0.0.1. */
+  envOverrides?: Record<string, string>;
   /** How to seed at build once the datastore is up. */
   seed: SeedStep;
   /** The git commit, written to /etc/bountydesk-build-marker so the reproduction sandbox can prove
@@ -44,6 +46,9 @@ export function synthesizeComposeDockerfile(input: SynthesizeInput): string {
   const lines: string[] = [];
   lines.push(`FROM ${input.appImageRef}`);
   lines.push("USER root");
+  for (const [key, value] of Object.entries(input.envOverrides ?? {})) {
+    lines.push(`ENV ${key}=${shArg(value)}`);
+  }
   lines.push("");
 
   // An http seed and the readiness wait need an HTTP client; the app base may not ship one. Install it

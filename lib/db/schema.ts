@@ -603,16 +603,22 @@ export const targetOnboarding = pgTable(
     repoFullName: text("repo_full_name").notNull(),
     /** What the build driver clones and builds: a git URL or ref for the target's source. */
     sourceRef: text("source_ref").notNull(),
-    /** PENDING_BUILD | PENDING_MANIFEST | AWAITING_APPROVAL | APPROVED | CONFIGURED | FAILED. */
-    state: text("state").notNull().default("PENDING_BUILD"),
+    /** PENDING_PLAN | PENDING_BUILD | PENDING_MANIFEST | AWAITING_APPROVAL | APPROVED | CONFIGURED
+     *  | FAILED | UNSUPPORTED. A row now starts at PENDING_PLAN so the classifier decides how the
+     *  one image is built before the build runs. */
+    state: text("state").notNull().default("PENDING_PLAN"),
+    /** The classifier's build plan (lib/build-onboarding/build-plan.ts): the strategy, ecosystem,
+     *  datastores, seed step and runtime shape the build and provision steps consume. Null until the
+     *  plan step runs; for an UNSUPPORTED row it carries the not-flattenable reason. */
+    buildPlan: jsonb("build_plan"),
     /** Filled by the build step; null until then. */
     imageName: text("image_name"),
     imageDigest: text("image_digest"),
     snapshotId: text("snapshot_id"),
     buildMarker: text("build_marker"),
     dockerfileText: text("dockerfile_text"),
-    /** The onboarding agent's proposed target manifest, validated by parseTargetManifest before
-     *  it is stored. Null until the manifest step runs. */
+    /** The target manifest derived from the build plan's runtime shape once the image exists,
+     *  validated before it is stored. Null until the manifest step runs. */
     proposedManifest: jsonb("proposed_manifest"),
     approvedBy: text("approved_by"),
     approvedAt: timestamp("approved_at", { withTimezone: true }),

@@ -1,11 +1,14 @@
 import { configureTarget } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
+import { parseTargetManifest } from "@/lib/targets/manifest";
 import type { TargetDefinition } from "@/lib/targets/registry";
 import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
+import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
+import { classify, rawSourceReader } from "./classify";
+import { knownTargetHints } from "./known-target-hints";
 import { onboardingSnapshotImageRef, type BuildDriver } from "./build-driver";
-import { proposeManifest } from "./onboarding-agent";
 import {
   advance,
   claim,
@@ -31,13 +34,22 @@ import {
  */
 export type OnboardDeps = {
   buildDriver: BuildDriver;
+  /** Retained for the daemon's wiring; the manifest is now derived from the build plan, so no
+   *  onboarding step calls the agent. */
   agentClient: TrueForgeClient;
+  /** Classify the repo into a build plan. Injectable so tests exercise the path without fetching the
+   *  real repo source; defaults to the deterministic classifier over the public source. */
+  classify?: (repoFullName: string) => Promise<BuildPlan>;
   /** The offline verify. Injectable so tests exercise the whole path without live Daytona. */
   provision?: typeof provisionTarget;
   teardown?: typeof teardownSandbox;
   leaseSeconds?: number;
   signal?: AbortSignal;
 };
+
+function defaultClassify(repoFullName: string): Promise<BuildPlan> {
+  return classify(rawSourceReader(repoFullName), repoFullName, knownTargetHints(repoFullName));
+}
 
 export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<string | null> {
   const leaseSeconds = deps.leaseSeconds ?? 60;
@@ -49,10 +61,27 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
 
   try {
     switch (lease.state) {
+      case "PENDING_PLAN": {
+        // Classify the source into a build plan before any build runs. A repo that cannot become one
+        // offline image lands in UNSUPPORTED with the reason, an honest resting state a reviewer
+        // reads, not a retried failure.
+        const doClassify = deps.classify ?? defaultClassify;
+        const plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
+          doClassify(lease.repoFullName),
+        );
+        if (plan.strategy === "not-flattenable") {
+          await advance(lease, "UNSUPPORTED", { buildPlan: plan });
+        } else {
+          await advance(lease, "PENDING_BUILD", { buildPlan: plan });
+        }
+        break;
+      }
+
       case "PENDING_BUILD": {
+        const plan = buildablePlan(lease.buildPlan);
         const result = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) =>
           deps.buildDriver.build(
-            { repoFullName: lease.repoFullName, sourceRef: lease.sourceRef },
+            { repoFullName: lease.repoFullName, sourceRef: lease.sourceRef, plan },
             { signal },
           ),
         );
@@ -67,22 +96,18 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
       }
 
       case "PENDING_MANIFEST": {
-        if (!lease.imageName || !lease.buildMarker || !lease.dockerfileText) {
+        if (!lease.imageName || !lease.buildMarker) {
           throw new Error("manifest step reached without build outputs");
         }
-        const manifest = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) =>
-          proposeManifest(
-            deps.agentClient,
-            {
-              repoFullName: lease.repoFullName,
-              sourceRef: lease.sourceRef,
-              imageName: lease.imageName!,
-              buildMarker: lease.buildMarker!,
-              dockerfileText: lease.dockerfileText!,
-            },
-            { signal },
-          ),
-        );
+        // Derive the manifest from the build plan's runtime shape, now that the image exists. The
+        // plan already decided the runtime up front from the source, so no second agent turn is run;
+        // parseTargetManifest re-validates it exactly as it validates an agent proposal.
+        const plan = buildablePlan(lease.buildPlan);
+        const manifestObject = planToManifest(plan, {
+          repoFullName: lease.repoFullName,
+          imageName: lease.imageName,
+        });
+        const manifest = parseTargetManifest(JSON.stringify(manifestObject));
         await advance(lease, "AWAITING_APPROVAL", { proposedManifest: manifest });
         break;
       }
@@ -150,6 +175,7 @@ async function verifyAndWrite(
         readinessPath,
         expectedBuildMarker: lease.buildMarker!,
         startCommand: definition.provisioning.startCommand,
+        warmupSeconds: definition.provisioning.warmupSeconds,
         snapshotImageRefOverride: snapshotImageRef,
       },
       appPort,
@@ -169,6 +195,16 @@ async function verifyAndWrite(
     snapshotImageRefOverride: snapshotImageRef,
     dockerfileText: lease.dockerfileText ?? undefined,
   });
+}
+
+/** Parse a stored build plan and refuse a not-flattenable one: the build and manifest steps only ever
+ *  run for a buildable strategy, so reaching them without one is a bug, not a retryable failure. */
+function buildablePlan(value: unknown): Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" }> {
+  const plan = parseBuildPlan(value);
+  if (plan.strategy === "not-flattenable") {
+    throw new Error("build step reached with a not-flattenable plan");
+  }
+  return plan;
 }
 
 /** A stored manifest is server-authored (validated by parseTargetManifest before it was stored),

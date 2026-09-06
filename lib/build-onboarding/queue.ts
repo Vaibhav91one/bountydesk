@@ -11,29 +11,34 @@ import { targetOnboarding, db, type Executor } from "@/lib/db";
  * What is different from the other queues is the state machine. A single row moves through
  * several worker-driven states and one human-gated one:
  *
- *   PENDING_BUILD    build the image, register the snapshot
- *   PENDING_MANIFEST run the onboarding agent, capture a validated manifest
+ *   PENDING_PLAN     classify the source, decide the build plan (or UNSUPPORTED)
+ *   PENDING_BUILD    build the one image from the plan, register the snapshot
+ *   PENDING_MANIFEST derive the target manifest from the plan's runtime shape
  *   AWAITING_APPROVAL wait for a reviewer  (NOT claimable)
  *   APPROVED         verify offline, write the TargetProfile, bind the repo
  *   CONFIGURED       done  (NOT claimable)
  *   FAILED           a step exhausted its attempts
+ *   UNSUPPORTED      the repo cannot become one offline image  (terminal, NOT claimable)
  *
- * The worker claims only the states it may advance on its own. AWAITING_APPROVAL and CONFIGURED
- * are excluded from claim() so nothing crosses a proposed manifest into a real TargetProfile
- * without a human moving it to APPROVED (see lib/build-onboarding/approve-request.ts).
+ * The worker claims only the states it may advance on its own. AWAITING_APPROVAL, CONFIGURED and
+ * UNSUPPORTED are excluded from claim() so nothing crosses a proposed manifest into a real
+ * TargetProfile without a human moving it to APPROVED (see lib/build-onboarding/approve-request.ts),
+ * and an honest refusal is a resting state a reviewer reads rather than a row the worker retries.
  */
 export const MAX_ATTEMPTS = 8;
 
 export type OnboardingState =
+  | "PENDING_PLAN"
   | "PENDING_BUILD"
   | "PENDING_MANIFEST"
   | "AWAITING_APPROVAL"
   | "APPROVED"
   | "CONFIGURED"
-  | "FAILED";
+  | "FAILED"
+  | "UNSUPPORTED";
 
-/** The states the worker may pick up. The two it may not are the human gate and the terminal. */
-const CLAIMABLE: OnboardingState[] = ["PENDING_BUILD", "PENDING_MANIFEST", "APPROVED", "FAILED"];
+/** The states the worker may pick up. The human gate, the terminal and the refusal are excluded. */
+const CLAIMABLE: OnboardingState[] = ["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST", "APPROVED", "FAILED"];
 
 /** A held target_onboarding row, carrying what the worker needs to resume from its state. */
 export type OnboardingLease = {
@@ -42,6 +47,7 @@ export type OnboardingLease = {
   repoFullName: string;
   sourceRef: string;
   state: OnboardingState;
+  buildPlan: unknown;
   imageName: string | null;
   imageDigest: string | null;
   snapshotId: string | null;
@@ -53,8 +59,9 @@ export type OnboardingLease = {
   leaseOwner: string;
 };
 
-/** The columns a build step or the manifest step writes back with advance(). */
+/** The columns the plan, build or manifest step writes back with advance(). */
 export type OnboardingAdvanceFields = Partial<{
+  buildPlan: unknown;
   imageName: string;
   imageDigest: string;
   snapshotId: string;
@@ -95,9 +102,10 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
       // proposal awaiting a human, a configured target) is left exactly as it is: the setWhere
       // below makes the update a no-op for those, so this stays idempotent for work in progress.
       set: {
-        state: "PENDING_BUILD",
+        state: "PENDING_PLAN",
         repoFullName: input.repoFullName,
         sourceRef: input.sourceRef,
+        buildPlan: null,
         imageName: null,
         imageDigest: null,
         snapshotId: null,
@@ -128,6 +136,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     repo_full_name: string;
     source_ref: string;
     state: OnboardingState;
+    build_plan: unknown;
     image_name: string | null;
     image_digest: string | null;
     snapshot_id: string | null;
@@ -159,6 +168,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
               ${targetOnboarding.repoFullName}     as repo_full_name,
               ${targetOnboarding.sourceRef}        as source_ref,
               ${targetOnboarding.state}            as state,
+              ${targetOnboarding.buildPlan}        as build_plan,
               ${targetOnboarding.imageName}        as image_name,
               ${targetOnboarding.imageDigest}      as image_digest,
               ${targetOnboarding.snapshotId}       as snapshot_id,
@@ -178,6 +188,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     repoFullName: row.repo_full_name,
     sourceRef: row.source_ref,
     state: row.state,
+    buildPlan: row.build_plan,
     imageName: row.image_name,
     imageDigest: row.image_digest,
     snapshotId: row.snapshot_id,
@@ -307,7 +318,7 @@ export async function sweepExpiredLeases(): Promise<{ released: number; failed: 
              'build-onboarding worker died on the final attempt'
            ),
            updated_at       = now()
-     where ${targetOnboarding.state} in ('PENDING_BUILD', 'PENDING_MANIFEST', 'APPROVED')
+     where ${targetOnboarding.state} in ('PENDING_PLAN', 'PENDING_BUILD', 'PENDING_MANIFEST', 'APPROVED')
        and ${targetOnboarding.leaseExpiresAt} < now()
        and ${targetOnboarding.attempts} >= ${MAX_ATTEMPTS}
     returning ${targetOnboarding.id} as id

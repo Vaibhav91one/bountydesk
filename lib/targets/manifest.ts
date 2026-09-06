@@ -13,6 +13,7 @@ export type TargetManifest = {
   startCommand?: string;
   envPrefix?: string;
   scopeRules?: unknown[];
+  warmupSeconds?: number;
 };
 
 export function parseTargetManifest(text: string): TargetDefinition {
@@ -48,6 +49,13 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
   const startCommand = optionalString(manifest, "startCommand");
   if (startCommand !== undefined) validateStartCommand(startCommand);
 
+  const warmupSeconds = manifest.warmupSeconds;
+  if (warmupSeconds !== undefined) {
+    if (typeof warmupSeconds !== "number" || !Number.isInteger(warmupSeconds) || warmupSeconds < 0 || warmupSeconds > 600) {
+      throw new Error("target manifest warmupSeconds must be an integer 0..600");
+    }
+  }
+
   const repoFullName = readString(manifest, "repoFullName");
   const envPrefix = optionalString(manifest, "envPrefix") ?? envPrefixFromName(name);
   if (!ENV_PREFIX_RE.test(envPrefix)) {
@@ -70,6 +78,7 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
     provisioning: {
       readinessPath,
       ...(startCommand ? { startCommand } : {}),
+      ...(typeof warmupSeconds === "number" ? { warmupSeconds } : {}),
     },
   };
 }

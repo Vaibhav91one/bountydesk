@@ -430,6 +430,9 @@ export type ProvisionAuthorization = {
   expectedBuildMarker: string;
   startCommand?: string;
   snapshotImageRefOverride?: string;
+  /** Extra seconds added to the readiness deadline for an image that starts a bundled datastore
+   * before the app answers, or a slow runtime. Absent for a plain app that answers at once. */
+  warmupSeconds?: number;
   /** Only present when a reproduction recipe is driving this run; threaded onto the sandbox's
    * labels for audit, same as before this function existed on its own. The driver's turn-time
    * provisioning has no recipe and leaves this unset. */
@@ -526,7 +529,7 @@ export async function provisionTarget(
       appPort,
       authorization.readinessPath,
       authorization.startCommand,
-      READINESS_TIMEOUT_MS,
+      READINESS_TIMEOUT_MS + Math.max(0, authorization.warmupSeconds ?? 0) * 1000,
       opts?.signal,
     );
   } catch (error) {

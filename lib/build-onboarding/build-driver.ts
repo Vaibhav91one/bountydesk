@@ -9,11 +9,16 @@
  * narrow, server-held egress allow-list, bakes a build marker, registers the image as a Daytona
  * snapshot, and reports back the identifiers the later steps pin against.
  */
+import type { BuildPlan } from "./build-plan";
+
 export type BuildInput = {
   /** owner/name, used to name the image and label the sandbox. */
   repoFullName: string;
-  /** A git URL or ref the driver clones and builds. */
+  /** The commit or ref the driver checks out, so the build is pinned to an exact source. */
   sourceRef: string;
+  /** The classifier's plan, deciding the build strategy, ecosystem egress and (for compose) the
+   *  datastores to bundle and seed. Must be a buildable strategy, never `not-flattenable`. */
+  plan: BuildPlan;
 };
 
 export type BuildResult = {
@@ -27,6 +32,9 @@ export type BuildResult = {
   dockerfileText: string;
   /** The commit baked into /etc/bountydesk-build-marker, re-verified from inside the sandbox. */
   buildMarker: string;
+  /** A hash over the build plan, base-image digest and commit, so the pinned target identity records
+   *  how it was built and not only what came out (docs/decisions.md Q20). */
+  buildRecipeDigest: string;
 };
 
 export interface BuildDriver {

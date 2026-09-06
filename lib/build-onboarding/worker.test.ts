@@ -2,14 +2,15 @@ import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
 import type { BuildDriver, BuildResult } from "./build-driver";
+import type { BuildPlan } from "./build-plan";
 import type { OnboardDeps } from "./worker";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 /**
- * The whole onboarding software path, end to end, against fakes: a fake BuildDriver (no Daytona),
- * a fake TrueForge client returning a canned manifest (no harness), and a fake provision (no live
- * sandbox). Only the DB is real, on a disposable schema. This proves the state machine, the
- * manifest validation, the human gate, and the TargetProfile write without any live infra.
+ * The whole onboarding software path, end to end, against fakes: a fake classifier (no source
+ * fetch), a fake BuildDriver (no Daytona), and a fake provision (no live sandbox). Only the DB is
+ * real, on a disposable schema. This proves the state machine (plan, build, manifest, human gate,
+ * verify, write) and the manifest validation without any live infra.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
@@ -45,17 +46,14 @@ async function connectedRepo(fullName: string): Promise<number> {
   return repoId;
 }
 
-function manifestJson(repoFullName: string): string {
-  return JSON.stringify({
-    name: "widget",
-    repoFullName,
-    imageName: "ghcr.io/acme/widget",
-    baseUrl: "http://localhost:3000",
-    readinessPath: "/",
-    startCommand: "node server.js",
-    scopeRules: [{ allow: "localhost" }],
-  });
-}
+const widgetPlan: BuildPlan = {
+  strategy: "dockerfile",
+  ecosystem: "node",
+  dockerfilePath: "Dockerfile",
+  buildContext: ".",
+  seed: { kind: "none" },
+  runtime: { name: "widget", baseUrl: "http://localhost:3000", readinessPath: "/", startCommand: "node server.js" },
+};
 
 const buildResult: BuildResult = {
   imageName: "ghcr.io/acme/widget",
@@ -63,6 +61,7 @@ const buildResult: BuildResult = {
   snapshotId: "snap-widget",
   dockerfileText: "FROM node:20\nCMD node server.js",
   buildMarker: "b".repeat(40),
+  buildRecipeDigest: `sha256:${"c".repeat(64)}`,
 };
 
 function fakeBuildDriver(over?: Partial<BuildResult> | Error): BuildDriver {
@@ -99,12 +98,19 @@ function fakeAgentClient(finalMessage: string | null): TrueForgeClient {
 function deps(over: Partial<OnboardDeps>): OnboardDeps {
   return {
     buildDriver: fakeBuildDriver(),
-    agentClient: fakeAgentClient(manifestJson("acme/widget")),
+    agentClient: fakeAgentClient(null),
+    classify: async () => widgetPlan,
     provision: async () => ({ sandboxId: "sbx-verify", appPort: 3000 }),
     teardown: async () => {},
     leaseSeconds: 60,
     ...over,
   };
+}
+
+/** Drive the row from a fresh enqueue through classify and build to PENDING_MANIFEST. */
+async function toManifest(worker: typeof import("./worker"), over: Partial<OnboardDeps> = {}) {
+  await worker.onboardOnce("w1", deps(over)); // PENDING_PLAN -> PENDING_BUILD
+  await worker.onboardOnce("w1", deps(over)); // PENDING_BUILD -> PENDING_MANIFEST
 }
 
 /** Park every existing row terminal so onboardOnce (global-FIFO claim) picks only this test's
@@ -123,54 +129,74 @@ async function stateOf(repoId: number): Promise<string> {
   return row.state;
 }
 
-test("the build step stores its outputs and advances to the manifest step", async () => {
+test("classify then build stores the outputs and advances to the manifest step", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
   await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
 
-  await worker.onboardOnce("w1", deps({}));
+  await worker.onboardOnce("w1", deps({})); // PENDING_PLAN -> PENDING_BUILD
+  assert.equal(await stateOf(repoId), "PENDING_BUILD");
+  await worker.onboardOnce("w1", deps({})); // PENDING_BUILD -> PENDING_MANIFEST
 
   assert.equal(await stateOf(repoId), "PENDING_MANIFEST");
   const [row] = await dbm.db
-    .select({ imageDigest: dbm.targetOnboarding.imageDigest, dockerfileText: dbm.targetOnboarding.dockerfileText })
+    .select({
+      imageDigest: dbm.targetOnboarding.imageDigest,
+      dockerfileText: dbm.targetOnboarding.dockerfileText,
+      buildPlan: dbm.targetOnboarding.buildPlan,
+    })
     .from(dbm.targetOnboarding)
     .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
   assert.equal(row.imageDigest, buildResult.imageDigest);
   assert.match(row.dockerfileText ?? "", /FROM node:20/);
+  assert.equal((row.buildPlan as { strategy?: string }).strategy, "dockerfile");
 });
 
-test("a valid manifest reaches the human gate; an invalid one fails for retry", async () => {
+test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", async () => {
+  const repoId = await connectedRepo("acme/multi");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/multi", sourceRef: "https://x/multi.git" });
+
+  let built = false;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "two app services" }),
+      buildDriver: { async build() { built = true; return buildResult; } },
+    }),
+  );
+
+  assert.equal(await stateOf(repoId), "UNSUPPORTED");
+  assert.equal(built, false, "an unsupported repo is never built");
+  // UNSUPPORTED is terminal: a further claim does not pick it up.
+  await worker.onboardOnce("w1", deps({}));
+  assert.equal(await stateOf(repoId), "UNSUPPORTED");
+});
+
+test("the manifest is derived from the build plan and reaches the human gate", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
   await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
 
-  await worker.onboardOnce("w1", deps({})); // build -> PENDING_MANIFEST
+  await toManifest(worker);
+  await worker.onboardOnce("w1", deps({})); // PENDING_MANIFEST -> AWAITING_APPROVAL
 
-  // An unparseable manifest keeps the row at PENDING_MANIFEST (retryable) and records the error.
-  await worker.onboardOnce("w1", deps({ agentClient: fakeAgentClient("not json at all") }));
-  assert.equal(await stateOf(repoId), "PENDING_MANIFEST");
-
-  // Clear the failure backoff so the retry is claimable now (the worker would just wait).
-  await dbm.db
-    .update(dbm.targetOnboarding)
-    .set({ nextAttemptAt: new Date() })
-    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
-
-  // A valid manifest advances to the gate.
-  await worker.onboardOnce("w1", deps({}));
   assert.equal(await stateOf(repoId), "AWAITING_APPROVAL");
   const [row] = await dbm.db
     .select({ manifest: dbm.targetOnboarding.proposedManifest })
     .from(dbm.targetOnboarding)
     .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
-  assert.equal((row.manifest as { name?: string }).name, "widget");
+  const manifest = row.manifest as { name?: string; imageName?: string };
+  assert.equal(manifest.name, "widget");
+  // imageName comes from the build, not the plan.
+  assert.equal(manifest.imageName, "ghcr.io/acme/widget");
 });
 
 test("the worker never advances a row out of AWAITING_APPROVAL on its own", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
   await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
-  await worker.onboardOnce("w1", deps({}));
+  await toManifest(worker);
   await worker.onboardOnce("w1", deps({}));
   assert.equal(await stateOf(repoId), "AWAITING_APPROVAL");
 
@@ -183,8 +209,8 @@ test("an approved row verifies offline and writes the TargetProfile", async () =
   const repoId = await connectedRepo("acme/widget");
   await drain();
   await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
-  await worker.onboardOnce("w1", deps({}));
-  await worker.onboardOnce("w1", deps({}));
+  await toManifest(worker);
+  await worker.onboardOnce("w1", deps({})); // -> AWAITING_APPROVAL
 
   // Human approval.
   await dbm.db
@@ -229,8 +255,8 @@ test("a failed offline verify leaves the row unwritten", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
   await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
-  await worker.onboardOnce("w1", deps({}));
-  await worker.onboardOnce("w1", deps({}));
+  await toManifest(worker);
+  await worker.onboardOnce("w1", deps({})); // -> AWAITING_APPROVAL
   await dbm.db
     .update(dbm.targetOnboarding)
     .set({ state: "APPROVED" })
