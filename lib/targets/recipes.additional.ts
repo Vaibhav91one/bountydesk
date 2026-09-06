@@ -173,9 +173,11 @@ function dsvwSqlInjectionRecipe(config: DsvwConfig): ReproductionRecipe {
   const injection = `2 UNION SELECT '${CANARY_PLACEHOLDER}'`;
   return {
     id: "dsvw-sqli",
-    // Not ready: the canary sits in a GET path the orchestrator never substitutes, so the oracle
-    // could never match today. Gated to NO_APPROVED_ORACLE.
-    oracleReady: false,
+    // Approved for reproduction. The live path is the agent's own probe_target investigation, and
+    // this flag is what authorises it; the deterministic canary oracle below is not run there, so
+    // its GET-path substitution gap does not reach the verdict. DSVW is built and onboarded, and a
+    // REPRODUCED the agent draws is still human-approved before anything ships.
+    oracleReady: true,
     title: "UNION SQL injection in the DSVW user lookup",
     keywords: ["sql injection", "sqli", "union select", "dsvw", `${config.sqlInjectionPath}?id=`],
     fixture: { request: { method: "GET", path: config.sqlInjectionPath } },
