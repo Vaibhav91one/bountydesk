@@ -7,12 +7,12 @@ import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow } from "@/components/filter-table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import type { OnboardingProposal, RepoStatus } from "@/lib/github/connections";
 
-import { ConfigureButton } from "../integrations/configure-button";
 import { RepositorySheet } from "./repository-sheet";
 
 const COLUMNS = [
@@ -138,9 +138,9 @@ export function ConnectionTabs({
   const needle = query.trim().toLowerCase();
   const rows: TableRow[] = repositories.map((repo) => ({
     id: repo.id,
-    // The row opens the panel. FilterTable stretches this over the row from the first cell
-    // and leaves the later cells above it, so Configure configures and does not also open a
-    // sheet behind itself.
+    // The row opens the panel. FilterTable stretches this over the row from the first cell and
+    // leaves the action cell above it, so the View button, which does the same, is not swallowed
+    // by the row overlay behind it.
     onSelect: () => showRepository(repo.fullName),
     hidden:
       !inGroup(repo.status, group) ||
@@ -164,12 +164,14 @@ export function ConnectionTabs({
       <Badge key="status" variant={repo.connected ? "success" : "outline"}>
         {repo.label}
       </Badge>,
-      <ConfigureButton
+      <Button
         key="action"
-        repoId={repo.repoId}
-        configured={repo.configured}
-        label={repo.configured ? "Reconfigure" : "Configure"}
-      />,
+        size="sm"
+        variant="outline"
+        onClick={() => showRepository(repo.fullName)}
+      >
+        View
+      </Button>,
     ],
   }));
 
