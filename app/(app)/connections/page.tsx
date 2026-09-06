@@ -67,6 +67,7 @@ export default async function ConnectionsPage() {
           type: connection.accountType,
         }),
         onboarding: repo.onboarding,
+        onboardingProgress: repo.onboardingProgress,
       };
     }),
   );

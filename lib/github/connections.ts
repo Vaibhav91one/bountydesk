@@ -4,6 +4,7 @@ import {
   db,
   eq,
   githubInstallation,
+  inArray,
   isNull,
   isNotNull,
   report,
@@ -42,6 +43,17 @@ export type ConnectionRepo = {
   /** A built target waiting for a reviewer to approve its proposed manifest, or null. This is
    *  the only human gate between a build and a written TargetProfile, so the panel surfaces it. */
   onboarding: OnboardingProposal | null;
+  /** Where onboarding is for this repo when it is not yet approvable: classifying, building,
+   *  failed, or an honest UNSUPPORTED with a reason. Null when there is nothing in flight (no row,
+   *  already awaiting approval, or already configured). Lets the panel say "building" rather than
+   *  look idle, and show why a repo cannot be onboarded. */
+  onboardingProgress: OnboardingProgress | null;
+};
+
+export type OnboardingProgress = {
+  state: "PENDING_PLAN" | "PENDING_BUILD" | "PENDING_MANIFEST" | "FAILED" | "UNSUPPORTED";
+  /** The not-flattenable reason for UNSUPPORTED, or the last error for FAILED; null otherwise. */
+  reason: string | null;
 };
 
 export type OnboardingProposal = {
@@ -144,6 +156,38 @@ async function awaitingApprovalOnboardings(): Promise<Map<number, OnboardingProp
   );
 }
 
+/**
+ * Onboarding that is in flight or refused, keyed by repository id. Everything except the two states
+ * the reviewer sees elsewhere (AWAITING_APPROVAL has its own proposal card, CONFIGURED is just the
+ * bound target). UNSUPPORTED carries its reason from the build plan; FAILED carries the last error.
+ */
+async function onboardingProgressByRepo(): Promise<Map<number, OnboardingProgress>> {
+  const rows = await db
+    .select({
+      repoId: targetOnboarding.repoId,
+      state: targetOnboarding.state,
+      buildPlan: targetOnboarding.buildPlan,
+      lastError: targetOnboarding.lastError,
+    })
+    .from(targetOnboarding)
+    .where(
+      inArray(targetOnboarding.state, ["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST", "FAILED", "UNSUPPORTED"]),
+    );
+
+  return new Map(
+    rows.map((row) => {
+      const state = row.state as OnboardingProgress["state"];
+      const reason =
+        state === "UNSUPPORTED"
+          ? ((row.buildPlan as { reason?: string } | null)?.reason ?? null)
+          : state === "FAILED"
+            ? row.lastError
+            : null;
+      return [Number(row.repoId), { state, reason }] as const;
+    }),
+  );
+}
+
 export type Connection = {
   installationRowId: string;
   installationId: number;
@@ -192,6 +236,7 @@ export function repoStatus(row: StatusInput): RepoStatus {
 export async function listConnections(): Promise<Connection[]> {
   const reports = await reportsByRepository();
   const onboardings = await awaitingApprovalOnboardings();
+  const onboardingProgress = await onboardingProgressByRepo();
   const rows = await db
     .select({
       installationRowId: githubInstallation.id,
@@ -254,6 +299,7 @@ export async function listConnections(): Promise<Connection[]> {
       targetProfileName: row.targetProfileName,
       reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
       onboarding: onboardings.get(row.repoId) ?? null,
+      onboardingProgress: onboardingProgress.get(row.repoId) ?? null,
       status: repoStatus({
         installationSuspended: row.suspendedAt !== null,
         active: row.active ?? false,

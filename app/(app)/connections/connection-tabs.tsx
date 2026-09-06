@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import type { OnboardingProposal, RepoStatus } from "@/lib/github/connections";
+import type { OnboardingProgress, OnboardingProposal, RepoStatus } from "@/lib/github/connections";
 
 import { RepositorySheet } from "./repository-sheet";
 
@@ -73,6 +73,8 @@ export type RepositoryRow = {
   manageUrl: string | null;
   /** A built target awaiting this reviewer's approval, or null. Drives the panel's approve gate. */
   onboarding: OnboardingProposal | null;
+  /** Onboarding in flight or refused (classifying, building, failed, unsupported), or null. */
+  onboardingProgress: OnboardingProgress | null;
 };
 
 /**

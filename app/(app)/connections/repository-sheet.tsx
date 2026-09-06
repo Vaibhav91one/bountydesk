@@ -17,7 +17,6 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-import { ConfigureButton } from "../integrations/configure-button";
 import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import type { RepositoryRow } from "./connection-tabs";
 
@@ -34,6 +33,24 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function count(n: number, noun: string): string {
   if (n === 0) return `No ${noun}s`;
   return `${n} ${n === 1 ? noun : `${noun}s`}`;
+}
+
+/** Plain-language heading for where onboarding is, or why it stopped. */
+function onboardingProgressLabel(state: string): string {
+  switch (state) {
+    case "PENDING_PLAN":
+      return "Classifying the repository";
+    case "PENDING_BUILD":
+      return "Building the target image";
+    case "PENDING_MANIFEST":
+      return "Preparing the target manifest";
+    case "FAILED":
+      return "Onboarding failed";
+    case "UNSUPPORTED":
+      return "This repository cannot be onboarded";
+    default:
+      return "Onboarding in progress";
+  }
 }
 
 /**
@@ -153,12 +170,25 @@ export function RepositorySheet({
                 </div>
               ) : null}
 
-              {/* The same control the row carries, so the two cannot drift apart. */}
-              <ConfigureButton
-                repoId={repo.repoId}
-                configured={repo.configured}
-                label={repo.configured ? "Reconfigure" : "Configure"}
-              />
+              {/* Onboarding that is in flight or refused. A reviewer sees "building" rather than an
+                  idle panel, and an honest reason when a repo cannot become one offline image. */}
+              {repo.onboardingProgress ? (
+                <div
+                  className={
+                    repo.onboardingProgress.state === "UNSUPPORTED" ||
+                    repo.onboardingProgress.state === "FAILED"
+                      ? "flex flex-col gap-1 rounded-md border border-border/50 px-4 py-3 text-body text-muted-foreground"
+                      : "flex flex-col gap-1 rounded-md bg-muted/30 px-4 py-3 text-body text-muted-foreground"
+                  }
+                >
+                  <span className="text-meta font-medium text-foreground">
+                    {onboardingProgressLabel(repo.onboardingProgress.state)}
+                  </span>
+                  {repo.onboardingProgress.reason ? (
+                    <span className="text-sm">{repo.onboardingProgress.reason}</span>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="flex flex-col gap-2">
                 <Button
