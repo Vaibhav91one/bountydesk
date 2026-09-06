@@ -201,7 +201,19 @@ async function waitForAppReady(
 
   const deadline = Date.now() + timeoutMs;
   const probePath = readinessPath.startsWith("/") ? readinessPath : `/${readinessPath}`;
-  const probe = `curl -s -o /dev/null -w '%{http_code}' http://localhost:${port}${probePath} 2>/dev/null || echo 000`;
+  const tool = await httpProbeTool(sandbox, signal);
+  if (!tool) {
+    throw new Error(
+      `sandbox ${sandbox.id} has neither curl nor wget, so app readiness cannot be checked`,
+    );
+  }
+  const url = `http://localhost:${port}${probePath}`;
+  // wget has no per-request status readout as portable as curl's -w, so a clean fetch counts as
+  // ready and anything else as not-yet: the loop only needs to know the app answered.
+  const probe =
+    tool === "curl"
+      ? `curl -s -o /dev/null -w '%{http_code}' ${url} 2>/dev/null || echo 000`
+      : `wget -q -O /dev/null -T 5 ${url} 2>/dev/null && echo 200 || echo 000`;
 
   while (Date.now() < deadline) {
     throwIfAborted(signal);
@@ -230,7 +242,7 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
   // The probe needs an HTTP client inside the target image. curl is preferred, but minimal
   // bases (busybox, alpine) ship wget instead, so it is accepted as a fallback. With neither
   // the probe cannot run, and we refuse to certify rather than assume the block held.
-  const tool = await egressProbeTool(sandbox, signal);
+  const tool = await httpProbeTool(sandbox, signal);
   if (!tool) {
     throw new Error(
       "neither curl nor wget is available in the sandbox, so the egress probes prove nothing",
@@ -262,7 +274,7 @@ async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<v
   }
 }
 
-async function egressProbeTool(
+async function httpProbeTool(
   sandbox: Sandbox,
   signal?: AbortSignal,
 ): Promise<"curl" | "wget" | null> {
