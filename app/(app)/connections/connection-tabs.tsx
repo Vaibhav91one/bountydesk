@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import type { RepoStatus } from "@/lib/github/connections";
+import type { OnboardingProposal, RepoStatus } from "@/lib/github/connections";
 
 import { ConfigureButton } from "../integrations/configure-button";
 import { RepositorySheet } from "./repository-sheet";
@@ -71,6 +71,8 @@ export type RepositoryRow = {
   /** GitHub's own repository-access screen for this installation, or null when the account
    *  type was never recorded and the right path cannot be worked out. */
   manageUrl: string | null;
+  /** A built target awaiting this reviewer's approval, or null. Drives the panel's approve gate. */
+  onboarding: OnboardingProposal | null;
 };
 
 /**

@@ -337,3 +337,53 @@ test("an ANALYSIS_ONLY report with a verdict to approve counts as waiting", asyn
 
   assert.equal(rows.find((r) => r.connectedRepositoryId === target)?.reports.awaitingReview, 1);
 });
+
+test("a target awaiting approval surfaces on its repository, other states do not", async () => {
+  const install = await installation();
+  const pending = await repo(install.id, { configured: false });
+  const building = await repo(install.id, { configured: false });
+
+  const repoIdOf = async (id: string) =>
+    (
+      await dbm.db
+        .select({ repoId: dbm.connectedRepository.repoId })
+        .from(dbm.connectedRepository)
+        .where(dbm.eq(dbm.connectedRepository.id, id))
+    )[0].repoId;
+
+  const manifest = {
+    name: "webgoat",
+    repoFullName: "acme/webgoat",
+    imageName: "ghcr.io/acme/webgoat",
+    baseUrl: "http://localhost:8080",
+    readinessPath: "/health",
+  };
+
+  await dbm.db.insert(dbm.targetOnboarding).values({
+    repoId: await repoIdOf(pending),
+    repoFullName: "acme/webgoat",
+    sourceRef: "main",
+    state: "AWAITING_APPROVAL",
+    proposedManifest: manifest,
+    imageName: "ghcr.io/acme/webgoat",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+  });
+  // A build still running is the worker's to advance, not a reviewer's to decide, so it must
+  // not surface as an approvable proposal.
+  await dbm.db.insert(dbm.targetOnboarding).values({
+    repoId: await repoIdOf(building),
+    repoFullName: "acme/other",
+    sourceRef: "main",
+    state: "PENDING_MANIFEST",
+    proposedManifest: manifest,
+  });
+
+  const repos =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  const pendingRow = repos.find((r) => r.connectedRepositoryId === pending);
+  assert.equal(pendingRow?.onboarding?.manifest.name, "webgoat");
+  assert.equal(pendingRow?.onboarding?.imageDigest, `sha256:${"a".repeat(64)}`);
+  assert.equal(repos.find((r) => r.connectedRepositoryId === building)?.onboarding, null);
+});

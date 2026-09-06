@@ -8,9 +8,11 @@ import {
   isNotNull,
   report,
   sql,
+  targetOnboarding,
   targetProfile,
 } from "@/lib/db";
 import { awaitingReviewSql } from "@/lib/reports/queue";
+import type { TargetManifest } from "@/lib/targets/manifest";
 
 /**
  * The read model behind the Integrations screen.
@@ -37,6 +39,16 @@ export type ConnectionRepo = {
   /** What this repository has actually sent, which is the question an operator opens a
    *  repository to ask. Hidden reports are left out, the same as everywhere else. */
   reports: RepoReports;
+  /** A built target waiting for a reviewer to approve its proposed manifest, or null. This is
+   *  the only human gate between a build and a written TargetProfile, so the panel surfaces it. */
+  onboarding: OnboardingProposal | null;
+};
+
+export type OnboardingProposal = {
+  manifest: TargetManifest;
+  /** The pushed image and its digest, shown so a reviewer approves a specific build, not a name. */
+  imageName: string | null;
+  imageDigest: string | null;
 };
 
 export type RepoReports = {
@@ -96,6 +108,42 @@ async function reportsByRepository(): Promise<Map<string, RepoReports>> {
   );
 }
 
+/**
+ * The onboarding rows a reviewer can act on, keyed by repository id.
+ *
+ * Only AWAITING_APPROVAL: every other state is either the worker's to advance or already
+ * terminal, and none of them offers the reviewer a decision. A row with no proposed manifest
+ * yet cannot be shown, so it is skipped rather than surfaced as an empty card.
+ */
+async function awaitingApprovalOnboardings(): Promise<Map<number, OnboardingProposal>> {
+  const rows = await db
+    .select({
+      repoId: targetOnboarding.repoId,
+      proposedManifest: targetOnboarding.proposedManifest,
+      imageName: targetOnboarding.imageName,
+      imageDigest: targetOnboarding.imageDigest,
+    })
+    .from(targetOnboarding)
+    .where(eq(targetOnboarding.state, "AWAITING_APPROVAL"));
+
+  return new Map(
+    rows.flatMap((row) =>
+      row.proposedManifest
+        ? [
+            [
+              Number(row.repoId),
+              {
+                manifest: row.proposedManifest as TargetManifest,
+                imageName: row.imageName,
+                imageDigest: row.imageDigest,
+              },
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+}
+
 export type Connection = {
   installationRowId: string;
   installationId: number;
@@ -143,6 +191,7 @@ export function repoStatus(row: StatusInput): RepoStatus {
 /** Every live installation and the repositories it granted. Tombstoned installs are hidden. */
 export async function listConnections(): Promise<Connection[]> {
   const reports = await reportsByRepository();
+  const onboardings = await awaitingApprovalOnboardings();
   const rows = await db
     .select({
       installationRowId: githubInstallation.id,
@@ -204,6 +253,7 @@ export async function listConnections(): Promise<Connection[]> {
       fullName: row.fullName,
       targetProfileName: row.targetProfileName,
       reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
+      onboarding: onboardings.get(row.repoId) ?? null,
       status: repoStatus({
         installationSuspended: row.suspendedAt !== null,
         active: row.active ?? false,

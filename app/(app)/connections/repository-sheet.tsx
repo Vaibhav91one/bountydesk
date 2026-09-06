@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/sheet";
 
 import { ConfigureButton } from "../integrations/configure-button";
+import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import type { RepositoryRow } from "./connection-tabs";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -113,6 +114,44 @@ export function RepositorySheet({
                   {formatStamp(new Date(repo.lastSyncedAt))}
                 </Row>
               </dl>
+
+              {/* The one human gate on onboarding. A worker cannot cross AWAITING_APPROVAL on
+                  its own, so this is the only path from a proposed manifest to a written target,
+                  and the reviewer approves a specific build (name and digest), not just a name. */}
+              {repo.onboarding ? (
+                <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/30 p-3">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-meta font-medium text-foreground">
+                      Proposed target awaiting approval
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      A build finished and proposed this manifest. Approving it writes the target
+                      profile and opens reproduction for this repository.
+                    </p>
+                  </div>
+                  <dl className="flex flex-col">
+                    <Row label="Name">{repo.onboarding.manifest.name}</Row>
+                    <Row label="Image">
+                      <span className="break-all font-mono text-xs">
+                        {(repo.onboarding.imageName ?? repo.onboarding.manifest.imageName) +
+                          (repo.onboarding.imageDigest
+                            ? `@${repo.onboarding.imageDigest}`
+                            : "")}
+                      </span>
+                    </Row>
+                    <Row label="Base URL">{repo.onboarding.manifest.baseUrl}</Row>
+                    <Row label="Readiness path">{repo.onboarding.manifest.readinessPath}</Row>
+                    {repo.onboarding.manifest.startCommand ? (
+                      <Row label="Start command">
+                        <span className="break-all font-mono text-xs">
+                          {repo.onboarding.manifest.startCommand}
+                        </span>
+                      </Row>
+                    ) : null}
+                  </dl>
+                  <ApproveOnboardingButton repoId={repo.repoId} />
+                </div>
+              ) : null}
 
               {/* The same control the row carries, so the two cannot drift apart. */}
               <ConfigureButton

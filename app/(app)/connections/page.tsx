@@ -66,6 +66,7 @@ export default async function ConnectionsPage() {
           login: connection.accountLogin,
           type: connection.accountType,
         }),
+        onboarding: repo.onboarding,
       };
     }),
   );
