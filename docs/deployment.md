@@ -109,6 +109,16 @@ Start with one TrueForge replica and SQLite. Add Postgres and Valkey only for di
 Oracle Always Free is an optional disposable experiment, not the deployment target. Its capacity
 and allowance can change without changing this architecture.
 
+## Agent model provider
+
+Both agent manifests pin `zen/gpt-5-4-mini`, so the harness needs a provider named `zen` before
+`scripts/apply-agent.ts` can push them. Register it once in the harness settings as a custom
+OpenAI-compatible provider: base URL `https://opencode.ai/zen/v1`, the OpenCode Zen key, and one
+model whose id is `gpt-5.4-mini` and whose name is `gpt-5-4-mini` (the harness strips dots from a
+model name, and the manifest references it by that dot-free name). The key lives in the harness,
+not in the repo or the worker env. To move the agent to a different model, add it to the same
+provider and change the pin in `agent/bountydesk.agent.json` and `agent/target-onboarding.agent.json`.
+
 ## Target onboarding
 
 The build-onboarding worker (lib/build-onboarding) clones a connected repository, builds its image
