@@ -45,6 +45,20 @@ const BUILD_DISK_GB = numEnv("BUILD_DISK_GB", 10);
 const BUILD_TTL_MINUTES = numEnv("BUILD_TTL_MINUTES", 30);
 const BUILD_TIMEOUT_S = 300;
 
+// Forward the sandbox's egress-proxy env into the build's RUN steps. Each `--build-arg NAME`
+// with no value takes NAME from the build shell's environment, both cases because different
+// tools read different ones (apk and pip read the lowercase, others the uppercase).
+const PROXY_BUILD_ARGS = [
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+]
+  .map((name) => `--build-arg ${name}`)
+  .join(" ");
+
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -90,11 +104,14 @@ export function createDaytonaBuildDriver(): BuildDriver {
         const buildMarker = (
           await run(sandbox, "cd /work/source && git rev-parse HEAD")
         ).result.trim();
-        // Append the marker layer, exactly as the manual workflow does (see
-        // .github/workflows/build-daytona-target.yml).
+        // Append the marker layer, like the manual workflow (.github/workflows/build-daytona-target.yml)
+        // but pinned to root first: a customer Dockerfile may end on a non-root USER that cannot
+        // write /etc, which is what broke the manual workflow's assumption. The image then runs as
+        // root in the offline reproduction sandbox, which is fine for a test target; restoring the
+        // original trailing USER is a possible later refinement.
         await run(
           sandbox,
-          `printf 'RUN mkdir -p /etc && echo %s > /etc/bountydesk-build-marker\\n' ${shellArg(buildMarker)} >> /work/source/Dockerfile`,
+          `printf 'USER root\\nRUN mkdir -p /etc && echo %s > /etc/bountydesk-build-marker\\n' ${shellArg(buildMarker)} >> /work/source/Dockerfile`,
         );
         const dockerfileText = (
           await run(sandbox, "cat /work/source/Dockerfile")
@@ -103,7 +120,18 @@ export function createDaytonaBuildDriver(): BuildDriver {
         await startDockerDaemon(sandbox);
         // Build first, with no credential in the sandbox: the Dockerfile is the customer's
         // untrusted code and must not run alongside a reusable push token.
-        await run(sandbox, `cd /work/source && docker build -t ${imageRef} .`);
+        //
+        // The sandbox reaches the egress allow-list through an HTTP proxy it sets in http_proxy
+        // and friends, but a docker build's RUN steps run in nested containers that do not inherit
+        // that env, so any RUN that fetches packages (apk, apt, pip, npm) goes out direct and is
+        // refused. Forward the proxy vars as build args: `--build-arg NAME` with no value takes
+        // NAME from this shell's env, and docker treats the proxy names as predefined build args,
+        // so it passes them into every RUN and scrubs them from the image history without the
+        // Dockerfile declaring them.
+        await run(
+          sandbox,
+          `cd /work/source && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`,
+        );
         // Only now introduce the push credential, use it, and remove it before anything else
         // runs, so it is present for the push and nothing more.
         try {
@@ -151,7 +179,9 @@ async function run(sandbox: Sandbox, command: string): Promise<ExecResult> {
   // provide on its own (it runs the string, not a login shell).
   const result = await execute(sandbox, `sh -lc ${shellArg(command)}`, BUILD_TIMEOUT_S);
   if (result.exitCode !== 0) {
-    throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(0, 400)}`);
+    // The failing step is at the end of a build log, not the start, so keep the tail: the head is
+    // just the base-image and context-load lines that never explain why a build broke.
+    throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(-2000)}`);
   }
   return result;
 }
