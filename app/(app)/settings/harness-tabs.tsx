@@ -85,7 +85,7 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
       <TabsContent value="models" className="flex flex-col gap-4">
         <Panel
           title="Configured providers"
-          detail="Where the agent's model comes from. The saved agent pins zen/gpt-5-4-mini, so a harness with no provider registered refuses the manifest outright rather than falling back to anything."
+          detail="Where the agent's model comes from. The saved agent pins openai/gpt-5-4-mini, so a harness with no provider registered refuses the manifest outright rather than falling back to anything."
         >
           <SectionBody section={snapshot.modelProviders}>
             {(providers) =>
@@ -125,7 +125,7 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
 
         <Panel
           title="Add a provider"
-          detail="Picking a well-known provider prefills its model list from the harness catalog. Anything the catalog does not carry, the Zen gpt-5.4-mini among them, is added by id here."
+          detail="Picking a well-known provider prefills its model list from the harness catalog. Anything the catalog does not carry, gpt-5-mini among them, is added by id here."
         >
           <SectionBody section={snapshot.catalog}>
             {(catalog) => <ModelProviderForm catalog={catalog} />}

@@ -9,7 +9,7 @@ export const metadata = { title: "Settings · BountyDesk" };
  * Settings is the TrueForge harness: the five things it holds, on one screen.
  *
  * A fresh harness needs a model provider and a sandbox provider before `npm run agent:apply`
- * will take the saved manifest, which pins `zen/gpt-5-4-mini` and enables the sandbox. Both
+ * will take the saved manifest, which pins `openai/gpt-5-4-mini` and enables the sandbox. Both
  * are set here, so the harness can be brought up without leaving this app.
  *
  * `readHarness` never throws: each section carries its own error, so a harness that is down

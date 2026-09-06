@@ -5,7 +5,7 @@
  * create-or-replace by name, so re-running is safe.
  *
  * A fresh harness needs a model provider and a sandbox provider first, at /settings/harness.
- * The agent manifest pins zen/gpt-5-4-mini and sets config.sandbox.enabled, and neither
+ * The agent manifest pins openai/gpt-5-4-mini and sets config.sandbox.enabled, and neither
  * resolves against a server with no provider registered.
  *
  *   npm run agent:apply

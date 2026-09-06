@@ -5,7 +5,7 @@
  * The screen exists because only three of the five surfaces had a code path. Skills,
  * connectors and the agent were applied by scripts; nothing registered a model provider or a
  * sandbox provider, so a fresh harness rejects the agent manifest with "Unknown model
- * zen/gpt-5-4-mini, provider not configured" and the runbook's bootstrap cannot complete.
+ * openai/gpt-5-4-mini, provider not configured" and the runbook's bootstrap cannot complete.
  */
 import { TrueForge, TrueForgeApi, TrueForgeError } from "@truefoundry/trueforge-sdk";
 
