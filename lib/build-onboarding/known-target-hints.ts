@@ -10,28 +10,33 @@ import { type ClassifyOptions } from "./classify";
  */
 
 /**
- * Create DVWA's database tables at build by driving its own /setup.php, the same "Create / Reset
- * Database" step a human clicks once after `docker compose up`. This runs inside the single seed RUN,
- * after MariaDB is up: start Apache in the background, fetch the setup page for its CSRF user_token,
- * POST the create-database action with it, then confirm the users table the SQLi labs read now exists.
- * A failure here fails the build loudly (the && chain stops before the lenient Apache kill), so an
- * image never ships with an empty database that would make every reproduction a false negative.
+ * Create DVWA's schema and default accounts at build by loading its own setup SQL straight into the
+ * database, rather than by driving /setup.php over HTTP. These are the statements DVWA's
+ * `dvwa/includes/DBMS/MySQL.php` runs behind its "Create / Reset Database" button: the users table the
+ * SQLi labs read plus its five stock accounts, and the guestbook and log tables the other labs use.
+ *
+ * It is SQL, not the HTTP setup, on purpose. The seed runs inside a build sandbox that is already
+ * nesting a Docker daemon, and starting Apache and PHP on top of the datastore to reach /setup.php
+ * pushed that sandbox past its memory and got the whole RUN OOM-killed (a SIGTERM, exit 143). Loading
+ * the SQL needs only the mysql client against the datastore already up for the create-database step,
+ * so it stays within budget and has no Apache, PHP, session or CSRF token to get wrong. The verify at
+ * the end fails the build loudly rather than shipping an image whose database would make every
+ * reproduction a false negative.
  */
-const DVWA_SETUP_SEED_COMMAND = [
-  "( apache2-foreground >/tmp/bd-apache.log 2>&1 & echo $! > /tmp/bd-apache.pid )",
-  'for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:80/setup.php 2>/dev/null && break; sleep 1; done',
-  // Match the token by anchoring on value= within the input tag, not by skipping non-hex up to it:
-  // the word "value" itself contains hex letters, so a "skip non-hex" pattern stops short of the
-  // real token. The `.` after value= consumes the opening quote, \K drops everything before the hex.
-  'TOKEN=$(curl -fsSL -c /tmp/bd-cj http://127.0.0.1:80/setup.php | grep -oP "user_token[^>]*value=.\\K[0-9a-f]{32}" | head -n1)',
-  'test -n "$TOKEN"',
-  'curl -fsSL -b /tmp/bd-cj -c /tmp/bd-cj -X POST http://127.0.0.1:80/setup.php --data-urlencode "create_db=Create / Reset Database" --data-urlencode "user_token=$TOKEN" -o /tmp/bd-setup.html',
-  // Confirm the users table the SQLi labs read now exists, retried: creating the schema can make
-  // the datastore briefly restart under a memory-tight build, and the socket is gone in that window.
-  'for i in $(seq 1 30); do mysql --protocol=socket dvwa -e "SELECT COUNT(*) FROM users" >/dev/null 2>&1 && break; sleep 1; done',
-  'mysql --protocol=socket dvwa -e "SELECT COUNT(*) FROM users"',
-  '{ kill "$(cat /tmp/bd-apache.pid)" 2>/dev/null || true; }',
-].join(" && ");
+const DVWA_SETUP_SQL = [
+  "DROP TABLE IF EXISTS access_log; DROP TABLE IF EXISTS security_log; DROP TABLE IF EXISTS guestbook; DROP TABLE IF EXISTS users;",
+  "CREATE TABLE users (user_id int(6),first_name varchar(15),last_name varchar(15), user varchar(15), password varchar(32),avatar varchar(70), last_login TIMESTAMP, failed_login INT(3), PRIMARY KEY (user_id));",
+  "INSERT INTO users VALUES ('1','admin','admin','admin',MD5('password'),'/hackable/users/admin.jpg', NOW(), '0'),('2','Gordon','Brown','gordonb',MD5('abc123'),'/hackable/users/gordonb.jpg', NOW(), '0'),('3','Hack','Me','1337',MD5('charley'),'/hackable/users/1337.jpg', NOW(), '0'),('4','Pablo','Picasso','pablo',MD5('letmein'),'/hackable/users/pablo.jpg', NOW(), '0'),('5','Bob','Smith','smithy',MD5('password'),'/hackable/users/smithy.jpg', NOW(), '0');",
+  "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user';",
+  "UPDATE users SET role='admin' WHERE user='admin';",
+  "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_enabled TINYINT(1) DEFAULT 1;",
+  "CREATE TABLE access_log (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, target_id INT NOT NULL, action VARCHAR(50) NOT NULL, timestamp DATETIME NOT NULL, FOREIGN KEY (user_id) REFERENCES users(user_id), FOREIGN KEY (target_id) REFERENCES users(user_id)) ENGINE=InnoDB;",
+  "CREATE TABLE security_log (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL, target_id INT NOT NULL, action VARCHAR(50) NOT NULL, timestamp DATETIME NOT NULL, ip_address VARCHAR(45) NOT NULL, FOREIGN KEY (user_id) REFERENCES users(user_id), FOREIGN KEY (target_id) REFERENCES users(user_id)) ENGINE=InnoDB;",
+  "CREATE TABLE guestbook (comment_id SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT, comment varchar(300), name varchar(100), PRIMARY KEY (comment_id));",
+  "INSERT INTO guestbook VALUES ('1','This is a test comment.','test');",
+].join(" ");
+
+const DVWA_SETUP_SEED_COMMAND = `mysql dvwa -e "${DVWA_SETUP_SQL}" && mysql dvwa -e "SELECT COUNT(*) FROM users"`;
 
 const HINTS: Record<string, ClassifyOptions> = {
   "vaibhav91one/dvwa": {
