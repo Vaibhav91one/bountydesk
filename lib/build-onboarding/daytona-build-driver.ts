@@ -143,10 +143,33 @@ export function createDaytonaBuildDriver(): BuildDriver {
  *  (stored durably and offered for download). */
 async function buildImage(
   sandbox: Sandbox,
-  plan: Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" }>,
+  plan: Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "agent-authored" }>,
   imageRef: string,
   buildMarker: string,
 ): Promise<string> {
+  if (plan.strategy === "agent-authored") {
+    // The agent converged on this Dockerfile by iterating in its own throwaway sandbox; the driver
+    // rebuilds it here, against the repo it clones, for the pinned artifact. Write it into the context
+    // via a base64 pipe (arbitrary text, intact), append the marker layer pinned to root (the agent's
+    // Dockerfile may end on a non-root USER), then build.
+    const context = plan.buildContext;
+    const b64 = Buffer.from(plan.dockerfileText, "utf8").toString("base64");
+    await run(
+      sandbox,
+      `echo ${shellArg(b64)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`,
+    );
+    await run(
+      sandbox,
+      `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(buildMarker)} >> /work/source/${context}/Dockerfile.bountydesk`,
+    );
+    const dockerfileText = (await run(sandbox, `cat /work/source/${context}/Dockerfile.bountydesk`)).result;
+    await run(
+      sandbox,
+      `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} -t ${imageRef} .`,
+    );
+    return dockerfileText;
+  }
+
   if (plan.strategy === "dockerfile") {
     const dockerfilePath = plan.dockerfilePath;
     const context = plan.buildContext;

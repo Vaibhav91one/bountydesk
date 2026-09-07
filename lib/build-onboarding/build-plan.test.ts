@@ -53,6 +53,33 @@ test("a compose-synth plan carries the app service, datastores and an http seed"
   assert.deepEqual(plan.extraEgressHosts, ["deb.debian.org"]);
 });
 
+test("an agent-authored plan carries the Dockerfile text and a build context", () => {
+  const plan = parseBuildPlan({
+    strategy: "agent-authored",
+    ecosystem: "node",
+    dockerfileText: "FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm ci\nCMD [\"node\",\"server.js\"]\n",
+    buildContext: ".",
+    runtime: { name: "app", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  });
+  if (plan.strategy !== "agent-authored") throw new Error("narrowing");
+  assert.match(plan.dockerfileText, /^FROM node:20-alpine/);
+  assert.equal(plan.buildContext, ".");
+  assert.equal(plan.runtime?.baseUrl, "http://localhost:3000");
+});
+
+test("an agent-authored plan rejects an empty Dockerfile", () => {
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        strategy: "agent-authored",
+        ecosystem: "none",
+        dockerfileText: "   ",
+        runtime: { name: "app", baseUrl: "http://localhost:8080", readinessPath: "/" },
+      }),
+    /dockerfileText must be a nonempty string/,
+  );
+});
+
 test("not-flattenable needs a reason and carries no runtime", () => {
   const plan = parseBuildPlan({
     strategy: "not-flattenable",

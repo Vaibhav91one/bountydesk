@@ -35,6 +35,7 @@ export const BUILD_STRATEGIES = [
   "dockerfile",
   "image",
   "compose-synth",
+  "agent-authored",
   "not-flattenable",
 ] as const;
 export type BuildStrategy = (typeof BUILD_STRATEGIES)[number];
@@ -116,6 +117,16 @@ type BuildInputs =
       envOverrides?: Record<string, string>;
     }
   | {
+      strategy: "agent-authored";
+      /** The full Dockerfile the onboarding agent converged on, built verbatim by the driver. The
+       *  agent found it by iterating in its own throwaway sandbox; the driver rebuilds it here for the
+       *  pinned, digest-checked artifact. This is the recipe text, not a repo path. */
+      dockerfileText: string;
+      /** Repo-relative build context the Dockerfile builds against; the driver clones the repo into
+       *  it, writes the Dockerfile, and builds. Default ".". */
+      buildContext: string;
+    }
+  | {
       strategy: "not-flattenable";
       /** Why no single offline image can represent this repo, shown to the reviewer. */
       reason: string;
@@ -136,6 +147,10 @@ const PATH_SEGMENT_RE = /^[A-Za-z0-9._/-]+$/;
 const BUILD_ARG_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const ENV_PREFIX_RE = /^[A-Z0-9_]{1,80}$/;
 const MAX_WARMUP_SECONDS = 600;
+/** A Dockerfile the onboarding agent authored is a few KB at most; cap it so a plan cannot carry an
+ *  arbitrarily large blob. It is built verbatim in the throwaway build sandbox and the artifact is
+ *  still offline-verified, so size is the only bound needed here. */
+const MAX_DOCKERFILE_CHARS = 20_000;
 
 /**
  * Validate an untrusted object (the classifier agent's JSON, or a stored row) into a BuildPlan.
@@ -187,6 +202,27 @@ export function parseBuildPlan(input: unknown): BuildPlan {
       throw new Error("build plan baseImage must be a bare image reference");
     }
     return { strategy, ecosystem, baseImage, seed, runtime, ...withHosts(extraEgressHosts) };
+  }
+
+  if (strategy === "agent-authored") {
+    // Not str(): a Dockerfile is multi-line and ends on a newline, which str() forbids.
+    const dockerfileText = plan.dockerfileText;
+    if (
+      typeof dockerfileText !== "string" ||
+      dockerfileText.trim().length === 0 ||
+      dockerfileText.length > MAX_DOCKERFILE_CHARS
+    ) {
+      throw new Error(`build plan dockerfileText must be a nonempty string under ${MAX_DOCKERFILE_CHARS} characters`);
+    }
+    return {
+      strategy,
+      ecosystem,
+      dockerfileText,
+      buildContext: relPath(optStr(plan, "buildContext") ?? ".", "buildContext"),
+      seed,
+      runtime,
+      ...withHosts(extraEgressHosts),
+    };
   }
 
   // compose-synth
