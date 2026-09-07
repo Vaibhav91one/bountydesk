@@ -552,3 +552,20 @@ export async function createSnapshot(spec: CreateSnapshotSpec): Promise<Snapshot
     }),
   });
 }
+
+/**
+ * Remove every snapshot with this exact name, if any. Onboarding names a target's snapshot
+ * deterministically from its repo, so a rebuild reuses the name, and Daytona refuses a create that
+ * collides with an existing one ("Snapshot with name ... already exists"). Deleting first makes the
+ * rebuild replace the prior snapshot instead of failing on it. Idempotent: no match is a no-op, and a
+ * delete that races another is swallowed.
+ */
+export async function deleteSnapshotByName(name: string): Promise<void> {
+  const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>("/snapshots?limit=200");
+  const items = Array.isArray(listed) ? listed : (listed.items ?? []);
+  for (const snapshot of items) {
+    if (snapshot.name === name && snapshot.id) {
+      await call(`/snapshots/${encodeURIComponent(snapshot.id)}`, { method: "DELETE" }).catch(() => undefined);
+    }
+  }
+}

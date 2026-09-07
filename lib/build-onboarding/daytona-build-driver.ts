@@ -5,6 +5,7 @@ import {
   BUILD_PURPOSE,
   createBuildSandbox,
   createSnapshot,
+  deleteSnapshotByName,
   deleteSandbox,
   execute,
   PURPOSE_LABEL,
@@ -112,6 +113,9 @@ export function createDaytonaBuildDriver(): BuildDriver {
           await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
         ).result.trim();
 
+        // A rebuild of the same target reuses this deterministic name, and Daytona refuses a create
+        // that collides with an existing snapshot. Replace the prior one rather than fail on it.
+        await deleteSnapshotByName(`onboarding-${slug}`);
         const snapshot = await createSnapshot({
           name: `onboarding-${slug}`,
           image: imageRef,
