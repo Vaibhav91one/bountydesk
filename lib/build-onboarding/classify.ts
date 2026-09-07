@@ -251,6 +251,12 @@ export type ClassifyOptions = {
   /** Readiness path override for an app whose "/" redirects (DVWA's "/" is a 302 to /login.php, and
    *  the readiness poll wants a 2xx). */
   readinessPathHint?: string;
+  /** Extra image env for a compose app that reads its configuration from the environment, merged over
+   *  (and winning against) the datastore-host overrides the classifier derives from the compose. This
+   *  is where a known target sets the values that make its reported vulnerability reachable in the
+   *  isolated sandbox: DVWA needs `low` security instead of its `impossible` default and its login
+   *  wall off, so a stateless probe can reach the injectable page. */
+  envOverridesHint?: Record<string, string>;
 };
 
 /**
@@ -295,7 +301,13 @@ export async function classify(
       appDockerfile: topology.appDockerfile,
       ...(datastoreEgress.length ? { extraEgressHosts: datastoreEgress } : {}),
       ...(options.configRewritesHint ? { configRewrites: options.configRewritesHint } : {}),
-      ...(Object.keys(topology.envOverrides).length ? { envOverrides: topology.envOverrides } : {}),
+      ...(() => {
+        // The hint wins over a compose-derived override for the same key, so a known target can steer
+        // an env var the compose also sets (DVWA's DB_SERVER is rewritten to loopback by the datastore
+        // pass; a hint here adds the security-level and auth env the compose does not carry).
+        const env = { ...topology.envOverrides, ...(options.envOverridesHint ?? {}) };
+        return Object.keys(env).length ? { envOverrides: env } : {};
+      })(),
       seed: options.composeSeedHint ?? { kind: "none" },
       runtime: {
         name,

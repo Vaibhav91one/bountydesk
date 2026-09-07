@@ -75,6 +75,20 @@ test("a none seed still creates the empty database but hits no url", () => {
   assert.doesNotMatch(df, /install -y --no-install-recommends curl/);
 });
 
+test("a command seed installs curl and emits the command verbatim in the seed RUN", () => {
+  const df = synthesizeComposeDockerfile({
+    appImageRef: "app:1",
+    datastores: [{ recipe: mariadb!, creds: { dbName: "dvwa", user: "dvwa", password: "p@ss" } }],
+    seed: { kind: "command", command: "apache2-foreground & curl -fsS http://127.0.0.1:80/setup.php" },
+    buildMarker: "m",
+    appStartCommand: "apache2-foreground",
+    appPort: 80,
+  });
+  // a command seed can drive the app over HTTP too, so curl is installed for it, not only for http
+  assert.match(df, /install -y --no-install-recommends curl/);
+  assert.ok(df.includes("curl -fsS http://127.0.0.1:80/setup.php"), "the command runs verbatim");
+});
+
 test("synthesis refuses an empty datastore list", () => {
   assert.throws(
     () =>

@@ -143,3 +143,31 @@ test("a compose seed and start hint flow into the plan", async () => {
   if (plan.strategy !== "compose-synth") throw new Error("expected compose-synth");
   assert.deepEqual(plan.seed, { kind: "http", method: "GET", path: "/setup.php" });
 });
+
+test("an env-overrides hint merges over and wins against the compose-derived overrides", async () => {
+  // The app service names the datastore by its compose service in DB_SERVER, so the datastore pass
+  // rewrites it to loopback on its own.
+  const composeWithAppEnv = `
+services:
+  dvwa:
+    build: .
+    ports: ["127.0.0.1:80:80"]
+    environment:
+      DB_SERVER: db
+    depends_on: [db]
+  db:
+    image: mariadb:10
+    environment:
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ss
+`;
+  const plan = await classify(reader({ "compose.yml": composeWithAppEnv }), "Vaibhav91one/DVWA", {
+    envOverridesHint: { DEFAULT_SECURITY_LEVEL: "low" },
+  });
+  if (plan.strategy !== "compose-synth") throw new Error("expected compose-synth");
+  // The datastore pass rewrote DB_SERVER=db to loopback, and the hint added the security level the
+  // compose does not carry; both are present.
+  assert.equal(plan.envOverrides?.DB_SERVER, "127.0.0.1");
+  assert.equal(plan.envOverrides?.DEFAULT_SECURITY_LEVEL, "low");
+});

@@ -51,9 +51,10 @@ export function synthesizeComposeDockerfile(input: SynthesizeInput): string {
   }
   lines.push("");
 
-  // An http seed and the readiness wait need an HTTP client; the app base may not ship one. Install it
-  // alongside the datastore so the seed step can reach the app.
-  const needsCurl = input.seed.kind === "http";
+  // A seed that drives the app over HTTP needs a client the app base may not ship. Both the http seed
+  // and a command seed that runs the app's own setup endpoint (DVWA's /setup.php) use curl, so install
+  // it for either. A none seed needs nothing.
+  const needsCurl = input.seed.kind !== "none";
   const installParts = input.datastores.map((d) => d.recipe.install());
   if (needsCurl) {
     installParts.unshift(
