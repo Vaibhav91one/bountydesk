@@ -11,6 +11,33 @@ export function buildMcpServerManifest(appBaseUrl: string, secret: string) {
   };
 }
 
+/** The onboarding agent's build tools: open a build sandbox, run build commands, commit a recipe or
+ *  declare a repo unsandboxable. Authenticated with the same MCP server secret; the route resolves
+ *  the calling onboarding row by the agent's capability token. */
+export function buildBuildServerManifest(appBaseUrl: string, secret: string) {
+  return {
+    name: "bountydesk-build",
+    description: "BountyDesk's onboarding build sandbox",
+    type: "remote" as const,
+    url: `${appBaseUrl}/api/mcp/build`,
+    auth: {
+      type: "header" as const,
+      headers: { Authorization: `Bearer ${secret}` },
+    },
+  };
+}
+
+/**
+ * The onboarding agent's build tools carry no harness approval gate, on purpose. The onboarding turn
+ * is driven by a synchronous poll (lib/build-onboarding/onboarding-agent.ts) that treats an approval
+ * pause as a wiring error, and it cannot resolve one; and the human gate that matters already exists
+ * one level up, at the onboarding AWAITING_APPROVAL step, where a reviewer approves the built target
+ * before it becomes a TargetProfile. The build sandbox is ephemeral with server-held egress, and the
+ * committed image is rebuilt and offline-verified, so per-command gating would add friction without a
+ * boundary the onboarding approval does not already provide.
+ */
+export const BUILD_APPROVAL_GATED_TOOLS = [] as const;
+
 /**
  * The scope-guard connector: full tool surface (scope_check, http_probe, tcp_probe,
  * scope_add/remove/add_temporary, request_intrusive_approval, verify_grant, osv_query,

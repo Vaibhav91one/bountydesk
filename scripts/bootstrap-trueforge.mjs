@@ -85,6 +85,16 @@ function desiredMcpServers() {
       },
     },
     {
+      name: "bountydesk-build",
+      description: "BountyDesk's onboarding build sandbox",
+      type: "remote",
+      url: `${appBaseUrl}/api/mcp/build`,
+      auth: {
+        type: "header",
+        headers: { Authorization: `Bearer ${requireEnv("MCP_SERVER_SECRET")}` },
+      },
+    },
+    {
       name: "scope-guard",
       description:
         "BountyDesk's ported scope-guard MCP server: egress allowlisting and the intrusive-action approval gate",
