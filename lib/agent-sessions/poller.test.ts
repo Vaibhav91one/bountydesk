@@ -170,6 +170,17 @@ function publishVerdictCall(capability: string, overrides: Partial<PendingToolCa
   };
 }
 
+function writeProbeCall(capability: string, overrides: Partial<PendingToolCall> = {}): PendingToolCall {
+  return {
+    threadId: "thread-w",
+    toolCallId: "call-w",
+    toolName: "probe_target_write",
+    toolInfoType: "mcp",
+    argumentsJson: JSON.stringify({ capability, method: "POST", path: "/login.php" }),
+    ...overrides,
+  };
+}
+
 function draftedPublishVerdictCall(
   capability: string,
   draft: { outcome?: string; summary?: string; findings?: unknown[] } = {},
@@ -226,6 +237,7 @@ async function sessionRow(id: string) {
   const [row] = await dbm.db
     .select({
       turnStatus: dbm.agentSession.turnStatus,
+      turnId: dbm.agentSession.turnId,
       lastError: dbm.agentSession.lastError,
       pendingThreadId: dbm.agentSession.pendingThreadId,
       pendingToolCallId: dbm.agentSession.pendingToolCallId,
@@ -428,6 +440,54 @@ test("the pending call stays bound to the verdict prepared before the turn start
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.pendingVerdictId, fixture.verdictId);
   assert.notEqual(row.pendingVerdictId, newer.id);
+});
+
+test("a pending write probe is auto-approved and the session follows the resumed turn", async () => {
+  await drainOthers();
+  const fixture = await seedSession({ sandboxId: "sandbox-w" });
+
+  let createTurnCalls = 0;
+  const base = fakeClient({
+    status: "awaiting_approval",
+    pending: [writeProbeCall(fixture.capabilityToken)],
+  });
+  const client: TrueForgeClient = {
+    ...base,
+    findTurnByInput: async () => null,
+    createTurn: async (_sessionId, input) => {
+      createTurnCalls += 1;
+      const first = input[0];
+      assert.equal(first.type, "user.tool_approval");
+      if (first.type === "user.tool_approval") {
+        assert.equal(first.threadId, "thread-w");
+        assert.equal(first.toolCallId, "call-w");
+        assert.equal(first.approval.status, "allow");
+      }
+      return { turnId: "resumed-turn", snapshot: { status: "running" } };
+    },
+  };
+
+  const id = await poller.pollOnce("w-write-probe", { client });
+  assert.equal(id, fixture.agentSessionId);
+  assert.equal(createTurnCalls, 1, "the write probe must be approved with exactly one turn");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "RUNNING", "the session keeps going, not awaiting a human");
+  assert.equal(row.turnId, "resumed-turn", "the poller follows the resumed turn");
+  assert.equal(row.pendingThreadId, null, "a write probe engages no verdict approval markers");
+
+  // The verdict gate is untouched: the report stays mid-investigation, not moved to approval.
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "TRIAGING");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+  assert.ok(
+    events.some((e) => e.type === "agent.write_probe_auto_approved"),
+    "the auto-approval is recorded in the session event log",
+  );
 });
 
 test("a wrong tool name is refused loudly and never touches report state", async () => {
