@@ -48,9 +48,14 @@ const MARKER_PATH = "/etc/bountydesk-build-marker";
 
 // Forward the sandbox's egress-proxy env into a build's RUN steps (nested containers do not inherit
 // it), so package fetches inside RUN reach the proxy instead of going direct and being refused.
-const PROXY_BUILD_ARGS = ["http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]
-  .map((name) => `--build-arg ${name}`)
-  .join(" ");
+// --progress=plain makes BuildKit emit plain line-based logs to the captured stream: its default
+// progress UI detects the non-TTY exec and buffers into a stream the toolbox does not return, so a
+// failed build otherwise comes back as "exit 1" with no diagnostic at all.
+const PROXY_BUILD_ARGS =
+  "--progress=plain " +
+  ["http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"]
+    .map((name) => `--build-arg ${name}`)
+    .join(" ");
 
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
