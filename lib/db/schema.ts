@@ -617,6 +617,15 @@ export const targetOnboarding = pgTable(
     snapshotId: text("snapshot_id"),
     buildMarker: text("build_marker"),
     dockerfileText: text("dockerfile_text"),
+    /** The opaque token the onboarding agent's build tools (app/api/mcp/build) present to resolve
+     *  this row -- the onboarding analogue of agent_session.capability_token. The agent never sees a
+     *  repo or sandbox id; the token maps back to this row server-side. Null until the agent step
+     *  mints one. */
+    agentCapabilityToken: text("agent_capability_token"),
+    /** The ephemeral Docker-in-Docker build sandbox the agent is iterating in, set by
+     *  open_build_sandbox and read by run_build_command / probe_built_container. Null when none is
+     *  open; the sandbox itself is torn down when the agent step ends. */
+    agentSandboxId: text("agent_sandbox_id"),
     /** The target manifest derived from the build plan's runtime shape once the image exists,
      *  validated before it is stored. Null until the manifest step runs. */
     proposedManifest: jsonb("proposed_manifest"),
@@ -637,6 +646,7 @@ export const targetOnboarding = pgTable(
     uniqueIndex("target_onboarding_repo_id_key").on(t.repoId),
     index("target_onboarding_claim_idx").on(t.state, t.nextAttemptAt),
     index("target_onboarding_lease_idx").on(t.leaseExpiresAt),
+    uniqueIndex("target_onboarding_agent_capability_token_key").on(t.agentCapabilityToken),
   ],
 );
 
