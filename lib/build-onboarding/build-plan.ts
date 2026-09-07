@@ -315,7 +315,9 @@ function parseSeed(input: unknown): SeedStep {
     }
     return { kind: "http", method, path: normalizePath(str(seed, "path"), "seed.path") };
   }
-  if (kind === "command") return { kind: "command", command: singleLine(str(seed, "command"), "seed.command") };
+  // A seed command that loads a datastore schema (DVWA's setup SQL) is a few KB on one line, well
+  // over the tight bound a config rewrite gets; still bounded so a plan cannot carry an essay.
+  if (kind === "command") return { kind: "command", command: singleLine(str(seed, "command"), "seed.command", 8_000) };
   throw new Error("build plan seed kind must be none, http or command");
 }
 
@@ -397,9 +399,9 @@ function serviceName(value: string, key: string): string {
   return value;
 }
 
-function singleLine(value: string, key: string): string {
-  if (/[\r\n]/.test(value) || value.length > 1_000) {
-    throw new Error(`build plan ${key} must be a single line under 1000 characters`);
+function singleLine(value: string, key: string, maxLen = 1_000): string {
+  if (/[\r\n]/.test(value) || value.length > maxLen) {
+    throw new Error(`build plan ${key} must be a single line under ${maxLen} characters`);
   }
   return value;
 }
