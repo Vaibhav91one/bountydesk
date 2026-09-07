@@ -96,18 +96,25 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
     .where(eq(targetOnboarding.id, row.id));
 
   // Clone the repo and start dockerd so the agent can build straight away. The clone URL is the
-  // server-held repository name, never a model-supplied ref.
+  // server-held repository name, never a model-supplied ref. These two steps are required: if
+  // either fails, the sandbox is unusable, so surface the error and tear it down rather than
+  // reporting a ready sandbox the agent then works against blindly.
   const cloneUrl = `https://github.com/${row.repoFullName}.git`;
-  await execute(sandbox, `sh -lc ${shArg(`git clone --depth 1 ${shArg(cloneUrl)} /work/source`)}`, EXEC_TIMEOUT_S).catch(
-    () => undefined,
-  );
-  await execute(
+  const clone = await runInit(sandbox, `git clone --depth 1 ${shArg(cloneUrl)} /work/source`);
+  if (clone.exitCode !== 0) {
+    return failOpen(row.id, sandbox.id, `could not clone the repository: ${clone.output.slice(-500)}`);
+  }
+  const docker = await runInit(
     sandbox,
-    `sh -lc ${shArg("dockerd >/tmp/dockerd.log 2>&1 & for i in $(seq 1 30); do docker version >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1")}`,
-    EXEC_TIMEOUT_S,
-  ).catch(() => undefined);
+    "dockerd >/tmp/dockerd.log 2>&1 & for i in $(seq 1 30); do docker version >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1",
+  );
+  if (docker.exitCode !== 0) {
+    const log = await runInit(sandbox, "tail -c 500 /tmp/dockerd.log 2>/dev/null || true");
+    return failOpen(row.id, sandbox.id, `the docker daemon did not start: ${log.output.slice(-500)}`);
+  }
   // The DinD base image often ships without an HTTP client, so the agent cannot curl the container
-  // it builds. Provide one best-effort so it does not burn iterations discovering that.
+  // it builds. Provide one best-effort so it does not burn iterations discovering that; a missing
+  // curl is not fatal here (the agent can install one in its Dockerfile).
   await execute(
     sandbox,
     `sh -lc ${shArg("command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null 2>&1 || (apt-get update >/dev/null 2>&1 && apt-get install -y curl >/dev/null 2>&1) || true")}`,
@@ -206,6 +213,28 @@ export async function markUnsandboxable(capability: string, reason: string): Pro
     .where(eq(targetOnboarding.id, row.id));
 
   return { ok: true, message: "recorded that this repository cannot be sandboxed; its reports will go the analysis-only route" };
+}
+
+/** Run one required setup command in a fresh sandbox, normalising a thrown error into a non-zero
+ *  exit so the caller checks one shape. Used only for open_build_sandbox's clone and dockerd steps. */
+async function runInit(sandbox: Sandbox, command: string): Promise<{ exitCode: number; output: string }> {
+  try {
+    const result = await execute(sandbox, `sh -lc ${shArg(command)}`, EXEC_TIMEOUT_S);
+    return { exitCode: result.exitCode, output: result.result };
+  } catch (error) {
+    return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** A build sandbox that failed to initialise is torn down and unrecorded, so the next open starts
+ *  clean rather than reusing a half-built one. */
+async function failOpen(onboardingId: string, sandboxId: string, reason: string): Promise<BuildToolResult> {
+  await deleteSandbox(sandboxId).catch(() => undefined);
+  await db
+    .update(targetOnboarding)
+    .set({ agentSandboxId: null, updatedAt: new Date() })
+    .where(eq(targetOnboarding.id, onboardingId));
+  return { ok: false, reason };
 }
 
 /** Best-effort teardown of a session's build sandbox, called by the worker when the agent turn ends. */

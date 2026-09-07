@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { db, eq, targetOnboarding } from "@/lib/db";
+import { and, db, eq, targetOnboarding } from "@/lib/db";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 import { teardownBuildSandbox } from "@/lib/mcp/build";
 
@@ -100,15 +100,27 @@ export async function runOnboardingAgent(
     await client.deleteSession(sessionId).catch(() => undefined);
     // Tear down the agent's exploratory build sandbox and clear its session handles, whatever the
     // outcome. The committed recipe (build_plan) is what the worker acts on, not the sandbox.
+    //
+    // Fence on the capability this turn minted: if lease renewal failed and a replacement worker
+    // took the row over, it has already written its own token and sandbox id. Clearing by id alone
+    // would wipe the new attempt's handles and strand its build sandbox, so only tear down and clear
+    // when the row still carries this turn's token, and gate the clear on it in the same statement.
     const [row] = await db
-      .select({ sandboxId: targetOnboarding.agentSandboxId })
+      .select({ sandboxId: targetOnboarding.agentSandboxId, token: targetOnboarding.agentCapabilityToken })
       .from(targetOnboarding)
       .where(eq(targetOnboarding.id, input.onboardingId))
       .limit(1);
-    await teardownBuildSandbox(row?.sandboxId ?? null);
-    await db
-      .update(targetOnboarding)
-      .set({ agentCapabilityToken: null, agentSandboxId: null, updatedAt: new Date() })
-      .where(eq(targetOnboarding.id, input.onboardingId));
+    if (row?.token === capability) {
+      await teardownBuildSandbox(row.sandboxId ?? null);
+      await db
+        .update(targetOnboarding)
+        .set({ agentCapabilityToken: null, agentSandboxId: null, updatedAt: new Date() })
+        .where(
+          and(
+            eq(targetOnboarding.id, input.onboardingId),
+            eq(targetOnboarding.agentCapabilityToken, capability),
+          ),
+        );
+    }
   }
 }

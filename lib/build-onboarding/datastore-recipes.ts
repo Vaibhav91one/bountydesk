@@ -93,7 +93,11 @@ const mariadb: DatastoreRecipe = {
     return [
       "mkdir -p /run/mysqld && chown -R mysql:mysql /run/mysqld",
       `( mysqld_safe --datadir=/var/lib/mysql --bind-address=127.0.0.1 ${LEAN_MEM} & )`,
+      // The loop's trailing `sleep` returns zero, so the loop alone exits successfully even when the
+      // database never answered. A final ping fails the boot if it is still down, so the app is never
+      // launched against a dead datastore (it would come up serving errors and read as a ready target).
       "for i in $(seq 1 60); do mysqladmin --protocol=socket ping >/dev/null 2>&1 && break; sleep 1; done",
+      "mysqladmin --protocol=socket ping >/dev/null 2>&1",
     ].join(" && ");
   },
 };
