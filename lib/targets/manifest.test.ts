@@ -45,6 +45,8 @@ test("a target manifest rejects non-loopback or overbroad authority", () => {
     { ...base, readinessPath: "http://localhost:3000/health" },
     { ...base, scopeRules: [{ allow: "example.com" }] },
     { ...base, startCommand: "echo one\necho two" },
+    { ...base, startCommand: "docker run --rm -p 8000:8000 ghcr.io/vaibhav91one/dynamic-target" },
+    { ...base, startCommand: "/usr/bin/podman run dynamic-target" },
     {
       name: base.name,
       imageName: base.imageName,

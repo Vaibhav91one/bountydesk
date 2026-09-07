@@ -4,6 +4,7 @@ import { Sparkle } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import { loginUrl } from "@/lib/auth/oauth";
 import { cn } from "@/lib/utils";
 
 /**
@@ -25,10 +26,12 @@ export function SiteHeader({
   links = true,
   sticky = true,
   entrance = false,
+  appLinkPrefetch = true,
 }: {
   links?: boolean;
   sticky?: boolean;
   entrance?: boolean;
+  appLinkPrefetch?: boolean;
 }) {
   return (
     <header
@@ -75,7 +78,7 @@ export function SiteHeader({
           <Button
             size="sm"
             nativeButton={false}
-            render={<Link href="/login" />}
+            render={<Link href={loginUrl()} prefetch={appLinkPrefetch} />}
             className="rounded-full px-4"
           >
             <RollingIcon icon={Sparkle} weight="fill" className="size-4" /> Get

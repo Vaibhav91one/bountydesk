@@ -5,7 +5,10 @@ import { CaretDown, Check, Sparkle } from "@phosphor-icons/react/ssr";
 
 import { cn } from "@/lib/utils";
 
-import { ToolCallHover, type ToolCallView } from "./tool-call-detail";
+import type { LifecycleEventView } from "@/lib/reports/case-view";
+import type { ToolCallView } from "@/lib/reports/tool-call-view";
+
+import { ToolCallHover, type ToolCallFallback } from "./tool-call-detail";
 
 /**
  * The pixel-grid loader, ported from a loading-state component.
@@ -53,7 +56,7 @@ export function ShimmerLabel({ children }: { children: React.ReactNode }) {
 // detail carries the live TrueForge arguments and result for a mirrored tool-call row, matched
 // by id in the page. Only "agent.tool_call:<name>" rows whose detail still exists carry it; the
 // rest render plain, with no hover.
-export type TraceRow = { seq: number; type: string; at: string; detail?: ToolCallView };
+const TOOL_CALL_PREFIX = "agent.tool_call:";
 
 /**
  * What the agent actually did, expandable.
@@ -63,8 +66,27 @@ export type TraceRow = { seq: number; type: string; at: string; detail?: ToolCal
  * nothing to animate into being and no reason to pretend otherwise. The staggered entrance
  * stays, because the rows do arrive when the panel opens.
  */
-export function AgentTrace({ rows }: { rows: TraceRow[] }) {
+export function AgentTrace({
+  rows,
+  details,
+}: {
+  rows: LifecycleEventView[];
+  /** Live tool-call detail keyed by TrueForge call id. See LifecycleList for the matching. */
+  details?: Record<string, ToolCallView>;
+}) {
   const [open, setOpen] = useState(true);
+
+  const detailFor = (eventKey: string | null) =>
+    eventKey?.startsWith(TOOL_CALL_PREFIX)
+      ? details?.[eventKey.slice(TOOL_CALL_PREFIX.length)]
+      : undefined;
+
+  // The always-present source: a tool-call row carries the mirrored tool name and preview, so
+  // the hover opens even where the live detail above never arrives.
+  const fallbackFor = (row: LifecycleEventView): ToolCallFallback | null =>
+    row.toolName && row.argsPreview
+      ? { toolName: row.toolName, argsPreview: row.argsPreview }
+      : null;
 
   return (
     <div className="flex flex-col">
@@ -111,7 +133,7 @@ export function AgentTrace({ rows }: { rows: TraceRow[] }) {
                     aria-hidden="true"
                     className="size-3 shrink-0 text-phase-delivered"
                   />
-                  <ToolCallHover detail={row.detail}>
+                  <ToolCallHover detail={detailFor(row.eventKey)} fallback={fallbackFor(row)}>
                     <span className="min-w-0 flex-1 truncate text-meta text-foreground">
                       {row.type}
                     </span>

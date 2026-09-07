@@ -127,6 +127,27 @@
       "when": 1788115354944,
       "tag": "0017_relax_pending_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788241054747,
+      "tag": "0018_onboarding_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788717533710,
+      "tag": "0019_onboarding_build_plan",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788783601942,
+      "tag": "0020_onboarding_agent_session",
+      "breakpoints": true
     }
   ]
 }

@@ -28,8 +28,8 @@ export function isTerminal(state: ReportState): boolean {
  * Two rules are load-bearing rather than tidy. `OUT_OF_SCOPE` is reachable only from
  * `TRIAGING`, because it is a deterministic rejection made before any verdict exists: once a
  * report has been reproduced, refusing it is a human decision (`DENIED`), not a scope check.
- * And `ANALYSIS_ONLY` still passes through `AWAITING_APPROVAL`, because the analysis packet
- * is text we send to a reporter, and nothing reaches them unapproved.
+ * And `ANALYSIS_ONLY` can move to delivery only from the approval path, because the analysis
+ * packet is text we send to a reporter, and nothing reaches them unapproved.
  *
  * There is no delivery-failure state. A failing send is retried by the outbox worker while
  * the report stays in `DELIVERING`, so a transient GitHub error is not a lifecycle event.
@@ -40,7 +40,7 @@ export function isTerminal(state: ReportState): boolean {
 const ALLOWED_TRANSITIONS: Record<ReportState, readonly ReportState[]> = {
   TRIAGING: ["REPRODUCING", "ANALYSIS_ONLY", "OUT_OF_SCOPE"],
   REPRODUCING: ["AWAITING_APPROVAL", "ANALYSIS_ONLY"],
-  ANALYSIS_ONLY: ["AWAITING_APPROVAL"],
+  ANALYSIS_ONLY: ["AWAITING_APPROVAL", "DELIVERING", "DENIED"],
   AWAITING_APPROVAL: ["DELIVERING", "DENIED"],
   DELIVERING: ["DELIVERED"],
   DELIVERED: [],

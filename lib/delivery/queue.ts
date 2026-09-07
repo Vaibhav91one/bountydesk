@@ -138,6 +138,33 @@ export type DeliveryLease = {
   leaseOwner: string;
 };
 
+type ClaimedDeliveryRow = {
+  id: string;
+  report_id: string;
+  verdict_id: string;
+  idempotency_key: string;
+  target: string;
+  approved_content_hash: string;
+  attempts: number;
+  max_attempts: number;
+  fence: string | number;
+};
+
+function deliveryLease(row: ClaimedDeliveryRow): DeliveryLease {
+  return {
+    id: row.id,
+    reportId: row.report_id,
+    verdictId: row.verdict_id,
+    idempotencyKey: row.idempotency_key,
+    target: row.target,
+    approvedContentHash: row.approved_content_hash,
+    attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+    fence: Number(row.fence),
+    leaseOwner: row.idempotency_key,
+  };
+}
+
 /**
  * Take exactly one deliverable row, atomically. Same FOR UPDATE SKIP LOCKED shape as
  * `lib/jobs/queue.ts`'s `claim`: two drainer workers never fight over a lock and never hand
@@ -150,17 +177,7 @@ export async function claim(
   owner: string,
   leaseSeconds = 60,
 ): Promise<DeliveryLease | null> {
-  const rows = await db.execute<{
-    id: string;
-    report_id: string;
-    verdict_id: string;
-    idempotency_key: string;
-    target: string;
-    approved_content_hash: string;
-    attempts: number;
-    max_attempts: number;
-    fence: string | number;
-  }>(sql`
+  const rows = await db.execute<ClaimedDeliveryRow>(sql`
     update ${outboundDelivery}
        set lease_owner      = ${owner},
            lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
@@ -193,18 +210,53 @@ export async function claim(
   const row = rows[0];
   if (!row) return null;
 
-  return {
-    id: row.id,
-    reportId: row.report_id,
-    verdictId: row.verdict_id,
-    idempotencyKey: row.idempotency_key,
-    target: row.target,
-    approvedContentHash: row.approved_content_hash,
-    attempts: row.attempts,
-    maxAttempts: row.max_attempts,
-    fence: Number(row.fence),
-    leaseOwner: owner,
-  };
+  return { ...deliveryLease(row), leaseOwner: owner };
+}
+
+/**
+ * Claim one known outbox row. Used after a reviewer approves a synthesized analysis-only
+ * verdict, where the current request knows exactly which delivery it just enqueued and should
+ * not drain older unrelated work.
+ */
+export async function claimById(
+  owner: string,
+  deliveryId: string,
+  leaseSeconds = 60,
+): Promise<DeliveryLease | null> {
+  const rows = await db.execute<ClaimedDeliveryRow>(sql`
+    update ${outboundDelivery}
+       set lease_owner      = ${owner},
+           lease_expires_at = now() + make_interval(secs => ${leaseSeconds}),
+           attempts         = ${outboundDelivery.attempts} + 1,
+           fence            = ${outboundDelivery.fence} + 1,
+           updated_at       = now()
+     where ${outboundDelivery.id} = (
+       select ${outboundDelivery.id}
+         from ${outboundDelivery}
+        where ${outboundDelivery.id} = ${deliveryId}
+          and ${outboundDelivery.state} = 'PENDING'
+          and ${outboundDelivery.requiresHumanReview} = false
+          and ${outboundDelivery.attempts} < ${outboundDelivery.maxAttempts}
+          and ${outboundDelivery.nextAttemptAt} <= now()
+          and (${outboundDelivery.leaseExpiresAt} is null or ${outboundDelivery.leaseExpiresAt} < now())
+        limit 1
+        for update skip locked
+     )
+    returning ${outboundDelivery.id}                  as id,
+              ${outboundDelivery.reportId}             as report_id,
+              ${outboundDelivery.verdictId}             as verdict_id,
+              ${outboundDelivery.idempotencyKey}        as idempotency_key,
+              ${outboundDelivery.target}                as target,
+              ${outboundDelivery.approvedContentHash}   as approved_content_hash,
+              ${outboundDelivery.attempts}               as attempts,
+              ${outboundDelivery.maxAttempts}            as max_attempts,
+              ${outboundDelivery.fence}                  as fence
+  `);
+
+  const row = rows[0];
+  if (!row) return null;
+
+  return { ...deliveryLease(row), leaseOwner: owner };
 }
 
 /** Raised when a mutation is attempted with a lease that is no longer the current one. */

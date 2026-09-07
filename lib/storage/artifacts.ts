@@ -5,8 +5,8 @@
  * fetch rather than @supabase/supabase-js: adding an SDK for three requests is more surface
  * than the requests are. The service role key is a server secret and stays server-side; it is
  * read straight from the environment rather than through requireSecret so a missing key
- * degrades to a no-op instead of throwing, which is what keeps the rest of the app, the build
- * and the tests working before Storage is configured.
+ * degrades to a no-op instead of throwing, which is what keeps the build, the tests and a local
+ * checkout with no Supabase project working.
  *
  * Every operation is best-effort: an unconfigured or unreachable Storage never throws, it
  * returns a value the caller treats as "not stored". The bucket is private, so the only way to
@@ -35,9 +35,11 @@ type StorageConfig = { baseUrl: string; key: string };
 /**
  * The Storage endpoint and service role key, or null when either is absent.
  *
- * Both are commented out in .env.local until the owner fills them in, so null is the normal
- * state today, not an error. The one-time log makes it visible in server output without turning
- * every artifact write into a warning.
+ * Both are set in the deployed environment (see env.example), so null means a checkout that has
+ * not filled them in rather than the expected state. The one-time log makes that visible in
+ * server output without turning every artifact write into a warning. It matters more than it
+ * looks: an artifact recorded while this returns null keeps storage_path null for good, because
+ * the artifact table refuses UPDATE.
  */
 function config(): StorageConfig | null {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();

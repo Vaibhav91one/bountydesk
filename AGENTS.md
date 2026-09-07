@@ -115,7 +115,10 @@ Reuse from the Sentinel prototype where the plan says to: the scope-guard engine
 tests, CI, CONTRIBUTING, and the TrueForge session and turn driver. Do not rebuild what is
 already there.
 
-Disclose AI assistance in the PR.
+Do not tag Claude anywhere in the history or on a PR. No `Co-Authored-By` trailer, no
+co-author on a commit, no "written with Claude" line in a description, no @-mention in a
+comment. The author of a change is the person who owns it, and a bot credit on every commit
+tells a reader nothing while making the log harder to scan.
 
 ## Writing style
 
@@ -224,8 +227,7 @@ promotional language, and process commentary that does not help a reviewer judge
 - [ ] I have added tests that prove my fix is effective or that my feature works
 ```
 
-Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit trailer is
-`Co-Authored-By: Claude <noreply@anthropic.com>`.
+Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit messages carry no trailer.
 
 Stage only what your change owns. The shadcn UI scaffold is deliberately left uncommitted in
 the working tree (`app/globals.css`, `app/layout.tsx`, `components.json`, `lib/utils.ts`,
@@ -294,7 +296,11 @@ installation creates the connected repo, a build worker clones that repo in a bu
 dependency egress, the platform reads or asks an onboarding agent to propose target metadata,
 builds and verifies a Daytona snapshot, then writes or rotates the server-side `TargetProfile`.
 The later reproduction run still uses a no-egress sandbox and the agent still interacts with the
-target only through `probe_target` and approval-gated `probe_target_write`.
+target only through `probe_target` and approval-gated `probe_target_write`. The pipeline is built
+and live-proven through build, snapshot, manifest proposal and approval; the open follow-ups from
+that first run, a pluggable and ephemeral registry handoff to replace the GHCR-specific one, the
+onboarding agent's start-command model, and non-GitHub target writes, are in
+[`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md).
 
 Target repositories must stay passive test applications. Do not rely on repo-local scripts such
 as `detect.sh` as the authority for reproduction. Startup commands, readiness checks, image pins,

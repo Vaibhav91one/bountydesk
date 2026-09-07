@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { db, eq, report, type Executor } from "@/lib/db";
+import { agentSession, db, eq, report, type Executor } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import {
   recordEvent,
@@ -20,6 +20,18 @@ const PRE_ANALYSIS_STATES: ReadonlySet<ReportState> = new Set([
   "REPRODUCING",
 ]);
 
+async function ensureStubSession(reportId: string, tx: Executor = db): Promise<void> {
+  await tx
+    .insert(agentSession)
+    .values({
+      reportId,
+      capabilityToken: `stub:${reportId}`,
+      sessionId: `stub:${reportId}`,
+      turnStatus: "DONE_NO_ACTION",
+    })
+    .onConflictDoNothing({ target: agentSession.reportId });
+}
+
 /**
  * The deterministic stand-in for a real TrueForge-backed driver. It never opens a session
  * and never touches the sandbox or scope guard: it only ever produces ANALYSIS_ONLY, so
@@ -28,6 +40,8 @@ const PRE_ANALYSIS_STATES: ReadonlySet<ReportState> = new Set([
 export const stubAnalysisDriver: AnalysisDriver = {
   async ensureSession({ reportId, signal }: AnalysisContext): Promise<void> {
     if (signal.aborted) throw signal.reason;
+    await ensureStubSession(reportId);
+
     await recordEvent(
       reportId,
       "analysis.stub_session.created",
@@ -41,6 +55,8 @@ export const stubAnalysisDriver: AnalysisDriver = {
     if (signal.aborted) throw signal.reason;
 
     await db.transaction(async (tx: Executor) => {
+      await ensureStubSession(reportId, tx);
+
       // Locks the row so a concurrent or retried call cannot both see TRIAGING/REPRODUCING
       // and both try to write a verdict; the second one blocks here until the first commits
       // its transition, then sees the post-transition state and returns early below.
@@ -64,7 +80,7 @@ export const stubAnalysisDriver: AnalysisDriver = {
 
       const verdictId = randomUUID();
       const payload = buildPayload(verdictId);
-      await ensureInitialVerdict(
+      const verdict = await ensureInitialVerdict(
         {
           id: verdictId,
           reportId,
@@ -77,7 +93,15 @@ export const stubAnalysisDriver: AnalysisDriver = {
       );
 
       await transition(reportId, row.state, "ANALYSIS_ONLY", tx);
-      await transition(reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+      await tx
+        .update(agentSession)
+        .set({
+          turnStatus: "DONE_NO_ACTION",
+          pendingVerdictId: verdict.id,
+          pendingApprovedContentHash: verdict.contentHash,
+          updatedAt: new Date(),
+        })
+        .where(eq(agentSession.reportId, reportId));
 
       await recordEvent(
         reportId,

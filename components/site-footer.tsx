@@ -2,6 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowSquareOut } from "@phosphor-icons/react/ssr";
 
+import { loginUrl } from "@/lib/auth/oauth";
+
 const SOURCE = "https://github.com/Vaibhav91one/bountydesk";
 
 const COLUMNS: {
@@ -40,7 +42,7 @@ const COLUMNS: {
   },
 ];
 
-export function SiteFooter() {
+export function SiteFooter({ appLinkPrefetch = true }: { appLinkPrefetch?: boolean }) {
   return (
     <footer className="mt-24 border-t border-border/50">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-12 px-6 py-14">
@@ -87,7 +89,8 @@ export function SiteFooter() {
                         </a>
                       ) : (
                         <Link
-                          href={link.href}
+                          href={link.href === "/login" ? loginUrl() : link.href}
+                          prefetch={appLinkPrefetch}
                           className="text-meta text-muted-foreground hover:text-foreground"
                         >
                           {link.label}

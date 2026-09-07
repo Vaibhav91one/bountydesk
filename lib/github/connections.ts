@@ -1,11 +1,19 @@
 import {
+  and,
   connectedRepository,
   db,
   eq,
   githubInstallation,
+  inArray,
   isNull,
+  isNotNull,
+  report,
+  sql,
+  targetOnboarding,
   targetProfile,
 } from "@/lib/db";
+import { awaitingReviewSql } from "@/lib/reports/queue";
+import type { TargetManifest } from "@/lib/targets/manifest";
 
 /**
  * The read model behind the Integrations screen.
@@ -29,7 +37,156 @@ export type ConnectionRepo = {
   fullName: string;
   targetProfileName: string | null;
   status: RepoStatus;
+  /** What this repository has actually sent, which is the question an operator opens a
+   *  repository to ask. Hidden reports are left out, the same as everywhere else. */
+  reports: RepoReports;
+  /** A built target waiting for a reviewer to approve its proposed manifest, or null. This is
+   *  the only human gate between a build and a written TargetProfile, so the panel surfaces it. */
+  onboarding: OnboardingProposal | null;
+  /** Where onboarding is for this repo when it is not yet approvable: classifying, building,
+   *  failed, or an honest UNSUPPORTED with a reason. Null when there is nothing in flight (no row,
+   *  already awaiting approval, or already configured). Lets the panel say "building" rather than
+   *  look idle, and show why a repo cannot be onboarded. */
+  onboardingProgress: OnboardingProgress | null;
 };
+
+export type OnboardingProgress = {
+  state: "PENDING_PLAN" | "PENDING_BUILD" | "PENDING_MANIFEST" | "FAILED" | "UNSUPPORTED";
+  /** The not-flattenable reason for UNSUPPORTED, or the last error for FAILED; null otherwise. */
+  reason: string | null;
+};
+
+export type OnboardingProposal = {
+  manifest: TargetManifest;
+  /** The pushed image and its digest, shown so a reviewer approves a specific build, not a name. */
+  imageName: string | null;
+  imageDigest: string | null;
+};
+
+export type RepoReports = {
+  total: number;
+  /** Reports with a verdict a reviewer can still answer, by the same rule the board uses. */
+  awaitingReview: number;
+  /** Reports whose verdict reached the issue as a comment. */
+  delivered: number;
+  lastReportAt: Date | null;
+};
+
+const NO_REPORTS: RepoReports = {
+  total: 0,
+  awaitingReview: 0,
+  delivered: 0,
+  lastReportAt: null,
+};
+
+/**
+ * How many reports each connected repository has sent, and when the last one arrived.
+ *
+ * One grouped pass rather than a count per row: the connections screen draws every repository
+ * an installation granted, and a query each would scale with the grant. Reports carry the
+ * repository they came from, so this needs no join back to the installation.
+ */
+async function reportsByRepository(): Promise<Map<string, RepoReports>> {
+  const rows = await db
+    .select({
+      connectedRepositoryId: report.connectedRepositoryId,
+      total: sql<number>`count(*)::int`,
+      // The same predicate the board and the home summary rank on, so a repository cannot
+      // report nothing waiting while the queue shows a card with an Approve button.
+      awaitingReview: sql<number>`count(*) filter (where ${awaitingReviewSql})::int`,
+      delivered: sql<number>`count(*) filter (where ${report.state} = 'DELIVERED')::int`,
+      lastReportAt: sql<Date>`max(${report.createdAt})`,
+    })
+    .from(report)
+    .where(and(isNull(report.hiddenAt), isNotNull(report.connectedRepositoryId)))
+    .groupBy(report.connectedRepositoryId);
+
+  return new Map(
+    rows.flatMap((row) =>
+      row.connectedRepositoryId
+        ? [
+            [
+              row.connectedRepositoryId,
+              {
+                total: row.total,
+                awaitingReview: row.awaitingReview,
+                delivered: row.delivered,
+                lastReportAt: row.lastReportAt ? new Date(row.lastReportAt) : null,
+              },
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+}
+
+/**
+ * The onboarding rows a reviewer can act on, keyed by repository id.
+ *
+ * Only AWAITING_APPROVAL: every other state is either the worker's to advance or already
+ * terminal, and none of them offers the reviewer a decision. A row with no proposed manifest
+ * yet cannot be shown, so it is skipped rather than surfaced as an empty card.
+ */
+async function awaitingApprovalOnboardings(): Promise<Map<number, OnboardingProposal>> {
+  const rows = await db
+    .select({
+      repoId: targetOnboarding.repoId,
+      proposedManifest: targetOnboarding.proposedManifest,
+      imageName: targetOnboarding.imageName,
+      imageDigest: targetOnboarding.imageDigest,
+    })
+    .from(targetOnboarding)
+    .where(eq(targetOnboarding.state, "AWAITING_APPROVAL"));
+
+  return new Map(
+    rows.flatMap((row) =>
+      row.proposedManifest
+        ? [
+            [
+              Number(row.repoId),
+              {
+                manifest: row.proposedManifest as TargetManifest,
+                imageName: row.imageName,
+                imageDigest: row.imageDigest,
+              },
+            ] as const,
+          ]
+        : [],
+    ),
+  );
+}
+
+/**
+ * Onboarding that is in flight or refused, keyed by repository id. Everything except the two states
+ * the reviewer sees elsewhere (AWAITING_APPROVAL has its own proposal card, CONFIGURED is just the
+ * bound target). UNSUPPORTED carries its reason from the build plan; FAILED carries the last error.
+ */
+async function onboardingProgressByRepo(): Promise<Map<number, OnboardingProgress>> {
+  const rows = await db
+    .select({
+      repoId: targetOnboarding.repoId,
+      state: targetOnboarding.state,
+      buildPlan: targetOnboarding.buildPlan,
+      lastError: targetOnboarding.lastError,
+    })
+    .from(targetOnboarding)
+    .where(
+      inArray(targetOnboarding.state, ["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST", "FAILED", "UNSUPPORTED"]),
+    );
+
+  return new Map(
+    rows.map((row) => {
+      const state = row.state as OnboardingProgress["state"];
+      const reason =
+        state === "UNSUPPORTED"
+          ? ((row.buildPlan as { reason?: string } | null)?.reason ?? null)
+          : state === "FAILED"
+            ? row.lastError
+            : null;
+      return [Number(row.repoId), { state, reason }] as const;
+    }),
+  );
+}
 
 export type Connection = {
   installationRowId: string;
@@ -77,6 +234,9 @@ export function repoStatus(row: StatusInput): RepoStatus {
 
 /** Every live installation and the repositories it granted. Tombstoned installs are hidden. */
 export async function listConnections(): Promise<Connection[]> {
+  const reports = await reportsByRepository();
+  const onboardings = await awaitingApprovalOnboardings();
+  const onboardingProgress = await onboardingProgressByRepo();
   const rows = await db
     .select({
       installationRowId: githubInstallation.id,
@@ -137,6 +297,9 @@ export async function listConnections(): Promise<Connection[]> {
       repoId: row.repoId,
       fullName: row.fullName,
       targetProfileName: row.targetProfileName,
+      reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
+      onboarding: onboardings.get(row.repoId) ?? null,
+      onboardingProgress: onboardingProgress.get(row.repoId) ?? null,
       status: repoStatus({
         installationSuspended: row.suspendedAt !== null,
         active: row.active ?? false,

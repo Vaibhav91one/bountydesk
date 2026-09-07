@@ -640,7 +640,11 @@ test("run's turn message describes the bound target's name and pinned image, whe
       return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
     },
   });
-  const d = driver.createTrueforgeAnalysisDriver(client);
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async (_authorization, appPort) => ({
+    sandboxId: "sandbox-for-turn-message",
+    appPort,
+  });
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
   await d.ensureSession(context(reportId));
 
   await d.run(context(reportId));
@@ -650,6 +654,20 @@ test("run's turn message describes the bound target's name and pinned image, whe
   assert.ok(message.includes("juice-shop-demo"), "message must name the bound target");
   assert.ok(message.includes(target.imageName), "message must carry the pinned image reference");
   assert.ok(message.includes(target.imageDigest), "message must carry the pinned digest");
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.ok(
+    message.includes(
+      `probe_target {"capability":"${session.capabilityToken}","method":"GET","path":"/"}`,
+    ),
+    "message must show the first probe_target call with the exact opaque capability",
+  );
+  assert.ok(
+    message.includes('Do not use "bountydesk", the target name, the image name, a host, or a URL'),
+    "message must distinguish the opaque capability from human-readable target names",
+  );
   assert.ok(
     !message.includes("No authorized target is bound"),
     "an authorized target must not be described as unbound",

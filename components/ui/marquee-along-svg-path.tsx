@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, type RefObject } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   motion,
   useAnimationFrame,
@@ -184,6 +184,7 @@ export function MarqueeAlongSvgPath({
   const baseOffset = useMotionValue(0);
   const generatedId = React.useId();
   const id = pathId ?? `marquee-path-${generatedId}`;
+  const [isVisible, setIsVisible] = useState(() => typeof IntersectionObserver === "undefined");
 
   const items = useMemo(() => {
     const list = React.Children.toArray(children);
@@ -225,10 +226,24 @@ export function MarqueeAlongSvgPath({
     { clamp: false },
   );
 
+  useEffect(() => {
+    const node = container.current;
+    if (!node) return;
+
+    if (typeof IntersectionObserver === "undefined") return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsVisible(entry?.isIntersecting ?? false),
+      { rootMargin: "160px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   useAnimationFrame((_, delta) => {
     // Decorative travel, so it stops entirely rather than slowing down. Returning here also
     // drops the per-frame work for anyone who asked not to see it move.
-    if (reducedMotion) return;
+    if (reducedMotion || !isVisible) return;
 
     if (isDragging.current && draggable) {
       baseOffset.set(baseOffset.get() + dragVelocity.current);

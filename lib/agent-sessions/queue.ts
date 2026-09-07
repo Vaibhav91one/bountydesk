@@ -214,6 +214,10 @@ export async function recordFinalSummary(
 
 export type AgentSessionReleaseUpdate = {
   turnStatus?: TurnStatus;
+  /** Point the session at a new chained turn, for the poller to follow after it resumes a
+   *  paused turn (an auto-approved write probe). Mirrors what the approval-submission worker
+   *  writes after it submits a verdict decision. */
+  turnId?: string;
   pendingThreadId?: string | null;
   pendingToolCallId?: string | null;
   pendingVerdictId?: string | null;

@@ -49,6 +49,11 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
   assert.equal(agentDefinition.manifest.config.dynamic_sub_agents.enabled, true);
 });
 
+test("the BountyDesk agent starts provisioned-target contact through probe_target", () => {
+  assert.match(agentDefinition.manifest.instructions, /Start by calling probe_target with method GET and path \//);
+  assert.match(agentDefinition.manifest.instructions, /Do not call scope_check for the target name/);
+});
+
 test("the BountyDesk agent wires in exactly the 11 report skills, each backed by a real SKILL.md", () => {
   const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
   assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
@@ -69,7 +74,10 @@ test("the target onboarding agent only has the manifest proposal skill", () => {
   assert.deepEqual(targetOnboardingAgentDefinition.manifest.skills, [
     { name: "bountydesk-target-onboarding" },
   ]);
-  assert.equal(targetOnboardingAgentDefinition.manifest.config.sandbox.enabled, true);
+  // The onboarding agent drives its own Docker-in-Docker build sandbox through the build MCP tools,
+  // so the harness's built-in sandbox is off (it also decouples onboarding from the harness's own
+  // Daytona provider config).
+  assert.equal(targetOnboardingAgentDefinition.manifest.config.sandbox.enabled, false);
   assert.equal(targetOnboardingAgentDefinition.manifest.config.dynamic_sub_agents.enabled, false);
 
   const content = readFileSync(

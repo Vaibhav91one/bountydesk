@@ -20,6 +20,12 @@
 </p>
 
 <p align="center">
+  <a href="https://youtu.be/tgpWKCdM5a8"><b>Demo video</b></a>
+  &nbsp;&middot;&nbsp;
+  <a href="https://dev.to/vaibhav_tomar_b2fc1fcbe38/bountydesk-agent-led-bug-bounty-triage-with-a-human-approved-verdict-43lm"><b>Write-up</b></a>
+</p>
+
+<p align="center">
   Built on the <a href="https://trueforge.dev">TrueForge</a> agent harness for
   the WeMakeDevs x TrueFoundry x Qodo Agent Harness Hackathon (Aug 2026).
 </p>
@@ -112,6 +118,17 @@ TrueForge is the agent workflow, not a prompt wrapper.
 | Approvals | Pause before `publish_verdict` can become an outbound comment |
 
 The final comment is not prefilled by the server. The agent writes it. The platform re-checks authorization before accepting any reproduced or not-reproduced claim. The reviewer signs the exact bytes that will be delivered.
+
+### MCP servers and skills in this repo
+
+BountyDesk ships the tools the agent uses, so the harness has real capabilities to grant rather than stubs.
+
+Two MCP servers:
+
+- `publish-verdict` (`app/api/mcp/publish-verdict`) exposes the approval-gated `publish_verdict` tool the agent calls to draft its outcome, summary, and findings.
+- `scope-guard` (`app/api/mcp/scope-guard`) holds the authorized scope and exposes `probe_target`, the approval-gated `probe_target_write`, and the scope checks. It is ported and hardened from the Sentinel prototype.
+
+Twelve agent skills under `skills/`: recon, triage, validation, api-security, payloads, dast, challenges, cve-lab-construction, firmware, mobile, and demo-targets are wired into the primary agent by `agent/bountydesk.agent.json`; target-onboarding is wired into its own agent by `agent/target-onboarding.agent.json`. All are registered with `npm run skills:apply` before `npm run agent:apply`.
 
 ## What is built
 

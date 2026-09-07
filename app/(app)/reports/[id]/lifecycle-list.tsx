@@ -3,23 +3,15 @@
 import { useState } from "react";
 import { CaretDown } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+import type { LifecycleEventView, LifecycleStepView } from "@/lib/reports/case-view";
+import type { ToolCallView } from "@/lib/reports/tool-call-view";
 import { cn } from "@/lib/utils";
 
-import { StepBadge, type StepState } from "./lifecycle-step";
-import { ToolCallHover, type ToolCallView } from "./tool-call-detail";
+import { StepBadge } from "./lifecycle-step";
+import { ToolCallHover, type ToolCallFallback } from "./tool-call-detail";
 
-export type LifecycleStep = {
-  key: string;
-  label: string;
-  note: string;
-  state: StepState;
-  /** Inline SVG for the mascot standing in for this phase, id-prefixed by the page. */
-  mascot: string;
-  // detail is the live tool-call arguments and result for a mirrored tool-call event, matched
-  // by id in the page. Present only on "agent.tool_call:<name>" rows whose detail TrueForge
-  // still holds; every other row leaves it undefined and shows no hover.
-  events: { seq: number; type: string; at: string; detail?: ToolCallView }[];
-};
+const TOOL_CALL_PREFIX = "agent.tool_call:";
 
 /**
  * The pipeline as a list, one row per phase, each opening onto the events recorded during it.
@@ -32,8 +24,32 @@ export type LifecycleStep = {
  * A row with no events does not open. A chevron that turns and reveals nothing is worse than
  * no chevron.
  */
-export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
+export function LifecycleList({
+  steps,
+  details,
+}: {
+  steps: LifecycleStepView[];
+  /**
+   * Live tool-call detail, keyed by TrueForge call id, from its own query. A mirrored event
+   * carries that id on its eventKey as "agent.tool_call:<id>", which is the only way back to
+   * the un-redacted arguments: the event's own type holds the tool name and nothing else.
+   * Empty whenever the harness is unreachable, and a row without a match renders plain.
+   */
+  details?: Record<string, ToolCallView>;
+}) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
+
+  const detailFor = (eventKey: string | null) =>
+    eventKey?.startsWith(TOOL_CALL_PREFIX)
+      ? details?.[eventKey.slice(TOOL_CALL_PREFIX.length)]
+      : undefined;
+
+  // The always-present source: the mirrored tool name and preview, so a tool-call row hovers
+  // even where the live detail never arrives (the Vercel tier cannot reach the harness).
+  const fallbackFor = (event: LifecycleEventView): ToolCallFallback | null =>
+    event.toolName && event.argsPreview
+      ? { toolName: event.toolName, argsPreview: event.argsPreview }
+      : null;
 
   return (
     // h-full and justify-between: the panel is stretched to the diagram beside it, and rows
@@ -60,13 +76,13 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
 
               {/* Agent Bounty doing the thing the row names. A phase nobody reached is drawn
                   faint rather than swapped for a placeholder: it is the same step, not yet. */}
-              <span
-                aria-hidden="true"
+              <AnimatedMascotSvg
+                state={step.mascot}
+                scope={`lifecycle-${step.key}`}
                 className={cn(
                   "size-12 shrink-0 [&>svg]:block [&>svg]:size-full",
                   step.state === "pending" && "opacity-40",
                 )}
-                dangerouslySetInnerHTML={{ __html: step.mascot }}
               />
 
               <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
@@ -97,7 +113,7 @@ export function LifecycleList({ steps }: { steps: LifecycleStep[] }) {
                   <ul className="flex flex-col gap-1.5">
                     {step.events.map((event) => (
                       <li key={event.seq} className="flex items-center gap-4">
-                        <ToolCallHover detail={event.detail}>
+                        <ToolCallHover detail={detailFor(event.eventKey)} fallback={fallbackFor(event)}>
                           <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
                             {event.type}
                           </span>

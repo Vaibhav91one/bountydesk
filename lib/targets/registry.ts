@@ -6,6 +6,9 @@ export type TargetProvisioningConfig = {
   expectedBuildMarker: string;
   startCommand?: string;
   snapshotImageRefOverride?: string;
+  /** Extra seconds the reproduction sandbox waits for readiness beyond the default, for an image
+   *  that starts a datastore before the app answers (a bundled MariaDB) or a slow JVM. */
+  warmupSeconds?: number;
 };
 
 export type TargetPin = {
@@ -173,6 +176,9 @@ export function targetProfileConfig(
       ...(target.provisioning.startCommand
         ? { startCommand: target.provisioning.startCommand }
         : {}),
+      ...(typeof target.provisioning.warmupSeconds === "number"
+        ? { warmupSeconds: target.provisioning.warmupSeconds }
+        : {}),
       ...(pin.snapshotImageRefOverride ?? target.provisioning.snapshotImageRefOverride
         ? {
             snapshotImageRefOverride:
@@ -207,6 +213,9 @@ export function targetProvisioningFromConfig(
         ...(typeof maybeProvisioning.startCommand === "string" &&
         maybeProvisioning.startCommand.length > 0
           ? { startCommand: maybeProvisioning.startCommand }
+          : {}),
+        ...(typeof maybeProvisioning.warmupSeconds === "number"
+          ? { warmupSeconds: maybeProvisioning.warmupSeconds }
           : {}),
         ...(typeof maybeProvisioning.snapshotImageRefOverride === "string" &&
         maybeProvisioning.snapshotImageRefOverride.length > 0

@@ -2,203 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
-import { PhaseDot } from "@/components/phase-dot";
-import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { requireReviewer } from "@/lib/auth/dal";
-import { formatStamp } from "@/lib/format";
-import {
-  isAgentInvestigating,
-  isReportId,
-  oracleDecided,
-  readCase,
-  verdictFindings,
-  type CaseFile,
-} from "@/lib/reports/case";
-import { mascotState } from "@/lib/mascot/states";
-import { phaseOf } from "@/lib/reports/queue";
-import { readToolCalls } from "@/lib/reports/tool-calls";
+import { isReportId, readCase } from "@/lib/reports/case";
+import { caseLiveView } from "@/lib/reports/case-view";
 
-import { ApprovalDialog } from "./approval-dialog";
-import { ArtifactsPanel } from "./artifacts-panel";
-import { FindingsPanel } from "./findings-panel";
-import { VerdictCard } from "./verdict-card";
-import { LifecycleList, type LifecycleStep } from "./lifecycle-list";
-import type { StepState } from "./lifecycle-step";
-import { StatusCard } from "./status-card";
-import type { ToolCallView } from "./tool-call-detail";
+import { CaseApproval } from "./case-approval";
+import { CaseRealtimeBadges } from "./case-realtime-badges";
+import { CaseView } from "./case-view";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
-
-function Panel({
-  title,
-  aside,
-  children,
-  className,
-}: {
-  title: string;
-  aside?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <section
-      className={`flex min-w-0 flex-col gap-4 rounded-xl border border-border/50 bg-card p-5 ${className ?? ""}`}
-    >
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-meta text-muted-foreground">{title}</h2>
-        {aside}
-      </header>
-      {children}
-    </section>
-  );
-}
-/**
- * The pipeline, and how far this report got through it.
- *
- * Derived from state and from what exists, never from a stored step counter: there is no such
- * column, and inventing one that could drift from the report's own state would make the
- * picture and the truth two different things.
- */
-/**
- * Which lifecycle step an event belongs to, by the prefix its type carries.
- *
- * Anything unrecognised falls to the step the report is currently in rather than being
- * dropped. An event nobody placed is still an event that happened, and a log that quietly
- * loses lines is worse than one with a line in the wrong place.
- */
-const EVENT_PHASE: Record<string, string> = {
-  intake: "intake",
-  sandbox: "investigation",
-  repro: "investigation",
-  // The poller's mirrored tool-call events (lib/agent-sessions/poller.ts), type
-  // "agent.tool_call:<toolName>". This is what actually populates the investigation step
-  // during a live run, ahead of any sandbox/repro events the deterministic pipeline would add.
-  agent: "investigation",
-  analysis: "verdict",
-  verdict: "verdict",
-  approval: "approval",
-  delivery: "delivery",
-  target: "investigation",
-};
-
-/**
- * Which mascot stands for a lifecycle row.
- *
- * Keyed to the row and to what the record says happened in it, so a reproduction that never
- * ran and one that is running do not draw the same picture, and no two rows in the list carry
- * the same one. Drafting a verdict borrows scanning, because no mascot exists for it yet.
- */
-function stepMascot(
-  key: string,
-  state: StepState,
-  file: CaseFile,
-): Parameters<typeof mascotState>[0] {
-  if (key === "intake") return "ingest";
-  if (key === "investigation") {
-    // idle when it has not been reached: scanning belongs to the verdict row below, and two
-    // rows carrying the same picture is what made this list read as one repeated step.
-    return state === "current" ? "reproducing" : state === "skipped" ? "infra-hiccup" : "idle";
-  }
-  if (key === "verdict") return "scanning";
-  if (key === "approval") {
-    return file.approval?.decision === "DENIED" ? "denied" : "awaiting-approval";
-  }
-  return state === "done" ? "celebrating" : "delivered";
-}
-
-function lifecycle(file: CaseFile) {
-  const terminal = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
-  const past = (states: string[]) => states.includes(file.state);
-
-  // The step's own step log, not the dead REPRODUCING report state: nothing transitions into
-  // REPRODUCING under the agent-authored model, so a step fed from it would sit on "Coming
-  // soon" for every real run. Fed instead from the poller's mirrored tool-call events
-  // (EVENT_PHASE's "agent" entry) and the session's own turnStatus, both of which move during
-  // a live investigation.
-  const investigationEvents = file.events.filter((e) => e.channel === "agent");
-  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, investigationEvents.length > 0);
-
-  return [
-    {
-      key: "intake",
-      label: "Intake",
-      note: file.target ? "Authenticated, target bound" : "Authenticated, no target bound",
-      state: "done" as const,
-    },
-    {
-      key: "investigation",
-      label: "Investigation",
-      note: file.verdict
-        ? `${investigationEvents.length} ${investigationEvents.length === 1 ? "step" : "steps"} recorded`
-        : investigating
-          ? "In progress"
-          : "Not started",
-      // Done the moment a verdict exists: the live path mints revision 1 only once the agent
-      // calls publish_verdict, which is also the last thing that happens in its turn (see
-      // lib/mcp/publish-verdict.ts), so a verdict existing means the investigation is over.
-      state: file.verdict
-        ? ("done" as const)
-        : investigating
-          ? ("current" as const)
-          : ("pending" as const),
-    },
-    {
-      key: "verdict",
-      label: "Verdict drafted",
-      note: file.verdict ? `Revision ${file.verdict.revision}` : "None yet",
-      state: file.verdict ? ("done" as const) : ("pending" as const),
-    },
-    {
-      key: "approval",
-      label: "Human approval",
-      note: file.approval
-        ? `${file.approval.decision === "APPROVED" ? "Approved" : "Denied"} by ${file.approval.reviewer}`
-        : file.awaitingVerdictId
-          ? "Waiting on a reviewer"
-          : "Not reached",
-      state: file.approval
-        ? ("done" as const)
-        : past(["AWAITING_APPROVAL"])
-          ? ("current" as const)
-          : ("pending" as const),
-    },
-    {
-      key: "delivery",
-      label: "Delivery",
-      note: file.delivery ? file.delivery.state.toLowerCase() : "Not enqueued",
-      state:
-        file.state === "DELIVERED"
-          ? ("done" as const)
-          : file.state === "DELIVERING"
-            ? ("current" as const)
-            : past(terminal)
-              ? ("skipped" as const)
-              : ("pending" as const),
-    },
-  ];
-}
 /**
  * A link out to GitHub, or the same text unlinked.
  *
@@ -265,7 +79,18 @@ function Reporter({
   );
 }
 
-
+/**
+ * The case file.
+ *
+ * This component renders the report's identity, which is fixed for the life of the report: its
+ * title, who opened it, and where it came from. Everything that can change while a reviewer is
+ * looking at it is below, in CaseView and CaseApproval, which share one polled read of
+ * caseLiveView. The same view is built here for their initialData, so first paint is fully
+ * server-rendered and nothing arrives late.
+ *
+ * Nothing on this page polls the server component itself any more. It used to, at 2.5s, which
+ * re-ran readCase and a five second TrueForge call for markup that mostly had not changed.
+ */
 export default async function CaseFilePage({ params }: { params: Promise<{ id: string }> }) {
   await requireReviewer();
   const { id } = await params;
@@ -275,91 +100,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   const file = isReportId(id) ? await readCase(id) : null;
   if (!file) notFound();
 
-  // Full tool-call detail, read live from TrueForge and never persisted (see
-  // lib/reports/tool-calls.ts). Resilient: returns [] when there is no session or the harness is
-  // unreachable, and a step with no matching detail simply renders without a hover.
-  const toolCalls = await readToolCalls(file.id);
-  const detailById = new Map(toolCalls.map((call) => [call.id, call] as const));
-
-  // A mirrored tool-call event carries its TrueForge tool-call id on its idempotency key as
-  // "agent.tool_call:<id>" (lib/agent-sessions/poller.ts); ToolCallDetail.id is that same id, so
-  // this matches a lifecycle step to the un-redacted arguments and result behind it. Anything
-  // without a live match is undefined, and the row shows no hover.
-  const detailFor = (eventKey: string | null): ToolCallView | undefined => {
-    const prefix = "agent.tool_call:";
-    if (!eventKey?.startsWith(prefix)) return undefined;
-    const detail = detailById.get(eventKey.slice(prefix.length));
-    return detail
-      ? { toolName: detail.toolName, argumentsJson: detail.argumentsJson, result: detail.result }
-      : undefined;
-  };
-
-  const phase = phaseOf(file.state);
-
-  // Events, grouped onto the step they belong to. The fallback step is the one matching the
-  // report's own state, so an unknown prefix lands somewhere a reader would look for it.
-  const fallback =
-    file.state === "TRIAGING"
-      ? "intake"
-      : file.state === "REPRODUCING"
-        ? "investigation"
-        : file.state === "DELIVERING" || file.state === "DELIVERED"
-          ? "delivery"
-          : "verdict";
-
-  const eventsByStep = new Map<string, LifecycleStep["events"]>();
-  for (const event of file.events) {
-    const key = EVENT_PHASE[event.channel] ?? fallback;
-    const bucket = eventsByStep.get(key) ?? [];
-    bucket.push({
-      seq: event.seq,
-      type: event.type,
-      at: event.at.toISOString().slice(11, 19),
-      detail: detailFor(event.eventKey),
-    });
-    eventsByStep.set(key, bucket);
-  }
-
-  const steps: LifecycleStep[] = lifecycle(file).map((step) => {
-    const mascot = mascotState(stepMascot(step.key, step.state, file));
-    return {
-      ...step,
-      // Two rows can land on the same mascot, and the artwork carries ids. Without a per-row
-      // prefix the second copy's gradients resolve against the first one's defs and it draws
-      // wrong, which is the same trap status-card.tsx works around.
-      mascot: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${step.key}__`),
-      events: eventsByStep.get(step.key) ?? [],
-    };
-  });
-
-  const findings = verdictFindings(file.verdict?.evidence);
-
-  // The stored exact-comment artifact, when the post-commit recorder managed to write it. The
-  // download prefers its signed URL and falls back to the payload text when it is absent.
-  const payloadArtifactId =
-    file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null;
-
-  // Same id-prefix trap as the lifecycle rows: several mascots share one page.
-  const prefixed = (key: Parameters<typeof mascotState>[0], slot: string) => {
-    const mascot = mascotState(key);
-    return mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__${slot}__`);
-  };
-
-  /**
-   * Whose verdict this is.
-   *
-   * Agent Bounty drafts every verdict today: its own sandboxed investigation, using scope-guard,
-   * a sandbox, skills and subagents against the authorised target, is the primary and permanent
-   * source (docs/decisions.md Q22), not a stand-in for something else. The canary/oracle
-   * pipeline in lib/sandbox/reproduce.ts is retained as a strictly stronger, optional evidence
-   * source; when a verdict's evidence positively records one, the label credits it instead. The
-   * label is derived from the evidence rather than written down, so it changes by itself when
-   * the evidence does.
-   */
-  // Fail closed: only a recorded oracle result earns the oracle's name on the label. Anything
-  // else, including evidence nobody recognises, is Agent Bounty speaking for itself.
-  const drafted = !file.verdict || !oracleDecided(file.verdict.evidence);
-  const verdictLabel = drafted ? "Agent Bounty says" : "The oracle says";
+  const initial = caseLiveView(file);
 
   return (
     <main className="flex flex-1 flex-col">
@@ -390,10 +131,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </h1>
 
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-meta text-muted-foreground">
-              <span className="flex items-center gap-2 text-body text-foreground">
-                <PhaseDot phase={phase} />
-                {STATE_LABEL[file.state] ?? file.state}
-              </span>
+              <CaseRealtimeBadges reportId={file.id} initialStatus={initial} />
 
               <span aria-hidden="true">·</span>
 
@@ -421,129 +159,17 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </p>
           </div>
 
-          {/* Only where there is a pending call an approval could answer. A report sitting in
-              AWAITING_APPROVAL with nothing pending would open a dialog whose buttons refuse. */}
-          {file.awaitingVerdictId && file.verdict ? (
-            <ApprovalDialog
-              reportId={file.id}
-              verdictId={file.awaitingVerdictId}
-              contentHash={file.verdict.contentHash}
-              payload={file.verdict.payload}
-              payloadArtifactId={payloadArtifactId}
-              outcome={file.verdict.outcome}
-              outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
-              summary={file.verdict.summary}
-              revision={file.verdict.revision}
-              destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
-              targetName={file.target?.name ?? null}
-              reproductionRan={!drafted}
-              findings={findings}
-              speaker={prefixed("awaiting-approval", "speaker")}
-              chatMascot={prefixed("greeting", "chat")}
-              events={file.events.map((event) => ({
-                seq: event.seq,
-                type: event.type,
-                at: event.at.toISOString().slice(11, 19),
-                detail: detailFor(event.eventKey),
-              }))}
-            />
-          ) : null}
+          <CaseApproval reportId={file.id} initial={initial} />
         </div>
       </header>
 
-      <div className="flex flex-col gap-4 p-8">
-        <StatusCard
-          file={file}
-          stateLabel={STATE_LABEL[file.state] ?? file.state}
-          verdictLabel={verdictLabel}
-          outcomeLabel={
-            file.verdict ? (OUTCOME[file.verdict.outcome] ?? file.verdict.outcome) : null
-          }
-        />
-
-        {/* The pipeline beside the shape it runs through. Equal height on purpose: they are
-            two views of the same run, and one of them ending early reads as unfinished. */}
-        <div className="grid items-stretch gap-4 lg:grid-cols-2">
-          <Panel title="Lifecycle" className="p-0">
-            <LifecycleList steps={steps} />
-          </Panel>
-
-          <Panel
-            title="Sandbox architecture"
-            aside={
-              <Badge variant="outline">
-                {file.sandbox ? "Target provisioned" : "No sandbox"}
-              </Badge>
-            }
-          >
-            <SandboxDiagram
-              repositoryFullName={file.repositoryFullName}
-              targetName={file.target?.name ?? null}
-              sandboxId={file.sandbox?.id ?? null}
-            />
-          </Panel>
-        </div>
-
-        {file.finalSummary ? (
-          <Panel title="Summary and next steps">
-            {/* The agent's own closing message, captured from its turn. Rendered as text, never
-                as HTML: the agent may have read prompt-injection content while probing an
-                untrusted target, so its prose is shown, not interpreted. whitespace-pre-wrap
-                keeps the paragraph and list breaks it wrote. */}
-            <p className="whitespace-pre-wrap text-body text-foreground">{file.finalSummary}</p>
-          </Panel>
-        ) : null}
-
-        {/* No card around it. The table carries its own border, and a "Findings" header over a
-            column already headed Finding was chrome saying the same word twice. */}
-        {file.verdict ? <FindingsPanel findings={findings} /> : null}
-
-        {/* Once the gate has closed there is no dialog to open, and the comment that went out
-            would otherwise be nowhere on this page. The same card, with the decision in place
-            of the buttons. */}
-        {file.verdict && !file.awaitingVerdictId ? (
-          <VerdictCard
-            payload={file.verdict.payload}
-            payloadArtifactId={payloadArtifactId}
-            outcome={file.verdict.outcome}
-            outcomeLabel={OUTCOME[file.verdict.outcome] ?? file.verdict.outcome}
-            summary={file.verdict.summary}
-            findings={findings}
-            revision={file.verdict.revision}
-            contentHash={file.verdict.contentHash}
-            destination={file.delivery?.target ?? file.issueUrl ?? file.sourceLabel}
-            speaker={prefixed("awaiting-approval", "record")}
-            chatMascot={prefixed("greeting", "record-chat")}
-            decision={
-              file.approval
-                ? {
-                    decision: file.approval.decision,
-                    reviewer: file.approval.reviewer,
-                    note: file.approval.note,
-                    at: formatStamp(file.approval.decidedAt),
-                  }
-                : null
-            }
-          />
-        ) : null}
-
-        <Panel
-          title="Artifacts"
-          aside={
-            <Badge variant="outline">
-              {file.artifacts.length === 0
-                ? "None recorded"
-                : `${file.artifacts.length} recorded`}
-            </Badge>
-          }
-        >
-          <ArtifactsPanel
-            artifacts={file.artifacts}
-            imageDigest={file.target?.imageDigest || null}
-            contentHash={file.verdict?.contentHash ?? null}
-          />
-        </Panel>
-      </div>
+      <CaseView
+        reportId={file.id}
+        initial={initial}
+        issueUrl={file.issueUrl}
+        channel={file.channel}
+        repositoryFullName={file.repositoryFullName}
+      />
     </main>
   );
 }

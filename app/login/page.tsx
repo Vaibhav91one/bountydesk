@@ -5,7 +5,7 @@ import { Warning } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
 import { MascotMarquee } from "@/components/mascot-marquee";
-import { mascotStates } from "@/lib/mascot/states";
+import { MASCOT_STATES } from "@/lib/mascot/catalog";
 import { currentSession } from "@/lib/auth/dal";
 
 import { SignInButton } from "./sign-in-button";
@@ -44,7 +44,7 @@ export default async function LoginPage({
           <p className="text-heading font-medium text-brand-soft">Meet Agent Bounty</p>
           <p className="text-display font-normal text-foreground">
             Your all-in-one
-            <MascotMarquee states={mascotStates()} />
+            <MascotMarquee states={[...MASCOT_STATES]} />
             threat hunter
           </p>
           <p className="max-w-[480px] text-lead text-muted-foreground">

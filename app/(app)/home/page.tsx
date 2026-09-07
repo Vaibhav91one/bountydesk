@@ -1,16 +1,6 @@
 import Link from "next/link";
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
-import {
-  ArrowRight,
-  Check,
-  CheckCircle,
-  Files,
-  Folder,
-  Gear,
-  Plus,
-  ShareNetwork,
-  Tray,
-} from "@phosphor-icons/react/ssr";
+import { ArrowRight, Check, CheckCircle, Folder, Plus } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -19,8 +9,10 @@ import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import { listConnections } from "@/lib/github/connections";
 import { readHomeSummary } from "@/lib/home/summary";
-import { mascotState } from "@/lib/mascot/states";
-import { cn } from "@/lib/utils";
+
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+
+import { HomeCountsLive } from "./home-live";
 
 export const metadata = { title: "Home · BountyDesk" };
 
@@ -38,66 +30,8 @@ const INTEGRATIONS = [
   { key: "upload", name: "File upload", icon: Folder, state: "coming soon" },
 ] as const;
 
-/**
- * A door to a screen, with the count behind it.
- *
- * Every number comes from the database. A card that guessed, or that showed a placeholder
- * while it loaded, would be the one thing on this page a person could not act on.
- */
-function RouteCard({
-  href,
-  icon,
-  title,
-  body,
-  stats,
-}: {
-  href: string;
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-  stats: { label: string; value: number; urgent?: boolean }[];
-}) {
-  return (
-    <Link
-      href={href}
-      className="group/button flex flex-col gap-3.5 rounded-xl border border-border/50 bg-card p-5 transition-colors hover:border-border hover:bg-muted/20"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <span className="flex size-10 items-center justify-center rounded-lg border bg-background">
-          {icon}
-        </span>
-        <RollingIcon icon={ArrowRight} className="size-4 text-muted-foreground" />
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <h2 className="text-heading text-foreground">{title}</h2>
-        <p className="text-body text-muted-foreground">{body}</p>
-      </div>
-
-      <div className="mt-auto flex flex-wrap items-baseline gap-x-5 gap-y-1 pt-1">
-        {stats.map((stat) => (
-          <span key={stat.label} className="flex items-baseline gap-1.5">
-            <span
-              className={cn(
-                "text-heading tabular-nums",
-                // Amber only where a reviewer is actually the blocker. A count of zero is
-                // not urgent, and colouring it would cry wolf on an empty queue.
-                stat.urgent ? "text-phase-approval" : "text-foreground",
-              )}
-            >
-              {stat.value}
-            </span>
-            <span className="text-meta text-muted-foreground">{stat.label}</span>
-          </span>
-        ))}
-      </div>
-    </Link>
-  );
-}
-
 export default async function HomePage() {
   await requireReviewer();
-  const mascot = mascotState("idle");
   // Two reads rather than one snapshot, deliberately: the GitHub grant and the report counts
   // describe different things and no card claims a relationship between them. readHomeSummary
   // takes its own transaction, so the numbers that do sit beside each other agree.
@@ -110,13 +44,10 @@ export default async function HomePage() {
   return (
     <main className="flex flex-1 flex-col gap-8 p-8">
       <header className="flex items-center gap-4">
-        {/* Inlined rather than an <img>: the animation lives in a <style> block inside the
-            file and an image does not reliably run it. The site preloader carries its own copy
-            under a different id prefix, so the two can sit on the page together. */}
-        <span
-          aria-hidden="true"
+        <AnimatedMascotSvg
+          state="idle"
+          scope="home"
           className="size-24 shrink-0 [&>svg]:block [&>svg]:size-full"
-          dangerouslySetInnerHTML={{ __html: mascot.markup }}
         />
         <div className="flex flex-col gap-2">
           {/* brand-soft rather than --brand: the accent at full strength is a 3:1 on this
@@ -189,51 +120,11 @@ export default async function HomePage() {
 
         {/* One card per screen, each carrying the count behind it. Somewhere to go and how
             much is waiting there; what the product does is the prose below, not here. */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:col-span-2">
-          <RouteCard
-            href="/board"
-            icon={<Tray className="size-5" />}
-            title="Review queue"
-            body="Every report by phase, from triage through to the ones that are finished."
-            stats={[
-              { label: "open", value: summary.open },
-              { label: "need you", value: summary.awaiting, urgent: summary.awaiting > 0 },
-            ]}
-          />
-
-          <RouteCard
-            href="/reports"
-            icon={<Files className="size-5" />}
-            title="Reports"
-            body="Everything that has arrived, whatever state it ended in."
-            stats={[
-              { label: "total", value: summary.reports },
-              { label: "closed", value: summary.reports - summary.open },
-            ]}
-          />
-
-          <RouteCard
-            href="/connections"
-            icon={<ShareNetwork className="size-5" />}
-            title="Connections"
-            body="Which repositories are admissible, and what each is bound to."
-            stats={[
-              { label: "granted", value: repositories.length },
-              { label: "accepting", value: admissible.length },
-            ]}
-          />
-
-          <RouteCard
-            href="/settings"
-            icon={<Gear className="size-5" />}
-            title="Settings"
-            body="What the guard enforces, and what has been signed."
-            stats={[
-              { label: "targets", value: summary.targets },
-              { label: "decisions", value: summary.decisions },
-            ]}
-          />
-        </div>
+        <HomeCountsLive
+          initial={summary}
+          granted={repositories.length}
+          accepting={admissible.length}
+        />
       </div>
     </main>
   );

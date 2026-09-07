@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ArrowSquareOut, CheckCircle, Warning } from "@phosphor-icons/react/ssr";
 import { GitHubLight } from "developer-icons";
 
+import { formatStamp } from "@/lib/format";
+
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +17,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 
-import { ConfigureButton } from "../integrations/configure-button";
+import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import type { RepositoryRow } from "./connection-tabs";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -27,12 +29,42 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+/** A repository that has sent nothing yet says so, rather than showing a bare zero. */
+function count(n: number, noun: string): string {
+  if (n === 0) return `No ${noun}s`;
+  return `${n} ${n === 1 ? noun : `${noun}s`}`;
+}
+
+/** Plain-language heading for where onboarding is, or why it stopped. */
+function onboardingProgressLabel(state: string): string {
+  switch (state) {
+    case "PENDING_PLAN":
+      return "Classifying the repository";
+    case "PENDING_BUILD":
+      return "Building the target image";
+    case "PENDING_MANIFEST":
+      return "Preparing the target manifest";
+    case "FAILED":
+      return "Onboarding failed";
+    case "UNSUPPORTED":
+      return "This repository cannot be onboarded";
+    default:
+      return "Onboarding in progress";
+  }
+}
+
 /**
  * One repository, without leaving the list.
  *
- * The table says whether a report opened here would be accepted; this says why, and gives the
- * two controls that change it. Everything shown is already in the row, so it opens instantly
- * and reads nothing further: a repository has no detail page to be a summary of.
+ * The table says whether a report opened here would be accepted; this says why, what the
+ * repository has actually sent, and gives the control that changes it. Everything shown comes
+ * from the row the table already has, so it opens instantly: a repository has no detail page
+ * to be a summary of.
+ *
+ * Which panel is open is a URL parameter, so this is linkable. That is the whole reason the
+ * fields here are the ones a person recognises (an owner, a repository, a count of reports)
+ * rather than the ids the database joins on: the link gets pasted to someone who has to be
+ * able to tell what it points at.
  */
 export function RepositorySheet({
   repo,
@@ -74,36 +106,142 @@ export function RepositorySheet({
               </p>
 
               <dl className="flex flex-col">
-                <Row label="Account">{repo.account}</Row>
+                <Row label="Owner">{repo.owner}</Row>
+                <Row label="Repository">{repo.name}</Row>
+                <Row label="Installed by">{repo.account}</Row>
                 <Row label="Bound target">{repo.target ?? "None bound"}</Row>
-                <Row label="Repository id">
-                  <span className="font-mono">{repo.repoId}</span>
+                <Row label="Reports received">{count(repo.reportCount, "report")}</Row>
+                {/* Only where there is something to act on. A permanent "0 waiting" is a row
+                    a reader has to check every time to learn nothing. */}
+                {repo.awaitingReview > 0 ? (
+                  <Row label="Waiting on a reviewer">
+                    <Link
+                      href="/board"
+                      className="text-brand-soft underline underline-offset-4"
+                    >
+                      {count(repo.awaitingReview, "report")}
+                    </Link>
+                  </Row>
+                ) : null}
+                <Row label="Verdicts delivered">{repo.delivered}</Row>
+                <Row label="Last report">
+                  {repo.lastReportAt ? formatStamp(new Date(repo.lastReportAt)) : "None yet"}
                 </Row>
-                <Row label="Accepting reports">{repo.connected ? "Yes" : "No"}</Row>
+                <Row label="Last change from GitHub">
+                  {formatStamp(new Date(repo.lastSyncedAt))}
+                </Row>
               </dl>
 
-              {/* The same control the row carries, so the two cannot drift apart. */}
-              <ConfigureButton
-                repoId={repo.repoId}
-                configured={repo.configured}
-                label={repo.configured ? "Reconfigure" : "Configure"}
-              />
+              {/* The one human gate on onboarding. A worker cannot cross AWAITING_APPROVAL on
+                  its own, so this is the only path from a proposed manifest to a written target,
+                  and the reviewer approves a specific build (name and digest), not just a name. */}
+              {repo.onboarding ? (
+                <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/30 p-3">
+                  <div className="flex flex-col gap-0.5">
+                    <p className="text-meta font-medium text-foreground">
+                      Proposed target awaiting approval
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      A build finished and proposed this manifest. Approving it writes the target
+                      profile and opens reproduction for this repository.
+                    </p>
+                  </div>
+                  <dl className="flex flex-col">
+                    <Row label="Name">{repo.onboarding.manifest.name}</Row>
+                    <Row label="Image">
+                      <span className="break-all font-mono text-xs">
+                        {(repo.onboarding.imageName ?? repo.onboarding.manifest.imageName) +
+                          (repo.onboarding.imageDigest
+                            ? `@${repo.onboarding.imageDigest}`
+                            : "")}
+                      </span>
+                    </Row>
+                    <Row label="Base URL">{repo.onboarding.manifest.baseUrl}</Row>
+                    <Row label="Readiness path">{repo.onboarding.manifest.readinessPath}</Row>
+                    {repo.onboarding.manifest.startCommand ? (
+                      <Row label="Start command">
+                        <span className="break-all font-mono text-xs">
+                          {repo.onboarding.manifest.startCommand}
+                        </span>
+                      </Row>
+                    ) : null}
+                  </dl>
+                  <ApproveOnboardingButton repoId={repo.repoId} />
+                </div>
+              ) : null}
 
-              <Button
-                variant="outline"
-                nativeButton={false}
-                render={
-                  <a
-                    href={`https://github.com/${repo.fullName}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                  />
-                }
-                className="w-full justify-center"
-              >
-                <RollingIcon icon={GitHubLight} className="size-4" /> Open on GitHub
-                <ArrowSquareOut className="size-3.5" />
-              </Button>
+              {/* Onboarding that is in flight or refused. A reviewer sees "building" rather than an
+                  idle panel, and an honest reason when a repo cannot become one offline image. */}
+              {repo.onboardingProgress ? (
+                <div
+                  className={
+                    repo.onboardingProgress.state === "UNSUPPORTED" ||
+                    repo.onboardingProgress.state === "FAILED"
+                      ? "flex flex-col gap-1 rounded-md border border-border/50 px-4 py-3 text-body text-muted-foreground"
+                      : "flex flex-col gap-1 rounded-md bg-muted/30 px-4 py-3 text-body text-muted-foreground"
+                  }
+                >
+                  <span className="text-meta font-medium text-foreground">
+                    {onboardingProgressLabel(repo.onboardingProgress.state)}
+                  </span>
+                  {repo.onboardingProgress.reason ? (
+                    <span className="text-sm">{repo.onboardingProgress.reason}</span>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={
+                    <a
+                      href={`https://github.com/${repo.fullName}`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    />
+                  }
+                  className="w-full justify-center"
+                >
+                  <RollingIcon icon={GitHubLight} className="size-4" /> Open on GitHub
+                  <ArrowSquareOut className="size-3.5" />
+                </Button>
+
+                {/* Where reports come from, so it is one click from the panel that counts
+                    them. */}
+                <Button
+                  variant="outline"
+                  nativeButton={false}
+                  render={
+                    <a
+                      href={`https://github.com/${repo.fullName}/issues`}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                    />
+                  }
+                  className="w-full justify-center"
+                >
+                  Issues on GitHub
+                  <ArrowSquareOut className="size-3.5" />
+                </Button>
+
+                {/* Which repositories the App can see is GitHub's screen, not ours: a GitHub
+                    App cannot change its own repository selection, so taking access away
+                    happens there and reaches us afterwards as a webhook. */}
+                {repo.manageUrl ? (
+                  <Button
+                    variant="outline"
+                    nativeButton={false}
+                    render={
+                      <a href={repo.manageUrl} target="_blank" rel="noreferrer noopener" />
+                    }
+                    className="w-full justify-center"
+                  >
+                    Manage access on GitHub
+                    <ArrowSquareOut className="size-3.5" />
+                  </Button>
+                ) : null}
+              </div>
 
               <Button
                 variant="ghost"

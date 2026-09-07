@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 
-import { z } from "zod";
-
 import {
   agentSession,
   and,
   approvalDecision,
+  connectedRepository,
   db,
   eq,
   report,
   REPORT_TERMINAL_STATES,
+  targetOnboarding,
+  targetProfile,
   verdict,
   type Executor,
 } from "@/lib/db";
@@ -22,42 +23,32 @@ import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type PublishVerdictResult = { ok: true } | { ok: false; reason: string };
+export type EnqueueApprovedVerdictDeliveryResult =
+  | { ok: true; deliveryId: string }
+  | { ok: false; reason: string };
 
-/**
- * The one shared shape for what an agent-drafted verdict looks like, imported by both the MCP
- * route (capability-only lookup, unchanged in this PR) and the poller (the full shape, once a
- * real agent starts drafting outcome/summary/findings instead of only echoing a capability
- * token back). One definition means the two can never quietly drift on what counts as a valid
- * draft.
- */
-export const findingSchema = z.object({
-  title: z.string().min(1).max(200),
-  severity: z.enum(["critical", "high", "medium", "low", "info"]),
-  description: z.string().min(1).max(4000),
-  evidenceRef: z.string().min(1).max(500),
-});
-
-export const verdictDraftSchema = z.object({
-  outcome: z.enum(["REPRODUCED", "NOT_REPRODUCED", "ANALYSIS_ONLY"]),
-  summary: z.string().min(1).max(2000),
-  findings: z.array(findingSchema).max(20),
-});
-
-export const publishVerdictInputSchema = verdictDraftSchema.extend({
-  capability: z.string(),
-});
-
-export type Finding = z.infer<typeof findingSchema>;
-export type VerdictDraft = z.infer<typeof verdictDraftSchema>;
-export type PublishVerdictInput = z.infer<typeof publishVerdictInputSchema>;
+export {
+  findingSchema,
+  publishVerdictInputSchema,
+  verdictDraftSchema,
+  type Finding,
+  type PublishVerdictInput,
+  type VerdictDraft,
+} from "@/lib/mcp/verdict-draft";
+import { verdictDraftSchema, type Finding, type VerdictDraft } from "@/lib/mcp/verdict-draft";
 
 export type DraftVerdictResult = { ok: true; verdictId: string } | { ok: false; reason: string };
 
 function renderFinding(finding: Finding, index: number): string {
-  // A subheading carrying the severity, then the description, then the evidence reference on its
-  // own line. GitHub renders this as a heading and two paragraphs; the reviewer's UI reads the
-  // same structured fields directly rather than this string.
-  return `### ${index + 1}. ${finding.title} (${finding.severity.toUpperCase()})\n\n${finding.description}\n\nEvidence: ${finding.evidenceRef}`;
+  // A subheading carrying the severity, then the description. GitHub renders this as a heading
+  // and a paragraph; the reviewer's UI reads the same structured fields directly rather than
+  // this string.
+  //
+  // The evidence reference the agent cited is deliberately not in here. It names a file inside
+  // the harness sandbox, so on a public issue it is a path the reporter cannot open and would
+  // read as a broken link to proof. The reference is kept on the verdict and written into the
+  // findings artifact a reviewer can download.
+  return `### ${index + 1}. ${finding.title} (${finding.severity.toUpperCase()})\n\n${finding.description}`;
 }
 
 /**
@@ -66,17 +57,32 @@ function renderFinding(finding: Finding, index: number): string {
  * words never reach the outbound comment unrendered, which matters doubly here since the
  * agent may have absorbed prompt-injection content while probing an untrusted target.
  */
-export function buildAgentDraftedPayload(verdictId: string, draft: VerdictDraft): string {
+export type TargetRef = { imageName: string; imageDigest: string };
+
+export function buildAgentDraftedPayload(
+  verdictId: string,
+  draft: VerdictDraft,
+  targetRef?: TargetRef | null,
+): string {
   const findingsBlock =
     draft.findings.length > 0
       ? `\n\n## Findings\n\n${draft.findings.map(renderFinding).join("\n\n")}`
       : "";
 
+  // The target the report was reproduced against, named by its durable digest, when the target
+  // came through the onboarding pipeline. The digest is stable and checkable; a signed download
+  // URL would expire and, being non-deterministic, would also change the content hash the human
+  // approved. This line is part of the hashed, approved bytes, so a reviewer sees it before
+  // signing and the delivery worker posts it verbatim.
+  const targetBlock = targetRef
+    ? `\n\n## Target image\n\n${targetRef.imageName}@${targetRef.imageDigest}`
+    : "";
+
   // The outcome heads the comment on its own line, in the outbound comment's own words, rather
   // than left for the free-form summary to convey: a draft's `summary` is validated only for
   // length, not for agreeing with its own `outcome`, so the approved text must state the
   // persisted outcome plainly instead of relying on the agent's prose to get it right.
-  const body = `## Outcome: ${draft.outcome}\n\n## Summary\n\n${draft.summary}${findingsBlock}`;
+  const body = `## Outcome: ${draft.outcome}\n\n## Summary\n\n${draft.summary}${findingsBlock}${targetBlock}`;
   return `${body}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
 }
 
@@ -101,6 +107,28 @@ export const SYNTHESIZED_ANALYSIS_SUMMARY =
  * never overwritten, and a REPRODUCED or NOT_REPRODUCED claim is never synthesized here. Runs
  * inside the caller's transaction, so it commits or rolls back with the lifecycle move around it.
  */
+/**
+ * Why reproduction was not available for this report, for the synthesized verdict's evidence. Only
+ * server-derived facts go in: the report's own target binding and the onboarding state of its repo,
+ * both enums the platform set, never agent output or a tool result. So a reviewer reading the case
+ * file can tell "the repository cannot be onboarded for reproduction" from "no target is bound",
+ * without any untrusted text entering the verdict record. The specific onboarding reason (which for
+ * an agent-refused repo is agent-authored text) stays in the connections UI, not here.
+ */
+async function reproductionUnavailabilityEvidence(reportId: string, tx: Executor): Promise<Record<string, string>> {
+  const [row] = await tx
+    .select({ onboardingState: targetOnboarding.state })
+    .from(report)
+    .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (row?.onboardingState === "UNSUPPORTED") {
+    return { reproduction: "unavailable", reason: "repository-not-onboardable" };
+  }
+  return { reproduction: "unavailable", reason: "no-reproduction-target" };
+}
+
 export async function synthesizeAnalysisOnlyVerdict(
   reportId: string,
   tx: Executor,
@@ -136,7 +164,9 @@ export async function synthesizeAnalysisOnlyVerdict(
       reportId,
       outcome: "ANALYSIS_ONLY",
       summary: SYNTHESIZED_ANALYSIS_SUMMARY,
-      evidence: { source: "server-synthesized" },
+      // The outbound summary stays constant; the evidence (reviewer-facing, not the GitHub comment)
+      // carries the server-derived reason reproduction was unavailable.
+      evidence: { source: "server-synthesized", ...(await reproductionUnavailabilityEvidence(reportId, tx)) },
       payload: buildAgentDraftedPayload(verdictId, draft),
     },
     tx,
@@ -211,7 +241,20 @@ async function persistAgentDraftedVerdict(
   const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
   if (!allowed.ok) return allowed;
 
-  const payload = buildAgentDraftedPayload(verdictId, draft);
+  // The image the report was reproduced against, if it has a bound target with a digest. Cited
+  // in the approved comment; absent for a target-less report, which simply gets no target line.
+  const [targetRow] = await tx
+    .select({ imageName: targetProfile.imageName, imageDigest: targetProfile.imageDigest })
+    .from(report)
+    .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  const targetRef =
+    targetRow?.imageName && targetRow.imageDigest
+      ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
+      : null;
+
+  const payload = buildAgentDraftedPayload(verdictId, draft, targetRef);
   const row = await ensureInitialVerdict(
     {
       id: verdictId,
@@ -370,7 +413,13 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
       return { ok: false, reason: "content hash mismatch" };
     }
 
-    return enqueueApprovedVerdictDelivery(tx, session.id, verdictRow, recomputedHash);
+    const enqueued = await enqueueApprovedVerdictDelivery(
+      tx,
+      session.id,
+      verdictRow,
+      recomputedHash,
+    );
+    return enqueued.ok ? { ok: true } : enqueued;
   });
 }
 
@@ -395,7 +444,7 @@ export async function enqueueApprovedVerdictDelivery(
     outcome: (typeof verdict.outcome.enumValues)[number];
   },
   approvedContentHash: string,
-): Promise<PublishVerdictResult> {
+): Promise<EnqueueApprovedVerdictDeliveryResult> {
   // Belt-and-suspenders: every outcome the driver can actually produce is publishable once a
   // human has approved it, so this only guards against a value nothing in this codebase writes
   // today (INCONCLUSIVE is in the schema enum but no driver ever emits it).
@@ -409,7 +458,7 @@ export async function enqueueApprovedVerdictDelivery(
   }
 
   const [reportRow] = await tx
-    .select({ channel: report.channel, sourceRef: report.sourceRef })
+    .select({ channel: report.channel, sourceRef: report.sourceRef, state: report.state })
     .from(report)
     .where(eq(report.id, verdictRow.reportId))
     .limit(1);
@@ -422,7 +471,14 @@ export async function enqueueApprovedVerdictDelivery(
     return { ok: false, reason: "invalid GitHub delivery target" };
   }
 
-  await enqueueDelivery(
+  const canDeliver =
+    reportRow.state === "AWAITING_APPROVAL" ||
+    (reportRow.state === "ANALYSIS_ONLY" && verdictRow.outcome === "ANALYSIS_ONLY");
+  if (!canDeliver) {
+    return { ok: false, reason: `report is ${reportRow.state}; approved verdict cannot deliver` };
+  }
+
+  const delivery = await enqueueDelivery(
     {
       reportId: verdictRow.reportId,
       verdictId: verdictRow.id,
@@ -437,7 +493,7 @@ export async function enqueueApprovedVerdictDelivery(
     tx,
   );
 
-  await transition(verdictRow.reportId, "AWAITING_APPROVAL", "DELIVERING", tx);
+  await transition(verdictRow.reportId, reportRow.state, "DELIVERING", tx);
 
   await tx
     .update(agentSession)
@@ -450,5 +506,5 @@ export async function enqueueApprovedVerdictDelivery(
     })
     .where(eq(agentSession.id, sessionId));
 
-  return { ok: true };
+  return { ok: true, deliveryId: delivery.id };
 }

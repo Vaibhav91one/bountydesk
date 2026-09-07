@@ -13,6 +13,7 @@ export type TargetManifest = {
   startCommand?: string;
   envPrefix?: string;
   scopeRules?: unknown[];
+  warmupSeconds?: number;
 };
 
 export function parseTargetManifest(text: string): TargetDefinition {
@@ -48,6 +49,13 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
   const startCommand = optionalString(manifest, "startCommand");
   if (startCommand !== undefined) validateStartCommand(startCommand);
 
+  const warmupSeconds = manifest.warmupSeconds;
+  if (warmupSeconds !== undefined) {
+    if (typeof warmupSeconds !== "number" || !Number.isInteger(warmupSeconds) || warmupSeconds < 0 || warmupSeconds > 600) {
+      throw new Error("target manifest warmupSeconds must be an integer 0..600");
+    }
+  }
+
   const repoFullName = readString(manifest, "repoFullName");
   const envPrefix = optionalString(manifest, "envPrefix") ?? envPrefixFromName(name);
   if (!ENV_PREFIX_RE.test(envPrefix)) {
@@ -70,6 +78,7 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
     provisioning: {
       readinessPath,
       ...(startCommand ? { startCommand } : {}),
+      ...(typeof warmupSeconds === "number" ? { warmupSeconds } : {}),
     },
   };
 }
@@ -124,6 +133,15 @@ function normalizePath(value: string, key: string): string {
 function validateStartCommand(value: string): void {
   if (value.length > 1_000 || /[\r\n]/.test(value)) {
     throw new Error("target manifest startCommand must be a single line under 1000 characters");
+  }
+  // The reproduction sandbox is the target container itself, offline, with no Docker daemon, so a
+  // host-model command (docker run, podman, docker compose) can never launch the app. Reject it at
+  // parse time, so a manifest proposing one fails validation here rather than at app start later.
+  const head = (value.trim().split(/\s+/, 1)[0] ?? "").split("/").pop()?.toLowerCase() ?? "";
+  if (/^(docker|docker-compose|podman|nerdctl)$/.test(head)) {
+    throw new Error(
+      "target manifest startCommand must launch the app inside the container, not a docker or podman host command",
+    );
   }
 }
 

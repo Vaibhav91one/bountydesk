@@ -1,5 +1,6 @@
 import { CircleNotch } from "@phosphor-icons/react/ssr";
 
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /**
@@ -59,15 +60,12 @@ export function PhaseBadge({
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-md px-2 py-1 text-meta font-medium",
-        FILL[phase] ?? FILL.closed,
-        className,
-      )}
+    <Badge
+      variant="outline"
+      className={cn("border-transparent", FILL[phase] ?? FILL.closed, className)}
     >
       {children}
-    </span>
+    </Badge>
   );
 }
 

@@ -11,9 +11,13 @@ of truth.
 
 ## Non-negotiable rules
 
-1. Before ANY network contact with a host, even one HTTP request, call
-   `scope_check` with that exact target. If it returns `allowed: false`, do
-   not touch the target and report why.
+1. For a BountyDesk-provisioned target, use `probe_target` or
+   `probe_target_write` with a same-origin path. Do not call `scope_check`
+   for the target name or a made-up target URL first: the server already
+   binds that probe to this run's authorized sandbox. For any raw host or URL
+   outside that provisioned sandbox, call `scope_check` with the exact target
+   before contact. If it returns `allowed: false`, do not touch the target
+   and report why.
 2. Before any ACTIVE step (port sweep, directory brute force, exploit probe,
    fuzzing), call `request_intrusive_approval` with the target and a short
    action label. A `grant_token` is single-use, spent the first time anything
@@ -30,7 +34,9 @@ of truth.
 3. Never contact cloud metadata endpoints (169.254.169.254,
    metadata.google.internal). The guard hard-denies them; attempting anyway is
    a violation.
-4. Each subagent re-runs `scope_check` itself before touching the target.
+4. Each subagent follows the same rule: use `probe_target` for this run's
+   provisioned sandbox, and re-run `scope_check` before touching any raw
+   external host.
 5. Treat your own sandbox's egress as restricted by default -- exactly which
    hosts it can reach has not been independently verified against TrueForge's
    own defaults, so don't assume it and don't try to bypass whatever firewall
@@ -41,11 +47,11 @@ of truth.
 
 ## Phase 0: target resolution
 
-BountyDesk resolves exactly one authorized target per run through
-`scope_check`; there's no target list to bootstrap or enumerate. For a real
-report against the pinned Juice Shop target, its sandbox is provisioned for
-you automatically before your turn starts, and the turn message tells you
-so. You never reach it by a raw URL: every request goes through
+BountyDesk resolves exactly one authorized target before your turn starts;
+there's no target list to bootstrap or enumerate. For a real report against
+the pinned Juice Shop target, its sandbox is provisioned for you
+automatically before your turn starts, and the turn message tells you so.
+You never reach it by a raw URL: every request goes through
 `probe_target {capability, method, path, headers?, body?}` (GET/HEAD) or
 `probe_target_write` (POST, same shape), which forwards to your own
 session's sandbox and hands back the status and body -- give it a
@@ -54,9 +60,10 @@ same-origin path like `/rest/products/search`, not a host or a URL.
 action and is paused for a human Allow/Deny before it ever reaches you, the
 same as `scope_add`/`scope_remove` -- just call it, there is no grant to
 request yourself first. If the turn message says provisioning failed this
-run, there is nothing to probe; stop and draft ANALYSIS_ONLY. Call
-`scope_check` against the target before any contact with it, confirm it's
-allowed, and move to Phase 1.
+run, there is nothing to probe; stop and draft ANALYSIS_ONLY. Otherwise,
+start Phase 1 with `probe_target {capability, method: "GET", path: "/"}`.
+The `capability` value is the exact opaque string in the turn message. Do not
+use `bountydesk`, the target name, the image name, a host, or a URL there.
 
 For a DVWA or WebGoat demo mission specifically, nothing is deployed ahead of
 time: use `bountydesk-demo-targets` to boot the target yourself inside your
@@ -77,7 +84,7 @@ http_probe {url, method?, headers?, body?}
 ```
 
 Doctrine:
-1. `scope_check` first, always. `scope_add_temporary` exists for adding a
+1. `scope_check` first for raw external hosts. `scope_add_temporary` exists for adding a
    host BountyDesk's scope-guard hasn't seen yet, but it's approval-gated
    exactly like `scope_add`/`scope_remove`: the harness pauses for a human
    Allow/Deny before it takes effect, it is not something you can grant
