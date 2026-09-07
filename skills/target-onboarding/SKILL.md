@@ -33,6 +33,13 @@ reproduce a report, decide severity, run exploits, or draft a verdict.
 - **Prove it works before committing.** `curl` a data-backed page and confirm it returns real content,
   not a login redirect to an empty app, an error page, or an empty database. HTTP 200 alone is not
   enough.
+- **The image must contain `curl` or `wget`.** BountyDesk boots the image offline and, from *inside*
+  it, both polls readiness and proves the network really is blocked; both checks run an HTTP client in
+  the image. A minimal base (`node:*-slim`, `python:*-slim`, alpine, distroless) often ships neither,
+  and the image is then rejected at verification even though it boots. If your base lacks both, install
+  one (`apt-get install -y curl`, `apk add --no-cache curl`) as part of the build. Confirm it yourself:
+  run the client from *within* the container (`docker exec <id> curl ...`), not only from the sandbox
+  host, since the host always has curl and hides a missing one in the image.
 - **Runtime shape.** `name` is the repo name lowercased (`Vaibhav91one/WebGoat` → `webgoat`).
   `baseUrl` is `http://localhost:<port>` on the port the app serves. `readinessPath` is a same-origin
   path that returns 2xx once the app is up. Add `warmupSeconds` if the image starts a datastore before
