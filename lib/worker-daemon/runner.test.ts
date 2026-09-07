@@ -95,6 +95,35 @@ test("runLoop logs and backs off on a thrown claim rather than propagating", asy
   assert.match(errors[0], /transient failure/);
 });
 
+test("runLoop with a claim timeout fails a hung claim instead of hanging on it", async () => {
+  const controller = new AbortController();
+  let calls = 0;
+  const outcomes: string[] = [];
+  const errors: string[] = [];
+
+  const claimOnce = (signal: AbortSignal) => {
+    calls += 1;
+    // First claim never resolves: this is the dead-socket hang. Without the timeout the loop
+    // would await it forever and never record progress, which is the wedge the timeout prevents.
+    if (calls === 1) return new Promise<string | null>(() => {});
+    controller.abort();
+    return Promise.resolve<string | null>(null);
+  };
+
+  await runLoop("t", claimOnce, {
+    signal: controller.signal,
+    sleep: noWaitSleep,
+    logger: { log: () => undefined, error: (msg: string) => errors.push(msg) },
+    errorBackoffMs: 1,
+    claimTimeoutMs: 20,
+    onProgress: (_name, outcome) => outcomes.push(outcome),
+  });
+
+  assert.equal(calls, 2, "the loop must time the hung claim out and retry, not hang");
+  assert.equal(outcomes[0], "failed", "a timed-out claim counts as a failed iteration");
+  assert.match(errors[0], /did not finish within 20ms/);
+});
+
 test("runLoop never has more than one claim in flight at a time", async () => {
   const controller = new AbortController();
   let inFlight = 0;

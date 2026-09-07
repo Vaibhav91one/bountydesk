@@ -14,6 +14,39 @@ function errorMessage(err: unknown): string {
 }
 
 /**
+ * Rejects if `op` has not settled within `ms`, so a call that hangs becomes a failed iteration
+ * rather than a silent one.
+ *
+ * The failure this exists for is a database call that never returns: Supabase's pooler can drop
+ * a connection without a FIN, and the next query on that dead socket waits forever because the
+ * server-side statement_timeout the pooler was told to enforce is not applied through it. A loop
+ * awaiting such a call never records progress, so /healthz reads it as wedged and the platform
+ * restarts the worker, over and over. Turning the hang into a throw lets the loop back off and
+ * retry on a fresh connection, and lets /healthz see a loop that is failing (a visible, bounded
+ * state the failure budget covers) rather than one gone silent.
+ *
+ * The abandoned `op` keeps running; postgres-js reaps the dead connection on its own later. This
+ * is only for the loops whose one iteration is fast (a single-row claim, a sweep, one HTTP poll).
+ * The jobs and build-onboarding claims legitimately run for minutes and are left unwrapped.
+ */
+async function withTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      op,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} did not finish within ${ms}ms; treating it as a failed iteration`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Resolves early when `signal` aborts, rather than always waiting out the full duration. A
  * SIGTERM during a 30-second sweeper interval (or any backoff) must not make shutdown wait for
  * that timer: most deployment platforms send SIGKILL well before then.
@@ -58,6 +91,10 @@ export type RunLoopOptions = {
   idleBackoffMs?: number;
   errorBackoffMs?: number;
   onProgress?: OnProgress;
+  /** Fail an iteration that has not returned in this long, so a hung claim is a failed iteration
+   *  rather than a silent one. Omit for a claim that legitimately runs for minutes (jobs, build
+   *  onboarding), whose long silence is covered by a wide stall budget instead. */
+  claimTimeoutMs?: number;
 };
 
 /**
@@ -85,7 +122,10 @@ export async function runLoop(
   while (!opts.signal.aborted) {
     let claimedId: string | null;
     try {
-      claimedId = await claimOnce(opts.signal);
+      const claim = claimOnce(opts.signal);
+      claimedId = opts.claimTimeoutMs
+        ? await withTimeout(claim, opts.claimTimeoutMs, `[${name}] claim`)
+        : await claim;
     } catch (error) {
       if (opts.signal.aborted) return;
       logger.error(`[${name}] claim failed: ${errorMessage(error)}`);
@@ -112,6 +152,9 @@ export type RunSweeperOptions = {
   logger?: Logger;
   intervalMs?: number;
   onProgress?: OnProgress;
+  /** Fail a sweep that has not returned in this long. A sweep is a single UPDATE, so any long
+   *  wait is a hung connection, not real work. */
+  sweepTimeoutMs?: number;
 };
 
 /**
@@ -132,7 +175,8 @@ export async function runSweeper(
   while (!opts.signal.aborted) {
     let outcome: Outcome = "ok";
     try {
-      await sweepOnce();
+      const sweep = sweepOnce();
+      await (opts.sweepTimeoutMs ? withTimeout(sweep, opts.sweepTimeoutMs, `[${name}]`) : sweep);
     } catch (error) {
       outcome = "failed";
       logger.error(`[${name}] sweep failed: ${errorMessage(error)}`);
@@ -147,6 +191,9 @@ export type QueueSpec = {
   name: string;
   claimOnce: ClaimOnce;
   sweepOnce: () => Promise<unknown>;
+  /** Fail this queue's claim if it has not returned in this long. Set for the queues whose claim
+   *  is fast; omit for jobs and build-onboarding, whose claim runs the whole job or build. */
+  claimTimeoutMs?: number;
 };
 
 export type RunDaemonOptions = {
@@ -158,6 +205,8 @@ export type RunDaemonOptions = {
   errorBackoffMs?: number;
   sweepIntervalMs?: number;
   onProgress?: OnProgress;
+  /** Timeout applied to every sweep, since all sweeps are a single fast UPDATE. */
+  sweepTimeoutMs?: number;
 };
 
 /**
@@ -176,6 +225,7 @@ export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Pr
         idleBackoffMs: opts.idleBackoffMs,
         errorBackoffMs: opts.errorBackoffMs,
         onProgress: opts.onProgress,
+        claimTimeoutMs: queue.claimTimeoutMs,
       }),
       runSweeper(`${queue.name}-sweep`, queue.sweepOnce, {
         signal: opts.signal,
@@ -183,6 +233,7 @@ export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Pr
         logger: opts.logger,
         intervalMs: opts.sweepIntervalMs,
         onProgress: opts.onProgress,
+        sweepTimeoutMs: opts.sweepTimeoutMs,
       }),
     ]),
   );

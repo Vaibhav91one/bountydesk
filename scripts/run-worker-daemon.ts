@@ -67,6 +67,17 @@ const BUILD_ONBOARDING_STALL_BUDGET_MS = 1_920_000;
  */
 const FAILING_BUDGET_MS = 180_000;
 
+/**
+ * Fail a fast loop's iteration if it has not returned this soon. Set below the default stall
+ * budget so a hung database call (a Supabase pooler connection dropped without a FIN, whose next
+ * query then waits forever) becomes a failed iteration the loop retries on a fresh connection,
+ * rather than a silent one that reads as wedged and restarts the worker. It applies only to the
+ * loops whose iteration is fast: every sweep, and the claims that do one poll or one submit. The
+ * jobs and build-onboarding claims run the whole job or build and are left unwrapped, since their
+ * minutes-long runs are legitimate and are covered by their own wide stall budgets.
+ */
+const FAST_LOOP_TIMEOUT_MS = 60_000;
+
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
 }
@@ -171,6 +182,7 @@ async function main(): Promise<void> {
           signal,
         }),
       sweepOnce: sweepAgentSessions,
+      claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
     },
     {
       name: "approval-submission",
@@ -181,12 +193,14 @@ async function main(): Promise<void> {
           signal,
         }),
       sweepOnce: sweepApprovalSubmissions,
+      claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
     },
     {
       name: "delivery",
       claimOnce: (signal) =>
         deliverOnce(deliveryOwner, { leaseSeconds: LEASE_SECONDS, signal }),
       sweepOnce: sweepDeliveries,
+      claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
     },
     {
       name: "build-onboarding",
@@ -219,6 +233,7 @@ async function main(): Promise<void> {
   await runDaemon(queues, {
     signal: controller.signal,
     onProgress: (name, outcome) => heartbeat.record(name, Date.now(), outcome),
+    sweepTimeoutMs: FAST_LOOP_TIMEOUT_MS,
   });
   console.log("worker daemon stopped");
 }
