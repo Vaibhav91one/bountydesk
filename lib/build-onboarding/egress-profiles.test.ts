@@ -21,7 +21,10 @@ test("node selects npm without python or php hosts", () => {
   const node = selectEgressHosts({ ecosystem: "node" });
   assert.ok(node.includes("registry.npmjs.org"));
   assert.ok(!node.includes("pypi.org"));
-  assert.ok(!node.includes("deb.debian.org"));
+  assert.ok(!node.includes("repo.packagist.org"), "node should not carry the php Composer host");
+  // The Debian apt mirror is a base host, not php-specific: a node:*-slim (Debian) image that
+  // apt-installs a system package needs it, so node carries it through the base set.
+  assert.ok(node.includes("deb.debian.org"), "node carries the Debian apt mirror from the base set");
 });
 
 test("extra hosts are merged and the result is de-duplicated and sorted", () => {

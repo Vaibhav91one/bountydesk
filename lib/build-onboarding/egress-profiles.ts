@@ -13,9 +13,11 @@ import { type Ecosystem } from "./build-plan";
  */
 
 /** Always allowed: cloning from GitHub, pulling base images from Docker Hub and GHCR, and the Alpine
- *  package mirror, because Alpine is the base OS of a large share of images regardless of the app's
- *  own language. GitHub release assets (`objects.githubusercontent.com`) sit here too, since many
- *  Dockerfiles download a pinned release tarball rather than a language package. */
+ *  and Debian package mirrors, because Alpine and Debian-slim are the base OS of a large share of
+ *  images regardless of the app's own language (a `node:*-slim` is Debian, so a Node image that
+ *  apt-installs one system package needs these too, not just PHP). GitHub release assets
+ *  (`objects.githubusercontent.com`) sit here too, since many Dockerfiles download a pinned release
+ *  tarball rather than a language package. */
 export const BASE_EGRESS: readonly string[] = [
   "github.com",
   "codeload.github.com",
@@ -29,6 +31,8 @@ export const BASE_EGRESS: readonly string[] = [
   "production.cloudflare.docker.com",
   "production.cloudfront.docker.com",
   "dl-cdn.alpinelinux.org",
+  "deb.debian.org",
+  "security.debian.org",
 ];
 
 /** Package hosts per ecosystem, added on top of the base set. `none` is a build that fetches nothing
@@ -37,11 +41,9 @@ export const ECOSYSTEM_EGRESS: Record<Ecosystem, readonly string[]> = {
   none: [],
   node: ["registry.npmjs.org"],
   python: ["pypi.org", "files.pythonhosted.org"],
-  // Debian/Ubuntu apt for the PHP base plus Composer and its package index. api.github.com and
-  // codeload cover Composer resolving VCS dependencies.
+  // Composer and its package index for the PHP base (the Debian apt hosts it also needs are in the
+  // base set now). api.github.com and codeload cover Composer resolving VCS dependencies.
   php: [
-    "deb.debian.org",
-    "security.debian.org",
     "getcomposer.org",
     "repo.packagist.org",
     "packagist.org",
