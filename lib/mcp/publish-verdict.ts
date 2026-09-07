@@ -4,10 +4,12 @@ import {
   agentSession,
   and,
   approvalDecision,
+  connectedRepository,
   db,
   eq,
   report,
   REPORT_TERMINAL_STATES,
+  targetOnboarding,
   targetProfile,
   verdict,
   type Executor,
@@ -105,6 +107,28 @@ export const SYNTHESIZED_ANALYSIS_SUMMARY =
  * never overwritten, and a REPRODUCED or NOT_REPRODUCED claim is never synthesized here. Runs
  * inside the caller's transaction, so it commits or rolls back with the lifecycle move around it.
  */
+/**
+ * Why reproduction was not available for this report, for the synthesized verdict's evidence. Only
+ * server-derived facts go in: the report's own target binding and the onboarding state of its repo,
+ * both enums the platform set, never agent output or a tool result. So a reviewer reading the case
+ * file can tell "the repository cannot be onboarded for reproduction" from "no target is bound",
+ * without any untrusted text entering the verdict record. The specific onboarding reason (which for
+ * an agent-refused repo is agent-authored text) stays in the connections UI, not here.
+ */
+async function reproductionUnavailabilityEvidence(reportId: string, tx: Executor): Promise<Record<string, string>> {
+  const [row] = await tx
+    .select({ onboardingState: targetOnboarding.state })
+    .from(report)
+    .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (row?.onboardingState === "UNSUPPORTED") {
+    return { reproduction: "unavailable", reason: "repository-not-onboardable" };
+  }
+  return { reproduction: "unavailable", reason: "no-reproduction-target" };
+}
+
 export async function synthesizeAnalysisOnlyVerdict(
   reportId: string,
   tx: Executor,
@@ -140,7 +164,9 @@ export async function synthesizeAnalysisOnlyVerdict(
       reportId,
       outcome: "ANALYSIS_ONLY",
       summary: SYNTHESIZED_ANALYSIS_SUMMARY,
-      evidence: { source: "server-synthesized" },
+      // The outbound summary stays constant; the evidence (reviewer-facing, not the GitHub comment)
+      // carries the server-derived reason reproduction was unavailable.
+      evidence: { source: "server-synthesized", ...(await reproductionUnavailabilityEvidence(reportId, tx)) },
       payload: buildAgentDraftedPayload(verdictId, draft),
     },
     tx,
