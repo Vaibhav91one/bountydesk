@@ -9,7 +9,7 @@
     ],
     "skills": [{ "name": "bountydesk-target-onboarding" }],
     "config": {
-      "sandbox": { "enabled": true },
+      "sandbox": { "enabled": false },
       "dynamic_sub_agents": { "enabled": false },
       "iteration_limit": 40
     }

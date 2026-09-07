@@ -144,17 +144,25 @@ async function main() {
   });
   console.log('model provider "openai" configured');
 
-  await client.settings.sandboxProviders.createOrUpdate({
-    manifest: {
-      type: "daytona",
-      auth: { apiKey: requireEnv("DAYTONA_API_KEY") },
-      execTimeoutMs: 60000,
-      autoStopIntervalInMinutes: 5,
-      autoArchiveIntervalInMinutes: 60,
-      autoDeleteIntervalInMinutes: 7200,
-    },
-  });
-  console.log('sandbox provider "daytona" configured');
+  // The sandbox provider is for the harness's own built-in sandbox tools. It is not fatal to the rest
+  // of bootstrap: agents that drive their own sandboxing through MCP tools (the onboarding agent uses
+  // BountyDesk's build tools, not this) do not need it, and a rejected or rotated key here must not
+  // stop the connectors, skills and agents below from registering. Log and carry on.
+  try {
+    await client.settings.sandboxProviders.createOrUpdate({
+      manifest: {
+        type: "daytona",
+        auth: { apiKey: requireEnv("DAYTONA_API_KEY") },
+        execTimeoutMs: 60000,
+        autoStopIntervalInMinutes: 5,
+        autoArchiveIntervalInMinutes: 60,
+        autoDeleteIntervalInMinutes: 7200,
+      },
+    });
+    console.log('sandbox provider "daytona" configured');
+  } catch (error) {
+    console.warn(`sandbox provider "daytona" NOT configured (continuing): ${error?.message ?? error}`);
+  }
 
   for (const manifest of desiredMcpServers()) {
     await client.settings.mcpServers.createOrUpdate({ manifest });
