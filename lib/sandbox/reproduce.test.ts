@@ -77,10 +77,13 @@ function defaultExecuteResult(command: string): ExecResult {
     return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
   }
   if (command.includes("command -v curl")) {
-    return { exitCode: 0, result: "CURL_PRESENT\n" };
+    // httpProbeTool checks for the literal "TOOL=curl" its detection script prints.
+    return { exitCode: 0, result: "TOOL=curl\n" };
   }
   if (command.includes("bountydesk-egress")) {
-    return { exitCode: 0, result: "PROBE curl_exit=0 status=403\nBODY Internet is restricted\n" };
+    // runEgressProbe parses "PROBE exit=<n> status=<code>"; a 403 with the restriction body is
+    // classifyEgressProbe's "blocked" signal, which is what a no-egress sandbox must prove.
+    return { exitCode: 0, result: "PROBE exit=0 status=403\nBODY Internet is restricted\n" };
   }
   return { exitCode: 0, result: "200" };
 }
@@ -445,7 +448,7 @@ test("the authorized target profile port drives readiness and preview lookup", a
   );
 
   assert.equal(outcome.outcome, "REPRODUCED");
-  assert.ok(executeCalls.some((command) => command.includes("http://localhost:8080/")));
+  assert.ok(executeCalls.some((command) => command.includes("http://127.0.0.1:8080/")));
   assert.ok(calls.some((call) => call.url.includes("/ports/8080/preview-url")));
 });
 
@@ -479,9 +482,9 @@ test("the authorized target provisioning drives sandbox startup and build verifi
 
   assert.equal(outcome.outcome, "REPRODUCED");
   assert.equal(createSandboxImageOverrides[0], "ghcr.io/vaibhav91one/custom-target:verified");
-  assert.ok(executeCalls.includes("start-custom-target"));
+  assert.ok(executeCalls.some((command) => command.includes("start-custom-target")));
   assert.ok(
-    executeCalls.some((command) => command.includes("http://localhost:3000/healthz")),
+    executeCalls.some((command) => command.includes("http://127.0.0.1:3000/healthz")),
     "readiness must use the target profile's readiness path",
   );
 });
@@ -820,7 +823,7 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
   resetSpies();
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
-    if (!command.includes("http://localhost")) return defaultExecuteResult(command);
+    if (!command.includes("http://127.0.0.1")) return defaultExecuteResult(command);
     return { exitCode: 0, result: "000" };
   };
 
@@ -831,7 +834,7 @@ test("a sandbox that never answers its port reports TARGET_UNAVAILABLE and still
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
-test("a failed app start reports TARGET_UNAVAILABLE without waiting for readiness probes", async () => {
+test("a failed app start reports TARGET_UNAVAILABLE and tears the sandbox down", async () => {
   resetSpies();
   executeImpl = async (_sandbox, command) => {
     executeCalls.push(command);
@@ -845,7 +848,9 @@ test("a failed app start reports TARGET_UNAVAILABLE without waiting for readines
 
   assert.equal(outcome.outcome, "ANALYSIS_ONLY");
   if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
-  assert.equal(executeCalls.filter((command) => command.includes("http://localhost:3000/")).length, 0);
+  // The start command is launched detached, so its exit is not what flags a bad start any more; the
+  // readiness poll finding the port unanswered is. So a failed start no longer short-circuits before
+  // readiness, and the run still ends TARGET_UNAVAILABLE and tears the sandbox down.
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
@@ -873,7 +878,7 @@ test("cancellation during readiness tears down the sandbox and rejects the run",
     if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
       return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
     }
-    if (!command.includes("http://localhost")) return defaultExecuteResult(command);
+    if (!command.includes("http://127.0.0.1")) return defaultExecuteResult(command);
     probes += 1;
     if (probes === 2) controller.abort(reason);
     return { exitCode: 0, result: "000" };

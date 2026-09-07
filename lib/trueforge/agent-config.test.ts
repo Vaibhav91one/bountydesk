@@ -74,7 +74,10 @@ test("the target onboarding agent only has the manifest proposal skill", () => {
   assert.deepEqual(targetOnboardingAgentDefinition.manifest.skills, [
     { name: "bountydesk-target-onboarding" },
   ]);
-  assert.equal(targetOnboardingAgentDefinition.manifest.config.sandbox.enabled, true);
+  // The onboarding agent drives its own Docker-in-Docker build sandbox through the build MCP tools,
+  // so the harness's built-in sandbox is off (it also decouples onboarding from the harness's own
+  // Daytona provider config).
+  assert.equal(targetOnboardingAgentDefinition.manifest.config.sandbox.enabled, false);
   assert.equal(targetOnboardingAgentDefinition.manifest.config.dynamic_sub_agents.enabled, false);
 
   const content = readFileSync(
