@@ -95,6 +95,18 @@ export async function configureJuiceShopTarget(
   return configureTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME });
 }
 
+/**
+ * A profile with this name already exists and its pinned settings differ from what configure was
+ * asked to write. configureTarget refuses to overwrite one on purpose (see rotateTarget's note); a
+ * caller that has verified the new build, like onboarding a rebuild, catches this and rotates instead.
+ */
+export class TargetProfileExistsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TargetProfileExistsError";
+  }
+}
+
 export async function configureTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
   const definition = targetDefinitionForInput(input);
   const config = targetProfileConfig(definition, input);
@@ -160,7 +172,7 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
       !isDeepStrictEqual(target.config, config) ||
       !isDeepStrictEqual(target.scopeRules, definition.scopeRules)
     ) {
-      throw new Error(`${definition.name} exists with different pinned target settings`);
+      throw new TargetProfileExistsError(`${definition.name} exists with different pinned target settings`);
     }
 
     await tx

@@ -1,4 +1,4 @@
-import { configureTarget } from "@/lib/targets/configure";
+import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest } from "@/lib/targets/manifest";
 import type { TargetDefinition } from "@/lib/targets/registry";
@@ -186,7 +186,7 @@ async function verifyAndWrite(
   // its own failures). Do it before the write, so a failed write does not leak the sandbox.
   await teardown(sandboxId, false);
 
-  await configureTarget({
+  const pin = {
     repoId: lease.repoId,
     targetDefinition: definition,
     imageDigest: lease.imageDigest,
@@ -194,7 +194,18 @@ async function verifyAndWrite(
     buildMarker: lease.buildMarker,
     snapshotImageRefOverride: snapshotImageRef,
     dockerfileText: lease.dockerfileText ?? undefined,
-  });
+  };
+  // Onboarding a repo that already has a profile (a re-onboard, or a verified rebuild) reuses the
+  // profile name, and configureTarget refuses to overwrite one whose pinned settings differ. This
+  // run has just built and offline-verified the new image, so it is exactly the "yes, replace what
+  // is pinned" case rotateTarget exists for: create when there is nothing to replace, rotate in place
+  // when there is. Rotation keeps the profile id, so every report and connected repo stays bound.
+  try {
+    await configureTarget(pin);
+  } catch (error) {
+    if (!(error instanceof TargetProfileExistsError)) throw error;
+    await rotateTarget(pin);
+  }
 }
 
 /** Parse a stored build plan and refuse a not-flattenable one: the build and manifest steps only ever
