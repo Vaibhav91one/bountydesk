@@ -6,7 +6,7 @@ import {
   type DatastoreEngine,
   type Ecosystem,
 } from "./build-plan";
-import { hasDatastoreRecipe } from "./datastore-recipes";
+import { getDatastoreRecipe, hasDatastoreRecipe } from "./datastore-recipes";
 
 /**
  * Decide how a repo becomes one offline image before the build runs. The classifier reads a handful
@@ -52,6 +52,25 @@ export async function detectEcosystem(source: SourceReader): Promise<Ecosystem> 
   for (const marker of ECOSYSTEM_MARKERS) {
     if ((await source.readFile(marker.file)) !== null) return marker.ecosystem;
   }
+  return "none";
+}
+
+/**
+ * Infer the ecosystem from a Dockerfile's base image, for a compose app whose language manifest
+ * lives in a subdirectory the root scan misses (DVWA's `composer.json` is under vulnerabilities/api,
+ * so only the `FROM php:...` reveals it is PHP). The base image is what decides which package hosts
+ * the build needs: a `php`/`composer` base wants Debian apt and Packagist, a `node` base wants npm.
+ */
+export function ecosystemFromDockerfile(dockerfileText: string): Ecosystem {
+  const from = dockerfileText.match(/^\s*FROM\s+(\S+)/im)?.[1]?.toLowerCase() ?? "";
+  const image = from.split("/").pop() ?? from; // strip a registry/namespace prefix
+  if (/(^|[:@-])php|composer/.test(image) || image.startsWith("php")) return "php";
+  if (image.startsWith("node") || image.includes("nodejs")) return "node";
+  if (image.startsWith("python") || image.startsWith("pypy")) return "python";
+  if (image.startsWith("ruby")) return "ruby";
+  if (image.startsWith("golang") || image === "go") return "go";
+  if (/openjdk|eclipse-temurin|amazoncorretto|maven|gradle|jdk|jre/.test(image)) return "java";
+  if (/dotnet|aspnet/.test(image)) return "dotnet";
   return "none";
 }
 
@@ -252,14 +271,26 @@ export async function classify(
       // Dockerfile build that would produce an app with no datastore.
       return { strategy: "not-flattenable", ecosystem, reason: topology.reason };
     }
+    // The app's own Dockerfile decides the ecosystem for a compose app, since its package manifest
+    // may sit in a subdirectory the root scan misses. Fall back to the root scan if it reveals
+    // nothing. The datastore install (apt) needs its own hosts regardless of the app's ecosystem.
+    const appDockerfilePath = joinRepoPath(topology.appContext, topology.appDockerfile);
+    const appDockerfileText = await source.readFile(appDockerfilePath);
+    const appEcosystem = appDockerfileText ? ecosystemFromDockerfile(appDockerfileText) : "none";
+    const composeEcosystem = appEcosystem !== "none" ? appEcosystem : ecosystem;
+    const datastoreEgress = [
+      ...new Set(topology.datastores.flatMap((d) => getDatastoreRecipe(d.engine)?.installEgressHosts ?? [])),
+    ];
+
     return {
       strategy: "compose-synth",
-      ecosystem,
+      ecosystem: composeEcosystem,
       composePath: compose.path,
       appService: topology.appService,
       datastores: topology.datastores,
       appContext: topology.appContext,
       appDockerfile: topology.appDockerfile,
+      ...(datastoreEgress.length ? { extraEgressHosts: datastoreEgress } : {}),
       ...(options.configRewritesHint ? { configRewrites: options.configRewritesHint } : {}),
       ...(Object.keys(topology.envOverrides).length ? { envOverrides: topology.envOverrides } : {}),
       seed: options.composeSeedHint ?? { kind: "none" },
@@ -292,6 +323,13 @@ export async function classify(
     ecosystem,
     reason: "repo has neither a Dockerfile nor a flattenable compose file",
   };
+}
+
+/** Join a compose build context and Dockerfile into a repo-relative path ("." + "Dockerfile" ->
+ *  "Dockerfile", "app" + "Dockerfile" -> "app/Dockerfile"). */
+function joinRepoPath(context: string, dockerfile: string): string {
+  const base = context.replace(/^\.\/?/, "").replace(/\/+$/, "");
+  return base ? `${base}/${dockerfile}` : dockerfile;
 }
 
 async function readFirst(

@@ -18,6 +18,9 @@ export type DatastoreRecipe = {
   engine: DatastoreEngine;
   /** The data directory that must survive into the image layer after the build-time seed. */
   dataDir: string;
+  /** Hosts the install step fetches from, added to the build egress allow-list so installing the
+   *  datastore into the app image is not refused. Debian apt for the apt-based recipes. */
+  installEgressHosts: string[];
   /** Dockerfile-RUN shell that installs the server package(s). */
   install(): string;
   /** Build-time shell: start the daemon detached, wait until it answers, then create the database and
@@ -40,6 +43,7 @@ export function shq(value: string): string {
 const mariadb: DatastoreRecipe = {
   engine: "mariadb",
   dataDir: "/var/lib/mysql",
+  installEgressHosts: ["deb.debian.org", "security.debian.org"],
   install() {
     return [
       "apt-get update",

@@ -5,6 +5,7 @@ import {
   classify,
   detectEcosystem,
   dockerfileExposePort,
+  ecosystemFromDockerfile,
   parseComposeTopology,
   profileNameFromRepo,
   type SourceReader,
@@ -66,6 +67,26 @@ test("classify turns DVWA into a compose-synth build plan", async () => {
   assert.equal(plan.runtime?.name, "dvwa");
   assert.equal(plan.runtime?.baseUrl, "http://localhost:80");
   assert.equal(plan.datastores[0]?.engine, "mariadb");
+});
+
+test("ecosystem is inferred from a Dockerfile base image", () => {
+  assert.equal(ecosystemFromDockerfile("FROM docker.io/library/php:8-apache"), "php");
+  assert.equal(ecosystemFromDockerfile("FROM node:20-alpine"), "node");
+  assert.equal(ecosystemFromDockerfile("FROM eclipse-temurin:21-jre"), "java");
+  assert.equal(ecosystemFromDockerfile("FROM scratch"), "none");
+});
+
+test("a compose app with its language in a subdir gets its ecosystem and datastore egress from the Dockerfile", async () => {
+  // No root composer.json (DVWA's is under vulnerabilities/api); only the Dockerfile FROM says PHP.
+  const plan = await classify(
+    reader({ "compose.yml": DVWA_COMPOSE, Dockerfile: "FROM php:8-apache\nRUN apt-get update" }),
+    "Vaibhav91one/DVWA",
+  );
+  assert.equal(plan.strategy, "compose-synth");
+  if (plan.strategy !== "compose-synth") return;
+  assert.equal(plan.ecosystem, "php");
+  // the MariaDB install needs Debian apt hosts regardless of the app's ecosystem
+  assert.ok(plan.extraEgressHosts?.includes("deb.debian.org"), "datastore apt egress is added");
 });
 
 test("classify turns a bare Dockerfile repo into a dockerfile plan (DSVW shape)", async () => {
