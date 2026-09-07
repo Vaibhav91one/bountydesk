@@ -1,3 +1,4 @@
+import { db, eq, targetOnboarding } from "@/lib/db";
 import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest } from "@/lib/targets/manifest";
@@ -8,6 +9,7 @@ import type { TrueForgeClient } from "@/lib/trueforge/client";
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
 import { classify, rawSourceReader } from "./classify";
 import { knownTargetHints } from "./known-target-hints";
+import { runOnboardingAgent, type RunOnboardingAgentInput } from "./onboarding-agent";
 import { onboardingSnapshotImageRef, type BuildDriver } from "./build-driver";
 import {
   advance,
@@ -40,6 +42,10 @@ export type OnboardDeps = {
   /** Classify the repo into a build plan. Injectable so tests exercise the path without fetching the
    *  real repo source; defaults to the deterministic classifier over the public source. */
   classify?: (repoFullName: string) => Promise<BuildPlan>;
+  /** Run the onboarding agent for a repo the deterministic classifier could not flatten. Injectable so
+   *  tests exercise the ladder without a live TrueForge turn; defaults to the real agent turn, which
+   *  writes its result onto the row's build_plan. */
+  runOnboardingAgent?: (input: RunOnboardingAgentInput) => Promise<void>;
   /** The offline verify. Injectable so tests exercise the whole path without live Daytona. */
   provision?: typeof provisionTarget;
   teardown?: typeof teardownSandbox;
@@ -49,6 +55,21 @@ export type OnboardDeps = {
 
 function defaultClassify(repoFullName: string): Promise<BuildPlan> {
   return classify(rawSourceReader(repoFullName), repoFullName, knownTargetHints(repoFullName));
+}
+
+/** Re-read the plan the onboarding agent wrote onto the row through its commit/mark tools. A row with
+ *  no plan means the agent ended its turn without committing or refusing; treat that as a
+ *  not-flattenable outcome so the ladder falls to UNSUPPORTED rather than a retried failure. */
+async function readBuildPlan(onboardingId: string): Promise<BuildPlan> {
+  const [row] = await db
+    .select({ buildPlan: targetOnboarding.buildPlan })
+    .from(targetOnboarding)
+    .where(eq(targetOnboarding.id, onboardingId))
+    .limit(1);
+  if (!row?.buildPlan) {
+    return { strategy: "not-flattenable", ecosystem: "none", reason: "the onboarding agent produced no build recipe" };
+  }
+  return parseBuildPlan(row.buildPlan);
 }
 
 export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<string | null> {
@@ -62,13 +83,31 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
   try {
     switch (lease.state) {
       case "PENDING_PLAN": {
-        // Classify the source into a build plan before any build runs. A repo that cannot become one
-        // offline image lands in UNSUPPORTED with the reason, an honest resting state a reviewer
+        // The onboarding ladder. Rung 1: the deterministic classifier turns a Dockerfile/compose repo
+        // into a build plan. Rung 2 (the agent): a repo it cannot flatten is handed to the onboarding
+        // agent, which tries to build it into one bootable image in a sandbox and writes its result
+        // (an agent-authored plan, or a not-flattenable reason) onto build_plan. A repo that comes out
+        // not-flattenable lands in UNSUPPORTED with the reason, an honest resting state a reviewer
         // reads, not a retried failure.
         const doClassify = deps.classify ?? defaultClassify;
-        const plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
-          doClassify(lease.repoFullName),
-        );
+        let plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () => doClassify(lease.repoFullName));
+
+        if (plan.strategy === "not-flattenable") {
+          // Store the deterministic plan first so the agent's tools read the detected ecosystem (and
+          // therefore its build-sandbox egress) from build_plan.
+          await db
+            .update(targetOnboarding)
+            .set({ buildPlan: plan, updatedAt: new Date() })
+            .where(eq(targetOnboarding.id, lease.id));
+          const runAgent =
+            deps.runOnboardingAgent ??
+            ((input: RunOnboardingAgentInput) => runOnboardingAgent(deps.agentClient, input, { signal: deps.signal }));
+          await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
+            runAgent({ onboardingId: lease.id, repoFullName: lease.repoFullName }),
+          );
+          plan = await readBuildPlan(lease.id);
+        }
+
         if (plan.strategy === "not-flattenable") {
           await advance(lease, "UNSUPPORTED", { buildPlan: plan });
         } else {

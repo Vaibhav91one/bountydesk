@@ -162,6 +162,8 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
     "w1",
     deps({
       classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "two app services" }),
+      // The agent runs (rung 2) but converges on nothing, so the deterministic reason stands.
+      runOnboardingAgent: async () => {},
       buildDriver: { async build() { built = true; return buildResult; } },
     }),
   );
@@ -171,6 +173,72 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
   // UNSUPPORTED is terminal: a further claim does not pick it up.
   await worker.onboardOnce("w1", deps({}));
   assert.equal(await stateOf(repoId), "UNSUPPORTED");
+});
+
+test("the agent rung commits an agent-authored plan and the row goes to build", async () => {
+  const repoId = await connectedRepo("acme/nodockerfile");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/nodockerfile", sourceRef: "https://x/nodockerfile.git" });
+
+  let built = false;
+  const overrides: Partial<OnboardDeps> = {
+    // The deterministic classifier cannot flatten a repo with no Dockerfile.
+    classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "no Dockerfile" }),
+    // The agent stands it up: its commit_target_image writes an agent-authored plan onto the row.
+    runOnboardingAgent: async ({ onboardingId }) => {
+      await dbm.db
+        .update(dbm.targetOnboarding)
+        .set({
+          buildPlan: {
+            strategy: "agent-authored",
+            ecosystem: "node",
+            dockerfileText: 'FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN npm ci\nCMD ["node","server.js"]\n',
+            buildContext: ".",
+            seed: { kind: "none" },
+            runtime: { name: "nodockerfile", baseUrl: "http://localhost:3000", readinessPath: "/" },
+          },
+        })
+        .where(dbm.eq(dbm.targetOnboarding.id, onboardingId));
+    },
+    buildDriver: { async build() { built = true; return buildResult; } },
+  };
+
+  await worker.onboardOnce("w1", deps(overrides)); // PENDING_PLAN -> (agent) -> PENDING_BUILD
+  assert.equal(await stateOf(repoId), "PENDING_BUILD");
+  const [row] = await dbm.db
+    .select({ buildPlan: dbm.targetOnboarding.buildPlan })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal((row.buildPlan as { strategy?: string }).strategy, "agent-authored");
+
+  await worker.onboardOnce("w1", deps(overrides)); // PENDING_BUILD -> build -> PENDING_MANIFEST
+  assert.equal(built, true, "the agent-authored plan is built like any other");
+  assert.equal(await stateOf(repoId), "PENDING_MANIFEST");
+});
+
+test("the agent rung can declare a repo unsandboxable", async () => {
+  const repoId = await connectedRepo("acme/microservices");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git" });
+
+  let built = false;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "no Dockerfile" }),
+      // mark_unsandboxable writes a fresh not-flattenable reason onto the row.
+      runOnboardingAgent: async ({ onboardingId }) => {
+        await dbm.db
+          .update(dbm.targetOnboarding)
+          .set({ buildPlan: { strategy: "not-flattenable", ecosystem: "node", reason: "needs three services that talk to each other" } })
+          .where(dbm.eq(dbm.targetOnboarding.id, onboardingId));
+      },
+      buildDriver: { async build() { built = true; return buildResult; } },
+    }),
+  );
+
+  assert.equal(await stateOf(repoId), "UNSUPPORTED");
+  assert.equal(built, false);
 });
 
 test("the manifest is derived from the build plan and reaches the human gate", async () => {

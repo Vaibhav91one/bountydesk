@@ -1,88 +1,85 @@
-import type { TargetDefinition } from "@/lib/targets/registry";
-import { parseTargetManifest } from "@/lib/targets/manifest";
+import { randomUUID } from "node:crypto";
+
+import { db, eq, targetOnboarding } from "@/lib/db";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
+import { teardownBuildSandbox } from "@/lib/mcp/build";
 
 /**
- * Run the target-onboarding agent and capture the manifest it proposes.
+ * Run the onboarding agent so it stands a repository up as one bootable target image.
  *
- * Mirrors lib/analysis/trueforge-driver.ts's session-then-turn-then-poll shape, but far simpler:
- * no report, no capability token, no gated tool. The onboarding agent (agent/target-onboarding.
- * agent.json, registered by scripts/apply-agent.ts) inspects the built source and emits a target
- * manifest as its closing message; this drives one turn and reads that message back.
+ * The agent works through its build tools (app/api/mcp/build): it opens a Docker-in-Docker sandbox,
+ * iterates a Dockerfile until the app boots with its data present, then calls commit_target_image or
+ * mark_unsandboxable. Those tools write the result onto the onboarding row's `build_plan` (an
+ * agent-authored plan, or a not-flattenable reason); this driver just runs the turn to completion and
+ * cleans up. The worker reads `build_plan` afterward and advances the state machine, so this function
+ * never touches the state itself.
  *
- * The agent's output is not trusted prose: it is passed through parseTargetManifest, the same
- * validator the operator scripts use, which enforces the name, ghcr image, loopback base URL,
- * readiness path and localhost scope. A message that does not parse is a failure the caller
- * retries, not something stored.
+ * The agent resolves its own onboarding row through an opaque capability token this driver mints and
+ * stores on the row before the turn (the onboarding analogue of agent_session.capability_token). The
+ * token is cleared and the build sandbox torn down on the way out, success or failure.
  */
 export const ONBOARDING_AGENT_NAME = "bountydesk-target-onboarding";
 
-/** How long a proposal turn may run before it is treated as a failed attempt. */
-const TURN_DEADLINE_MS = 120_000;
-const POLL_INTERVAL_MS = 1_500;
+/** How long an onboarding turn may run before it is treated as a failed attempt. The agent may run
+ *  several multi-minute docker builds; this sits under the build-onboarding stall budget, and the
+ *  worker renews the row's lease around it. */
+const TURN_DEADLINE_MS = 25 * 60_000;
+const POLL_INTERVAL_MS = 3_000;
 
-export type ProposeManifestInput = {
-  repoFullName: string;
-  sourceRef: string;
-  imageName: string;
-  buildMarker: string;
-  dockerfileText: string;
-};
-
-export class ManifestProposalError extends Error {
+export class OnboardingAgentError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "ManifestProposalError";
+    this.name = "OnboardingAgentError";
   }
 }
 
-function prompt(input: ProposeManifestInput): string {
-  // Everything the agent needs to name the target and describe how to start it, from what the
-  // build already established. The agent may open its own sandbox to inspect further; the
-  // contract is that its final message is the manifest JSON, nothing else.
+function buildOnboardingTurnMessage(repoFullName: string, capability: string): string {
   return [
-    "Propose the target manifest for this built application. Reply with the manifest JSON only.",
+    `Onboard the repository ${repoFullName} as a BountyDesk reproduction target.`,
     "",
-    `Repository: ${input.repoFullName}`,
-    `Source ref: ${input.sourceRef}`,
-    `Built image name (untagged): ${input.imageName}`,
-    `Build marker (commit): ${input.buildMarker}`,
+    "Use your build tools. Pass this capability token as the `capability` argument to every build",
+    `tool call, and to nothing else: ${capability}`,
     "",
-    "Dockerfile the image was built from:",
-    "```",
-    input.dockerfileText,
-    "```",
+    "Open the build sandbox, iterate a Dockerfile until the app boots offline and a data-backed",
+    "request returns real content, then call commit_target_image. If the repository cannot be built",
+    "into one bootable offline image, call mark_unsandboxable with a specific reason. Do not reply",
+    "with prose instead of a tool call; the outcome is the tool call you make.",
   ].join("\n");
 }
 
 async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   await new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
   });
 }
 
-/**
- * Drive one onboarding turn and return the validated target manifest. Deletes the session on the
- * way out, success or failure, so a proposal never leaves a TrueForge session open behind it.
- */
-export async function proposeManifest(
+export type RunOnboardingAgentInput = { onboardingId: string; repoFullName: string };
+
+export async function runOnboardingAgent(
   client: TrueForgeClient,
-  input: ProposeManifestInput,
+  input: RunOnboardingAgentInput,
   opts: { signal?: AbortSignal } = {},
-): Promise<TargetDefinition> {
-  const { sessionId } = await client.createSession({
-    signal: opts.signal,
-    agentName: ONBOARDING_AGENT_NAME,
-  });
+): Promise<void> {
+  const capability = randomUUID();
+  await db
+    .update(targetOnboarding)
+    .set({ agentCapabilityToken: capability, updatedAt: new Date() })
+    .where(eq(targetOnboarding.id, input.onboardingId));
+
+  const { sessionId } = await client.createSession({ signal: opts.signal, agentName: ONBOARDING_AGENT_NAME });
 
   try {
     const { turnId } = await client.createTurn(
       sessionId,
-      [{ type: "user.message", content: prompt(input) }],
+      [{ type: "user.message", content: buildOnboardingTurnMessage(input.repoFullName, capability) }],
       { signal: opts.signal },
     );
 
@@ -90,44 +87,28 @@ export async function proposeManifest(
     for (;;) {
       const snapshot = await client.getTurn(sessionId, turnId, { signal: opts.signal });
       if (snapshot.status === "done_no_action") break;
-      if (snapshot.status === "error") {
-        throw new ManifestProposalError(`onboarding turn errored: ${snapshot.message}`);
-      }
-      if (snapshot.status === "cancelled") {
-        throw new ManifestProposalError("onboarding turn was cancelled");
-      }
+      if (snapshot.status === "error") throw new OnboardingAgentError(`onboarding turn errored: ${snapshot.message}`);
+      if (snapshot.status === "cancelled") throw new OnboardingAgentError("onboarding turn was cancelled");
       if (snapshot.status === "awaiting_approval") {
-        // The onboarding agent has no gated tool; a pending approval means it is wired wrong.
-        throw new ManifestProposalError("onboarding turn reached an unexpected approval gate");
+        // The build tools are ungated; a pending approval means the agent is wired wrong.
+        throw new OnboardingAgentError("onboarding turn reached an unexpected approval gate");
       }
-      if (Date.now() > deadline) {
-        throw new ManifestProposalError("onboarding turn did not finish before its deadline");
-      }
+      if (Date.now() > deadline) throw new OnboardingAgentError("onboarding turn did not finish before its deadline");
       await sleep(POLL_INTERVAL_MS, opts.signal);
     }
-
-    const message = await client.getFinalSummary?.(sessionId, turnId, { signal: opts.signal });
-    if (!message) {
-      throw new ManifestProposalError("onboarding turn finished without a manifest message");
-    }
-
-    // Throws on any invalid field; the worker turns that into a retryable failure rather than
-    // storing an unvalidated manifest.
-    return parseTargetManifest(extractManifestJson(message));
   } finally {
     await client.deleteSession(sessionId).catch(() => undefined);
+    // Tear down the agent's exploratory build sandbox and clear its session handles, whatever the
+    // outcome. The committed recipe (build_plan) is what the worker acts on, not the sandbox.
+    const [row] = await db
+      .select({ sandboxId: targetOnboarding.agentSandboxId })
+      .from(targetOnboarding)
+      .where(eq(targetOnboarding.id, input.onboardingId))
+      .limit(1);
+    await teardownBuildSandbox(row?.sandboxId ?? null);
+    await db
+      .update(targetOnboarding)
+      .set({ agentCapabilityToken: null, agentSandboxId: null, updatedAt: new Date() })
+      .where(eq(targetOnboarding.id, input.onboardingId));
   }
-}
-
-/**
- * Pull the manifest object out of the agent's message. The agent is asked for JSON only, but a
- * model often wraps it in a ```json fence or a sentence; take the outermost brace span so a
- * stray "Here is the manifest:" does not fail an otherwise valid proposal. parseTargetManifest
- * still rejects anything that is not a well-formed manifest.
- */
-function extractManifestJson(message: string): string {
-  const start = message.indexOf("{");
-  const end = message.lastIndexOf("}");
-  if (start === -1 || end === -1 || end < start) return message;
-  return message.slice(start, end + 1);
 }
