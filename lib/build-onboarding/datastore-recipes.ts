@@ -40,6 +40,15 @@ export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/**
+ * Hold MariaDB's memory down. Bundled into the app image, it shares a build sandbox (and later the
+ * reproduction sandbox) with the app and the build tooling, and a seeded test database is tiny: the
+ * default ~128M InnoDB buffer pool is enough on its own to get the daemon OOM-killed in a
+ * memory-tight build (a SIGTERM, exit 143), which fails the seed. A small pool and no performance
+ * schema fit the daemon into what these sandboxes actually give it.
+ */
+const LEAN_MEM = "--innodb-buffer-pool-size=64M --performance-schema=OFF";
+
 const mariadb: DatastoreRecipe = {
   engine: "mariadb",
   dataDir: "/var/lib/mysql",
@@ -72,7 +81,7 @@ const mariadb: DatastoreRecipe = {
     // that chains the wait and seed steps (`cmd & && next` is a shell syntax error).
     return [
       "( test -d /var/lib/mysql/mysql || mariadb-install-db --user=mysql --datadir=/var/lib/mysql >/dev/null )",
-      "( mysqld_safe --datadir=/var/lib/mysql --skip-networking=0 --bind-address=127.0.0.1 & )",
+      `( mysqld_safe --datadir=/var/lib/mysql --skip-networking=0 --bind-address=127.0.0.1 ${LEAN_MEM} & )`,
       "for i in $(seq 1 60); do mysqladmin --protocol=socket ping >/dev/null 2>&1 && break; sleep 1; done",
       `mysql -e ${shq(sql)}`,
     ].join(" && ");
@@ -83,7 +92,7 @@ const mariadb: DatastoreRecipe = {
   bootAndWait() {
     return [
       "mkdir -p /run/mysqld && chown -R mysql:mysql /run/mysqld",
-      "( mysqld_safe --datadir=/var/lib/mysql --bind-address=127.0.0.1 & )",
+      `( mysqld_safe --datadir=/var/lib/mysql --bind-address=127.0.0.1 ${LEAN_MEM} & )`,
       "for i in $(seq 1 60); do mysqladmin --protocol=socket ping >/dev/null 2>&1 && break; sleep 1; done",
     ].join(" && ");
   },

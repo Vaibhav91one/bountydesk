@@ -20,9 +20,15 @@ import { type ClassifyOptions } from "./classify";
 const DVWA_SETUP_SEED_COMMAND = [
   "( apache2-foreground >/tmp/bd-apache.log 2>&1 & echo $! > /tmp/bd-apache.pid )",
   'for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:80/setup.php 2>/dev/null && break; sleep 1; done',
-  'TOKEN=$(curl -fsSL -c /tmp/bd-cj http://127.0.0.1:80/setup.php | grep -oiE "user_token[^0-9a-f]*[0-9a-f]{32}" | grep -oE "[0-9a-f]{32}" | head -n1)',
+  // Match the token by anchoring on value= within the input tag, not by skipping non-hex up to it:
+  // the word "value" itself contains hex letters, so a "skip non-hex" pattern stops short of the
+  // real token. The `.` after value= consumes the opening quote, \K drops everything before the hex.
+  'TOKEN=$(curl -fsSL -c /tmp/bd-cj http://127.0.0.1:80/setup.php | grep -oP "user_token[^>]*value=.\\K[0-9a-f]{32}" | head -n1)',
   'test -n "$TOKEN"',
   'curl -fsSL -b /tmp/bd-cj -c /tmp/bd-cj -X POST http://127.0.0.1:80/setup.php --data-urlencode "create_db=Create / Reset Database" --data-urlencode "user_token=$TOKEN" -o /tmp/bd-setup.html',
+  // Confirm the users table the SQLi labs read now exists, retried: creating the schema can make
+  // the datastore briefly restart under a memory-tight build, and the socket is gone in that window.
+  'for i in $(seq 1 30); do mysql --protocol=socket dvwa -e "SELECT COUNT(*) FROM users" >/dev/null 2>&1 && break; sleep 1; done',
   'mysql --protocol=socket dvwa -e "SELECT COUNT(*) FROM users"',
   '{ kill "$(cat /tmp/bd-apache.pid)" 2>/dev/null || true; }',
 ].join(" && ");
