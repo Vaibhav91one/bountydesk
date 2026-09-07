@@ -32,7 +32,13 @@ zerops:
       envVariables:
         NODE_ENV: production
         TRUEFORGE_URL: http://trueforge:8791
-        DATABASE_POOL_MAX: "4"
+        # The daemon runs a claim loop and a sweeper for each of the five queues plus the
+        # agent-session poller: eleven loops that each want a connection at once, most of all at
+        # startup when they all fire together. A pool below that count starves the loops that lose
+        # the race, and a starved loop never finishes an iteration, so /healthz reads it as wedged
+        # and the platform restarts the worker every couple of minutes. Keep the pool above the
+        # loop count. The pooler (port 6543) multiplexes these onto far fewer server connections.
+        DATABASE_POOL_MAX: "12"
         WORKER_HEALTH_PORT: "8080"
         # Target onboarding (lib/build-onboarding). Non-secret config only; DAYTONA_API_KEY and
         # GHCR_PUSH_TOKEN are set as service secrets, not here. BUILD_BASE_SNAPSHOT is the
