@@ -89,6 +89,13 @@ function startHealthServer(port: number, heartbeat: Heartbeat, signal: AbortSign
       // dependency is gone, fails the check so the platform restarts the worker, which is the
       // one thing known to clear a wedge.
       const health = heartbeat.snapshot();
+      // Log why a check failed. The platform restarts on a 503 but records nothing about the
+      // reason, and a silent loop leaves no log of its own, so without this line a restart cycle
+      // is invisible: you see the worker bounce and cannot tell which loop wedged or how stale it
+      // was. The snapshot names the stale loops and their ages, which is what a restart is for.
+      if (!health.ok) {
+        console.error(`worker /healthz unhealthy: ${JSON.stringify({ stale: health.stale, ages: health.ages, failingFor: health.failingFor })}`);
+      }
       res.writeHead(health.ok ? 200 : 503, {
         "content-type": "application/json",
         "cache-control": "no-store",
