@@ -102,6 +102,13 @@ zerops:
         TRUEFORGE_PROXY_HEALTH_URL: http://127.0.0.1:8791/healthz
         SQLITE_PATH: /mnt/tfdata/db.sqlite
         HOST: 127.0.0.1
+        # The harness's MCP connectors are registered at APP_BASE_URL. Point at the Vercel production
+        # alias, which serves the current routes: the app.bounty-desk custom domain is pinned to an
+        # older deployment and does not follow production promotion. The MCP routes are allowlisted
+        # past the landing gate, so they answer on this alias.
+        APP_BASE_URL: https://bounty-desk-indol.vercel.app
+        # Pull skills (the onboarding agent's included) from this branch rather than main.
+        BOUNTYDESK_SKILL_REPO_REF: feat/agentic-onboarding
       startCommands:
         - name: trueforge
           command: node ops/trueforge/node_modules/@truefoundry/trueforge/dist/cli.js --port 8790
