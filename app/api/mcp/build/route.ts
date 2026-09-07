@@ -15,6 +15,11 @@ import {
 
 // The Postgres connection and Daytona calls these tools make need the Node runtime.
 export const runtime = "nodejs";
+// run_build_command drives a docker build in the sandbox, which can take minutes, so ask the host for
+// the longest function it allows. On a platform that caps below this a heavy build can still outrun the
+// limit; the agent should keep single commands as short as it can, and a build too slow for the host is
+// a signal to mark the repo unsandboxable.
+export const maxDuration = 300;
 
 function isAuthorized(header: string | null): boolean {
   if (!header) return false;
