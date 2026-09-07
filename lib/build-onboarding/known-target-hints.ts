@@ -10,10 +10,13 @@ import { type ClassifyOptions } from "./classify";
  */
 const HINTS: Record<string, ClassifyOptions> = {
   "vaibhav91one/dvwa": {
-    // DVWA creates its schema by hitting /setup.php; the GET primes it, and the app also seeds on
-    // first use. If a live run shows the tables are not created, this becomes a `command` seed that
-    // runs DVWA's own database import against the bundled MariaDB.
-    composeSeedHint: { kind: "http", method: "GET", path: "/setup.php" },
+    // Onboarding to CONFIGURED only needs the app to boot and answer, so the build creates the empty
+    // database and user and stops there; DVWA creates its own tables from /setup.php at runtime (a
+    // POST with its CSRF token, which the reproduction path drives, not the build). A `none` seed
+    // also keeps the seed layer to a datastore bring-up, without starting Apache inside the build.
+    composeSeedHint: { kind: "none" },
+    // DVWA's "/" is a 302 to /login.php; the readiness poll wants a 2xx.
+    readinessPathHint: "/login.php",
     // DVWA's config.inc.php names the datastore by the compose service `db`; rewrite it to loopback
     // so the app reaches the MariaDB bundled into the same image.
     configRewritesHint: [

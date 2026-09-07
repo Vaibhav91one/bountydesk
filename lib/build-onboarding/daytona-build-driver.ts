@@ -237,13 +237,20 @@ async function inspectStartCommand(sandbox: Sandbox, image: string): Promise<str
   throw new Error(`app image ${image} declares no CMD or ENTRYPOINT to start it`);
 }
 
+/** Daytona caps the sandbox domain allow-list at this many hosts. */
+const MAX_EGRESS_DOMAINS = 20;
+
 function egressAllowList(plan: BuildPlan): string[] {
-  const extraFromEnv = (process.env.BUILD_EGRESS_ALLOWLIST ?? "")
-    .split(",")
-    .map((h) => h.trim())
-    .filter(Boolean);
-  const extra = [...(plan.extraEgressHosts ?? []), ...extraFromEnv];
-  return selectEgressHosts({ ecosystem: plan.ecosystem, extraEgressHosts: extra });
+  // The per-ecosystem code map is the source of truth; the old global BUILD_EGRESS_ALLOWLIST env is
+  // deliberately not unioned in, both because it defeats the per-ecosystem narrowing and because the
+  // union blew past Daytona's 20-domain cap. A repo that needs an extra host declares it on the plan.
+  const hosts = selectEgressHosts({ ecosystem: plan.ecosystem, extraEgressHosts: plan.extraEgressHosts });
+  if (hosts.length > MAX_EGRESS_DOMAINS) {
+    throw new Error(
+      `build egress needs ${hosts.length} domains, over Daytona's ${MAX_EGRESS_DOMAINS} cap; trim the ${plan.ecosystem} profile or the plan's extra hosts`,
+    );
+  }
+  return hosts;
 }
 
 function renderBuildArgs(args: Record<string, string> | undefined): string {
@@ -255,8 +262,9 @@ function renderBuildArgs(args: Record<string, string> | undefined): string {
 
 function portFromBaseUrl(baseUrl: string | undefined): number {
   if (!baseUrl) throw new Error("compose-synth plan has no runtime baseUrl for the app port");
-  const port = new URL(baseUrl).port;
-  const n = Number(port);
+  const url = new URL(baseUrl);
+  // URL.port is empty for a scheme's default port (80 for http, 443 for https), so fall back to it.
+  const n = url.port ? Number(url.port) : url.protocol === "https:" ? 443 : 80;
   if (!Number.isInteger(n) || n <= 0) throw new Error(`compose-synth baseUrl has no usable port: ${baseUrl}`);
   return n;
 }

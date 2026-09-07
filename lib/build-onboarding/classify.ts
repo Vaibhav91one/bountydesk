@@ -248,6 +248,9 @@ export type ClassifyOptions = {
   /** Literal config-file rewrites for a compose target whose app hardcodes the datastore host in a
    *  file rather than reading it from an env var (DVWA's config.inc.php names `db`). */
   configRewritesHint?: Array<{ file: string; from: string; to: string }>;
+  /** Readiness path override for an app whose "/" redirects (DVWA's "/" is a 302 to /login.php, and
+   *  the readiness poll wants a 2xx). */
+  readinessPathHint?: string;
 };
 
 /**
@@ -297,7 +300,7 @@ export async function classify(
       runtime: {
         name,
         baseUrl: `http://localhost:${topology.appPort}`,
-        readinessPath: "/",
+        readinessPath: options.readinessPathHint ?? "/",
         // The synthesized image boots the app from its own entrypoint, so no startCommand; give a
         // datastore a warmup budget for its cold start.
         warmupSeconds: 60,
