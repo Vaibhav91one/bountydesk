@@ -106,6 +106,13 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
     `sh -lc ${shArg("dockerd >/tmp/dockerd.log 2>&1 & for i in $(seq 1 30); do docker version >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1")}`,
     EXEC_TIMEOUT_S,
   ).catch(() => undefined);
+  // The DinD base image often ships without an HTTP client, so the agent cannot curl the container
+  // it builds. Provide one best-effort so it does not burn iterations discovering that.
+  await execute(
+    sandbox,
+    `sh -lc ${shArg("command -v curl >/dev/null 2>&1 || apk add --no-cache curl >/dev/null 2>&1 || (apt-get update >/dev/null 2>&1 && apt-get install -y curl >/dev/null 2>&1) || true")}`,
+    EXEC_TIMEOUT_S,
+  ).catch(() => undefined);
 
   return {
     ok: true,
