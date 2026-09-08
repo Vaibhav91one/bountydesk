@@ -2,7 +2,7 @@
 
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { startTransition, useState } from "react";
 import { Eye, Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow } from "@/components/filter-table";
@@ -127,16 +127,35 @@ export function ConnectionTabs({
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const open = params.get("repo");
+
+  // Which panel is open is mirrored in the URL (so it can be linked to and reopens on reload), but the
+  // sheet is driven by this local state, not read back from the URL. Deriving `open` from
+  // useSearchParams meant closing had to wait for router.replace to commit an RSC round-trip before the
+  // exit animation could even start, which read as a lag. Now the close is instant and the URL is
+  // updated in the background; the render-time reconcile just below re-syncs from the URL for a deep
+  // link or Back/Forward.
+  const urlRepo = params.get("repo");
+  const [open, setOpen] = useState<string | null>(urlRepo);
+  // Reconcile from the URL during render (React's "adjust state on prop change" pattern), so a deep
+  // link and Back/Forward still open the right panel, without a setState-in-effect. Our own
+  // background URL write lands here too and no-ops, since `open` already matches.
+  const [syncedUrlRepo, setSyncedUrlRepo] = useState<string | null>(urlRepo);
+  if (urlRepo !== syncedUrlRepo) {
+    setSyncedUrlRepo(urlRepo);
+    setOpen(urlRepo);
+  }
 
   // replace rather than push, so Back leaves the connections page instead of stepping through
   // every panel that was opened on the way here.
   function showRepository(fullName: string | null) {
+    setOpen(fullName); // update the sheet at once; the URL write below must not block the animation.
     const next = new URLSearchParams(params.toString());
     if (fullName) next.set("repo", fullName);
     else next.delete("repo");
     const search = next.toString();
-    router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+    startTransition(() => {
+      router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+    });
   }
 
   const needle = query.trim().toLowerCase();
