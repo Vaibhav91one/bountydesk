@@ -26,7 +26,19 @@ export type SourceReader = {
   readFile(path: string): Promise<string | null>;
 };
 
-const COMPOSE_PATHS = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+const COMPOSE_PATHS = [
+  "compose.yaml",
+  "compose.yml",
+  "docker-compose.yaml",
+  "docker-compose.yml",
+  // Common deployment layouts keep the Compose file below the repository root. The source reader
+  // is intentionally read-only and has no directory-listing authority, so support reviewed
+  // conventional paths explicitly rather than guessing from repo content.
+  "deploy/docker/docker-compose.yaml",
+  "deploy/docker/docker-compose.yml",
+  "docker/docker-compose.yaml",
+  "docker/docker-compose.yml",
+];
 
 const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
   { file: "package.json", ecosystem: "node" },

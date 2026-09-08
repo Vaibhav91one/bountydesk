@@ -161,6 +161,15 @@ test("parseComposeMesh enumerates services, picks the app, and infers the datast
   assert.equal(db.port, 5432);
 });
 
+test("classify discovers Compose files in the standard deployment directory", async () => {
+  const plan = await classify(
+    reader({ "deploy/docker/docker-compose.yml": PG_COMPOSE, "package.json": "{}" }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  assert.equal(plan.composePath, "deploy/docker/docker-compose.yml");
+});
+
 test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
   const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
   assert.equal(plan.strategy, "compose-mesh");
