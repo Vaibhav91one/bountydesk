@@ -161,6 +161,20 @@ test("parseComposeMesh enumerates services, picks the app, and infers the datast
   assert.equal(db.port, 5432);
 });
 
+test("classify resolves nested Compose build paths relative to the manifest", async () => {
+  const plan = await classify(
+    reader({
+      "deploy/docker/compose.yml": PG_COMPOSE,
+      "deploy/docker/Dockerfile": "FROM node:20\nEXPOSE 8000",
+      "package.json": "{}",
+    }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  assert.equal(plan.services.find((s) => s.role === "app")?.build?.context, "deploy/docker");
+});
+
 test("classify discovers Compose files in the standard deployment directory", async () => {
   const plan = await classify(
     reader({ "deploy/docker/docker-compose.yml": PG_COMPOSE, "package.json": "{}" }),
