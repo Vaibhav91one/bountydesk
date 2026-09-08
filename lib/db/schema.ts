@@ -617,6 +617,12 @@ export const targetOnboarding = pgTable(
     snapshotId: text("snapshot_id"),
     buildMarker: text("build_marker"),
     dockerfileText: text("dockerfile_text"),
+    /** For a compose-mesh build only: every service the build produced (the app and its
+     *  dependencies), each with its own image, digest, snapshot, port, start command and peers. The
+     *  top-level image fields above mirror the app service, so a single-image target ignores this. It
+     *  is carried from the build step to the offline-verify and profile-write steps, then persisted
+     *  into the target profile's config.services. Null for a single-image target. */
+    builtServices: jsonb("built_services"),
     /** The opaque token the onboarding agent's build tools (app/api/mcp/build) present to resolve
      *  this row -- the onboarding analogue of agent_session.capability_token. The agent never sees a
      *  repo or sandbox id; the token maps back to this row server-side. Null until the agent step

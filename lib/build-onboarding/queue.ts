@@ -53,6 +53,7 @@ export type OnboardingLease = {
   snapshotId: string | null;
   buildMarker: string | null;
   dockerfileText: string | null;
+  builtServices: unknown;
   proposedManifest: unknown;
   attempts: number;
   fence: number;
@@ -68,6 +69,7 @@ export type OnboardingAdvanceFields = Partial<{
   buildMarker: string;
   dockerfileText: string;
   buildLog: string;
+  builtServices: unknown;
   proposedManifest: unknown;
 }>;
 
@@ -121,6 +123,7 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         snapshotId: null,
         buildMarker: null,
         dockerfileText: null,
+        builtServices: null,
         buildLog: null,
         progressNote: null,
         reviewResult: null,
@@ -155,6 +158,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     snapshot_id: string | null;
     build_marker: string | null;
     dockerfile_text: string | null;
+    built_services: unknown;
     proposed_manifest: unknown;
     attempts: number;
     fence: string | number;
@@ -187,6 +191,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
               ${targetOnboarding.snapshotId}       as snapshot_id,
               ${targetOnboarding.buildMarker}      as build_marker,
               ${targetOnboarding.dockerfileText}   as dockerfile_text,
+              ${targetOnboarding.builtServices}    as built_services,
               ${targetOnboarding.proposedManifest} as proposed_manifest,
               ${targetOnboarding.attempts}         as attempts,
               ${targetOnboarding.fence}            as fence
@@ -207,6 +212,7 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     snapshotId: row.snapshot_id,
     buildMarker: row.build_marker,
     dockerfileText: row.dockerfile_text,
+    builtServices: row.built_services,
     proposedManifest: row.proposed_manifest,
     attempts: row.attempts,
     fence: Number(row.fence),

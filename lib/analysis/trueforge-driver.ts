@@ -12,8 +12,8 @@ import {
   targetProfile,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
-import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
-import { profileAppPort } from "@/lib/targets/authorize-reproduction";
+import { provisionMesh, provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import { meshServicesFromConfig, profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
@@ -319,17 +319,35 @@ export function createTrueforgeAnalysisDriver(
           );
           if (appPort !== null && provisioning) {
             try {
-              provisioned = await provision(
-                {
-                  imageName: targetInfo.imageName,
-                  imageDigest: targetInfo.imageDigest,
-                  snapshotId: targetInfo.snapshotId,
-                  targetProfileId: context.targetProfileId as string,
-                  ...provisioning,
-                },
-                appPort,
-                { signal },
-              );
+              // A compose-mesh target boots every service as its own linked sandbox; probe_target
+              // still reaches only the app, whose sandbox id and port are what get stored below. A
+              // single-image target boots one snapshot exactly as before.
+              const meshServices = meshServicesFromConfig(context.targetConfig);
+              if (meshServices) {
+                const mesh = await provisionMesh(
+                  {
+                    targetProfileId: context.targetProfileId as string,
+                    appService: meshServices.find((s) => s.role === "app")!.service,
+                    services: meshServices,
+                    readinessPath: provisioning.readinessPath,
+                    warmupSeconds: provisioning.warmupSeconds,
+                  },
+                  { signal },
+                );
+                provisioned = { sandboxId: mesh.sandboxId, appPort: mesh.appPort };
+              } else {
+                provisioned = await provision(
+                  {
+                    imageName: targetInfo.imageName,
+                    imageDigest: targetInfo.imageDigest,
+                    snapshotId: targetInfo.snapshotId,
+                    targetProfileId: context.targetProfileId as string,
+                    ...provisioning,
+                  },
+                  appPort,
+                  { signal },
+                );
+              }
             } catch {
               // A genuine cancellation must still propagate as one, not be swallowed into "no
               // target this run" -- the caller's lease/retry semantics depend on seeing it.

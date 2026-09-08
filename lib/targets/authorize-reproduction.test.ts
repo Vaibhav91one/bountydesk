@@ -73,6 +73,48 @@ test("an unknown target profile id is refused, not treated as a caller-supplied 
   assert.deepEqual(result, { ok: false, reason: "NO_BOUND_TARGET" });
 });
 
+test("meshServicesFromConfig is null for a single-image profile and maps a mesh profile", () => {
+  assert.equal(authorize.meshServicesFromConfig({ baseUrl: "http://localhost:80" }), null);
+  assert.equal(authorize.meshServicesFromConfig({ services: [] }), null);
+
+  const services = authorize.meshServicesFromConfig({
+    services: [
+      {
+        service: "web",
+        role: "app",
+        imageName: "ghcr.io/x/web",
+        imageDigest: "sha256:" + "a".repeat(64),
+        snapshotId: "snap-web",
+        snapshotImageRef: "ghcr.io/x/web:bountydesk-onboarding",
+        port: 8000,
+        buildMarker: "abc",
+        startCommand: "node app.js",
+        peers: ["db"],
+      },
+      { service: "db", role: "dependency", imageName: "postgres", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db", port: 5432 },
+    ],
+  });
+  assert.ok(services);
+  assert.equal(services!.length, 2);
+  const web = services!.find((s) => s.role === "app")!;
+  assert.equal(web.snapshotImageRefOverride, "ghcr.io/x/web:bountydesk-onboarding");
+  assert.equal(web.startCommand, "node app.js");
+  assert.deepEqual(web.peers, ["db"]);
+  const db = services!.find((s) => s.role === "dependency")!;
+  assert.equal(db.port, 5432);
+  assert.equal(db.startCommand, undefined);
+});
+
+test("meshServicesFromConfig refuses a mesh with no app service", () => {
+  assert.throws(
+    () =>
+      authorize.meshServicesFromConfig({
+        services: [{ service: "db", role: "dependency", imageName: "postgres", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db" }],
+      }),
+    /no app service/,
+  );
+});
+
 test("a profile with no image name cannot be authorized for a live run", async () => {
   await dbm.db.update(dbm.targetProfile).set({ imageName: null }).where(dbm.eq(dbm.targetProfile.id, profileId));
 
