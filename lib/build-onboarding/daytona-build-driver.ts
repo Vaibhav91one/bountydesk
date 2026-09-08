@@ -76,7 +76,17 @@ const PROXY_TRUST_ENV =
   'NODE_TLS_REJECT_UNAUTHORIZED="0" NPM_CONFIG_STRICT_SSL="false" GIT_SSL_NO_VERIFY="true"';
 
 export function injectProxyTrust(dockerfileText: string): string {
-  return dockerfileText.replace(/^([ \t]*FROM[ \t]+[^\n]+)$/gim, `$1\n${PROXY_TRUST_ENV}`);
+  const withTrustEnv = dockerfileText.replace(/^([ \t]*FROM[ \t]+[^\n]+)$/gim, `$1\n${PROXY_TRUST_ENV}`);
+  return withTrustEnv
+    .split("\n")
+    .map((line) => {
+      if (!/^\s*RUN\s+/i.test(line) || /#/.test(line)) return line;
+      return line.replace(
+        /\bapk(?!\s+--no-check-certificate)(?=\s+(?:(?!&&|;|\bapk\b)[^\n])*\badd\b)/gi,
+        "apk --no-check-certificate",
+      );
+    })
+    .join("\n");
 }
 
 /**

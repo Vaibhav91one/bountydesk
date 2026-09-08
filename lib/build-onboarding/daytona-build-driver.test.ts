@@ -30,6 +30,25 @@ test("injectProxyTrust adds the trust env after each FROM and nowhere else", () 
   assert.match(out, /\nRUN pip install flask\n/);
 });
 
+test("injectProxyTrust disables Alpine apk certificate checks", () => {
+  const out = injectProxyTrust("FROM alpine:3.24\nRUN apk add --update --no-cache curl\n");
+  assert.match(out, /apk --no-check-certificate add --update --no-cache curl/);
+});
+
+test("injectProxyTrust does not duplicate Alpine certificate flags", () => {
+  const out = injectProxyTrust("FROM alpine:3.24\nRUN apk --no-check-certificate add curl\n");
+  assert.equal(out.match(/--no-check-certificate/g)?.length, 1);
+});
+
+test("injectProxyTrust handles chained apk installs without touching data", () => {
+  const out = injectProxyTrust(
+    "FROM alpine:3.24\n# apk add should stay unchanged\nENV NOTE=\"apk add unchanged\"\nRUN apk update && apk add curl\n",
+  );
+  assert.match(out, /apk update && apk --no-check-certificate add curl/);
+  assert.match(out, /# apk add should stay unchanged/);
+  assert.match(out, /ENV NOTE=\"apk add unchanged\"/);
+});
+
 test("dockerEnvLine bakes a service's compose env, quoting values, and is empty for none", () => {
   assert.equal(dockerEnvLine(undefined), "");
   assert.equal(dockerEnvLine({}), "");
