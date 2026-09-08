@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, db, eq, targetOnboarding } from "@/lib/db";
-import { rawSourceReader, type SourceReader } from "@/lib/build-onboarding/classify";
+import type { SourceReader } from "@/lib/build-onboarding/classify";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 import type { ReviewResult, ReviewVerdict } from "@/lib/mcp/review";
 
@@ -50,6 +50,22 @@ const REVIEW_FILES = [
   "go.mod",
   "pom.xml",
 ];
+
+/** Read a file capped at maxBytes with a Range request, so a large README or lockfile does not download
+ *  in full for a cheap pre-check. raw.githubusercontent.com honours Range and answers 206 with only the
+ *  first bytes; a host that ignores it returns 200, which the slice still bounds. */
+function boundedSourceReader(repoFullName: string, maxBytes: number, ref = "HEAD"): SourceReader {
+  return {
+    async readFile(path: string) {
+      const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
+        headers: { Range: `bytes=0-${maxBytes - 1}` },
+      });
+      if (res.status === 404) return null;
+      if (!res.ok && res.status !== 206) return null;
+      return (await res.text()).slice(0, maxBytes);
+    },
+  };
+}
 
 async function readRepoFiles(source: SourceReader): Promise<Array<{ path: string; text: string }>> {
   const found: Array<{ path: string; text: string }> = [];
@@ -109,7 +125,7 @@ export async function runSandboxabilityReview(
   opts: { signal?: AbortSignal; source?: SourceReader } = {},
 ): Promise<ReviewResult> {
   const capability = randomUUID();
-  const source = opts.source ?? rawSourceReader(input.repoFullName);
+  const source = opts.source ?? boundedSourceReader(input.repoFullName, MAX_FILE_CHARS);
 
   try {
     await db
@@ -171,10 +187,12 @@ async function readVerdict(onboardingId: string, capability: string): Promise<Re
   // A replacement step may have taken the row over (new token); then this review's result is moot.
   if (!row || row.token !== capability) return unsure("the review did not complete for this attempt");
 
+  // Clear the result fenced on the token, so a replacement review that wrote its own result between
+  // the read above and here is not erased.
   await db
     .update(targetOnboarding)
     .set({ reviewResult: null, updatedAt: new Date() })
-    .where(eq(targetOnboarding.id, onboardingId))
+    .where(and(eq(targetOnboarding.id, onboardingId), eq(targetOnboarding.agentCapabilityToken, capability)))
     .catch(() => undefined);
 
   const result = row.reviewResult as { verdict?: unknown; reason?: unknown } | null;

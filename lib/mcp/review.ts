@@ -32,13 +32,6 @@ export async function reportSandboxability(
   reason: string,
 ): Promise<ReviewToolResult> {
   if (!capability) return { ok: false, reason: "unknown capability" };
-  const [row] = await db
-    .select({ id: targetOnboarding.id })
-    .from(targetOnboarding)
-    .where(eq(targetOnboarding.agentCapabilityToken, capability))
-    .limit(1);
-  if (!row) return { ok: false, reason: "unknown capability" };
-
   if (!isVerdict(verdict)) {
     return { ok: false, reason: 'verdict must be "yes", "no" or "unsure"' };
   }
@@ -47,11 +40,16 @@ export async function reportSandboxability(
       ? reason.trim().slice(0, MAX_REASON)
       : "no reason given";
 
+  // Write fenced on the capability token in one statement, not a resolve-then-update: a replacement
+  // review may have installed its own token in between, and this stale turn must not overwrite it. A
+  // zero-row update means the token is no longer ours, which is the same as an unknown capability.
   const result: ReviewResult = { verdict, reason: why };
-  await db
+  const updated = await db
     .update(targetOnboarding)
     .set({ reviewResult: result, updatedAt: new Date() })
-    .where(eq(targetOnboarding.id, row.id));
+    .where(eq(targetOnboarding.agentCapabilityToken, capability))
+    .returning({ id: targetOnboarding.id });
+  if (updated.length === 0) return { ok: false, reason: "unknown capability" };
 
   return { ok: true, message: `recorded sandboxability verdict "${verdict}"` };
 }

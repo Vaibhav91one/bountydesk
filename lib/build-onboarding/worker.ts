@@ -114,13 +114,16 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
           // A "no" skips the multi-minute build turn and routes the repo to analysis-only; "yes"/"unsure"
           // fall through to the build agent unchanged. It is fail-open (any failure -> "unsure"), so an
           // unregistered review agent leaves onboarding behaving exactly as before.
-          const runReview =
-            deps.runSandboxabilityReview ??
-            ((input: RunSandboxabilityReviewInput) =>
-              runSandboxabilityReview(deps.agentClient, input, { signal: deps.signal }));
-          const review = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
-            runReview({ onboardingId: lease.id, repoFullName: lease.repoFullName }),
-          );
+          // withHeartbeat hands its operation the combined lease-loss signal; pass it into the default
+          // review so a lost lease cancels the remote turn instead of leaving it polling after another
+          // worker takes over. Injected reviews ignore the signal.
+          const review = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) => {
+            const runReview =
+              deps.runSandboxabilityReview ??
+              ((input: RunSandboxabilityReviewInput) =>
+                runSandboxabilityReview(deps.agentClient, input, { signal }));
+            return runReview({ onboardingId: lease.id, repoFullName: lease.repoFullName });
+          });
 
           if (review.verdict === "no") {
             plan = {
