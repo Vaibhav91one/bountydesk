@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import yaml from "js-yaml";
 
 import {
@@ -26,7 +28,23 @@ export type SourceReader = {
   readFile(path: string): Promise<string | null>;
 };
 
-const COMPOSE_PATHS = ["compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml"];
+const COMPOSE_PATHS = [
+  "compose.yaml",
+  "compose.yml",
+  "docker-compose.yaml",
+  "docker-compose.yml",
+  // Common deployment layouts keep the Compose file below the repository root. The source reader
+  // is intentionally read-only and has no directory-listing authority, so support reviewed
+  // conventional paths explicitly rather than guessing from repo content.
+  "deploy/docker/compose.yaml",
+  "deploy/docker/compose.yml",
+  "deploy/docker/docker-compose.yaml",
+  "deploy/docker/docker-compose.yml",
+  "docker/compose.yaml",
+  "docker/compose.yml",
+  "docker/docker-compose.yaml",
+  "docker/docker-compose.yml",
+];
 
 const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
   { file: "package.json", ecosystem: "node" },
@@ -420,7 +438,18 @@ export async function classify(
       const mesh = parseComposeMesh(compose.text);
       if (!mesh.ok) return { strategy: "not-flattenable", ecosystem, reason: topology.reason };
 
-      const appSvc = mesh.services.find((s) => s.role === "app")!;
+      const resolvedServices = mesh.services.map((service) =>
+        service.build
+          ? {
+              ...service,
+              build: resolveComposeBuild(compose.path, {
+                context: service.build.context,
+                dockerfile: service.build.dockerfile ?? "Dockerfile",
+              }),
+            }
+          : service,
+      );
+      const appSvc = resolvedServices.find((s) => s.role === "app")!;
       let meshEcosystem = ecosystem;
       if (appSvc.build) {
         const appDockerfileText = await source.readFile(
@@ -433,7 +462,7 @@ export async function classify(
         ecosystem: meshEcosystem,
         composePath: compose.path,
         appService: mesh.appService,
-        services: mesh.services,
+        services: resolvedServices,
         seed: options.composeSeedHint ?? { kind: "none" },
         runtime: {
           name,
@@ -447,7 +476,11 @@ export async function classify(
     // The app's own Dockerfile decides the ecosystem for a compose app, since its package manifest
     // may sit in a subdirectory the root scan misses. Fall back to the root scan if it reveals
     // nothing. The datastore install (apt) needs its own hosts regardless of the app's ecosystem.
-    const appDockerfilePath = joinRepoPath(topology.appContext, topology.appDockerfile);
+    const resolvedAppBuild = resolveComposeBuild(compose.path, {
+      context: topology.appContext,
+      dockerfile: topology.appDockerfile,
+    });
+    const appDockerfilePath = joinRepoPath(resolvedAppBuild.context, resolvedAppBuild.dockerfile);
     const appDockerfileText = await source.readFile(appDockerfilePath);
     const appEcosystem = appDockerfileText ? ecosystemFromDockerfile(appDockerfileText) : "none";
     const composeEcosystem = appEcosystem !== "none" ? appEcosystem : ecosystem;
@@ -461,8 +494,8 @@ export async function classify(
       composePath: compose.path,
       appService: topology.appService,
       datastores: topology.datastores,
-      appContext: topology.appContext,
-      appDockerfile: topology.appDockerfile,
+      appContext: resolvedAppBuild.context,
+      appDockerfile: resolvedAppBuild.dockerfile,
       ...(datastoreEgress.length ? { extraEgressHosts: datastoreEgress } : {}),
       ...(options.configRewritesHint ? { configRewrites: options.configRewritesHint } : {}),
       ...(() => {
@@ -509,6 +542,26 @@ export async function classify(
 function joinRepoPath(context: string, dockerfile: string): string {
   const base = context.replace(/^\.\/?/, "").replace(/\/+$/, "");
   return base ? `${base}/${dockerfile}` : dockerfile;
+}
+
+/** Resolve a Compose-relative path against the directory containing its manifest. */
+function resolveComposePath(composePath: string, relativePath: string): string {
+  if (path.posix.isAbsolute(relativePath)) {
+    throw new Error(`compose build path must be repository-relative: ${relativePath}`);
+  }
+  const composeDir = path.posix.dirname(composePath);
+  const resolved = path.posix.normalize(path.posix.join(composeDir, relativePath));
+  if (resolved === ".." || resolved.startsWith("../")) {
+    throw new Error(`compose path escapes repository: ${relativePath}`);
+  }
+  return resolved;
+}
+
+function resolveComposeBuild(composePath: string, build: { context: string; dockerfile: string }) {
+  return {
+    context: resolveComposePath(composePath, build.context),
+    dockerfile: build.dockerfile,
+  };
 }
 
 async function readFirst(

@@ -161,6 +161,51 @@ test("parseComposeMesh enumerates services, picks the app, and infers the datast
   assert.equal(db.port, 5432);
 });
 
+test("classify rejects absolute nested Compose build paths", async () => {
+  await assert.rejects(
+    () =>
+      classify(
+        reader({
+          "deploy/docker/compose.yml": PG_COMPOSE.replace("build: .", "build: /tmp"),
+        }),
+        "owner/app",
+      ),
+    /repository-relative/,
+  );
+});
+
+test("classify resolves nested Compose build paths relative to the manifest", async () => {
+  const plan = await classify(
+    reader({
+      "deploy/docker/compose.yml": PG_COMPOSE,
+      "deploy/docker/Dockerfile": "FROM node:20\nEXPOSE 8000",
+      "package.json": "{}",
+    }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  assert.equal(plan.services.find((s) => s.role === "app")?.build?.context, "deploy/docker");
+});
+
+test("classify discovers Compose files in the standard deployment directory", async () => {
+  const plan = await classify(
+    reader({ "deploy/docker/docker-compose.yml": PG_COMPOSE, "package.json": "{}" }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  assert.equal(plan.composePath, "deploy/docker/docker-compose.yml");
+});
+
+test("classify discovers nested compose.yml as well as docker-compose.yml", async () => {
+  const plan = await classify(
+    reader({ "deploy/docker/compose.yml": PG_COMPOSE, "package.json": "{}" }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  assert.equal(plan.composePath, "deploy/docker/compose.yml");
+});
+
 test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
   const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
   assert.equal(plan.strategy, "compose-mesh");
