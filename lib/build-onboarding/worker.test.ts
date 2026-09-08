@@ -3,6 +3,7 @@ import test, { after, before } from "node:test";
 
 import type { BuildDriver, BuildResult } from "./build-driver";
 import type { BuildPlan } from "./build-plan";
+import { assertSafeMeshStartCommand } from "./worker";
 import type { OnboardDeps } from "./worker";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
@@ -29,6 +30,13 @@ before(async () => {
 after(async () => {
   await dbm?.client.end({ timeout: 5 });
   await schema?.drop();
+});
+
+test("mesh start commands run inside the service and reject host container commands", () => {
+  assert.equal(assertSafeMeshStartCommand("web", "  ./start.sh  "), "./start.sh");
+  assert.equal(assertSafeMeshStartCommand("db", "docker-entrypoint.sh postgres"), "docker-entrypoint.sh postgres");
+  assert.throws(() => assertSafeMeshStartCommand("db", "docker run postgres"), /host-level/);
+  assert.throws(() => assertSafeMeshStartCommand("db", "podman run postgres"), /host-level/);
 });
 
 let seq = 0;
