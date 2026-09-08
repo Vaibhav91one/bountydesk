@@ -57,13 +57,42 @@ const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
   { file: "Gemfile", ecosystem: "ruby" },
 ];
 
-/** Map a compose service image to a datastore engine we can bundle, or undefined if it is not one. */
+/** Resolve defaulted Compose image variables without inventing a tag for required or conditional values. */
 function resolveComposeImage(image: string): string | undefined {
-  const resolved = image.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)[:-][^}]*\}/g, "latest");
-  if (/\$\{[^}]+\}/.test(resolved)) return undefined;
-  return resolved;
+  let out = "";
+  for (let i = 0; i < image.length; i++) {
+    if (image[i] === "\\" && image[i + 1] === "$" && image[i + 2] === "{") {
+      out += "${";
+      i += 2;
+      continue;
+    }
+    if (image[i] === "$" && image[i + 1] === "$") {
+      out += "$$";
+      i++;
+      continue;
+    }
+    if (image[i] !== "$" || image[i + 1] !== "{") {
+      if (image[i] === "$" && /[A-Za-z_]/.test(image[i + 1] ?? "")) return undefined;
+      out += image[i];
+      continue;
+    }
+    let depth = 1;
+    let end = i + 2;
+    for (; end < image.length && depth > 0; end++) {
+      if (image[end] === "{") depth++;
+      else if (image[end] === "}") depth--;
+    }
+    if (depth !== 0) return undefined;
+    const expression = image.slice(i + 2, end - 1);
+    const match = expression.match(/^([A-Za-z_][A-Za-z0-9_]*)(?::([-+?])|([-+?]))([\s\S]*)$/);
+    if (!match || (match[2] ?? match[3]) !== "-") return undefined;
+    out += match[4];
+    i = end - 1;
+  }
+  return /\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*/.test(out) ? undefined : out;
 }
 
+/** Map a compose service image to a datastore engine we can bundle, or undefined if it is not one. */
 function engineForImage(image: string): DatastoreEngine | undefined {
   const name = image.toLowerCase();
   if (name.includes("mariadb")) return "mariadb";
