@@ -35,6 +35,7 @@ export const BUILD_STRATEGIES = [
   "dockerfile",
   "image",
   "compose-synth",
+  "compose-mesh",
   "agent-authored",
   "not-flattenable",
 ] as const;
@@ -64,6 +65,35 @@ export type ComposeDatastore = {
   dbName?: string;
   user?: string;
   password?: string;
+};
+
+/**
+ * One service in a compose-mesh target. Unlike compose-synth, which flattens the app and its
+ * datastore into a single image, a mesh keeps every service separate: each is built or pulled at
+ * onboarding, snapshotted, and at reproduction runs as its own linked sandbox. The app service is
+ * the one the agent probes; a dependency (a database, a cache) is reached by the app over the
+ * private link group, addressed by the dependency's sandbox id, which the provisioner substitutes
+ * for the compose service name at boot. So the plan records the compose graph, not loopback wiring.
+ */
+export type ComposeMeshService = {
+  /** The compose service name, e.g. "db" or "vote". Peers reference it by this name. */
+  service: string;
+  /** The app is the probed front door; a dependency is internal and never probed directly. */
+  role: "app" | "dependency";
+  /** The container port the service listens on: the app's HTTP port, or a datastore's port. The
+   *  app always has one (it is what gets probed); a dependency with no inbound port (a background
+   *  worker) omits it, and is booted but neither addressed nor health-checked. */
+  port?: number;
+  /** Build the image from the repo. Exactly one of build or image is set. */
+  build?: { context: string; dockerfile?: string };
+  /** Pull a published image (a stock datastore such as postgres:16). Exactly one of build/image. */
+  image?: string;
+  /** The service's environment. A value that names another compose service (a DB host) is rewritten
+   *  to that peer's sandbox id at provision time, so it is kept verbatim here. */
+  env?: Record<string, string>;
+  /** Compose service names this service connects to, from depends_on or a host-valued env, so the
+   *  provisioner knows which peer sandbox ids to inject before the service starts. */
+  peers?: string[];
 };
 
 /** The runtime shape the reproduction sandbox needs, independent of how the image was built. This is
@@ -115,6 +145,14 @@ type BuildInputs =
       /** Environment values to set in the synthesized image, e.g. a DB host env the app reads, set to
        *  127.0.0.1 so the app reaches the bundled datastore on loopback. */
       envOverrides?: Record<string, string>;
+    }
+  | {
+      strategy: "compose-mesh";
+      composePath: string;
+      /** The one service the agent probes; must be the service in `services` with role "app". */
+      appService: string;
+      /** Every service to run as its own linked sandbox: the app and its dependencies. */
+      services: ComposeMeshService[];
     }
   | {
       strategy: "agent-authored";
@@ -223,6 +261,13 @@ export function parseBuildPlan(input: unknown): BuildPlan {
       runtime,
       ...withHosts(extraEgressHosts),
     };
+  }
+
+  if (strategy === "compose-mesh") {
+    const composePath = relPath(str(plan, "composePath"), "composePath");
+    const appService = serviceName(str(plan, "appService"), "appService");
+    const services = parseMeshServices(plan.services, appService);
+    return { strategy, ecosystem, composePath, appService, services, seed, runtime, ...withHosts(extraEgressHosts) };
   }
 
   // compose-synth
@@ -378,6 +423,90 @@ function parseDatastores(input: unknown): ComposeDatastore[] {
       ...(optStr(ds, "password") !== undefined ? { password: optStr(ds, "password") } : {}),
     };
   });
+}
+
+function parseMeshServices(input: unknown, appService: string): ComposeMeshService[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error("build plan compose-mesh requires a nonempty services array");
+  }
+  const seen = new Set<string>();
+  const services = input.map((raw, i) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+      throw new Error(`build plan services[${i}] must be an object`);
+    }
+    const s = raw as Record<string, unknown>;
+    const service = serviceName(str(s, "service"), `services[${i}].service`);
+    if (seen.has(service)) throw new Error(`build plan services has a duplicate service ${service}`);
+    seen.add(service);
+
+    const role = str(s, "role");
+    if (role !== "app" && role !== "dependency") {
+      throw new Error(`build plan services[${i}].role must be app or dependency`);
+    }
+
+    const port = s.port;
+    if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535)) {
+      throw new Error(`build plan services[${i}].port must be an integer 1..65535 when present`);
+    }
+
+    // A service is either built from the repo or pulled as a published image, never both and never
+    // neither: a mesh node with no image is nothing to boot, and one with both is ambiguous.
+    const hasBuild = s.build !== undefined;
+    const hasImage = s.image !== undefined;
+    if (hasBuild === hasImage) {
+      throw new Error(`build plan services[${i}] must set exactly one of build or image`);
+    }
+
+    const built: ComposeMeshService = {
+      service,
+      role: role as "app" | "dependency",
+      ...(port !== undefined ? { port } : {}),
+      ...(hasBuild ? { build: parseMeshBuild(s.build, i) } : {}),
+      ...(hasImage ? { image: parseMeshImage(s.image, i) } : {}),
+      ...(s.env !== undefined ? { env: parseBuildArgs(s.env) } : {}),
+      ...(s.peers !== undefined ? { peers: parseMeshPeers(s.peers, i) } : {}),
+    };
+    return built;
+  });
+
+  const apps = services.filter((s) => s.role === "app");
+  if (apps.length !== 1) {
+    throw new Error("build plan compose-mesh must have exactly one service with role app");
+  }
+  if (apps[0].service !== appService) {
+    throw new Error("build plan compose-mesh appService must name the service with role app");
+  }
+  // The app is what probe_target reaches, so its port is the target port and cannot be omitted.
+  if (apps[0].port === undefined) {
+    throw new Error("build plan compose-mesh app service must declare a port");
+  }
+  return services;
+}
+
+function parseMeshBuild(input: unknown, i: number): { context: string; dockerfile?: string } {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    throw new Error(`build plan services[${i}].build must be an object`);
+  }
+  const b = input as Record<string, unknown>;
+  return {
+    context: relPath(optStr(b, "context") ?? ".", `services[${i}].build.context`),
+    ...(optStr(b, "dockerfile") ? { dockerfile: relPath(optStr(b, "dockerfile")!, `services[${i}].build.dockerfile`) } : {}),
+  };
+}
+
+function parseMeshImage(input: unknown, i: number): string {
+  if (typeof input !== "string" || input.trim() !== input || input.length === 0) {
+    throw new Error(`build plan services[${i}].image must be a nonempty string`);
+  }
+  if (/\s/.test(input) || input.includes("://")) {
+    throw new Error(`build plan services[${i}].image must be a bare image reference`);
+  }
+  return input;
+}
+
+function parseMeshPeers(input: unknown, i: number): string[] {
+  if (!Array.isArray(input)) throw new Error(`build plan services[${i}].peers must be an array`);
+  return input.map((p, j) => serviceName(typeof p === "string" ? p : "", `services[${i}].peers[${j}]`));
 }
 
 function parseBuildArgs(input: unknown): Record<string, string> {

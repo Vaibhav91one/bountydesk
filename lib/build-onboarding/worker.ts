@@ -3,7 +3,12 @@ import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/t
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest } from "@/lib/targets/manifest";
 import type { TargetDefinition } from "@/lib/targets/registry";
-import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import {
+  provisionMesh,
+  provisionTarget,
+  teardownSandbox,
+  type MeshServiceAuth,
+} from "@/lib/sandbox/provision";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
@@ -15,7 +20,7 @@ import {
   type RunSandboxabilityReviewInput,
 } from "@/lib/analysis/sandboxability";
 import type { ReviewResult } from "@/lib/mcp/review";
-import { onboardingSnapshotImageRef, type BuildDriver } from "./build-driver";
+import { onboardingSnapshotImageRef, type BuildDriver, type BuiltService } from "./build-driver";
 import {
   advance,
   claim,
@@ -174,6 +179,9 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
           buildMarker: result.buildMarker,
           dockerfileText: result.dockerfileText,
           buildLog: result.buildLog,
+          // A compose-mesh build carries every service; a single-image build has none, and the
+          // column stays null. The top-level fields above already mirror the app service.
+          ...(result.services ? { builtServices: result.services } : {}),
         });
         break;
       }
@@ -248,30 +256,54 @@ async function verifyAndWrite(
   const readinessPath = definition.provisioning.readinessPath;
   const snapshotImageRef = onboardingSnapshotImageRef(lease.imageName);
 
-  const { sandboxId } = await withHeartbeat(lease, leaseSeconds, outerSignal, (signal) =>
-    provision(
-      {
-        imageName: lease.imageName!,
-        imageDigest: lease.imageDigest!,
-        snapshotId: lease.snapshotId!,
-        targetProfileId: lease.id,
-        readinessPath,
-        expectedBuildMarker: lease.buildMarker!,
-        startCommand: definition.provisioning.startCommand,
-        warmupSeconds: definition.provisioning.warmupSeconds,
-        snapshotImageRefOverride: snapshotImageRef,
-      },
-      appPort,
-      { signal },
-    ),
-  );
-  // The verify sandbox is the caller's to tear down on success (provisionTarget only tears down
-  // its own failures). Do it before the write, so a failed write does not leak the sandbox.
-  await teardown(sandboxId, false);
+  // A compose-mesh build carries every service; the offline verify boots the whole mesh. A
+  // single-image build boots the one snapshot exactly as before. Either way the sandboxes the verify
+  // created are torn down here before the write, so a failed write does not leak them.
+  const builtServices = parseBuiltServices(lease.builtServices);
+  let sandboxIds: string[];
+  if (builtServices) {
+    const result = await withHeartbeat(lease, leaseSeconds, outerSignal, (signal) =>
+      provisionMesh(
+        {
+          targetProfileId: lease.id,
+          appService: appServiceName(builtServices),
+          services: builtServices.map(meshServiceAuth),
+          readinessPath,
+          warmupSeconds: definition.provisioning.warmupSeconds,
+        },
+        { signal },
+      ),
+    );
+    sandboxIds = result.sandboxIds;
+  } else {
+    const { sandboxId } = await withHeartbeat(lease, leaseSeconds, outerSignal, (signal) =>
+      provision(
+        {
+          imageName: lease.imageName!,
+          imageDigest: lease.imageDigest!,
+          snapshotId: lease.snapshotId!,
+          targetProfileId: lease.id,
+          readinessPath,
+          expectedBuildMarker: lease.buildMarker!,
+          startCommand: definition.provisioning.startCommand,
+          warmupSeconds: definition.provisioning.warmupSeconds,
+          snapshotImageRefOverride: snapshotImageRef,
+        },
+        appPort,
+        { signal },
+      ),
+    );
+    sandboxIds = [sandboxId];
+  }
+  for (const id of sandboxIds) await teardown(id, false);
 
+  // The mesh services are pinned into the profile config so the reproduction run boots the same mesh.
+  const pinnedDefinition: TargetDefinition = builtServices
+    ? { ...definition, config: { ...definition.config, services: builtServices } }
+    : definition;
   const pin = {
     repoId: lease.repoId,
-    targetDefinition: definition,
+    targetDefinition: pinnedDefinition,
     imageDigest: lease.imageDigest,
     snapshotId: lease.snapshotId,
     buildMarker: lease.buildMarker,
@@ -295,7 +327,7 @@ async function verifyAndWrite(
  *  run for a buildable strategy, so reaching them without one is a bug, not a retryable failure. */
 function buildablePlan(
   value: unknown,
-): Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "agent-authored" }> {
+): Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "compose-mesh" | "agent-authored" }> {
   const plan = parseBuildPlan(value);
   if (plan.strategy === "not-flattenable") {
     throw new Error("build step reached with a not-flattenable plan");
@@ -317,6 +349,49 @@ function asTargetDefinition(value: unknown): TargetDefinition {
     throw new Error("stored proposed manifest is not a target definition");
   }
   return value as TargetDefinition;
+}
+
+/** Read the built mesh services stored at the build step. Null (a single-image build) is the common
+ *  case. Server-authored (written by the build driver), so a light shape check at the seam is enough. */
+function parseBuiltServices(value: unknown): BuiltService[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  for (const raw of value) {
+    const svc = raw as Partial<BuiltService> | null;
+    if (
+      typeof svc !== "object" ||
+      svc === null ||
+      typeof svc.service !== "string" ||
+      (svc.role !== "app" && svc.role !== "dependency") ||
+      typeof svc.imageName !== "string" ||
+      typeof svc.imageDigest !== "string" ||
+      typeof svc.snapshotId !== "string"
+    ) {
+      throw new Error("a stored built service is missing required fields");
+    }
+  }
+  return value as BuiltService[];
+}
+
+function appServiceName(services: BuiltService[]): string {
+  const app = services.find((s) => s.role === "app");
+  if (!app) throw new Error("built mesh services have no app service");
+  return app.service;
+}
+
+/** Map a stored built service to what the mesh provisioner needs to boot it. */
+function meshServiceAuth(s: BuiltService): MeshServiceAuth {
+  return {
+    service: s.service,
+    role: s.role,
+    imageName: s.imageName,
+    imageDigest: s.imageDigest,
+    snapshotId: s.snapshotId,
+    ...(s.snapshotImageRef ? { snapshotImageRefOverride: s.snapshotImageRef } : {}),
+    ...(s.port !== undefined ? { port: s.port } : {}),
+    ...(s.buildMarker ? { buildMarker: s.buildMarker } : {}),
+    ...(s.startCommand ? { startCommand: s.startCommand } : {}),
+    ...(s.peers ? { peers: s.peers } : {}),
+  };
 }
 
 /**

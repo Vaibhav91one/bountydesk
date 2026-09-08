@@ -3,6 +3,7 @@ import yaml from "js-yaml";
 import {
   type BuildPlan,
   type ComposeDatastore,
+  type ComposeMeshService,
   type DatastoreEngine,
   type Ecosystem,
 } from "./build-plan";
@@ -81,6 +82,7 @@ type ComposeService = {
   expose?: unknown;
   environment?: unknown;
   command?: unknown;
+  depends_on?: unknown;
 };
 
 export type ComposeTopology =
@@ -156,6 +158,118 @@ export function parseComposeTopology(composeText: string): ComposeTopology {
     appDockerfile: build.dockerfile,
     envOverrides,
   };
+}
+
+export type ComposeMeshTopology =
+  | { ok: true; appService: string; appPort: number; services: ComposeMeshService[] }
+  | { ok: false; reason: string };
+
+/**
+ * Read a compose file into a mesh: every service runs as its own linked sandbox, so nothing is
+ * flattened and no datastore recipe is needed (a dependency runs its real image). This handles the
+ * multi-service repos parseComposeTopology rejects (more than one app, a datastore with no recipe
+ * like postgres or mongo, an app that only pulls an image). It applies only to a genuine
+ * multi-service topology: a single-service compose is left to the flatten path's own reasons.
+ *
+ * The app is the one service the agent probes: a non-datastore service that publishes an HTTP port.
+ * Everything else is a dependency, reached by the app over the link group by its sandbox id, which
+ * the provisioner substitutes for the compose service name at boot. Peers come from depends_on and
+ * from env values that name another service, so the provisioner knows what to rewrite.
+ */
+export function parseComposeMesh(composeText: string): ComposeMeshTopology {
+  let doc: unknown;
+  try {
+    doc = yaml.load(composeText);
+  } catch {
+    return { ok: false, reason: "compose file is not valid YAML" };
+  }
+  const services = (doc as { services?: Record<string, ComposeService> } | null)?.services;
+  if (!services || typeof services !== "object") {
+    return { ok: false, reason: "compose file declares no services" };
+  }
+  const entries = Object.entries(services);
+  if (entries.length < 2) {
+    // A single service is not a mesh; the flatten path's reason (dockerfile/image strategy) is clearer.
+    return { ok: false, reason: "compose file has a single service" };
+  }
+  const allNames = new Set(entries.map(([name]) => name));
+
+  // The app is a non-datastore service that publishes a web port. Prefer one with a host `ports`
+  // mapping (the front door a compose author publishes), else the first with an exposed port.
+  const appCandidates = entries.filter(([, svc]) => {
+    const isDatastore = typeof svc.image === "string" && engineForImage(svc.image) !== undefined;
+    if (isDatastore) return false;
+    return (firstPort(svc.ports) ?? firstPort(svc.expose)) !== undefined;
+  });
+  if (appCandidates.length === 0) {
+    return { ok: false, reason: "no service publishes an HTTP port to probe" };
+  }
+  const appEntry = appCandidates.find(([, svc]) => firstPort(svc.ports) !== undefined) ?? appCandidates[0]!;
+  const appName = appEntry[0];
+  const appPort = firstPort(appEntry[1].ports) ?? firstPort(appEntry[1].expose)!;
+
+  const meshServices: ComposeMeshService[] = [];
+  for (const [name, svc] of entries) {
+    const build = appBuildConfig(svc.build);
+    const image = typeof svc.image === "string" ? svc.image : undefined;
+    if (!build && !image) {
+      return { ok: false, reason: `service ${name} has neither a build nor an image, so it cannot run` };
+    }
+    // A service listens where it maps or exposes a port; a datastore that declares neither still has
+    // a well-known port, so the app can reach it and readiness can be checked.
+    const port =
+      firstPort(svc.ports) ?? firstPort(svc.expose) ?? (image ? datastorePortForImage(image) : undefined);
+    const env = meshEnv(svc.environment);
+    const peers = servicePeers(svc, allNames, name);
+    meshServices.push({
+      service: name,
+      role: name === appName ? "app" : "dependency",
+      ...(port !== undefined ? { port } : {}),
+      // Prefer building from source when a service declares both a build and an image.
+      ...(build
+        ? { build: { context: build.context, ...(build.dockerfile !== "Dockerfile" ? { dockerfile: build.dockerfile } : {}) } }
+        : { image: image! }),
+      ...(Object.keys(env).length ? { env } : {}),
+      ...(peers.length ? { peers } : {}),
+    });
+  }
+
+  return { ok: true, appService: appName, appPort, services: meshServices };
+}
+
+/** The port a stock datastore listens on when the compose file names neither a mapping nor an
+ *  expose. The app still needs to reach it and readiness still needs a port to poll. */
+function datastorePortForImage(image: string): number | undefined {
+  const name = image.toLowerCase();
+  if (name.includes("mariadb") || name.includes("mysql") || name.includes("percona")) return 3306;
+  if (name.includes("postgres")) return 5432;
+  if (name.includes("redis")) return 6379;
+  if (name.includes("mongo")) return 27017;
+  return undefined;
+}
+
+/** compose env, restricted to entries a build plan accepts: env-name keys with single-line values. */
+function meshEnv(environment: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(normalizeEnv(environment))) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !/[\r\n]/.test(v)) out[k] = v;
+  }
+  return out;
+}
+
+/** The compose service names a service connects to: its depends_on, plus any env value that names
+ *  another service (a database host set to the db service's name). */
+function servicePeers(svc: ComposeService, allNames: Set<string>, self: string): string[] {
+  const peers = new Set<string>();
+  const dep = svc.depends_on;
+  if (Array.isArray(dep)) {
+    for (const d of dep) if (typeof d === "string") peers.add(d);
+  } else if (dep && typeof dep === "object") {
+    for (const k of Object.keys(dep as Record<string, unknown>)) peers.add(k);
+  }
+  for (const v of Object.values(normalizeEnv(svc.environment))) if (allNames.has(v)) peers.add(v);
+  peers.delete(self);
+  return [...peers].filter((n) => allNames.has(n));
 }
 
 /** A compose `build:` is either a context string or `{ context, dockerfile }`. */
@@ -260,9 +374,10 @@ export type ClassifyOptions = {
 };
 
 /**
- * Classify a repo into a build plan. Deterministic: a compose file with one app plus known datastores
- * is compose-synth, a Dockerfile alone is the dockerfile strategy, and anything that does not reduce
- * to one image is not-flattenable with a reason.
+ * Classify a repo into a build plan. Deterministic: a compose file with one app plus a recipe-backed
+ * datastore flattens to compose-synth; a multi-service compose that does not flatten (more than one
+ * app, a recipe-less datastore, an image-only app) becomes a compose-mesh of linked sandboxes; a
+ * Dockerfile alone is the dockerfile strategy; anything else is not-flattenable with a reason.
  */
 export async function classify(
   source: SourceReader,
@@ -276,9 +391,36 @@ export async function classify(
   if (compose) {
     const topology = parseComposeTopology(compose.text);
     if (!topology.ok) {
-      // A compose file that cannot flatten is a clear not-flattenable, not a fall-through to a
-      // Dockerfile build that would produce an app with no datastore.
-      return { strategy: "not-flattenable", ecosystem, reason: topology.reason };
+      // The single-image flatten does not fit. Try the mesh: run every service as its own linked
+      // sandbox, which covers the cases flatten rejects (more than one app, a recipe-less datastore
+      // like postgres, an image-only app). If the mesh does not fit either, keep flatten's reason,
+      // which is the clearer one for a single-service or genuinely unsupportable repo.
+      const mesh = parseComposeMesh(compose.text);
+      if (!mesh.ok) return { strategy: "not-flattenable", ecosystem, reason: topology.reason };
+
+      const appSvc = mesh.services.find((s) => s.role === "app")!;
+      let meshEcosystem = ecosystem;
+      if (appSvc.build) {
+        const appDockerfileText = await source.readFile(
+          joinRepoPath(appSvc.build.context, appSvc.build.dockerfile ?? "Dockerfile"),
+        );
+        if (appDockerfileText) meshEcosystem = ecosystemFromDockerfile(appDockerfileText);
+      }
+      return {
+        strategy: "compose-mesh",
+        ecosystem: meshEcosystem,
+        composePath: compose.path,
+        appService: mesh.appService,
+        services: mesh.services,
+        seed: options.composeSeedHint ?? { kind: "none" },
+        runtime: {
+          name,
+          baseUrl: `http://localhost:${mesh.appPort}`,
+          readinessPath: options.readinessPathHint ?? "/",
+          // Several cold services (a database warming up) need a wider readiness budget than one app.
+          warmupSeconds: 90,
+        },
+      };
     }
     // The app's own Dockerfile decides the ecosystem for a compose app, since its package manifest
     // may sit in a subdirectory the root scan misses. Fall back to the root scan if it reveals

@@ -540,3 +540,206 @@ export async function provisionTarget(
 
   return { sandboxId: sandbox.id, appPort };
 }
+
+/** One service of a compose-mesh, as the reproduction path sees it: the pinned image and snapshot to
+ *  boot, and the details needed to start it and wire it to its peers. */
+export type MeshServiceAuth = {
+  service: string;
+  role: "app" | "dependency";
+  imageName: string;
+  imageDigest: string;
+  snapshotId: string;
+  snapshotImageRefOverride?: string;
+  /** Absent for a background worker with no inbound port. */
+  port?: number;
+  /** Present for a service we built; its identity is re-proven from inside before it runs. */
+  buildMarker?: string;
+  /** The command that starts a built service, whose image entrypoint was overridden to idle. Absent
+   *  for a pulled dependency, which auto-starts from its own entrypoint. */
+  startCommand?: string;
+  /** Compose service names this service connects to, resolved to peer sandbox ids at wiring time. */
+  peers?: string[];
+};
+
+export type MeshProvisionAuthorization = {
+  targetProfileId: string;
+  appService: string;
+  services: MeshServiceAuth[];
+  readinessPath: string;
+  warmupSeconds?: number;
+  recipeId?: string;
+};
+
+/**
+ * The shell that maps each compose service name to its peer's link ip in /etc/hosts. A linked
+ * sandbox resolves a peer by its sandbox id over the link network's DNS (proven in
+ * scripts/spike-linked-sandboxes.ts); this looks that up and writes "<ip> <service-name>" so the
+ * compose service name the app baked in (a DB host set to "db") resolves to the db sandbox. Pure,
+ * so the wiring is unit-tested without a live sandbox.
+ */
+export function peerHostsCommand(peers: Array<{ name: string; sandboxId: string }>): string {
+  return peers
+    .map(
+      (p) =>
+        `ip=$(getent hosts ${shArg(p.sandboxId)} | awk '{print $1}'); ` +
+        `if [ -n "$ip" ]; then echo "$ip ${p.name}" >> /etc/hosts; fi`,
+    )
+    .join("; ");
+}
+
+function shArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Provision a compose-mesh: the app service as the parent sandbox and each dependency as a linked
+ * child, all internet-blocked. The app is what probe_target reaches; a dependency is internal.
+ *
+ * The order is deliberate. The app boots first (a child links to a parent, so the parent must exist)
+ * with its entrypoint idle so it does not start before its peers are reachable. Then every node is
+ * proven internet-closed (verify the graph: one leaky node fails the whole mesh closed) and every
+ * built node is proven to be the build we expect. Then each sandbox's /etc/hosts is wired so a
+ * compose service name resolves to its peer. Only then are built dependencies started, their ports
+ * waited on, and finally the app started and waited on. A failure at any step tears the whole group
+ * down before returning.
+ */
+export async function provisionMesh(
+  auth: MeshProvisionAuthorization,
+  opts?: { signal?: AbortSignal },
+): Promise<{ sandboxId: string; appPort: number; sandboxIds: string[] }> {
+  throwIfAborted(opts?.signal);
+  const app = auth.services.find((s) => s.role === "app");
+  if (!app || app.port === undefined) {
+    throw new ProvisionCouldNotDeployError("compose-mesh has no app service with a port");
+  }
+
+  const created: Array<{ service: string; sandbox: Sandbox }> = [];
+  const idByService = new Map<string, string>();
+  const sandboxOf = (service: string): Sandbox => {
+    const found = created.find((c) => c.service === service);
+    if (!found) throw new Error(`mesh service ${service} was not provisioned`);
+    return found.sandbox;
+  };
+  const teardownAll = async () => {
+    for (const c of [...created].reverse()) {
+      await teardownSandbox(c.sandbox.id, opts?.signal?.aborted === true).catch(() => undefined);
+    }
+  };
+
+  try {
+    // 1. App (parent) first, then each dependency linked to it.
+    const appSandbox = await bootMeshService(app, undefined, auth, opts?.signal);
+    created.push({ service: app.service, sandbox: appSandbox });
+    idByService.set(app.service, appSandbox.id);
+    for (const dep of auth.services.filter((s) => s.role !== "app")) {
+      const sandbox = await bootMeshService(dep, appSandbox.id, auth, opts?.signal);
+      created.push({ service: dep.service, sandbox });
+      idByService.set(dep.service, sandbox.id);
+    }
+
+    // 2. Verify the graph: every node blocks egress, every built node is the build we expect.
+    for (const c of created) {
+      throwIfAborted(opts?.signal);
+      await verifyNoEgress(c.sandbox, opts?.signal);
+      const svc = auth.services.find((s) => s.service === c.service)!;
+      if (svc.buildMarker) {
+        const ok = await buildMarkerCheck(c.sandbox, svc.buildMarker);
+        throwIfAborted(opts?.signal);
+        if (!ok) throw new Error(`mesh service ${c.service} booted the wrong build`);
+      }
+    }
+
+    // 3. Wire /etc/hosts so a compose service name resolves to its peer's link ip.
+    for (const c of created) {
+      const svc = auth.services.find((s) => s.service === c.service)!;
+      const peerNames = svc.peers ?? auth.services.filter((s) => s.service !== c.service).map((s) => s.service);
+      const peers = peerNames
+        .map((name) => ({ name, sandboxId: idByService.get(name) }))
+        .filter((p): p is { name: string; sandboxId: string } => Boolean(p.sandboxId));
+      if (peers.length) await execute(c.sandbox, peerHostsCommand(peers), 20);
+    }
+
+    // 4. Start built dependencies (a pulled datastore already auto-started from its own entrypoint).
+    for (const dep of auth.services.filter((s) => s.role !== "app" && s.startCommand)) {
+      await launchMeshService(sandboxOf(dep.service), dep.startCommand!);
+    }
+    // 5. Wait for every dependency that has a port to be listening before the app connects.
+    for (const dep of auth.services.filter((s) => s.role !== "app" && s.port !== undefined)) {
+      await waitForPortListening(sandboxOf(dep.service), dep.port!, opts?.signal);
+    }
+    // 6. Start the app and wait for it to answer its own port.
+    await waitForAppReady(
+      appSandbox,
+      app.port,
+      auth.readinessPath,
+      app.startCommand,
+      READINESS_TIMEOUT_MS + Math.max(0, auth.warmupSeconds ?? 0) * 1000,
+      opts?.signal,
+    );
+
+    return { sandboxId: appSandbox.id, appPort: app.port, sandboxIds: created.map((c) => c.sandbox.id) };
+  } catch (error) {
+    await teardownAll();
+    rethrowIfAborted(error, opts?.signal);
+    if (error instanceof ProvisionCouldNotDeployError || error instanceof ProvisionTargetUnavailableError) {
+      throw error;
+    }
+    throw new ProvisionTargetUnavailableError(errorMessage(error));
+  }
+}
+
+/** Boot one mesh service from its pinned snapshot. A dependency passes the app's sandbox id as its
+ *  link parent; the app passes none. Every egress and identity check is the single-image path's. */
+async function bootMeshService(
+  svc: MeshServiceAuth,
+  parentSandboxId: string | undefined,
+  auth: MeshProvisionAuthorization,
+  signal?: AbortSignal,
+): Promise<Sandbox> {
+  const imageRef = imageRefForProfile(svc.imageName, svc.imageDigest);
+  const snapshotInfo = await getSnapshot(svc.snapshotId);
+  throwIfAborted(signal);
+  const sandbox = await createSandbox(
+    {
+      snapshot: svc.snapshotId,
+      imageRef,
+      cpu: snapshotInfo.cpu ?? 0,
+      memoryGb: snapshotInfo.mem ?? 0,
+      diskGb: snapshotInfo.disk ?? 0,
+      ttlMinutes: SANDBOX_TTL_MINUTES,
+      labels: {
+        ...(auth.recipeId ? { "bountydesk.recipe": auth.recipeId } : {}),
+        "bountydesk.targetProfileId": auth.targetProfileId,
+        "bountydesk.meshService": svc.service,
+      },
+    },
+    svc.snapshotImageRefOverride,
+    parentSandboxId ? { parentSandboxId } : undefined,
+  );
+  throwIfAborted(signal);
+  return await getSandbox(sandbox.id);
+}
+
+/** Launch a service's start command detached, the same way waitForAppReady launches the app: its own
+ *  session so it outlives this exec, stdin detached so it is not signalled when the exec returns. */
+async function launchMeshService(sandbox: Sandbox, startCommand: string): Promise<void> {
+  const escaped = startCommand.replace(/'/g, "'\\''");
+  await execute(sandbox, `setsid sh -c '${escaped}' </dev/null >/tmp/bountydesk-app.log 2>&1 & echo launched`, 10);
+}
+
+/** Poll from inside until a dependency is listening on its port, so the app does not connect before
+ *  the datastore is up. A datastore does not speak HTTP, so this checks the listening socket rather
+ *  than an HTTP status. */
+async function waitForPortListening(sandbox: Sandbox, port: number, signal?: AbortSignal): Promise<void> {
+  const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  const probe =
+    `ss -ltn 2>/dev/null | grep -q ':${port} ' && echo UP || ` +
+    `{ netstat -ltn 2>/dev/null | grep -q ':${port} ' && echo UP || echo DOWN; }`;
+  while (Date.now() < deadline) {
+    throwIfAborted(signal);
+    const result = await execute(sandbox, probe, 10);
+    if (result.result.includes("UP")) return;
+    await delay(READINESS_POLL_MS, signal);
+  }
+  throw new Error(`mesh dependency on sandbox ${sandbox.id} did not listen on port ${port} in time`);
+}

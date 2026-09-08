@@ -1,12 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyEgressProbe } from "./provision";
+import { classifyEgressProbe, peerHostsCommand } from "./provision";
 
 const DENIAL = "Internet is restricted";
 
 // curl: the proxy answers a blocked request with 403 and the denial body, and nothing else is
 // accepted as proof. This preserves the behaviour that predated the wget fallback.
+test("peerHostsCommand resolves each peer by sandbox id and appends its service name to /etc/hosts", () => {
+  const cmd = peerHostsCommand([
+    { name: "db", sandboxId: "sb-db-1" },
+    { name: "redis", sandboxId: "sb-redis-2" },
+  ]);
+  // Resolves the peer's link ip by its sandbox id (link DNS), then maps the compose service name.
+  assert.match(cmd, /getent hosts 'sb-db-1'/);
+  assert.match(cmd, /echo "\$ip db" >> \/etc\/hosts/);
+  assert.match(cmd, /getent hosts 'sb-redis-2'/);
+  assert.match(cmd, /echo "\$ip redis" >> \/etc\/hosts/);
+  // Only writes when the lookup found an ip, so a missing peer does not corrupt /etc/hosts.
+  assert.match(cmd, /if \[ -n "\$ip" \]/);
+});
+
+test("peerHostsCommand is empty for a service with no peers", () => {
+  assert.equal(peerHostsCommand([]), "");
+});
+
 test("curl: 403 with the denial body is the only pass", () => {
   assert.equal(
     classifyEgressProbe({ tool: "curl", exitCode: 0, status: "403", body: DENIAL, stderr: "" }),
