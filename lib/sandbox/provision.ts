@@ -697,7 +697,18 @@ async function bootMeshService(
   signal?: AbortSignal,
 ): Promise<Sandbox> {
   const imageRef = imageRefForProfile(svc.imageName, svc.imageDigest);
-  const snapshotInfo = await getSnapshot(svc.snapshotId);
+  // A snapshot the build step just created can still be materialising ("pulling"); the mesh boots
+  // several of them right after a build, so wait for this one to go active rather than failing the
+  // whole run on a race the next attempt would just retry.
+  let snapshotInfo = await getSnapshot(svc.snapshotId);
+  const activeDeadline = Date.now() + 180_000;
+  while (snapshotInfo.state !== "active" && Date.now() < activeDeadline) {
+    if (["error", "build_failed"].includes(snapshotInfo.state)) {
+      throw new Error(`snapshot ${svc.snapshotId} for ${svc.service} is ${snapshotInfo.state}`);
+    }
+    await delay(3000, signal);
+    snapshotInfo = await getSnapshot(svc.snapshotId);
+  }
   throwIfAborted(signal);
   const sandbox = await createSandbox(
     {
