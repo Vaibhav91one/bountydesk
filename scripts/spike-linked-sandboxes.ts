@@ -120,10 +120,14 @@ async function egressProbe(sandbox: Sandbox, url: string): Promise<{ blocked: bo
   ].join("; ");
   const out = (await execute(sandbox, script, 20)).result;
   const m = /PROBE curl_exit=(\d+) status=(\d*)/.exec(out);
-  const curlExit = m ? Number(m[1]) : NaN;
+  const curlExit = m ? Number(m[1]) : null;
   const status = !m || m[2] === "" || m[2] === "000" ? null : m[2];
   const body = /BODY (.*)/.exec(out)?.[1]?.trim() ?? "";
-  const blocked = (curlExit !== 0 && status === null) || (status === DENIAL_STATUS && body.includes(DENIAL));
+  // Fail closed: only the interception proxy's 403 with its denial body proves egress was blocked,
+  // the same rule the production classifier uses (lib/sandbox/provision.ts). A transport failure, a
+  // truncated result, or a missing PROBE marker is not proof of a block (it could be a transient
+  // error), so it does not pass the gate.
+  const blocked = status === DENIAL_STATUS && body.includes(DENIAL);
   return { blocked, detail: { url, curlExit, status, body: body.slice(0, 80) } };
 }
 
@@ -163,26 +167,29 @@ async function startServer(sandbox: Sandbox): Promise<void> {
   if (!out.includes("SERVER_LISTENING")) throw new Error(`server did not come up on ${PORT}: ${out.slice(0, 200)}`);
 }
 
-/** Every IPv4 the sandbox holds, minus loopback, as bare addresses. One of these is the link
- *  network address a peer should be able to reach. */
-async function ipv4Addrs(sandbox: Sandbox): Promise<string[]> {
-  const out = (await execute(sandbox, "ip -4 -o addr show 2>/dev/null | awk '{print $4}'", 15)).result;
-  return out
-    .split(/\s+/)
-    .map((c) => c.split("/")[0].trim())
-    .filter((a) => /^\d+\.\d+\.\d+\.\d+$/.test(a) && a !== "127.0.0.1");
+/** B's link address as a peer resolves it: the link network's DNS maps a sandbox id to its private
+ *  link ip. This is THE link address, not just any interface B happens to hold, so a probe to it
+ *  proves the private-link route rather than an unrelated bridge answering. */
+async function linkAddressOf(from: Sandbox, peerId: string): Promise<string | null> {
+  const out = (await execute(from, `getent hosts ${peerId} | awk '{print $1}' | head -1`, 15)).result.trim();
+  return /^\d+\.\d+\.\d+\.\d+$/.test(out) ? out : null;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function sweep(ignore: string[] = []): Promise<string[]> {
-  const stragglers = (await listSandboxes({ [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE })).filter(
-    (s) => !ignore.includes(s.id),
-  );
-  for (const s of stragglers) await deleteSandbox(s.id);
-  return stragglers.map((s) => s.id);
+/** Delete everything this run labelled, retrying the listing with backoff. A create Daytona accepted
+ *  can take a moment to appear, and a lost response leaves a labelled sandbox with no id in `created`,
+ *  so one point-in-time listing can miss it. Mirrors the retry in scripts/spike-daytona.ts. */
+async function sweep(ignore: string[] = [], attempts = 5): Promise<string[]> {
+  const labels = { [SPIKE_LABEL]: SPIKE_RUN, [PURPOSE_LABEL]: PURPOSE };
+  for (let attempt = 1; ; attempt++) {
+    const stragglers = (await listSandboxes(labels)).filter((s) => !ignore.includes(s.id));
+    for (const s of stragglers) await deleteSandbox(s.id);
+    if (stragglers.length || attempt === attempts) return stragglers.map((s) => s.id);
+    await sleep(3000 * attempt);
+  }
 }
 
 async function main(): Promise<void> {
@@ -224,32 +231,26 @@ async function main(): Promise<void> {
     step("co_located_same_runner", Boolean(sbA.runnerId) && sbA.runnerId === sbB.runnerId);
     await requireTools(sbB, "child B");
 
-    // 3. Bring up an HTTP server on B, and learn B's addresses and DNS aliases.
-    console.log("\n3. START server on B, discover B addressing");
+    console.log("\n3. START server on B");
     await startServer(sbB);
-    const bAddrs = await ipv4Addrs(sbB);
-    step("B_ipv4_addrs", bAddrs);
-    const bHostsFile = (await execute(sbB, "cat /etc/hosts 2>/dev/null; echo '---'; hostname", 15)).result;
-    step("B_hosts_and_hostname", bHostsFile.slice(0, 400));
 
-    // 4. THE QUESTION: can A reach B over the link network while both are internet-blocked?
-    //    Try B's id as a DNS name, and every private IPv4 B holds. localhost is a negative
-    //    control: A hitting its own :8080 must NOT look like reaching B.
+    // 4. THE QUESTION: can A reach B over the link network while both are internet-blocked? Require
+    //    BOTH routes a linked peer uses: B's sandbox id resolved by the link DNS, and the private
+    //    link ip that id maps to. localhost is a negative control: A hitting its own :8080 must not
+    //    look like reaching B.
     console.log("\n4. REACH B FROM A (the load-bearing test)");
-    const candidates = [bId, ...bAddrs];
-    const reach: Record<string, unknown> = {};
-    let linkReached = false;
-    for (const host of candidates) {
-      const r = await httpGet(sbA, host);
-      reach[host] = { code: r.code, hasToken: r.hasToken };
-      if (r.code === "200" && r.hasToken) linkReached = true;
-    }
+    const linkIp = await linkAddressOf(sbA, bId);
+    step("A_resolved_B_link_ip", linkIp);
+    const byId = await httpGet(sbA, bId);
+    const byLinkIp = linkIp ? await httpGet(sbA, linkIp) : { code: null, hasToken: false, raw: "no link ip" };
     const control = await httpGet(sbA, "127.0.0.1");
-    step("A_to_B_reach", reach);
+    step("A_reach_B_by_id", { code: byId.code, hasToken: byId.hasToken });
+    step("A_reach_B_by_link_ip", { code: byLinkIp.code, hasToken: byLinkIp.hasToken });
     step("A_localhost_control_hasToken", control.hasToken);
-    step("link_reached", linkReached);
-    const dnsA = (await execute(sbA, `getent hosts ${bId} 2>/dev/null || echo NO_DNS`, 15)).result.trim();
-    step("A_dns_resolve_B_id", dnsA.slice(0, 200));
+    const idReached = byId.code === "200" && byId.hasToken;
+    const linkIpReached = byLinkIp.code === "200" && byLinkIp.hasToken;
+    step("link_reached_by_id", idReached);
+    step("link_reached_by_link_ip", linkIpReached);
 
     // 5. Both nodes must still be internet-blocked. The mesh is only as strong as its leakiest
     //    node, so this is checked on A and on B.
@@ -264,8 +265,12 @@ async function main(): Promise<void> {
     step("A_internet_blocked", aBlocked);
     step("B_internet_blocked", bBlocked);
 
-    // 6. Isolation: a sandbox OUTSIDE the linked group must not reach B. Uses a fresh label so
-    //    it is not counted as part of the A/B group, but is still swept in the finally.
+    // 6. Isolation: a sandbox OUTSIDE the linked group must not reach B. C carries the same block-all
+    //    as A and B but is not linked, so it has no route into the group. Record whether C landed on
+    //    the group's runner: block-all or a different runner could also stop C, so this demonstrates
+    //    the property that matters (an outsider cannot reach B) rather than isolating the exact
+    //    mechanism. C shares the run label and is swept in the finally; it is outside the group
+    //    because its create omits linkedSandbox, not because of any label.
     console.log("\n6. ISOLATION: an unlinked sandbox C must NOT reach B");
     const cRaw = await rawCreate(nodeBody({}, snapshotId));
     const cId = String(cRaw.id);
@@ -273,23 +278,26 @@ async function main(): Promise<void> {
     step("C_id", cId);
     const sbC = await waitForRunning(cId);
     await requireTools(sbC, "outsider C");
-    const cReach: Record<string, unknown> = {};
-    let isolationBroken = false;
-    for (const host of [bId, ...bAddrs]) {
-      const r = await httpGet(sbC, host);
-      cReach[host] = { code: r.code, hasToken: r.hasToken };
-      if (r.code === "200" && r.hasToken) isolationBroken = true;
-    }
-    step("C_to_B_reach", cReach);
-    step("isolation_broken", isolationBroken);
+    step("C_runner_matches_group", Boolean(sbB.runnerId) && sbC.runnerId === sbB.runnerId);
+    const cById = await httpGet(sbC, bId);
+    const cByLinkIp = linkIp ? await httpGet(sbC, linkIp) : { code: null, hasToken: false, raw: "no link ip" };
+    step("C_reach_B", {
+      byId: { code: cById.code, hasToken: cById.hasToken },
+      byLinkIp: { code: cByLinkIp.code, hasToken: cByLinkIp.hasToken },
+    });
+    const outsiderReached =
+      (cById.code === "200" && cById.hasToken) || (cByLinkIp.code === "200" && cByLinkIp.hasToken);
+    step("outsider_reached_B", outsiderReached);
 
     // Gates. Exiting zero has to mean all of these held.
     console.log("\n7. VERDICT");
-    if (!linkReached) throw new Error("A could not reach B over the link network: the mesh premise fails on this provider");
+    if (!idReached || !linkIpReached) {
+      throw new Error("A did not reach B over BOTH the link DNS and the link ip: the mesh premise is not proven on this provider");
+    }
     if (control.hasToken) throw new Error("localhost control returned the token: the reachability test is not measuring the link");
     if (!aBlocked || !bBlocked) throw new Error("a linked node could still reach the internet: block-all does not hold alongside linking");
-    if (isolationBroken) throw new Error("an unlinked sandbox reached B: the link network is not private to the group");
-    step("verdict", "PASS: link works with block-all on both nodes, and the group is isolated");
+    if (outsiderReached) throw new Error("an unlinked sandbox reached B: the link network is not private to the group");
+    step("verdict", "PASS: A reaches B by id and by link ip with block-all on both nodes, and the outsider cannot reach B");
   } finally {
     console.log("\n8. TEARDOWN");
     // Children first: an ephemeral child may already be gone once its parent is deleted, and a
