@@ -295,7 +295,7 @@ async function verifyAndWrite(
  *  run for a buildable strategy, so reaching them without one is a bug, not a retryable failure. */
 function buildablePlan(
   value: unknown,
-): Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "agent-authored" }> {
+): Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "compose-mesh" | "agent-authored" }> {
   const plan = parseBuildPlan(value);
   if (plan.strategy === "not-flattenable") {
     throw new Error("build step reached with a not-flattenable plan");

@@ -42,6 +42,10 @@ export type BuiltService = {
   port?: number;
   /** Present for a service we built (its image carries the marker), absent for a pulled image. */
   buildMarker?: string;
+  /** The command that starts a built service. Its image entrypoint is overridden to idle so it does
+   *  not auto-start before its peers are reachable; the provisioner wires peers, then runs this. A
+   *  pulled dependency (a stock datastore) auto-starts from its own entrypoint and has none. */
+  startCommand?: string;
   /** The service's env; a value naming another service is rewritten to that peer's sandbox id at
    *  provision time, so it is kept verbatim here. */
   env?: Record<string, string>;

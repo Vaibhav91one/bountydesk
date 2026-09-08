@@ -189,6 +189,7 @@ async function buildMesh(
       const dockerfile = svc.build.dockerfile ?? "Dockerfile";
       const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
+      const stageTag = `bountydesk-mesh-${svc.service}`;
       // Bake the marker, pinned to root because a service Dockerfile may end on a non-root USER, so
       // reproduction can prove which build booted this service.
       await run(
@@ -197,8 +198,13 @@ async function buildMesh(
       );
       const dfText = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
       const log = (
-        await run(sandbox, `cd /work/source/${context} && docker build -f ${dockerfile} ${PROXY_BUILD_ARGS} -t ${imageRef} .`)
+        await run(sandbox, `cd /work/source/${context} && docker build -f ${dockerfile} ${PROXY_BUILD_ARGS} -t ${stageTag} .`)
       ).result;
+      // Capture the service's real start command, then rebuild with an idle entrypoint so the image
+      // does not auto-start before the provisioner has wired its peers. The provisioner runs this.
+      const startCommand = await inspectMeshStartCommand(sandbox, stageTag);
+      await writeGenDockerfile(sandbox, `FROM ${stageTag}\nENTRYPOINT ["tail", "-f", "/dev/null"]\nCMD []\n`);
+      await run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
       const built: BuiltService = {
@@ -208,6 +214,7 @@ async function buildMesh(
         snapshotId,
         snapshotImageRef: imageRef,
         buildMarker: ctx.buildMarker,
+        startCommand,
       };
       services.push(built);
       if (svc.role === "app") {
@@ -406,6 +413,25 @@ async function inspectStartCommand(sandbox: Sandbox, image: string): Promise<str
     }
   }
   throw new Error(`app image ${image} declares no CMD or ENTRYPOINT to start it`);
+}
+
+/** The full command a mesh service starts with: its entrypoint and its command combined, since a
+ *  service may set either or both. The provisioner runs this after the image's entrypoint was
+ *  overridden to idle, so it must be the complete launch line, not just the CMD. */
+async function inspectMeshStartCommand(sandbox: Sandbox, image: string): Promise<string> {
+  const read = async (field: "Entrypoint" | "Cmd"): Promise<string[]> => {
+    const raw = (await run(sandbox, `docker inspect --format='{{json .Config.${field}}}' ${image}`)).result.trim();
+    if (!raw || raw === "null") return [];
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      return [];
+    }
+  };
+  const parts = [...(await read("Entrypoint")), ...(await read("Cmd"))];
+  if (parts.length === 0) throw new Error(`service image ${image} declares no CMD or ENTRYPOINT to start it`);
+  return parts.join(" ");
 }
 
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
