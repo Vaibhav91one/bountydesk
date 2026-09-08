@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowSquareOut, Check, CheckCircle, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowSquareOut, Check, CheckCircle, CircleNotch, Prohibit, Warning } from "@phosphor-icons/react/ssr";
 import { GitHubLight } from "developer-icons";
 
 import { formatStamp } from "@/lib/format";
@@ -21,6 +21,7 @@ import {
 import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import { DownloadArtifact } from "./download-artifact";
 import { OnboardingDialog, type OnboardingTab } from "./onboarding-dialog";
+import { onboardingView } from "./onboarding-steps";
 import type { RepositoryRow } from "./connection-tabs";
 import type { OnboardingDetail } from "@/lib/github/connections";
 
@@ -37,6 +38,30 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function count(n: number, noun: string): string {
   if (n === 0) return `No ${noun}s`;
   return `${n} ${n === 1 ? noun : `${noun}s`}`;
+}
+
+/**
+ * The button into the onboarding dialog, reading the current state rather than always saying the same
+ * thing: onboarded reads as done and green, a live onboarding as amber and in progress, and the two
+ * terminal misses (failed, unsupported) in their own colours. onboardingView's terminal bucket is the
+ * same one the dialog's stepper keys off, so the button and the view it opens never disagree.
+ */
+function OnboardingButton({ state, onOpen }: { state: string; onOpen: () => void }) {
+  const { terminal } = onboardingView(state);
+  const view =
+    terminal === "configured"
+      ? { label: "Onboarded", icon: <Check weight="bold" />, className: "bg-phase-delivered text-background hover:bg-phase-delivered/90" }
+      : terminal === "failed"
+        ? { label: "Onboarding failed", icon: <Warning weight="fill" />, className: "bg-destructive text-white hover:bg-destructive/90" }
+        : terminal === "unsupported"
+          ? { label: "Can't be onboarded", icon: <Prohibit weight="fill" />, className: "bg-phase-closed text-background hover:bg-phase-closed/90" }
+          : { label: "Onboarding…", icon: <CircleNotch weight="bold" className="animate-spin" />, className: "bg-phase-approval text-background hover:bg-phase-approval/90" };
+
+  return (
+    <Button className={`w-full justify-center ${view.className}`} onClick={onOpen}>
+      {view.icon} {view.label}
+    </Button>
+  );
 }
 
 /** Plain-language heading for where onboarding is, or why it stopped. A live progress note from the
@@ -281,12 +306,7 @@ export function RepositorySheet({
               ) : null}
 
               {repo.onboardingDetail ? (
-                <Button
-                  className="w-full justify-center bg-phase-delivered text-background hover:bg-phase-delivered/90"
-                  onClick={() => setDialogTab("state")}
-                >
-                  <Check weight="bold" /> Onboarding
-                </Button>
+                <OnboardingButton state={repo.onboardingDetail.state} onOpen={() => setDialogTab("state")} />
               ) : null}
 
               <OnboardingDialog
