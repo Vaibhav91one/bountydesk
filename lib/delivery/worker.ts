@@ -15,6 +15,7 @@ import type { IssueComment } from "@/lib/github/comment";
 
 import {
   claim,
+  claimById,
   fail,
   failPermanently,
   LeaseLostError,
@@ -192,6 +193,38 @@ export async function deliverOnce(
   const lease = await claim(owner, leaseSeconds);
   if (!lease) return null;
 
+  return deliverClaimed(lease, { leaseSeconds, deps, signal });
+}
+
+/**
+ * Drive one known outbox row. Review actions use this for synthesized analysis-only verdicts,
+ * where the approval request just enqueued a specific delivery and should not wait for an
+ * external scheduler to drain it later.
+ */
+export async function deliverById(
+  deliveryId: string,
+  owner: string,
+  {
+    leaseSeconds = 60,
+    deps,
+    signal,
+  }: { leaseSeconds?: number; deps?: DeliveryDeps; signal?: AbortSignal } = {},
+): Promise<string | null> {
+  if (signal?.aborted) return null;
+  const lease = await claimById(owner, deliveryId, leaseSeconds);
+  if (!lease) return null;
+
+  return deliverClaimed(lease, { leaseSeconds, deps, signal });
+}
+
+async function deliverClaimed(
+  lease: DeliveryLease,
+  {
+    leaseSeconds,
+    deps,
+    signal,
+  }: { leaseSeconds: number; deps?: DeliveryDeps; signal?: AbortSignal },
+): Promise<string | null> {
   if (signal?.aborted) {
     try {
       await releaseUnstarted(lease);

@@ -128,6 +128,28 @@ test("SKIP LOCKED means a second claim does not block on a locked row", async ()
   }
 });
 
+test("claimById only takes the requested delivery", async () => {
+  await drainOthers();
+  const first = await seedDelivery();
+  const second = await seedDelivery();
+
+  const claimed = await queue.claimById("targeted-worker", second.deliveryId, 60);
+  assert.ok(claimed);
+  assert.equal(claimed.id, second.deliveryId);
+  assert.equal(claimed.reportId, second.reportId);
+  assert.equal(claimed.leaseOwner, "targeted-worker");
+
+  const [firstRow] = await dbm.db
+    .select({
+      attempts: dbm.outboundDelivery.attempts,
+      leaseOwner: dbm.outboundDelivery.leaseOwner,
+    })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, first.deliveryId));
+  assert.equal(firstRow.attempts, 0);
+  assert.equal(firstRow.leaseOwner, null);
+});
+
 test("releasing an unstarted claim restores its attempt budget", async () => {
   await drainOthers();
   const seeded = await seedDelivery();

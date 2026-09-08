@@ -127,6 +127,48 @@
       "when": 1788115354944,
       "tag": "0017_relax_pending_constraint",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788241054747,
+      "tag": "0018_onboarding_queue",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788717533710,
+      "tag": "0019_onboarding_build_plan",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788783601942,
+      "tag": "0020_onboarding_agent_session",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788828560273,
+      "tag": "0021_sandboxability_review",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788828904247,
+      "tag": "0022_onboarding_progress_and_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788849114729,
+      "tag": "0023_wakeful_sue_storm",
+      "breakpoints": true
     }
   ]
 }

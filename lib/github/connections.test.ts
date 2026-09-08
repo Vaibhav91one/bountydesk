@@ -55,16 +55,68 @@ async function installation(
 async function repo(
   installationRowId: string,
   opts: { active?: boolean; archived?: boolean; configured?: boolean } = {},
+): Promise<string> {
+  ids += 1;
+  const [row] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({
+      installationId: installationRowId,
+      repoId: 800_000 + ids,
+      fullName: `acme/repo-${String(ids).padStart(3, "0")}`,
+      active: opts.active ?? true,
+      archivedAt: opts.archived ? new Date() : null,
+      targetProfileId: opts.configured === false ? null : targetProfileId,
+    })
+    .returning({ id: dbm.connectedRepository.id });
+
+  return row.id;
+}
+
+async function report(
+  connectedRepositoryId: string | null,
+  opts: { state?: string; hidden?: boolean; awaitingReviewer?: boolean } = {},
 ) {
   ids += 1;
-  await dbm.db.insert(dbm.connectedRepository).values({
-    installationId: installationRowId,
-    repoId: 800_000 + ids,
-    fullName: `acme/repo-${String(ids).padStart(3, "0")}`,
-    active: opts.active ?? true,
-    archivedAt: opts.archived ? new Date() : null,
-    targetProfileId: opts.configured === false ? null : targetProfileId,
-  });
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "github",
+      sourceRef: `github:1:issue:${ids}`,
+      title: `report ${ids}`,
+      body: "body",
+      state: (opts.state ?? "TRIAGING") as "TRIAGING",
+      connectedRepositoryId,
+      hiddenAt: opts.hidden ? new Date() : null,
+    })
+    .returning({ id: dbm.report.id });
+
+  // Waiting on a reviewer is a verdict nobody has decided yet, not a report state: a row parked
+  // in AWAITING_APPROVAL with nothing pending has no button for anyone to press.
+  if (opts.awaitingReviewer) {
+    const [v] = await dbm.db
+      .insert(dbm.verdict)
+      .values({
+        reportId: row.id,
+        outcome: opts.state === "ANALYSIS_ONLY" ? "ANALYSIS_ONLY" : "REPRODUCED",
+        summary: "summary",
+        payload: `payload ${ids}`,
+        contentHash: `hash-${ids}`,
+      })
+      .returning({ id: dbm.verdict.id });
+
+    await dbm.db.insert(dbm.agentSession).values({
+      reportId: row.id,
+      capabilityToken: `conn-cap-${ids}`,
+      sessionId: `conn-session-${ids}`,
+      turnId: `conn-turn-${ids}`,
+      pendingThreadId: `thread-${ids}`,
+      pendingToolCallId: `call-${ids}`,
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: `hash-${ids}`,
+    });
+  }
+
+  return row.id;
 }
 
 test("status reports the most severe reason first", () => {
@@ -223,4 +275,115 @@ test("last synced follows repository changes, not just the installation row", as
 
   assert.ok(after > before, "the repository write moved it forward");
   assert.equal(after.getTime(), later.getTime());
+});
+
+test("a repository counts the reports it has actually sent", async () => {
+  const install = await installation();
+  const sender = await repo(install.id);
+  const quiet = await repo(install.id);
+
+  await report(sender);
+  await report(sender, { state: "AWAITING_APPROVAL", awaitingReviewer: true });
+  // In the same state, but with nothing pending, so nobody owes it a decision.
+  await report(sender, { state: "AWAITING_APPROVAL" });
+  await report(sender, { state: "DELIVERED" });
+  await report(sender, { state: "DELIVERED" });
+  // Hidden rows are off every list in the product, so they are off this count too.
+  await report(sender, { state: "DELIVERED", hidden: true });
+  // Another repository's reports, and one that arrived through no repository at all.
+  await report(quiet);
+  await report(null);
+
+  const rows =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  const counted = rows.find((r) => r.connectedRepositoryId === sender);
+  assert.deepEqual(
+    { ...counted?.reports, lastReportAt: counted?.reports.lastReportAt !== null },
+    { total: 5, awaitingReview: 1, delivered: 2, lastReportAt: true },
+  );
+
+  assert.equal(rows.find((r) => r.connectedRepositoryId === quiet)?.reports.total, 1);
+});
+
+test("a repository that has sent nothing reports zeros rather than nothing", async () => {
+  // The panel draws these straight, so an absent entry would render "undefined reports".
+  const install = await installation();
+  const silent = await repo(install.id);
+
+  const rows =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  assert.deepEqual(rows.find((r) => r.connectedRepositoryId === silent)?.reports, {
+    total: 0,
+    awaitingReview: 0,
+    delivered: 0,
+    lastReportAt: null,
+  });
+});
+
+test("an ANALYSIS_ONLY report with a verdict to approve counts as waiting", async () => {
+  // The lane a dead-end run lands in: the report never reaches AWAITING_APPROVAL, and a reviewer
+  // still has to approve the server-authored verdict before anything ships.
+  const install = await installation();
+  const target = await repo(install.id);
+  await report(target, { state: "ANALYSIS_ONLY", awaitingReviewer: true });
+
+  const rows =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  assert.equal(rows.find((r) => r.connectedRepositoryId === target)?.reports.awaitingReview, 1);
+});
+
+test("a target awaiting approval surfaces on its repository, other states do not", async () => {
+  const install = await installation();
+  const pending = await repo(install.id, { configured: false });
+  const building = await repo(install.id, { configured: false });
+
+  const repoIdOf = async (id: string) =>
+    (
+      await dbm.db
+        .select({ repoId: dbm.connectedRepository.repoId })
+        .from(dbm.connectedRepository)
+        .where(dbm.eq(dbm.connectedRepository.id, id))
+    )[0].repoId;
+
+  const manifest = {
+    name: "webgoat",
+    repoFullName: "acme/webgoat",
+    imageName: "ghcr.io/acme/webgoat",
+    baseUrl: "http://localhost:8080",
+    readinessPath: "/health",
+  };
+
+  await dbm.db.insert(dbm.targetOnboarding).values({
+    repoId: await repoIdOf(pending),
+    repoFullName: "acme/webgoat",
+    sourceRef: "main",
+    state: "AWAITING_APPROVAL",
+    proposedManifest: manifest,
+    imageName: "ghcr.io/acme/webgoat",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+  });
+  // A build still running is the worker's to advance, not a reviewer's to decide, so it must
+  // not surface as an approvable proposal.
+  await dbm.db.insert(dbm.targetOnboarding).values({
+    repoId: await repoIdOf(building),
+    repoFullName: "acme/other",
+    sourceRef: "main",
+    state: "PENDING_MANIFEST",
+    proposedManifest: manifest,
+  });
+
+  const repos =
+    (await connections.listConnections()).find((c) => c.installationRowId === install.id)
+      ?.repositories ?? [];
+
+  const pendingRow = repos.find((r) => r.connectedRepositoryId === pending);
+  assert.equal(pendingRow?.onboarding?.manifest.name, "webgoat");
+  assert.equal(pendingRow?.onboarding?.imageDigest, `sha256:${"a".repeat(64)}`);
+  assert.equal(repos.find((r) => r.connectedRepositoryId === building)?.onboarding, null);
 });

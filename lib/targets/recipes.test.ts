@@ -339,11 +339,14 @@ test("log4shell oracle: the in-band canary echo is true, a non-200 is false", as
 // ANALYSIS_ONLY today and a false REPRODUCED is structurally impossible. authorizeReproduction-
 // Target applies recipeOracleReady after looking the recipe up; that lookup and this predicate
 // are exactly the gate, and both are exercised here without touching the database.
-test("the four onboarding recipes are gated not-oracle-ready", () => {
+test("the still-unbuilt onboarding recipes are gated not-oracle-ready", () => {
   assert.equal(recipeOracleReady(onlyRecipe("dvwa", DVWA_CONFIG)), false);
   assert.equal(recipeOracleReady(onlyRecipe("webgoat", WEBGOAT_CONFIG)), false);
-  assert.equal(recipeOracleReady(onlyRecipe("dsvw", DSVW_CONFIG)), false);
   assert.equal(recipeOracleReady(onlyRecipe("log4shell-cve-lab", LOG4SHELL_CONFIG)), false);
+});
+
+test("dsvw is oracle-ready now that it is built and onboarded", () => {
+  assert.equal(recipeOracleReady(onlyRecipe("dsvw", DSVW_CONFIG)), true);
 });
 
 test("juice-shop recipes stay oracle-ready", () => {

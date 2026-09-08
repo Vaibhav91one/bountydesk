@@ -42,6 +42,7 @@ async function seedFixture(
     tamperPayloadAfterDecision?: boolean;
     channel?: "github" | "manual";
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
+    state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
   } = {},
 ) {
   seq += 1;
@@ -54,7 +55,7 @@ async function seedFixture(
       sourceRef: opts.channel === "manual" ? `manual:${n}` : `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
-      state: "AWAITING_APPROVAL",
+      state: opts.state ?? "AWAITING_APPROVAL",
     })
     .returning({ id: dbm.report.id });
 
@@ -203,6 +204,20 @@ test("the happy path enqueues delivery, moves the report to DELIVERING, and clea
   assert.equal(pending.pendingToolCallId, null);
   assert.equal(pending.pendingVerdictId, null);
   assert.equal(pending.pendingApprovedContentHash, null);
+});
+
+test("an approved ANALYSIS_ONLY verdict publishes from the analysis lane", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    outcome: "ANALYSIS_ONLY",
+    state: "ANALYSIS_ONLY",
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(await deliveryCount(fixture.verdictId), 1);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
 });
 
 test("an approved REPRODUCED verdict publishes", async () => {
@@ -512,7 +527,9 @@ test("draftVerdictFromPendingCall accepts ANALYSIS_ONLY with no bound target and
   assert.ok(row.payload.includes("Nothing conclusive found from a read of the report alone."));
   assert.ok(row.payload.includes("Reflected parameter in search"));
   assert.ok(row.payload.includes("MEDIUM"));
-  assert.ok(row.payload.includes("scope-guard-log:1"));
+  // The reference the agent cited stays on the verdict and goes into the findings artifact, but
+  // never into the comment: on a public issue it points at a file only the harness can open.
+  assert.equal(row.payload.includes("scope-guard-log:1"), false);
   const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
   assert.equal(row.payload.split(marker).length, 2, "marker must appear exactly once");
   assert.equal(row.contentHash, computeContentHash(row.payload));
@@ -604,4 +621,92 @@ test("buildAgentDraftedPayload states the outcome on its own line, independent o
   });
 
   assert.ok(payload.startsWith("## Outcome: REPRODUCED"));
+});
+
+test("buildAgentDraftedPayload cites the target image digest only when a target ref is given", async () => {
+  const draft = {
+    outcome: "REPRODUCED" as const,
+    summary: "reproduced the injection",
+    findings: [],
+  };
+  const digest = `sha256:${"a".repeat(64)}`;
+
+  const withTarget = publishVerdictModule.buildAgentDraftedPayload("v1", draft, {
+    imageName: "ghcr.io/acme/widget",
+    imageDigest: digest,
+  });
+  assert.match(withTarget, /## Target image/);
+  assert.match(withTarget, new RegExp(`ghcr\\.io/acme/widget@${digest}`));
+
+  const withoutTarget = publishVerdictModule.buildAgentDraftedPayload("v1", draft);
+  assert.equal(withoutTarget.includes("## Target image"), false);
+
+  // The marker is still last, and appears exactly once, in both.
+  for (const body of [withTarget, withoutTarget]) {
+    assert.equal(body.split("<!-- bountydesk-delivery:v1 -->").length, 2);
+    assert.ok(body.trimEnd().endsWith("<!-- bountydesk-delivery:v1 -->"));
+  }
+});
+
+/** A connected repository whose onboarding ended UNSUPPORTED (no bound target), for the analysis-only
+ *  reason branch. */
+async function seedUnsupportedRepo(): Promise<string> {
+  const repoId = Number(`6${randomUUID().replace(/\D/g, "").slice(0, 8)}`);
+  const [installation] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({
+      installationId: Number(`5${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      accountLogin: `acct-${randomUUID()}`,
+      accountId: Number(`4${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+    })
+    .returning({ id: dbm.githubInstallation.id });
+  const [repo] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({ installationId: installation.id, repoId, fullName: `owner/unsupported-${randomUUID()}` })
+    .returning({ id: dbm.connectedRepository.id });
+  await dbm.db
+    .insert(dbm.targetOnboarding)
+    .values({ repoId, repoFullName: `owner/unsupported`, sourceRef: "https://x/u.git", state: "UNSUPPORTED" });
+  return repo.id;
+}
+
+async function verdictOf(reportId: string) {
+  const [row] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome, summary: dbm.verdict.summary, evidence: dbm.verdict.evidence })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  return row;
+}
+
+test("synthesized analysis-only names an unsandboxable repo as repository-not-onboardable", async () => {
+  const connectedRepositoryId = await seedUnsupportedRepo();
+  const { reportId } = await seedDraftableReport({ connectedRepositoryId, state: "TRIAGING" });
+
+  const result = await publishVerdictModule.synthesizeAnalysisOnlyVerdict(reportId, dbm.db);
+  assert.ok(result, "a verdict is synthesized");
+
+  const v = await verdictOf(reportId);
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal(v.summary, publishVerdictModule.SYNTHESIZED_ANALYSIS_SUMMARY, "the outbound summary stays the constant");
+  assert.deepEqual(v.evidence, {
+    source: "server-synthesized",
+    reproduction: "unavailable",
+    reason: "repository-not-onboardable",
+  });
+});
+
+test("synthesized analysis-only for a report with no target says no-reproduction-target", async () => {
+  const { reportId } = await seedDraftableReport({ state: "TRIAGING" });
+
+  const result = await publishVerdictModule.synthesizeAnalysisOnlyVerdict(reportId, dbm.db);
+  assert.ok(result);
+
+  const v = await verdictOf(reportId);
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal(v.summary, publishVerdictModule.SYNTHESIZED_ANALYSIS_SUMMARY);
+  assert.deepEqual(v.evidence, {
+    source: "server-synthesized",
+    reproduction: "unavailable",
+    reason: "no-reproduction-target",
+  });
 });

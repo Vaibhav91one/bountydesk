@@ -1,0 +1,131 @@
+zerops:
+  - setup: bdworker
+    build:
+      base: nodejs@22
+      buildCommands:
+        - npm ci
+      deployFiles:
+        - agent
+        - app
+        - components
+        - design
+        - docs
+        - drizzle
+        - hooks
+        - lib
+        - public
+        - scripts
+        - skills
+        - drizzle.config.ts
+        - eslint.config.mjs
+        - next.config.ts
+        - node_modules
+        - package-lock.json
+        - package.json
+        - postcss.config.mjs
+        - proxy.ts
+        - tsconfig.json
+      cache:
+        - node_modules
+    run:
+      base: nodejs@22
+      envVariables:
+        NODE_ENV: production
+        TRUEFORGE_URL: http://trueforge:8791
+        # The daemon runs a claim loop and a sweeper for each of the five queues plus the
+        # agent-session poller: eleven loops that each want a connection at once, most of all at
+        # startup when they all fire together. A pool below that count starves the loops that lose
+        # the race, and a starved loop never finishes an iteration, so /healthz reads it as wedged
+        # and the platform restarts the worker every couple of minutes. Keep the pool above the
+        # loop count. The pooler (port 6543) multiplexes these onto far fewer server connections.
+        DATABASE_POOL_MAX: "12"
+        WORKER_HEALTH_PORT: "8080"
+        # Target onboarding (lib/build-onboarding). Non-secret config only; DAYTONA_API_KEY and
+        # GHCR_PUSH_TOKEN are set as service secrets, not here. BUILD_BASE_SNAPSHOT is the
+        # DinD-capable Daytona snapshot the build sandbox boots from; BUILD_EGRESS_ALLOWLIST is
+        # the only network a build may reach (git host, image registries and their blob CDNs, and
+        # the language package hosts a target's own build pulls from). It stays an allowlist: a
+        # target whose ecosystem is not listed here fails the build rather than reaching anywhere.
+        # Add hosts per ecosystem as targets need them (npm, Alpine apk and PyPI are here; apt,
+        # Packagist or Maven Central would come next). The reproduction sandbox is unaffected and
+        # stays fully offline.
+        BUILD_BASE_SNAPSHOT: bountydesk-build-dind
+        BUILD_EGRESS_ALLOWLIST: "github.com,codeload.github.com,ghcr.io,pkg-containers.githubusercontent.com,registry-1.docker.io,auth.docker.io,index.docker.io,docker.io,production.cloudflare.docker.com,production.cloudfront.docker.com,registry.npmjs.org,dl-cdn.alpinelinux.org,pypi.org,files.pythonhosted.org"
+        GHCR_NAMESPACE: ghcr.io/vaibhav91one
+      start: npm run worker:daemon
+      healthCheck:
+        httpGet:
+          port: 8080
+          path: /healthz
+        failureTimeout: 60s
+        disconnectTimeout: 30s
+        recoveryTimeout: 30s
+        execPeriod: 30s
+
+  - setup: trueforge
+    build:
+      base: nodejs@22
+      os: ubuntu
+      prepareCommands:
+        - sudo apt-get update
+        - sudo apt-get install -y python3 make g++
+      buildCommands:
+        - cd ops/trueforge && npm install --omit=dev
+      deployFiles:
+        - agent
+        - ops/trueforge
+        - scripts/run-trueforge-proxy.mjs
+        - scripts/bootstrap-trueforge.mjs
+        - skills
+      cache:
+        - ops/trueforge/node_modules
+    deploy:
+      readinessCheck:
+        httpGet:
+          port: 8791
+          path: /healthz
+        failureTimeout: 90s
+        retryPeriod: 10s
+    run:
+      base: nodejs@22
+      os: ubuntu
+      ports:
+        - port: 8791
+          httpSupport: true
+      volume:
+        hostname: tfdata
+        mountPath: /mnt/tfdata
+      envVariables:
+        NODE_ENV: production
+        TRUEFORGE_UPSTREAM_URL: http://127.0.0.1:8790
+        TRUEFORGE_PROXY_PORT: "8791"
+        TRUEFORGE_PROXY_HEALTH_URL: http://127.0.0.1:8791/healthz
+        SQLITE_PATH: /mnt/tfdata/db.sqlite
+        HOST: 127.0.0.1
+        # The harness's MCP connectors (publish-verdict, build, scope-guard) are registered at
+        # APP_BASE_URL, which is the app host. SCOPE_GUARD_URL is the same origin. Both point at the
+        # app domain, which now tracks production.
+        APP_BASE_URL: https://app.bountydesk.vaibhav.quest
+        SCOPE_GUARD_URL: https://app.bountydesk.vaibhav.quest
+      startCommands:
+        - name: trueforge
+          command: node ops/trueforge/node_modules/@truefoundry/trueforge/dist/cli.js --port 8790
+        - name: proxy
+          # Bind every interface: Zerops forwards its HTTP ingress to the container, and neither
+          # loopback nor the IPv6 that hostname -i reports first is the address it targets, so a
+          # narrower bind is unreachable from the ingress and answers 502. Safe because this hop
+          # authenticates every request with TRUEFORGE_API_KEY, and the raw agent server it
+          # fronts stays on 127.0.0.1:8790.
+          command: |
+            export TRUEFORGE_PROXY_HOSTS="0.0.0.0"
+            node scripts/run-trueforge-proxy.mjs
+        - name: bootstrap
+          command: node scripts/bootstrap-trueforge.mjs
+      healthCheck:
+        httpGet:
+          port: 8791
+          path: /healthz
+        failureTimeout: 60s
+        disconnectTimeout: 30s
+        recoveryTimeout: 30s
+        execPeriod: 30s

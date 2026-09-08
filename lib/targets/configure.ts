@@ -71,6 +71,10 @@ export type ConfigureTargetInput = TargetPin & {
   repoId: number;
   targetName?: string;
   targetDefinition?: TargetDefinition;
+  /** The Dockerfile the target image was built from, when the target came through the
+   *  onboarding pipeline. Stored on the profile so a report against it can offer the file for
+   *  download; not part of the pinned identity, so it is never compared in the drift check. */
+  dockerfileText?: string;
 };
 
 export type ConfigureJuiceShopTargetInput = Omit<
@@ -89,6 +93,18 @@ export async function configureJuiceShopTarget(
   input: ConfigureJuiceShopTargetInput,
 ): Promise<ConfiguredTarget> {
   return configureTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME });
+}
+
+/**
+ * A profile with this name already exists and its pinned settings differ from what configure was
+ * asked to write. configureTarget refuses to overwrite one on purpose (see rotateTarget's note); a
+ * caller that has verified the new build, like onboarding a rebuild, catches this and rotates instead.
+ */
+export class TargetProfileExistsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TargetProfileExistsError";
+  }
 }
 
 export async function configureTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
@@ -134,6 +150,7 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
         snapshotId: input.snapshotId,
         config,
         scopeRules: definition.scopeRules,
+        dockerfileText: input.dockerfileText ?? null,
       })
       .onConflictDoNothing({ target: targetProfile.name })
       .returning();
@@ -155,7 +172,7 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
       !isDeepStrictEqual(target.config, config) ||
       !isDeepStrictEqual(target.scopeRules, definition.scopeRules)
     ) {
-      throw new Error(`${definition.name} exists with different pinned target settings`);
+      throw new TargetProfileExistsError(`${definition.name} exists with different pinned target settings`);
     }
 
     await tx
@@ -252,6 +269,7 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
         snapshotId: input.snapshotId,
         config,
         scopeRules: definition.scopeRules,
+        ...(input.dockerfileText !== undefined ? { dockerfileText: input.dockerfileText } : {}),
         updatedAt: new Date(),
       })
       .where(eq(targetProfile.id, target.id))

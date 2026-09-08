@@ -168,6 +168,13 @@ export const targetProfile = pgTable(
     config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
     /** Allowed hosts/paths; consulted by scope-guard. */
     scopeRules: jsonb("scope_rules").notNull().default(sql`'[]'::jsonb`),
+    /**
+     * The Dockerfile the target image was built from, when the target came through the
+     * onboarding pipeline (lib/build-onboarding). Null for the hand-built demo profile. Durable
+     * and human-readable, so a report against this target can offer it as a downloadable
+     * artifact and cite the image digest in the delivered comment.
+     */
+    dockerfileText: text("dockerfile_text"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -566,6 +573,101 @@ export const approvalSubmission = pgTable(
     uniqueIndex("approval_submission_approval_decision_key").on(t.approvalDecisionId),
     index("approval_submission_claim_idx").on(t.state, t.nextAttemptAt),
     index("approval_submission_lease_idx").on(t.leaseExpiresAt),
+  ],
+);
+
+/**
+ * The build-onboarding queue: how a connected repository becomes a reproducible target without
+ * an engineer editing the registry by hand.
+ *
+ * One row per repo being onboarded. A worker (lib/build-onboarding/worker.ts) drives it through
+ * build, manifest proposal, and, after a human approves, the offline verify and TargetProfile
+ * write. The lease block (attempts/lease_owner/lease_expires_at/fence/next_attempt_at/last_error)
+ * is the same shape as approval_submission and inbound_job; `state` is a plain text app-level
+ * machine, not a pgEnum, for the same reason approval_submission's is: it changes as the pipeline
+ * grows and an enum would mean a migration each time.
+ *
+ * repo_id + repo_full_name rather than a connected_repository FK: the pipeline is meant to run for
+ * targets that arrive through email or upload and have no connected_repository row. configureTarget
+ * keys the write on repo_id, so a GitHub target lines up; a non-GitHub target's write is a bounded
+ * follow-up (configureTarget currently requires an active connected_repository).
+ *
+ * AWAITING_APPROVAL and CONFIGURED are deliberately not claimable by the worker: nothing crosses a
+ * proposed manifest into a real TargetProfile without a human (see lib/build-onboarding/queue.ts).
+ */
+export const targetOnboarding = pgTable(
+  "target_onboarding",
+  {
+    id: id(),
+    repoId: bigint("repo_id", { mode: "number" }).notNull(),
+    repoFullName: text("repo_full_name").notNull(),
+    /** What the build driver clones and builds: a git URL or ref for the target's source. */
+    sourceRef: text("source_ref").notNull(),
+    /** PENDING_PLAN | PENDING_BUILD | PENDING_MANIFEST | AWAITING_APPROVAL | APPROVED | CONFIGURED
+     *  | FAILED | UNSUPPORTED. A row now starts at PENDING_PLAN so the classifier decides how the
+     *  one image is built before the build runs. */
+    state: text("state").notNull().default("PENDING_PLAN"),
+    /** The classifier's build plan (lib/build-onboarding/build-plan.ts): the strategy, ecosystem,
+     *  datastores, seed step and runtime shape the build and provision steps consume. Null until the
+     *  plan step runs; for an UNSUPPORTED row it carries the not-flattenable reason. */
+    buildPlan: jsonb("build_plan"),
+    /** Filled by the build step; null until then. */
+    imageName: text("image_name"),
+    imageDigest: text("image_digest"),
+    snapshotId: text("snapshot_id"),
+    buildMarker: text("build_marker"),
+    dockerfileText: text("dockerfile_text"),
+    /** For a compose-mesh build only: every service the build produced (the app and its
+     *  dependencies), each with its own image, digest, snapshot, port, start command and peers. The
+     *  top-level image fields above mirror the app service, so a single-image target ignores this. It
+     *  is carried from the build step to the offline-verify and profile-write steps, then persisted
+     *  into the target profile's config.services. Null for a single-image target. */
+    builtServices: jsonb("built_services"),
+    /** The opaque token the onboarding agent's build tools (app/api/mcp/build) present to resolve
+     *  this row -- the onboarding analogue of agent_session.capability_token. The agent never sees a
+     *  repo or sandbox id; the token maps back to this row server-side. Null until the agent step
+     *  mints one. */
+    agentCapabilityToken: text("agent_capability_token"),
+    /** The ephemeral Docker-in-Docker build sandbox the agent is iterating in, set by
+     *  open_build_sandbox and read by run_build_command / probe_built_container. Null when none is
+     *  open; the sandbox itself is torn down when the agent step ends. */
+    agentSandboxId: text("agent_sandbox_id"),
+    /** The sandboxability review's verdict, `{ verdict: "yes"|"no"|"unsure", reason }`, written by the
+     *  read-only review turn (lib/analysis, app/api/mcp/review) before the build agent runs. The worker
+     *  reads it to decide whether to skip the build turn (verdict "no" -> UNSUPPORTED) or proceed
+     *  ("yes"/"unsure"), then clears it. Null when no review has run. It is a routing hint, never a
+     *  trust boundary: the build, offline-verify and approval gates are unchanged. */
+    reviewResult: jsonb("review_result"),
+    /** A short human-readable note on what onboarding is doing right now ("reading the repository",
+     *  "building the target image", "opened build sandbox"), set by the worker and the build tools as
+     *  they work. The connections panel shows it in place of the coarse state label, so a multi-minute
+     *  agent turn reads as its real activity rather than one static "Classifying". Null when idle. */
+    progressNote: text("progress_note"),
+    /** The build driver's output from the rebuild that produced the pinned image, capped, kept so a
+     *  reviewer can download it from the connections panel. Null until the build step runs; on a failed
+     *  build the short reason stays in last_error. */
+    buildLog: text("build_log"),
+    /** The target manifest derived from the build plan's runtime shape once the image exists,
+     *  validated before it is stored. Null until the manifest step runs. */
+    proposedManifest: jsonb("proposed_manifest"),
+    approvedBy: text("approved_by"),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    // One onboarding per repo; a rotation (rebuild of an already-bound target) is a separate
+    // concern, not a second onboarding row.
+    uniqueIndex("target_onboarding_repo_id_key").on(t.repoId),
+    index("target_onboarding_claim_idx").on(t.state, t.nextAttemptAt),
+    index("target_onboarding_lease_idx").on(t.leaseExpiresAt),
+    uniqueIndex("target_onboarding_agent_capability_token_key").on(t.agentCapabilityToken),
   ],
 );
 

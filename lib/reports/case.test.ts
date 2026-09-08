@@ -170,12 +170,12 @@ test("the approval panel opens only for a call a reviewer can answer", async () 
   assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
 });
 
-test("a synthesized verdict with null thread markers is still exposed as approvable", async () => {
+test("a synthesized verdict in the analysis lane is still exposed as approvable", async () => {
   // A dead-end run's server-authored ANALYSIS_ONLY verdict has a verdict and hash awaiting
   // approval but no TrueForge call, so pending_thread_id/pending_tool_call_id are null. Gating
   // the approval panel on the thread marker would hide it and recreate the dead end; readCase
   // must key off the verdict/hash pair instead.
-  const id = await seedReport("AWAITING_APPROVAL");
+  const id = await seedReport("ANALYSIS_ONLY");
   const [v] = await dbm.db
     .insert(dbm.verdict)
     .values({
@@ -198,6 +198,42 @@ test("a synthesized verdict with null thread markers is still exposed as approva
   });
 
   assert.equal((await cases.readCase(id))?.awaitingVerdictId, v.id);
+});
+
+test("an approved pending verdict is no longer exposed as approvable", async () => {
+  const id = await seedReport("ANALYSIS_ONLY");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "ANALYSIS_ONLY",
+      summary: "could not verify; needs human triage",
+      payload: "the exact comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    pendingThreadId: null,
+    pendingToolCallId: null,
+    pendingVerdictId: v.id,
+    pendingApprovedContentHash: `hash-${id}`,
+  });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: v.id,
+    reviewer: "someone",
+    decision: "APPROVED",
+    payloadHash: `hash-${id}`,
+    threadId: null,
+    toolCallId: null,
+  });
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.approval?.decision, "APPROVED");
+  assert.equal(file?.awaitingVerdictId, null);
 });
 
 test("a decided verdict reports its decision and closes the gate", async () => {
@@ -277,7 +313,7 @@ test("a reporter is only linked when the handle could actually be a GitHub login
 });
 
 test("every report state maps to a mascot that exists", async () => {
-  const { MASCOT_FOR_STATE, MASCOT_STATES } = await import("@/lib/mascot/states");
+  const { MASCOT_FOR_STATE, MASCOT_STATES } = await import("@/lib/mascot/catalog");
   const { TERMINAL_STATES } = await import("./states");
 
   const all = [
@@ -540,4 +576,101 @@ test("a report is investigating only while its turn is live, has observed a tool
   for (const status of ["AWAITING_APPROVAL_HARNESS", "DONE_NO_ACTION", "ERROR", "CANCELLED", null]) {
     assert.equal(isAgentInvestigating(status, false, true), false, `${status} must not read as investigating`);
   }
+});
+
+test("a decision that never reached the harness is readable, and one that did is not confused with it", async () => {
+  // The shape report #18 was stuck in. The decision committed, the submission worker could not
+  // reach TrueForge, and because publish_verdict never fired there is no outbound_delivery row
+  // at all: the case file's only route to knowing is the submission row itself.
+  const id = await seedReport("AWAITING_APPROVAL");
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: id,
+      outcome: "REPRODUCED",
+      summary: "the payload executes",
+      payload: "comment",
+      contentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.verdict.id });
+
+  const [session] = await dbm.db
+    .insert(dbm.agentSession)
+    .values({
+      reportId: id,
+      capabilityToken: `token-${id}`,
+      sessionId: `session-${id}`,
+      turnStatus: "AWAITING_APPROVAL_HARNESS",
+      pendingThreadId: "thread-1",
+      pendingToolCallId: "call-1",
+      pendingVerdictId: v.id,
+      pendingApprovedContentHash: `hash-${id}`,
+    })
+    .returning({ id: dbm.agentSession.id });
+
+  const [decision] = await dbm.db
+    .insert(dbm.approvalDecision)
+    .values({
+      verdictId: v.id,
+      reviewer: "vaibhav",
+      decision: "APPROVED",
+      payloadHash: `hash-${id}`,
+      threadId: "thread-1",
+      toolCallId: "call-1",
+    })
+    .returning({ id: dbm.approvalDecision.id });
+
+  // Inserted at its terminal shape rather than driven through eight worker attempts. readCase
+  // is a pure read and does not care how the row got here.
+  await dbm.db.insert(dbm.approvalSubmission).values({
+    agentSessionId: session.id,
+    approvalDecisionId: decision.id,
+    state: "FAILED",
+    attempts: 8,
+    lastError: "Session not found: session-1",
+  });
+
+  const stalled = await cases.readCase(id);
+  assert.equal(stalled?.handoff?.state, "FAILED");
+  assert.equal(stalled?.handoff?.attempts, 8);
+  assert.equal(stalled?.handoff?.maxAttempts, 8);
+  assert.equal(stalled?.handoff?.lastError, "Session not found: session-1");
+  assert.equal(stalled?.delivery, null, "no delivery row was ever written");
+
+  // A report whose approval took the synthesized path has no submission row at all, and must
+  // not be reported as a handoff that has not happened yet.
+  const other = await seedReport("ANALYSIS_ONLY");
+  const [ov] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId: other,
+      outcome: "ANALYSIS_ONLY",
+      summary: "nothing ran",
+      payload: "comment",
+      contentHash: `hash-${other}`,
+    })
+    .returning({ id: dbm.verdict.id });
+  await dbm.db.insert(dbm.approvalDecision).values({
+    verdictId: ov.id,
+    reviewer: "vaibhav",
+    decision: "APPROVED",
+    payloadHash: `hash-${other}`,
+  });
+
+  assert.equal((await cases.readCase(other))?.handoff, null);
+});
+
+test("a session that died carries its reason onto the case file", async () => {
+  const id = await seedReport("ANALYSIS_ONLY");
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: id,
+    capabilityToken: `token-${id}`,
+    sessionId: `session-${id}`,
+    turnStatus: "ERROR",
+    lastError: "TrueForge session or turn was not found: session-1",
+  });
+
+  const file = await cases.readCase(id);
+  assert.equal(file?.turnStatus, "ERROR");
+  assert.equal(file?.sessionError, "TrueForge session or turn was not found: session-1");
 });

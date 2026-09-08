@@ -1,27 +1,28 @@
 "use client";
 
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
-import { useState } from "react";
-import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { startTransition, useState } from "react";
+import { Eye, Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow } from "@/components/filter-table";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import type { RepoStatus } from "@/lib/github/connections";
+import type { OnboardingDetail, OnboardingProgress, OnboardingProposal, RepoStatus } from "@/lib/github/connections";
 
-import { ConfigureButton } from "../integrations/configure-button";
 import { RepositorySheet } from "./repository-sheet";
 
 const COLUMNS = [
   { key: "repository", label: "Repository", width: "1.6fr" },
   { key: "target", label: "Bound target", width: "1fr" },
   { key: "status", label: "Status", width: "1fr" },
-  // A fixed track, not a fraction. Reconfigure and Remove repository measure 111 and 156
-  // with an 8 gap, and a proportional column dropped below that at this table's width and
-  // stacked them. The table scrolls sideways rather than the buttons wrapping.
-  { key: "action", label: "", width: "20rem", align: "end" as const, controls: true },
+  // A fixed track, not a fraction: Reconfigure is the widest label the button takes and a
+  // proportional column dropped under it at this table's width and wrapped it. The table
+  // scrolls sideways instead.
+  { key: "action", label: "", width: "10rem", align: "end" as const, controls: true },
 ];
 
 /**
@@ -52,12 +53,30 @@ export type RepositoryRow = {
   /** The raw status, which is what the chips filter on. `label` is what a person reads. */
   status: RepoStatus;
   fullName: string;
+  /** The two halves of fullName, split server-side. */
+  owner: string;
+  name: string;
   label: string;
   hint: string;
   target: string | null;
   repoId: number;
   configured: boolean;
   connected: boolean;
+  reportCount: number;
+  awaitingReview: number;
+  delivered: number;
+  /** ISO strings, because these cross from a server component into a client one. */
+  lastReportAt: string | null;
+  lastSyncedAt: string;
+  /** GitHub's own repository-access screen for this installation, or null when the account
+   *  type was never recorded and the right path cannot be worked out. */
+  manageUrl: string | null;
+  /** A built target awaiting this reviewer's approval, or null. Drives the panel's approve gate. */
+  onboarding: OnboardingProposal | null;
+  /** Onboarding in flight or refused (classifying, building, failed, unsupported), or null. */
+  onboardingProgress: OnboardingProgress | null;
+  /** The full onboarding record for the panel's detail view and downloads, or null if never onboarded. */
+  onboardingDetail: OnboardingDetail | null;
 };
 
 /**
@@ -101,15 +120,51 @@ export function ConnectionTabs({
 }) {
   const [query, setQuery] = useState("");
   const [group, setGroup] = useState<string>("all");
-  const [open, setOpen] = useState<string | null>(null);
+
+  // Which repository's panel is open lives in the URL, so the panel can be linked to and
+  // reopens on a reload. Named by owner/name rather than by row id: the link is something a
+  // person pastes to a colleague, and a uuid tells them nothing about where it goes.
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+
+  // Which panel is open is mirrored in the URL (so it can be linked to and reopens on reload), but the
+  // sheet is driven by this local state, not read back from the URL. Deriving `open` from
+  // useSearchParams meant closing had to wait for router.replace to commit an RSC round-trip before the
+  // exit animation could even start, which read as a lag. Now the close is instant and the URL is
+  // updated in the background; the render-time reconcile just below re-syncs from the URL for a deep
+  // link or Back/Forward.
+  const urlRepo = params.get("repo");
+  const [open, setOpen] = useState<string | null>(urlRepo);
+  // Reconcile from the URL during render (React's "adjust state on prop change" pattern), so a deep
+  // link and Back/Forward still open the right panel, without a setState-in-effect. Our own
+  // background URL write lands here too and no-ops, since `open` already matches.
+  const [syncedUrlRepo, setSyncedUrlRepo] = useState<string | null>(urlRepo);
+  if (urlRepo !== syncedUrlRepo) {
+    setSyncedUrlRepo(urlRepo);
+    setOpen(urlRepo);
+  }
+
+  // replace rather than push, so Back leaves the connections page instead of stepping through
+  // every panel that was opened on the way here.
+  function showRepository(fullName: string | null) {
+    setOpen(fullName); // update the sheet at once; the URL write below must not block the animation.
+    const next = new URLSearchParams(params.toString());
+    if (fullName) next.set("repo", fullName);
+    else next.delete("repo");
+    const search = next.toString();
+    startTransition(() => {
+      router.replace(search ? `${pathname}?${search}` : pathname, { scroll: false });
+    });
+  }
 
   const needle = query.trim().toLowerCase();
   const rows: TableRow[] = repositories.map((repo) => ({
     id: repo.id,
-    // The row opens the panel. FilterTable stretches this over the row from the first cell
-    // and leaves the later cells above it, so Configure configures and does not also open a
-    // sheet behind itself.
-    onSelect: () => setOpen(repo.id),
+    // The row opens the panel. FilterTable stretches this over the row from the first cell and
+    // leaves the action cell above it, so the View button, which does the same, is not swallowed
+    // by the row overlay behind it.
+    onSelect: () => showRepository(repo.fullName),
     hidden:
       !inGroup(repo.status, group) ||
       (needle.length > 0 &&
@@ -132,12 +187,16 @@ export function ConnectionTabs({
       <Badge key="status" variant={repo.connected ? "success" : "outline"}>
         {repo.label}
       </Badge>,
-      <ConfigureButton
+      <Button
         key="action"
-        repoId={repo.repoId}
-        configured={repo.configured}
-        label={repo.configured ? "Reconfigure" : "Configure"}
-      />,
+        size="sm"
+        variant="ghost"
+        className="text-brand-soft hover:text-brand-soft"
+        onClick={() => showRepository(repo.fullName)}
+      >
+        <Eye />
+        View
+      </Button>,
     ],
   }));
 
@@ -215,8 +274,8 @@ export function ConnectionTabs({
             />
 
             <RepositorySheet
-              repo={repositories.find((r) => r.id === open) ?? null}
-              onOpenChange={(next) => !next && setOpen(null)}
+              repo={repositories.find((r) => r.fullName === open) ?? null}
+              onOpenChange={(next) => !next && showRepository(null)}
             />
           </div>
         )}

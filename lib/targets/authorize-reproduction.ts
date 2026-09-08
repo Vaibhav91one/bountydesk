@@ -1,8 +1,49 @@
 import type { AnalysisOnlyReason, ReproductionRecipe } from "@/lib/reproduction/types";
+import type { MeshServiceAuth } from "@/lib/sandbox/provision";
 import {
   targetProvisioningFromConfig,
   type TargetProvisioningConfig,
 } from "./registry";
+
+/**
+ * The mesh services pinned in a target profile's config, mapped to what the provisioner needs to
+ * boot them, or null for a single-image target. A compose-mesh target stores every service (the app
+ * and its dependencies) under config.services at onboarding; the reproduction run reads them here to
+ * boot the whole mesh instead of one image.
+ */
+export function meshServicesFromConfig(config: unknown): MeshServiceAuth[] | null {
+  const services = (config as { services?: unknown } | null)?.services;
+  if (!Array.isArray(services) || services.length === 0) return null;
+  const out: MeshServiceAuth[] = [];
+  let hasApp = false;
+  for (const raw of services) {
+    const s = raw as Record<string, unknown>;
+    if (
+      typeof s?.service !== "string" ||
+      (s.role !== "app" && s.role !== "dependency") ||
+      typeof s.imageName !== "string" ||
+      typeof s.imageDigest !== "string" ||
+      typeof s.snapshotId !== "string"
+    ) {
+      throw new Error("a pinned mesh service is missing required fields");
+    }
+    if (s.role === "app") hasApp = true;
+    out.push({
+      service: s.service,
+      role: s.role,
+      imageName: s.imageName,
+      imageDigest: s.imageDigest,
+      snapshotId: s.snapshotId,
+      ...(typeof s.snapshotImageRef === "string" ? { snapshotImageRefOverride: s.snapshotImageRef } : {}),
+      ...(typeof s.port === "number" ? { port: s.port } : {}),
+      ...(typeof s.buildMarker === "string" ? { buildMarker: s.buildMarker } : {}),
+      ...(typeof s.startCommand === "string" ? { startCommand: s.startCommand } : {}),
+      ...(Array.isArray(s.peers) ? { peers: s.peers.filter((p): p is string => typeof p === "string") } : {}),
+    });
+  }
+  if (!hasApp) throw new Error("pinned mesh services have no app service");
+  return out;
+}
 
 export type ReproductionAuthorization =
   | ({

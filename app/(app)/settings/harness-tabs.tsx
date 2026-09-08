@@ -85,7 +85,7 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
       <TabsContent value="models" className="flex flex-col gap-4">
         <Panel
           title="Configured providers"
-          detail="Where the agent's model comes from. The saved agent pins openai/gpt-5-mini, so a harness with no provider registered refuses the manifest outright rather than falling back to anything."
+          detail="Where the agent's model comes from. The saved agent pins openai/gpt-5-4-mini, so a harness with no provider registered refuses the manifest outright rather than falling back to anything."
         >
           <SectionBody section={snapshot.modelProviders}>
             {(providers) =>

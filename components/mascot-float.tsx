@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import { useReducedMotion } from "motion/react";
 
+import { useMascotMarkup } from "@/components/animated-mascot-svg";
+
 /**
  * One mascot on a card: bobbing, and out of step with its neighbours.
  *
@@ -18,13 +20,15 @@ import { useReducedMotion } from "motion/react";
  * relative delays the artwork depends on and flatten it into a single beat.
  */
 export function MascotFloat({
-  markup,
+  state,
+  scope,
   seconds,
   delay,
   y,
   tilt,
 }: {
-  markup: string;
+  state: string;
+  scope: string;
   seconds: number;
   /** Negative, so the bob starts partway through rather than holding still until its turn. */
   delay: number;
@@ -32,6 +36,7 @@ export function MascotFloat({
   tilt: string;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const markup = useMascotMarkup(state, scope);
   // Subscribed rather than read once, so turning the preference on stills a board that is
   // already open and turning it off starts it again.
   const reduced = useReducedMotion();
@@ -62,7 +67,7 @@ export function MascotFloat({
         animation.startTime = Number(animation.startTime) + delay * 1000;
       }
     }
-  }, [delay, reduced]);
+  }, [delay, markup, reduced]);
 
   return (
     <span
@@ -75,7 +80,7 @@ export function MascotFloat({
         ["--float-y" as string]: y,
         ["--float-tilt" as string]: tilt,
       }}
-      dangerouslySetInnerHTML={{ __html: markup }}
+      dangerouslySetInnerHTML={markup ? { __html: markup } : undefined}
     />
   );
 }

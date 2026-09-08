@@ -42,7 +42,7 @@ export async function readHomeSummary(): Promise<HomeSummary> {
           reports: sql<number>`count(*)::int`,
           open: sql<number>`count(*) filter (where ${report.state} not in (${terminal}))::int`,
           awaiting: sql<number>`count(*) filter (
-            where ${report.state} = 'AWAITING_APPROVAL'
+            where ${report.state} in ('AWAITING_APPROVAL', 'ANALYSIS_ONLY')
               and ${agentSession.pendingVerdictId} is not null
               and ${agentSession.pendingApprovedContentHash} is not null
           )::int`,

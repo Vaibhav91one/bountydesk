@@ -257,11 +257,9 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
   assert.equal(session.turnId, "trueturn-1");
 
   // The poller: the fake already captured the turn's capability during createTurn above, so
-  // this first poll goes straight to awaiting_approval, carrying the agent's own drafted
-  // outcome/summary/findings. Confirms the atomic
-  // TRIAGING -> ANALYSIS_ONLY -> AWAITING_APPROVAL transition happens here, not inside the
-  // driver, and only once bounty-desk has independently verified a genuine pending
-  // publish_verdict call and turned its draft into the report's revision-1 verdict.
+  // this first poll sees the agent's drafted outcome/summary/findings. ANALYSIS_ONLY drafts
+  // stay in the analysis lane with an approval gate, after bounty-desk verifies the genuine
+  // pending publish_verdict call and turns its draft into the report's revision-1 verdict.
   const polled = await pollOnce("e2e-flow-poller", { client });
   assert.equal(polled, session.id);
 
@@ -270,7 +268,7 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportRow.id))
     .limit(1);
-  assert.equal(afterPoll.state, "AWAITING_APPROVAL");
+  assert.equal(afterPoll.state, "ANALYSIS_ONLY");
 
   const [verdictRow] = await dbm.db
     .select()
@@ -295,12 +293,12 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
   const allowed = await allowVerdict(reportRow.id, verdictRow.id);
   assert.deepEqual(allowed, { ok: true });
 
-  const [stillAwaiting] = await dbm.db
+  const [stillAnalysis] = await dbm.db
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportRow.id))
     .limit(1);
-  assert.equal(stillAwaiting.state, "AWAITING_APPROVAL");
+  assert.equal(stillAnalysis.state, "ANALYSIS_ONLY");
 
   // The submission worker relays the decision to TrueForge and hands the session off to the
   // new chained turn.
@@ -409,7 +407,7 @@ test("a denied verdict never reaches publish_verdict and the report stays DENIED
   assert.ok(reportRow);
 
   const resolvedState = await pollUntilResolved(client, reportRow.id);
-  assert.equal(resolvedState, "AWAITING_APPROVAL");
+  assert.equal(resolvedState, "ANALYSIS_ONLY");
 
   const [verdictRow] = await dbm.db
     .select({ id: dbm.verdict.id })

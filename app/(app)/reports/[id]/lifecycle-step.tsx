@@ -1,8 +1,7 @@
 import { Check, Minus } from "@phosphor-icons/react/ssr";
 
+import type { StepState } from "@/lib/reports/case-view";
 import { cn } from "@/lib/utils";
-
-export type StepState = "done" | "current" | "pending" | "skipped";
 
 /**
  * The badge above a lifecycle step.

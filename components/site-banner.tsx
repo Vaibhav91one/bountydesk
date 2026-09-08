@@ -17,10 +17,10 @@ const PER_COPY = 3;
  * started. Percentages rather than pixels, so the line's length can change with the text and
  * nothing has to be recalculated.
  *
- * Agent Bounty rides between cycles as a plain <img>, and its own animation does play that way.
- * lib/mascot/states.ts says otherwise and inlines the markup for that reason; that holds where
- * it matters there, but for a decorative strip the file is fetched once and shared by every
- * copy, against 32KB of markup per copy inline.
+ * Agent Bounty rides between cycles as a plain <img>. Everywhere the artwork has to change with
+ * a report's state it goes through components/animated-mascot-svg.tsx, which injects the markup
+ * so the keyframes inside it run; on a decorative strip that never changes, the file is fetched
+ * once and shared by every copy instead.
  *
  * The whole marquee is hidden from assistive technology and the sentence is offered once in
  * text, because a screen reader should hear this a single time rather than six.

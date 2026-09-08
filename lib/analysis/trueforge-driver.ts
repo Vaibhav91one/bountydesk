@@ -12,8 +12,8 @@ import {
   targetProfile,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
-import { provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
-import { profileAppPort } from "@/lib/targets/authorize-reproduction";
+import { provisionMesh, provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import { meshServicesFromConfig, profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
@@ -55,7 +55,7 @@ function buildTurnMessage(
   const targetSection = !target
     ? `No authorized target is bound to this report -- either no target profile is attached, or the connected repository's grant is inactive or revoked. There is nothing to reproduce against. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`
     : provisioned
-      ? `This report is bound to an authorized target: ${pinnedAt(target)}. A sandbox running it has already been provisioned for you. Reach it exclusively through probe_target (GET/HEAD) and probe_target_write (POST): give either a method, a same-origin path, and optional headers/body, and it forwards the request to your sandbox -- you never need, and never get, a raw URL, host or token. probe_target_write pauses for human approval before it reaches you, same as any other gated tool; just call it. Use scope-guard, skills and subagents alongside it, then decide the outcome yourself.`
+      ? `This report is bound to an authorized target: ${pinnedAt(target)}. A sandbox running it has already been provisioned for you. Reach it exclusively through probe_target (GET/HEAD) and probe_target_write (POST): give either a method, a same-origin path, and optional headers/body, and it forwards the request to your sandbox. The only valid tool capability for this report is ${capabilityToken}. Do not use "bountydesk", the target name, the image name, a host, or a URL as the capability. Your first target request should be exactly probe_target {"capability":"${capabilityToken}","method":"GET","path":"/"}. probe_target_write pauses for human approval before it reaches you, same as any other gated tool; just call it. Use scope-guard, skills and subagents alongside it, then decide the outcome yourself.`
       : `This report is bound to an authorized target: ${pinnedAt(target)}. Its sandbox could not be provisioned this run, so there is nothing reachable to investigate. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`;
 
   return `A bug bounty report has come in for triage.
@@ -319,17 +319,35 @@ export function createTrueforgeAnalysisDriver(
           );
           if (appPort !== null && provisioning) {
             try {
-              provisioned = await provision(
-                {
-                  imageName: targetInfo.imageName,
-                  imageDigest: targetInfo.imageDigest,
-                  snapshotId: targetInfo.snapshotId,
-                  targetProfileId: context.targetProfileId as string,
-                  ...provisioning,
-                },
-                appPort,
-                { signal },
-              );
+              // A compose-mesh target boots every service as its own linked sandbox; probe_target
+              // still reaches only the app, whose sandbox id and port are what get stored below. A
+              // single-image target boots one snapshot exactly as before.
+              const meshServices = meshServicesFromConfig(context.targetConfig);
+              if (meshServices) {
+                const mesh = await provisionMesh(
+                  {
+                    targetProfileId: context.targetProfileId as string,
+                    appService: meshServices.find((s) => s.role === "app")!.service,
+                    services: meshServices,
+                    readinessPath: provisioning.readinessPath,
+                    warmupSeconds: provisioning.warmupSeconds,
+                  },
+                  { signal },
+                );
+                provisioned = { sandboxId: mesh.sandboxId, appPort: mesh.appPort };
+              } else {
+                provisioned = await provision(
+                  {
+                    imageName: targetInfo.imageName,
+                    imageDigest: targetInfo.imageDigest,
+                    snapshotId: targetInfo.snapshotId,
+                    targetProfileId: context.targetProfileId as string,
+                    ...provisioning,
+                  },
+                  appPort,
+                  { signal },
+                );
+              }
             } catch {
               // A genuine cancellation must still propagate as one, not be swallowed into "no
               // target this run" -- the caller's lease/retry semantics depend on seeing it.

@@ -2,6 +2,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowSquareOut } from "@phosphor-icons/react/ssr";
 
+import { loginUrl } from "@/lib/auth/oauth";
+
 const SOURCE = "https://github.com/Vaibhav91one/bountydesk";
 
 const COLUMNS: {
@@ -87,7 +89,7 @@ export function SiteFooter({ appLinkPrefetch = true }: { appLinkPrefetch?: boole
                         </a>
                       ) : (
                         <Link
-                          href={link.href}
+                          href={link.href === "/login" ? loginUrl() : link.href}
                           prefetch={appLinkPrefetch}
                           className="text-meta text-muted-foreground hover:text-foreground"
                         >

@@ -74,7 +74,7 @@ test("ensureSession persists an explicitly labeled stub session identity", async
   });
 });
 
-test("a fresh TRIAGING report ends in AWAITING_APPROVAL with an ANALYSIS_ONLY verdict", async () => {
+test("a fresh TRIAGING report stays ANALYSIS_ONLY with a pending verdict", async () => {
   const reportId = await seedReport("TRIAGING");
 
   await driver.stubAnalysisDriver.run(context(reportId));
@@ -99,7 +99,21 @@ test("a fresh TRIAGING report ends in AWAITING_APPROVAL with an ANALYSIS_ONLY ve
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "AWAITING_APPROVAL");
+  assert.equal(reportRow.state, "ANALYSIS_ONLY");
+
+  const [sessionRow] = await dbm.db
+    .select({
+      pendingVerdictId: dbm.agentSession.pendingVerdictId,
+      pendingApprovedContentHash: dbm.agentSession.pendingApprovedContentHash,
+      pendingThreadId: dbm.agentSession.pendingThreadId,
+      pendingToolCallId: dbm.agentSession.pendingToolCallId,
+    })
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(sessionRow.pendingVerdictId, verdictRow.id);
+  assert.equal(sessionRow.pendingApprovedContentHash, verdictRow.contentHash);
+  assert.equal(sessionRow.pendingThreadId, null);
+  assert.equal(sessionRow.pendingToolCallId, null);
 });
 
 test("never produces REPRODUCED, NOT_REPRODUCED, or INCONCLUSIVE", async () => {
@@ -130,10 +144,10 @@ test("running a second time on an already-processed report is a no-op", async ()
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "AWAITING_APPROVAL");
+  assert.equal(reportRow.state, "ANALYSIS_ONLY");
 });
 
-test("a report starting in REPRODUCING also lands in AWAITING_APPROVAL", async () => {
+test("a report starting in REPRODUCING also lands in ANALYSIS_ONLY", async () => {
   const reportId = await seedReport("REPRODUCING");
   await driver.stubAnalysisDriver.run(context(reportId));
 
@@ -141,7 +155,7 @@ test("a report starting in REPRODUCING also lands in AWAITING_APPROVAL", async (
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "AWAITING_APPROVAL");
+  assert.equal(reportRow.state, "ANALYSIS_ONLY");
 
   const [verdictRow] = await dbm.db
     .select({ outcome: dbm.verdict.outcome })

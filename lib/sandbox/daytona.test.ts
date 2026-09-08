@@ -9,6 +9,8 @@ import {
   MAX_TTL_MINUTES,
   UnsafeSandboxSpec,
   assertSafeSpec,
+  createBuildSandbox,
+  createSnapshot,
   assertSandboxGone,
   assertSnapshotImage,
   assertSnapshotLimits,
@@ -214,6 +216,62 @@ test("the request blocks all network, names the resolved id, and carries no secr
 
   // A sandbox with no ceiling outlives the run that made it.
   assert.equal(body.ttlMinutes, 20);
+});
+
+test("an unlinked create sends no link fields", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    sent.push(JSON.parse(init?.body as string));
+    return json({ id: "sb-1", state: "started", public: false });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await createSandbox(spec);
+  });
+
+  assert.equal("linkedSandbox" in sent[0], false, "an unlinked sandbox must not join a group");
+  assert.equal("ephemeral" in sent[0], false);
+});
+
+test("a linked child names its parent, stays internet-blocked, and is ephemeral", async () => {
+  const sent: Record<string, unknown>[] = [];
+  const stub = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).includes("/snapshots/")) return json(snapshot);
+    sent.push(JSON.parse(init?.body as string));
+    return json({ id: "sb-child", state: "started", public: false });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await createSandbox(spec, undefined, { parentSandboxId: "sb-parent" });
+  });
+
+  const [body] = sent;
+  assert.equal(body.linkedSandbox, "sb-parent", "the child must name the parent it links to");
+  assert.equal(body.ephemeral, true, "a child must not outlive its group");
+  // Linking is not a way to widen egress: the child is as blocked as any reproduction sandbox.
+  assert.equal(body.networkBlockAll, true);
+  assert.equal("domainAllowList" in body, false);
+  assert.equal("networkAllowList" in body, false);
+  assert.equal(body.public, false);
+});
+
+test("a linked child with a malformed parent id never reaches the network", async () => {
+  for (const parentSandboxId of ["", "  ", "a".repeat(201), "sb; rm -rf /", "$(whoami)", "a b"]) {
+    let called = false;
+    const stub = (async () => {
+      called = true;
+      return json({});
+    }) as typeof fetch;
+    await withFetch(stub, async () => {
+      await assert.rejects(
+        createSandbox(spec, undefined, { parentSandboxId }),
+        UnsafeSandboxSpec,
+        parentSandboxId,
+      );
+      assert.equal(called, false, "a bad parent id must be refused before any create");
+    });
+  }
 });
 
 test("a snapshot whose limits differ from the run's is refused", async () => {
@@ -496,4 +554,36 @@ test("a command timeout must be whole seconds within our own ceiling", async () 
   for (const seconds of [0, -1, 1.5, MAX_EXEC_SECONDS + 1, Number.NaN]) {
     await assert.rejects(execute(sandbox, "echo ok", seconds), UnsafeSandboxSpec, String(seconds));
   }
+});
+
+test("a build sandbox refuses an empty egress allow-list before any network call", async () => {
+  // An empty list must fail closed, never widen to "network open".
+  await assert.rejects(
+    createBuildSandbox(
+      { snapshot: "base-dind", cpu: 2, memoryGb: 4, diskGb: 20, ttlMinutes: 30 },
+      [],
+    ),
+    UnsafeSandboxSpec,
+  );
+  await assert.rejects(
+    createBuildSandbox(
+      { snapshot: "base-dind", cpu: 2, memoryGb: 4, diskGb: 20, ttlMinutes: 30 },
+      ["   "],
+    ),
+    UnsafeSandboxSpec,
+  );
+});
+
+test("createSnapshot refuses a digest-pinned image name", async () => {
+  // Daytona rejects @sha256: in POST /snapshots; catch it at the seam with a clear reason.
+  await assert.rejects(
+    createSnapshot({
+      name: "x",
+      image: `ghcr.io/acme/x@sha256:${"a".repeat(64)}`,
+      cpu: 2,
+      memoryGb: 4,
+      diskGb: 20,
+    }),
+    UnsafeSandboxSpec,
+  );
 });

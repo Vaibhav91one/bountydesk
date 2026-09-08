@@ -72,6 +72,21 @@ export function callbackUrl(): string {
   return `${appBaseUrl()}/api/auth/github/callback`;
 }
 
+/**
+ * Sign-in URL for the marketing pages. When APP_BASE_URL is set it is an absolute URL on the app
+ * origin, because the marketing pages can be served on a different host than the app (landing on one
+ * domain, app on APP_BASE_URL's host) and the landing gate only exempts the app host: a relative
+ * "/login" on the landing host is a stray deep link that 302s to the source repo instead of the app.
+ *
+ * The marketing page is statically prerendered, so this runs at build. A build without APP_BASE_URL
+ * (a preview build, local dev) falls back to a relative "/login" rather than failing the build;
+ * production sets APP_BASE_URL and bakes the absolute app-origin URL the cross-host landing needs.
+ */
+export function loginUrl(): string {
+  if (!process.env.APP_BASE_URL?.trim()) return "/login";
+  return `${appBaseUrl()}/login`;
+}
+
 /** Whether cookies should carry Secure. Plain http is only ever local development. */
 export function isSecureOrigin(): boolean {
   return appBaseUrl().startsWith("https://");

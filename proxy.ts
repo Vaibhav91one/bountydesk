@@ -12,7 +12,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!shouldRedirectToSource(request.nextUrl.pathname)) {
+  if (!shouldRedirectToSource(request.nextUrl.pathname, request.headers.get("host"))) {
     return NextResponse.next();
   }
 

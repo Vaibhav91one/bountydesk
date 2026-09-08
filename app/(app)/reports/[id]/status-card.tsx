@@ -1,12 +1,12 @@
 import { GitHubLight } from "developer-icons";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
-import { mascotForState } from "@/lib/mascot/states";
-import { isAgentInvestigating, type CaseFile } from "@/lib/reports/case";
+import type { CaseLiveView } from "@/lib/reports/case-view";
 
 /** One fact. The value is always something the database holds. */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
@@ -24,37 +24,39 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
  * The mascot comes from the shared state map, so he is doing on this page whatever he is doing
  * on the board for the same report. He is decoration in the sense that no decision rests on
  * him, and not decoration in the sense that he is wrong if the state changes and he does not.
+ *
+ * Every value here reads off the live view, which is the point: this card used to be
+ * server-rendered with one live field spliced into it, so the status said "Approved" while the
+ * mascot, the event count and the verdict line beside it still described the run before the
+ * decision.
  */
 export function StatusCard({
-  file,
-  stateLabel,
-  verdictLabel,
-  outcomeLabel,
+  status,
+  issueUrl,
+  channel,
+  repositoryFullName,
 }: {
-  file: CaseFile;
-  stateLabel: string;
-  verdictLabel: string;
-  outcomeLabel: string | null;
+  status: CaseLiveView;
+  issueUrl: string | null;
+  /** Header facts that identify the report rather than track it, so they come from the page. */
+  channel: string;
+  repositoryFullName: string | null;
 }) {
-  const mascot = mascotForState(file.state);
-  const hasToolCallEvents = file.events.some((e) => e.channel === "agent");
-  const investigating = isAgentInvestigating(file.turnStatus, file.verdict !== null, hasToolCallEvents);
-
   return (
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
         <div className="flex items-center gap-2.5">
           <h2 className="text-heading text-foreground">Current run</h2>
-          {/* Nothing in stateLabel below distinguishes "queued" from "an agent is actively
+          {/* The status text does not distinguish "queued" from "an agent is actively
               working this right now" -- this badge is that difference. */}
-          {investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
+          {status.investigating ? <Badge variant="secondary">Agent investigating</Badge> : null}
         </div>
-        {file.issueUrl ? (
+        {issueUrl ? (
           <Button
             size="sm"
             variant="outline"
             nativeButton={false}
-            render={<a href={file.issueUrl} target="_blank" rel="noreferrer" />}
+            render={<a href={issueUrl} target="_blank" rel="noreferrer" />}
           >
             <RollingIcon icon={GitHubLight} className="size-4" /> Open on GitHub
           </Button>
@@ -62,34 +64,28 @@ export function StatusCard({
       </header>
 
       <div className="flex flex-col gap-6 p-5 sm:flex-row sm:items-center">
-        {/* The id prefix is per state, so two mascots for two different states could never
-            share ids even if both were on one page. */}
-        <span
-          aria-hidden="true"
-          className="size-32 shrink-0 self-center [&>svg]:block [&>svg]:size-full"
-          dangerouslySetInnerHTML={{
-            __html: mascot.markup.replaceAll(`${mascot.key}__`, `${mascot.key}__status__`),
-          }}
+        <AnimatedMascotSvg
+          state={status.mascotKey}
+          scope="status"
+          className="size-32 shrink-0 self-center"
         />
 
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-          <Fact label="Status">{stateLabel}</Fact>
-          <Fact label="Bound target">{file.target?.name ?? "None bound"}</Fact>
-          <Fact label="Intake">{file.repositoryFullName ?? file.channel}</Fact>
-          <Fact label={verdictLabel}>
-            {file.verdict && outcomeLabel
-              ? `${outcomeLabel} · revision ${file.verdict.revision}`
+          <Fact label="Status">{status.stateLabel}</Fact>
+          <Fact label="Bound target">{status.target?.name ?? "None bound"}</Fact>
+          <Fact label="Intake">{repositoryFullName ?? channel}</Fact>
+          <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
+            {status.verdict
+              ? `${status.verdict.outcomeLabel} · revision ${status.verdict.revision}`
               : "Nothing drafted yet"}
           </Fact>
           <Fact label="Recorded events">
-            {file.events.length === 0
+            {status.eventCount === 0
               ? "None yet"
-              : `${file.events.length} ${file.events.length === 1 ? "event" : "events"}`}
+              : `${status.eventCount} ${status.eventCount === 1 ? "event" : "events"}`}
           </Fact>
           <Fact label="Last change">
-            <time dateTime={file.updatedAt.toISOString()}>
-              {formatStamp(file.updatedAt)}
-            </time>
+            <time dateTime={status.updatedAt}>{formatStamp(new Date(status.updatedAt))}</time>
           </Fact>
         </div>
       </div>

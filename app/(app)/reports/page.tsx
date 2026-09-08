@@ -1,8 +1,7 @@
-import { AutoRefresh } from "@/components/auto-refresh";
 import { requireReviewer } from "@/lib/auth/dal";
 import { listAllReports, phaseOf, INDEX_LIMIT } from "@/lib/reports/queue";
 
-import { ReportsTable } from "./reports-table";
+import { ReportsLive } from "./reports-live";
 
 export const metadata = { title: "Reports · BountyDesk" };
 
@@ -18,7 +17,6 @@ export default async function ReportsPage() {
 
   return (
     <main className="flex flex-1 flex-col">
-      <AutoRefresh />
       <header className="flex flex-wrap items-baseline justify-between gap-4 border-b border-border/50 px-8 py-7">
         <div className="flex flex-col gap-1">
           <h1 className="text-title text-foreground">Reports</h1>
@@ -33,8 +31,8 @@ export default async function ReportsPage() {
         ) : null}
       </header>
 
-      <ReportsTable
-        rows={rows.map((row) => ({
+      <ReportsLive
+        initial={rows.map((row) => ({
           ...row,
           phase: phaseOf(row.state),
           updatedAt: row.updatedAt.toISOString(),

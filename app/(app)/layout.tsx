@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CurrentPage } from "@/components/current-page";
+import { QueryProvider } from "@/components/query-provider";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { requireReviewer } from "@/lib/auth/dal";
@@ -23,16 +24,18 @@ export default async function ConsoleLayout({ children }: LayoutProps<"/">) {
   const activeReports = await listActiveReports(5);
 
   return (
-    <SidebarProvider defaultOpen={!collapsed}>
-      <AppSidebar reviewer={session.login} activeReports={activeReports} />
-      <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator orientation="vertical" className="mr-1 h-4" />
-          <CurrentPage />
-        </header>
-        {children}
-      </SidebarInset>
-    </SidebarProvider>
+    <QueryProvider>
+      <SidebarProvider defaultOpen={!collapsed}>
+        <AppSidebar reviewer={session.login} activeReports={activeReports} />
+        <SidebarInset>
+          <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-1 h-4" />
+            <CurrentPage />
+          </header>
+          {children}
+        </SidebarInset>
+      </SidebarProvider>
+    </QueryProvider>
   );
 }

@@ -3,10 +3,15 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
+import { GithubLogo, MagnifyingGlass, Signature, X } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
-import { PhaseBadge, PhaseDot } from "@/components/phase-dot";
+import { PhaseDot } from "@/components/phase-dot";
+import {
+  ReportOutcomeBadge,
+  ReportStateBadge,
+  shouldShowOutcomeBadge,
+} from "@/components/report-badges";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { formatStamp } from "@/lib/format";
@@ -20,37 +25,16 @@ import type { IndexRow } from "@/lib/reports/queue";
  * module load. Importing one pure function from it would pull the whole pg driver into the
  * browser bundle, so the server does the lookup and sends the answer.
  */
-type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
+export type ReportRow = Omit<IndexRow, "updatedAt" | "createdAt"> & {
   updatedAt: string;
   createdAt: string;
   phase: string;
 };
 
-const STATE_LABEL: Record<string, string> = {
-  TRIAGING: "Triaging",
-  REPRODUCING: "Reproducing",
-  ANALYSIS_ONLY: "Analysis only",
-  AWAITING_APPROVAL: "Awaiting approval",
-  DELIVERING: "Delivering",
-  DELIVERED: "Delivered",
-  DENIED: "Denied",
-  OUT_OF_SCOPE: "Out of scope",
-  CANCELLED: "Cancelled",
-  EXPIRED: "Expired",
-};
-
-const OUTCOME: Record<string, string> = {
-  REPRODUCED: "Reproduced",
-  NOT_REPRODUCED: "Not reproduced",
-  INCONCLUSIVE: "Inconclusive",
-  ANALYSIS_ONLY: "Analysis only",
-};
 
 const COLUMNS = [
   { key: "report", label: "Report", width: "1.6fr" },
   { key: "origin", label: "Source", width: "0.9fr" },
-  // Wider than the rest: the status pill and the outcome beside it are two pieces of text,
-  // and the outcome was clipping to Reproduc…
   { key: "state", label: "Status", width: "1.4fr" },
   { key: "updated", label: "Last change", width: "0.9fr", align: "end" as const },
 ];
@@ -78,10 +62,43 @@ function matchesFilter(row: ReportRow, key: string): boolean {
   return true;
 }
 
+/**
+ * Renders whatever rows it is handed and nothing else.
+ *
+ * Deliberately free of data fetching: the landing page draws this same table over fixtures,
+ * outside the signed-in shell, where there is no QueryClient to read from and no session to
+ * poll with. reports-live.tsx is the console's wrapper that keeps the rows current.
+ */
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
+  // Repos pinned as filter pills, GitHub-issue style: a report is kept only if its repo is selected.
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
+  // Which suggestion the arrow keys have moved to, so Enter can pick it. onMouseDown gives mouse
+  // users a path but fires before the input's blur; keyboard users get here instead.
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
+
+  // The repos that actually have reports, for the suggestion list. Deriving from the rows in hand
+  // means the suggestions are exactly the repos worth scoping to, with no extra fetch.
+  const allRepos = useMemo(
+    () => [...new Set(rows.map((row) => row.origin).filter((origin) => origin.includes("/")))].sort(),
+    [rows],
+  );
+  const repoSuggestions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return allRepos
+      .filter((repo) => !selectedRepos.includes(repo) && repo.toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [allRepos, selectedRepos, query]);
+
+  const addRepo = (repo: string) => {
+    setSelectedRepos((current) => (current.includes(repo) ? current : [...current, repo]));
+    setQuery("");
+    setActiveSuggestion(0);
+  };
+  const removeRepo = (repo: string) => setSelectedRepos((current) => current.filter((r) => r !== repo));
 
   const counts = useMemo(
     () =>
@@ -100,6 +117,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       id: row.id,
       hidden:
         !matchesFilter(row, filter) ||
+        (selectedRepos.length > 0 && !selectedRepos.includes(row.origin)) ||
         // Title, issue number and origin, because those are the three things somebody arrives
         // holding. Not the state: that is what the chips above are for.
         (needle.length > 0 &&
@@ -127,13 +145,14 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           {row.sourceLabel} · {row.origin}
         </span>,
         <span key="state" className="flex min-w-0 items-center gap-2">
-          <PhaseBadge phase={row.phase}>{STATE_LABEL[row.state] ?? row.state}</PhaseBadge>
-          {/* The outcome stays plain. Two coloured pills side by side would compete, and the
-              state is the one a reviewer scans this column for. */}
-          {row.outcome ? (
-            <span className="truncate text-meta text-muted-foreground">
-              {OUTCOME[row.outcome] ?? row.outcome}
-            </span>
+          <ReportStateBadge
+            state={row.state}
+            phase={row.phase}
+            deliveryState={row.deliveryState}
+            failed={row.handoffFailed}
+          />
+          {shouldShowOutcomeBadge(row.state, row.outcome) ? (
+            <ReportOutcomeBadge outcome={row.outcome} />
           ) : null}
         </span>,
         <span key="updated" className="truncate text-meta text-muted-foreground">
@@ -141,7 +160,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         </span>,
       ],
     }));
-  }, [rows, query, filter, router]);
+  }, [rows, query, filter, router, selectedRepos]);
 
   if (rows.length === 0) {
     return (
@@ -165,16 +184,87 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
 
   return (
     <div className="flex flex-col gap-4 p-8">
-      <div className="relative">
-        <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search by title, issue or repository"
-          aria-label="Search reports"
-          className="h-11 border-border/50 pl-9 text-body"
-        />
+      <div className="flex flex-col gap-2">
+        {selectedRepos.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {selectedRepos.map((repo) => (
+              <Badge key={repo} variant="outline" className="gap-1 pr-1">
+                <GithubLogo weight="fill" className="size-3.5" />
+                <span className="max-w-[16rem] truncate">{repo}</span>
+                <button
+                  type="button"
+                  onClick={() => removeRepo(repo)}
+                  aria-label={`Remove ${repo} filter`}
+                  className="ml-0.5 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveSuggestion(0);
+            }}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            onKeyDown={(event) => {
+              if (repoSuggestions.length === 0) return;
+              const active = Math.min(activeSuggestion, repoSuggestions.length - 1);
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setActiveSuggestion(Math.min(active + 1, repoSuggestions.length - 1));
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveSuggestion(Math.max(active - 1, 0));
+              } else if (event.key === "Enter") {
+                // Pick the highlighted repo rather than submitting the surrounding form.
+                event.preventDefault();
+                addRepo(repoSuggestions[active]);
+              }
+            }}
+            placeholder="Filter by repository, or search title & issue"
+            aria-label="Search reports"
+            role="combobox"
+            aria-expanded={searchFocused && repoSuggestions.length > 0}
+            aria-controls="repo-suggestions"
+            className="h-11 border-border/50 pl-9 text-body"
+          />
+          {searchFocused && repoSuggestions.length > 0 && (
+            <ul
+              id="repo-suggestions"
+              role="listbox"
+              className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
+            >
+              {repoSuggestions.map((repo, i) => {
+                const active = i === Math.min(activeSuggestion, repoSuggestions.length - 1);
+                return (
+                  <li key={repo} role="option" aria-selected={active}>
+                    <button
+                      type="button"
+                      // mouseDown, not click: fire before the input's blur hides this list.
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        addRepo(repo);
+                      }}
+                      onMouseEnter={() => setActiveSuggestion(i)}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${active ? "bg-muted" : ""}`}
+                    >
+                      <GithubLogo weight="fill" className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{repo}</span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
       </div>
 
       <FilterTable

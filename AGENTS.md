@@ -115,7 +115,10 @@ Reuse from the Sentinel prototype where the plan says to: the scope-guard engine
 tests, CI, CONTRIBUTING, and the TrueForge session and turn driver. Do not rebuild what is
 already there.
 
-Disclose AI assistance in the PR.
+Do not tag Claude anywhere in the history or on a PR. No `Co-Authored-By` trailer, no
+co-author on a commit, no "written with Claude" line in a description, no @-mention in a
+comment. The author of a change is the person who owns it, and a bot credit on every commit
+tells a reader nothing while making the log harder to scan.
 
 ## Writing style
 
@@ -224,8 +227,7 @@ promotional language, and process commentary that does not help a reviewer judge
 - [ ] I have added tests that prove my fix is effective or that my feature works
 ```
 
-Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit trailer is
-`Co-Authored-By: Claude <noreply@anthropic.com>`.
+Branch names are `feat/…`, `fix/…`, `chore/…`, `docs/…`. Commit messages carry no trailer.
 
 Stage only what your change owns. The shadcn UI scaffold is deliberately left uncommitted in
 the working tree (`app/globals.css`, `app/layout.tsx`, `components.json`, `lib/utils.ts`,
@@ -285,7 +287,33 @@ The committed source of truth is [`docs/decisions.md`](docs/decisions.md) coveri
 [`docs/demo-runbook.md`](docs/demo-runbook.md), and [`docs/plan.md`](docs/plan.md). When this
 summary is ambiguous, defer to those records and ask rather than guess.
 
-## Future feature backlog
+## Backlog, now active work
+
+The hackathon MVP window is closed. The items below were held out of it for time, and they are
+open work now, not deferred: build them when a task reaches them rather than pointing at a freeze.
+This is only about the ones held for time. The production deferrals in `docs/decisions.md`'s
+"Deferred (real product)" (black-box and live-target reproduction, multi-tenancy and RBAC) are
+scope decisions, not the time-box, and stay deferred there.
+
+What the end of the window does not change is the safety invariants, which were never about the
+schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until their
+verified-recipient and transport-receipt contracts exist. `AWAITING_REPORTER` still is not emitted
+until reporter-reply correlation ships. Every verdict is still human-approved, which no phase ever
+turns off. Those hold whether or not there is time on the clock.
+
+The parked surfaces, so a plan knows where they live:
+
+- Email, upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
+  `built: false`). Email and upload share one blocker, the outbound contract above; drive was out
+  of scope for the demo rather than merely unbuilt.
+- The reviewer-to-agent conversation behind the parked "Chat with Agent Bounty" control
+  (`app/(app)/reports/[id]/verdict-card.tsx`). The panel works; nothing a reviewer typed reached
+  the harness, which is why denying got its own button instead.
+- Reporter reply and resume (`AWAITING_REPORTER`), described below in the lifecycle section.
+- The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
+- Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
+- The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
+  called live-proven; the recorded proof used the deterministic canary pipeline.
 
 Multi-target setup is manifest-driven. The frozen Juice Shop demo profile may stay in the
 server registry, but new targets should come from a validated target manifest or an onboarding
@@ -294,7 +322,11 @@ installation creates the connected repo, a build worker clones that repo in a bu
 dependency egress, the platform reads or asks an onboarding agent to propose target metadata,
 builds and verifies a Daytona snapshot, then writes or rotates the server-side `TargetProfile`.
 The later reproduction run still uses a no-egress sandbox and the agent still interacts with the
-target only through `probe_target` and approval-gated `probe_target_write`.
+target only through `probe_target` and approval-gated `probe_target_write`. The pipeline is built
+and live-proven through build, snapshot, manifest proposal and approval; the open follow-ups from
+that first run, a pluggable and ephemeral registry handoff to replace the GHCR-specific one, the
+onboarding agent's start-command model, and non-GitHub target writes, are in
+[`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md).
 
 Target repositories must stay passive test applications. Do not rely on repo-local scripts such
 as `detect.sh` as the authority for reproduction. Startup commands, readiness checks, image pins,
