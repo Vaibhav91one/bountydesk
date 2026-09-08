@@ -19,6 +19,7 @@ import {
   type BuildDriver,
   type BuildInput,
   type BuildResult,
+  type BuiltService,
 } from "./build-driver";
 import { synthesizeComposeDockerfile } from "./compose-compiler";
 import { getDatastoreRecipe, type DatastoreCreds } from "./datastore-recipes";
@@ -104,6 +105,13 @@ export function createDaytonaBuildDriver(): BuildDriver {
         const buildMarker = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
 
         await startDockerDaemon(sandbox);
+
+        // A mesh builds one image per service and registers one snapshot each, so it owns the whole
+        // push-and-register flow rather than the single-image path below.
+        if (plan.strategy === "compose-mesh") {
+          return await buildMesh(sandbox, plan, { ghcrNamespace, pushToken, slug, buildMarker });
+        }
+
         const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
 
         // Only now introduce the push credential, use it, and remove it, so the untrusted build ran
@@ -148,6 +156,127 @@ export function createDaytonaBuildDriver(): BuildDriver {
 /** Cap on the captured build log kept on the row for download. BuildKit is chatty; the tail is what a
  *  reviewer wants, so keep the last slice rather than the whole thing. */
 const BUILD_LOG_CAP = 64_000;
+
+/**
+ * Build a compose-mesh: one image per service, one snapshot per service. A service with a build
+ * context is built from the repo and pushed to ghcr with the marker baked in; a service that names a
+ * stock image is pulled (to capture its digest) and its public tag is registered as a snapshot
+ * directly. The returned BuildResult mirrors the app service at the top level so the single-image
+ * consumers keep working, and carries every service in `services` for the mesh provisioner.
+ */
+async function buildMesh(
+  sandbox: Sandbox,
+  plan: Extract<BuildPlan, { strategy: "compose-mesh" }>,
+  ctx: { ghcrNamespace: string; pushToken: string; slug: string; buildMarker: string },
+): Promise<BuildResult> {
+  const services: BuiltService[] = [];
+  let app: BuiltService | undefined;
+  let appDockerfileText = "";
+  let appBuildLog = "";
+
+  for (const svc of plan.services) {
+    const serviceSlug = `${ctx.slug}-${svc.service}`;
+    const common = {
+      service: svc.service,
+      role: svc.role,
+      ...(svc.port !== undefined ? { port: svc.port } : {}),
+      ...(svc.env ? { env: svc.env } : {}),
+      ...(svc.peers ? { peers: svc.peers } : {}),
+    };
+
+    if (svc.build) {
+      const context = svc.build.context;
+      const dockerfile = svc.build.dockerfile ?? "Dockerfile";
+      const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
+      const imageRef = onboardingSnapshotImageRef(imageName);
+      // Bake the marker, pinned to root because a service Dockerfile may end on a non-root USER, so
+      // reproduction can prove which build booted this service.
+      await run(
+        sandbox,
+        `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(ctx.buildMarker)} >> /work/source/${context}/${dockerfile}`,
+      );
+      const dfText = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
+      const log = (
+        await run(sandbox, `cd /work/source/${context} && docker build -f ${dockerfile} ${PROXY_BUILD_ARGS} -t ${imageRef} .`)
+      ).result;
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
+      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
+      const built: BuiltService = {
+        ...common,
+        imageName,
+        imageDigest,
+        snapshotId,
+        snapshotImageRef: imageRef,
+        buildMarker: ctx.buildMarker,
+      };
+      services.push(built);
+      if (svc.role === "app") {
+        app = built;
+        appDockerfileText = dfText;
+        appBuildLog = log;
+      }
+    } else {
+      const image = svc.image!;
+      // Pull to capture a digest; the build sandbox's base egress already allows Docker Hub and ghcr.
+      await run(sandbox, `docker pull ${shellArg(image)}`);
+      const imageDigest = (
+        await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${shellArg(image)} | sed 's/.*@//'`)
+      ).result.trim();
+      // Register the snapshot from the public tag; Daytona pulls it at snapshot creation, so the
+      // no-egress reproduction sandbox never needs the registry.
+      const snapshotId = await registerServiceSnapshot(serviceSlug, image);
+      services.push({ ...common, imageName: imageNameOf(image), imageDigest, snapshotId, snapshotImageRef: image });
+    }
+  }
+
+  if (!app) throw new Error("compose-mesh build produced no app service");
+  return {
+    imageName: app.imageName,
+    imageDigest: app.imageDigest,
+    snapshotId: app.snapshotId,
+    dockerfileText: appDockerfileText,
+    buildLog: appBuildLog.slice(-BUILD_LOG_CAP),
+    buildMarker: ctx.buildMarker,
+    buildRecipeDigest: buildRecipeDigest(plan, ctx.buildMarker, app.imageDigest),
+    services,
+  };
+}
+
+/** Push a built image and read back its pushed digest. The credential is introduced right before the
+ *  push and removed right after, so no untrusted build step ran with a reusable token in the sandbox. */
+async function pushAndDigest(sandbox: Sandbox, imageRef: string, pushToken: string): Promise<string> {
+  try {
+    await run(sandbox, `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`);
+    await run(sandbox, `docker push ${imageRef}`);
+  } finally {
+    await run(sandbox, "docker logout ghcr.io").catch(() => undefined);
+  }
+  return (
+    await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
+  ).result.trim();
+}
+
+/** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. */
+async function registerServiceSnapshot(serviceSlug: string, image: string): Promise<string> {
+  await deleteSnapshotByName(`onboarding-${serviceSlug}`);
+  const snapshot = await createSnapshot({
+    name: `onboarding-${serviceSlug}`,
+    image,
+    cpu: BUILD_CPU,
+    memoryGb: BUILD_MEMORY_GB,
+    diskGb: BUILD_DISK_GB,
+  });
+  return snapshot.id;
+}
+
+/** Strip the tag or digest from an image reference to the untagged name ("postgres:16" -> "postgres",
+ *  "ghcr.io/x/y:t" -> "ghcr.io/x/y"), leaving a registry host:port prefix intact. */
+export function imageNameOf(image: string): string {
+  const withoutDigest = image.split("@")[0];
+  const lastSlash = withoutDigest.lastIndexOf("/");
+  const lastColon = withoutDigest.lastIndexOf(":");
+  return lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
+}
 
 /** Build the one image `imageRef` from the plan's strategy, and return the Dockerfile that built it
  *  (stored durably and offered for download) plus the captured build output. */
