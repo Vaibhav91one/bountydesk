@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { onboardingSnapshotImageRef } from "./build-driver";
-import { imageNameOf, injectProxyTrust, repoSlug } from "./daytona-build-driver";
+import { injectProxyTrust, repoSlug } from "./daytona-build-driver";
 
 /**
  * The driver itself talks to live Daytona and a registry, so it is not unit-tested here. Its one
@@ -32,15 +32,6 @@ test("injectProxyTrust adds the trust env after each FROM and nowhere else", () 
 
 test("injectProxyTrust leaves a Dockerfile with no FROM unchanged", () => {
   assert.equal(injectProxyTrust("RUN echo hi\n"), "RUN echo hi\n");
-});
-
-test("imageNameOf strips a tag or digest but keeps a registry host and port", () => {
-  assert.equal(imageNameOf("postgres:16"), "postgres");
-  assert.equal(imageNameOf("redis"), "redis");
-  assert.equal(imageNameOf("ghcr.io/acme/api:v1"), "ghcr.io/acme/api");
-  assert.equal(imageNameOf("ghcr.io/acme/api@sha256:" + "a".repeat(64)), "ghcr.io/acme/api");
-  // A registry host:port prefix is not a tag and must survive.
-  assert.equal(imageNameOf("localhost:5000/api:v2"), "localhost:5000/api");
 });
 
 test("the slug is a registry-safe, lowercase identifier", () => {

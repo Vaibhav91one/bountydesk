@@ -79,6 +79,18 @@ export function injectProxyTrust(dockerfileText: string): string {
   return dockerfileText.replace(/^([ \t]*FROM[ \t]+[^\n]+)$/gim, `$1\n${PROXY_TRUST_ENV}`);
 }
 
+/**
+ * verifyNoEgress and waitForAppReady probe each node from inside with curl or wget. Minimal base
+ * images (python:slim, and datastore images like postgres) ship neither, so a mesh built on them
+ * cannot prove no egress or wait for readiness. Every mesh node's image therefore gets curl at build
+ * time, best-effort across the common package managers; the build egress already allows the distro
+ * mirrors. Meant to run as root (callers set USER root first).
+ */
+const ENSURE_PROBE_TOOL =
+  "RUN if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then " +
+  "(apt-get update && apt-get install -y --no-install-recommends curl) || (apk add --no-cache curl) || " +
+  "(microdnf install -y curl) || (dnf install -y curl) || (yum install -y curl) || true; fi";
+
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -218,7 +230,7 @@ async function buildMesh(
       const original = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
       const dfText =
         injectProxyTrust(original) +
-        `\nUSER root\nRUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
+        `\nUSER root\n${ENSURE_PROBE_TOOL}\nRUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
       const prepared = Buffer.from(dfText, "utf8").toString("base64");
       await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
       const log = (
@@ -248,15 +260,18 @@ async function buildMesh(
       }
     } else {
       const image = svc.image!;
-      // Pull to capture a digest; the build sandbox's base egress already allows Docker Hub and ghcr.
+      const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
+      const imageRef = onboardingSnapshotImageRef(imageName);
+      // Derive an image that adds curl (for the egress and readiness probes) so a minimal datastore
+      // image still verifies, and push it under our own immutable tag. This also avoids Daytona
+      // rejecting a snapshot of a :latest service image. The datastore keeps its own entrypoint, so
+      // it still auto-starts, and gets no marker (it is not a build we prove identity for).
       await run(sandbox, `docker pull ${shellArg(image)}`);
-      const imageDigest = (
-        await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${shellArg(image)} | sed 's/.*@//'`)
-      ).result.trim();
-      // Register the snapshot from the public tag; Daytona pulls it at snapshot creation, so the
-      // no-egress reproduction sandbox never needs the registry.
-      const snapshotId = await registerServiceSnapshot(serviceSlug, image);
-      services.push({ ...common, imageName: imageNameOf(image), imageDigest, snapshotId, snapshotImageRef: image });
+      await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n`);
+      await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
+      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
+      services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef });
     }
   }
 
@@ -308,15 +323,6 @@ async function registerServiceSnapshot(serviceSlug: string, image: string): Prom
       throw error;
     }
   }
-}
-
-/** Strip the tag or digest from an image reference to the untagged name ("postgres:16" -> "postgres",
- *  "ghcr.io/x/y:t" -> "ghcr.io/x/y"), leaving a registry host:port prefix intact. */
-export function imageNameOf(image: string): string {
-  const withoutDigest = image.split("@")[0];
-  const lastSlash = withoutDigest.lastIndexOf("/");
-  const lastColon = withoutDigest.lastIndexOf(":");
-  return lastColon > lastSlash ? withoutDigest.slice(0, lastColon) : withoutDigest;
 }
 
 /** Build the one image `imageRef` from the plan's strategy, and return the Dockerfile that built it
