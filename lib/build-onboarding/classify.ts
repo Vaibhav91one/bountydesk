@@ -546,6 +546,9 @@ function joinRepoPath(context: string, dockerfile: string): string {
 
 /** Resolve a Compose-relative path against the directory containing its manifest. */
 function resolveComposePath(composePath: string, relativePath: string): string {
+  if (path.posix.isAbsolute(relativePath)) {
+    throw new Error(`compose build path must be repository-relative: ${relativePath}`);
+  }
   const composeDir = path.posix.dirname(composePath);
   const resolved = path.posix.normalize(path.posix.join(composeDir, relativePath));
   if (resolved === ".." || resolved.startsWith("../")) {

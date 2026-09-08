@@ -161,6 +161,19 @@ test("parseComposeMesh enumerates services, picks the app, and infers the datast
   assert.equal(db.port, 5432);
 });
 
+test("classify rejects absolute nested Compose build paths", async () => {
+  await assert.rejects(
+    () =>
+      classify(
+        reader({
+          "deploy/docker/compose.yml": PG_COMPOSE.replace("build: .", "build: /tmp"),
+        }),
+        "owner/app",
+      ),
+    /repository-relative/,
+  );
+});
+
 test("classify resolves nested Compose build paths relative to the manifest", async () => {
   const plan = await classify(
     reader({
