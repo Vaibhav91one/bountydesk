@@ -36,7 +36,8 @@ test("mesh start commands run inside the service and reject host container comma
   assert.equal(assertSafeMeshStartCommand("web", "  ./start.sh  "), "./start.sh");
   assert.equal(assertSafeMeshStartCommand("db", "docker-entrypoint.sh postgres"), "docker-entrypoint.sh postgres");
   assert.throws(() => assertSafeMeshStartCommand("db", "docker run postgres"), /host-level/);
-  assert.throws(() => assertSafeMeshStartCommand("db", "podman run postgres"), /host-level/);
+  assert.throws(() => assertSafeMeshStartCommand("db", "cd /app && docker run postgres"), /host-level/);
+  assert.throws(() => assertSafeMeshStartCommand("db", "cd /app && podman run postgres"), /host-level/);
 });
 
 let seq = 0;

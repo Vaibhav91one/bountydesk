@@ -381,7 +381,10 @@ function appServiceName(services: BuiltService[]): string {
 /** Map a stored built service to what the mesh provisioner needs to boot it. */
 export function assertSafeMeshStartCommand(service: string, command: string | undefined): string | undefined {
   const startCommand = command?.trim();
-  if (startCommand && /^(docker|docker-compose|podman|nerdctl)(?:\s|$)/.test(startCommand)) {
+  if (
+    startCommand &&
+    /^(?:(?:cd\s+[^;&]+)\s*&&\s*)?(docker|docker-compose|podman|nerdctl)(?:\s|$)/.test(startCommand)
+  ) {
     throw new Error(`mesh service ${service} has a host-level start command: ${startCommand}`);
   }
   return startCommand;
