@@ -58,6 +58,12 @@ const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
 ];
 
 /** Map a compose service image to a datastore engine we can bundle, or undefined if it is not one. */
+function resolveComposeImage(image: string): string | undefined {
+  const resolved = image.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)[:-][^}]*\}/g, "latest");
+  if (/\$\{[^}]+\}/.test(resolved)) return undefined;
+  return resolved;
+}
+
 function engineForImage(image: string): DatastoreEngine | undefined {
   const name = image.toLowerCase();
   if (name.includes("mariadb")) return "mariadb";
@@ -251,7 +257,8 @@ export function parseComposeMesh(composeText: string): ComposeMeshTopology {
   const meshServices: ComposeMeshService[] = [];
   for (const [name, svc] of entries) {
     const build = appBuildConfig(svc.build);
-    const image = typeof svc.image === "string" ? svc.image : undefined;
+    const rawImage = typeof svc.image === "string" ? svc.image : undefined;
+    const image = rawImage ? resolveComposeImage(rawImage) : undefined;
     if (!build && !image) {
       return { ok: false, reason: `service ${name} has neither a build nor an image, so it cannot run` };
     }
