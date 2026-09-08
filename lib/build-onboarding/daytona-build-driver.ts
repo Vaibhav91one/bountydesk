@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { requireEnv, requireSecret } from "@/lib/env";
 import {
@@ -228,6 +228,12 @@ async function buildMesh(
   let appDockerfileText = "";
   let appBuildLog = "";
 
+  // A tag unique to this build. The onboarding tag is otherwise reused across builds of a repo, and
+  // Daytona caches a snapshot's image by tag: a rebuild that changed the image (adding curl) but kept
+  // the tag was served the stale, cached image, so a node came up without curl. A fresh tag per build
+  // forces Daytona to pull the image this build actually produced.
+  const buildTag = `bountydesk-${randomBytes(4).toString("hex")}`;
+
   for (const svc of plan.services) {
     const serviceSlug = `${ctx.slug}-${svc.service}`;
     const common = {
@@ -242,7 +248,7 @@ async function buildMesh(
       const context = svc.build.context;
       const dockerfile = svc.build.dockerfile ?? "Dockerfile";
       const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
-      const imageRef = onboardingSnapshotImageRef(imageName);
+      const imageRef = `${imageName}:${buildTag}`;
       const stageTag = `bountydesk-mesh-${svc.service}`;
       // Relax the proxy TLS check for package hosts (see PROXY_TRUST_ENV), then bake the marker,
       // pinned to root because a service Dockerfile may end on a non-root USER, so reproduction can
@@ -282,7 +288,7 @@ async function buildMesh(
     } else {
       const image = svc.image!;
       const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
-      const imageRef = onboardingSnapshotImageRef(imageName);
+      const imageRef = `${imageName}:${buildTag}`;
       // Derive an image that adds curl (for the egress and readiness probes) so a minimal datastore
       // image still verifies, and push it under our own immutable tag. This also avoids Daytona
       // rejecting a snapshot of a :latest service image. The datastore keeps its own entrypoint, so
