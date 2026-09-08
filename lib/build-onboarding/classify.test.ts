@@ -190,6 +190,40 @@ services:
   assert.equal(plan.services.filter((s) => s.role === "dependency").length, 2);
 });
 
+test("parseComposeMesh drops a docker-socket sidecar and meshes the real services", () => {
+  const mesh = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["5000:5000"]
+    environment:
+      DB_HOST: db
+  db:
+    image: postgres:13
+  autoheal:
+    image: willfarrell/autoheal:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+`);
+  assert.equal(mesh.ok, true);
+  if (!mesh.ok) return;
+  assert.deepEqual(mesh.services.map((s) => s.service).sort(), ["db", "web"]);
+  assert.equal(mesh.appService, "web");
+});
+
+test("a compose that is only an app plus a docker-socket sidecar is not a mesh", () => {
+  const mesh = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["5000:5000"]
+  autoheal:
+    image: willfarrell/autoheal:latest
+    volumes: ["/var/run/docker.sock:/var/run/docker.sock:ro"]
+`);
+  assert.equal(mesh.ok, false);
+});
+
 test("a single-service compose is not a mesh and keeps the flatten reason", () => {
   const mesh = parseComposeMesh(`
 services:
