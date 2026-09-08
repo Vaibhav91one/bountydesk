@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { MagnifyingGlass, Signature } from "@phosphor-icons/react/ssr";
+import { GithubLogo, MagnifyingGlass, Signature, X } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow as Row } from "@/components/filter-table";
 import { PhaseDot } from "@/components/phase-dot";
@@ -73,6 +73,28 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<string>("all");
+  // Repos pinned as filter pills, GitHub-issue style: a report is kept only if its repo is selected.
+  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [searchFocused, setSearchFocused] = useState(false);
+
+  // The repos that actually have reports, for the suggestion list. Deriving from the rows in hand
+  // means the suggestions are exactly the repos worth scoping to, with no extra fetch.
+  const allRepos = useMemo(
+    () => [...new Set(rows.map((row) => row.origin).filter((origin) => origin.includes("/")))].sort(),
+    [rows],
+  );
+  const repoSuggestions = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return allRepos
+      .filter((repo) => !selectedRepos.includes(repo) && repo.toLowerCase().includes(needle))
+      .slice(0, 8);
+  }, [allRepos, selectedRepos, query]);
+
+  const addRepo = (repo: string) => {
+    setSelectedRepos((current) => (current.includes(repo) ? current : [...current, repo]));
+    setQuery("");
+  };
+  const removeRepo = (repo: string) => setSelectedRepos((current) => current.filter((r) => r !== repo));
 
   const counts = useMemo(
     () =>
@@ -91,6 +113,8 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       id: row.id,
       hidden:
         !matchesFilter(row, filter) ||
+        // Repo pills scope to their repos; free text then narrows within them.
+        (selectedRepos.length > 0 && !selectedRepos.includes(row.origin)) ||
         // Title, issue number and origin, because those are the three things somebody arrives
         // holding. Not the state: that is what the chips above are for.
         (needle.length > 0 &&
@@ -133,7 +157,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         </span>,
       ],
     }));
-  }, [rows, query, filter, router]);
+  }, [rows, query, filter, router, selectedRepos]);
 
   if (rows.length === 0) {
     return (
@@ -157,16 +181,58 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
 
   return (
     <div className="flex flex-col gap-4 p-8">
-      <div className="relative">
-        <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search by title, issue or repository"
-          aria-label="Search reports"
-          className="h-11 border-border/50 pl-9 text-body"
-        />
+      <div className="flex flex-col gap-2">
+        {selectedRepos.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {selectedRepos.map((repo) => (
+              <Badge key={repo} variant="outline" className="gap-1 pr-1">
+                <GithubLogo weight="fill" className="size-3.5" />
+                <span className="max-w-[16rem] truncate">{repo}</span>
+                <button
+                  type="button"
+                  onClick={() => removeRepo(repo)}
+                  aria-label={`Remove ${repo} filter`}
+                  className="ml-0.5 rounded-sm p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        )}
+        <div className="relative">
+          <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onFocus={() => setSearchFocused(true)}
+            onBlur={() => setSearchFocused(false)}
+            placeholder="Filter by repository, or search title & issue"
+            aria-label="Search reports"
+            className="h-11 border-border/50 pl-9 text-body"
+          />
+          {searchFocused && repoSuggestions.length > 0 && (
+            <ul className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md">
+              {repoSuggestions.map((repo) => (
+                <li key={repo}>
+                  <button
+                    type="button"
+                    // mouseDown, not click: fire before the input's blur hides this list.
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      addRepo(repo);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
+                  >
+                    <GithubLogo weight="fill" className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="truncate">{repo}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
 
       <FilterTable
