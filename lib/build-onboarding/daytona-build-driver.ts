@@ -88,10 +88,12 @@ export function injectProxyTrust(dockerfileText: string): string {
  */
 const ENSURE_PROBE_TOOL =
   "RUN if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then " +
-  // Datastore images add a vendor apt repo (postgres uses PGDG, mysql and mongodb their own) whose
-  // host is not on the build egress allow-list, so apt-get update fails on it and curl never
-  // installs. Drop those vendor repos first so the update runs against the base distro mirrors only.
-  "rm -f /etc/apt/sources.list.d/pgdg*.list /etc/apt/sources.list.d/mysql*.list /etc/apt/sources.list.d/mongodb*.list 2>/dev/null || true; " +
+  // A datastore image adds a vendor apt repo (postgres uses PGDG, mariadb/mysql and mongodb their
+  // own) whose host is not on the build egress allow-list, so apt-get update fails on it and curl
+  // never installs. Drop every vendor .list in sources.list.d so the update runs against the base
+  // distro mirrors only; the base sources live in /etc/apt/sources.list or a .sources file and are
+  // left in place, so this stays a no-op on an image with no vendor repo.
+  "rm -f /etc/apt/sources.list.d/*.list 2>/dev/null || true; " +
   "(apt-get update && apt-get install -y --no-install-recommends curl) || (apk add --no-cache curl) || " +
   "(microdnf install -y curl) || (dnf install -y curl) || (yum install -y curl) || true; fi";
 
