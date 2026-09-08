@@ -105,8 +105,8 @@ zerops:
         # The harness's MCP connectors (publish-verdict, build, scope-guard) are registered at
         # APP_BASE_URL, which is the app host. SCOPE_GUARD_URL is the same origin. Both point at the
         # app domain, which now tracks production.
-        APP_BASE_URL: https://app.bounty-desk.vaibhav.quest
-        SCOPE_GUARD_URL: https://app.bounty-desk.vaibhav.quest
+        APP_BASE_URL: https://app.bountydesk.vaibhav.quest
+        SCOPE_GUARD_URL: https://app.bountydesk.vaibhav.quest
       startCommands:
         - name: trueforge
           command: node ops/trueforge/node_modules/@truefoundry/trueforge/dist/cli.js --port 8790
