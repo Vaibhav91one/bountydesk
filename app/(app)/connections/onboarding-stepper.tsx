@@ -2,11 +2,8 @@ import { StepBadge } from "../reports/[id]/lifecycle-step";
 import { cn } from "@/lib/utils";
 import { onboardingView } from "./onboarding-steps";
 
-/**
- * The onboarding ladder as a horizontal stepper, the connections analogue of the report lifecycle.
- * Reuses the lifecycle StepBadge (done/current/pending/skipped) and lays the steps left-to-right with
- * a connector rail lit as far as onboarding has progressed. A terminal outcome shows as a banner above.
- */
+/** The connections analogue of the report lifecycle: the onboarding ladder laid out horizontally,
+ *  reusing the lifecycle StepBadge so a step reads the same in both places. */
 export function OnboardingStepper({ state }: { state: string | null }) {
   const { steps, terminal } = onboardingView(state);
 
@@ -19,7 +16,8 @@ export function OnboardingStepper({ state }: { state: string | null }) {
       ) : null}
       {terminal === "failed" ? (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-meta text-destructive">
-          Onboarding failed. It is retried automatically; the record below shows the reason.
+          Onboarding stopped after using up its retry attempts. Reconnecting the repository or pushing a
+          corrected commit starts it again from the top.
         </p>
       ) : null}
 

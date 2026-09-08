@@ -40,12 +40,18 @@ export function onboardingView(state: OnboardingState | string | null | undefine
 
   if (!state) return { steps: at("pending"), terminal: null };
   if (state === "CONFIGURED") return { steps: at("done"), terminal: "configured" };
-  if (state === "UNSUPPORTED" || state === "FAILED") {
-    // The ladder stopped after the plan step: plan ran, everything after it was not reached.
+  if (state === "UNSUPPORTED") {
+    // Classification ran and concluded the repo cannot be sandboxed, so the plan step completed and
+    // nothing after it is attempted.
     return {
       steps: STEPS.map((step, i) => ({ ...step, state: (i === 0 ? "done" : "skipped") as StepState })),
-      terminal: state === "UNSUPPORTED" ? "unsupported" : "failed",
+      terminal: "unsupported",
     };
+  }
+  if (state === "FAILED") {
+    // A step exhausted its retries. The state does not record which one (it can fail at plan, build,
+    // manifest or verify), so claim no per-step progress rather than inventing a stage it cleared.
+    return { steps: at("skipped"), terminal: "failed" };
   }
 
   const cursor = CURSOR[state as OnboardingState] ?? 0;

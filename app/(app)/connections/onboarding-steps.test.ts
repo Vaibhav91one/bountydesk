@@ -30,12 +30,17 @@ test("CONFIGURED is all done", () => {
   assert.equal(onboardingStepDone("CONFIGURED", "verify"), true);
 });
 
-test("UNSUPPORTED and FAILED are terminal: plan done, the rest skipped", () => {
-  for (const state of ["UNSUPPORTED", "FAILED"] as const) {
-    const view = onboardingView(state);
-    assert.equal(view.terminal, state === "UNSUPPORTED" ? "unsupported" : "failed");
-    assert.equal(view.steps[0].state, "done");
-    assert.ok(view.steps.slice(1).every((s) => s.state === "skipped"));
-  }
+test("UNSUPPORTED completed the plan step and skipped the rest", () => {
+  const view = onboardingView("UNSUPPORTED");
+  assert.equal(view.terminal, "unsupported");
+  assert.equal(view.steps[0].state, "done");
+  assert.ok(view.steps.slice(1).every((s) => s.state === "skipped"));
   assert.equal(onboardingStepDone("UNSUPPORTED", "build"), false);
+});
+
+test("FAILED claims no stage, since the state does not record where it failed", () => {
+  const view = onboardingView("FAILED");
+  assert.equal(view.terminal, "failed");
+  assert.ok(view.steps.every((s) => s.state === "skipped"));
+  assert.equal(onboardingStepDone("FAILED", "plan"), false);
 });

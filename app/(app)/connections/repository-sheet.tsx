@@ -280,8 +280,6 @@ export function RepositorySheet({
                 <OnboardingRecord repoId={repo.repoId} detail={repo.onboardingDetail} configured={repo.configured} />
               ) : null}
 
-              {/* Two ways into the same onboarding dialog: the state as a stepper, or the agent
-                  architecture as a flowchart. Shown whenever the repo has an onboarding record. */}
               {repo.onboardingDetail ? (
                 <div className="flex gap-2">
                   <Button

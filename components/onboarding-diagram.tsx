@@ -74,7 +74,6 @@ export function OnboardingDiagram({
   state,
 }: {
   repositoryFullName: string | null;
-  /** The current onboarding state; each node's tick is derived from it. */
   state: string | null;
 }) {
   const done = (key: string) => onboardingStepDone(state, key);
