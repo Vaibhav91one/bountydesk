@@ -18,7 +18,9 @@ import {
 } from "@/components/ui/sheet";
 
 import { ApproveOnboardingButton } from "./approve-onboarding-button";
+import { DownloadArtifact } from "./download-artifact";
 import type { RepositoryRow } from "./connection-tabs";
+import type { OnboardingDetail } from "@/lib/github/connections";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -35,11 +37,16 @@ function count(n: number, noun: string): string {
   return `${n} ${n === 1 ? noun : `${noun}s`}`;
 }
 
-/** Plain-language heading for where onboarding is, or why it stopped. */
-function onboardingProgressLabel(state: string): string {
+/** Plain-language heading for where onboarding is, or why it stopped. A live progress note from the
+ *  worker or the build tools wins, so a multi-minute agent turn reads as its real activity instead of
+ *  one static "Classifying". */
+function onboardingProgressLabel(state: string, progressNote?: string | null): string {
+  if (progressNote && progressNote.trim().length > 0) {
+    return progressNote.charAt(0).toUpperCase() + progressNote.slice(1);
+  }
   switch (state) {
     case "PENDING_PLAN":
-      return "Classifying the repository";
+      return "Reading the repository";
     case "PENDING_BUILD":
       return "Building the target image";
     case "PENDING_MANIFEST":
@@ -51,6 +58,75 @@ function onboardingProgressLabel(state: string): string {
     default:
       return "Onboarding in progress";
   }
+}
+
+/** The onboarding record: what was built, the sandboxability verdict, the approver, and downloads.
+ *  Shown for any onboarding state, so a CONFIGURED target reads as onboarded rather than as an absence
+ *  of progress. */
+function OnboardingRecord({
+  repoId,
+  detail,
+  configured,
+}: {
+  repoId: number;
+  detail: OnboardingDetail;
+  configured: boolean;
+}) {
+  const image = detail.imageName
+    ? detail.imageName + (detail.imageDigest ? `@${detail.imageDigest}` : "")
+    : null;
+  const hasDownloads = detail.hasDockerfile || detail.hasManifest || detail.hasBuildPlan || detail.hasBuildLog;
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border/60 bg-muted/20 p-3">
+      <div className="flex items-center gap-2">
+        {configured ? <CheckCircle className="size-4 shrink-0 text-emerald-400" /> : null}
+        <p className="text-meta font-medium text-foreground">
+          {configured ? "Onboarded as a reproduction target" : "Onboarding record"}
+        </p>
+      </div>
+      <dl className="flex flex-col">
+        {detail.strategy ? (
+          <Row label="Build strategy">
+            {detail.strategy}
+            {detail.ecosystem ? ` · ${detail.ecosystem}` : ""}
+          </Row>
+        ) : null}
+        {image ? (
+          <Row label="Image">
+            <span className="break-all font-mono text-xs">{image}</span>
+          </Row>
+        ) : null}
+        {detail.buildMarker ? (
+          <Row label="Source commit">
+            <span className="font-mono text-xs">{detail.buildMarker.slice(0, 12)}</span>
+          </Row>
+        ) : null}
+        {detail.review ? (
+          <Row label="Sandboxability">
+            {detail.review.verdict}
+            {detail.review.reason ? ` · ${detail.review.reason}` : ""}
+          </Row>
+        ) : null}
+        {detail.reason ? <Row label="Reason">{detail.reason}</Row> : null}
+        {detail.approvedBy ? (
+          <Row label="Approved by">
+            {detail.approvedBy}
+            {detail.approvedAt ? ` · ${formatStamp(new Date(detail.approvedAt))}` : ""}
+          </Row>
+        ) : null}
+      </dl>
+      {hasDownloads ? (
+        <div className="flex flex-col gap-2">
+          <p className="text-meta text-muted-foreground">Downloads</p>
+          {detail.hasDockerfile ? <DownloadArtifact repoId={repoId} kind="dockerfile" label="Dockerfile" /> : null}
+          {detail.hasManifest ? <DownloadArtifact repoId={repoId} kind="manifest" label="Target manifest" /> : null}
+          {detail.hasBuildPlan ? <DownloadArtifact repoId={repoId} kind="buildplan" label="Build plan" /> : null}
+          {detail.hasBuildLog ? <DownloadArtifact repoId={repoId} kind="buildlog" label="Build log" /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -182,12 +258,20 @@ export function RepositorySheet({
                   }
                 >
                   <span className="text-meta font-medium text-foreground">
-                    {onboardingProgressLabel(repo.onboardingProgress.state)}
+                    {onboardingProgressLabel(repo.onboardingProgress.state, repo.onboardingDetail?.progressNote)}
                   </span>
                   {repo.onboardingProgress.reason ? (
                     <span className="text-sm">{repo.onboardingProgress.reason}</span>
                   ) : null}
                 </div>
+              ) : null}
+
+              {/* What onboarding did: the recipe, the built image, the sandboxability verdict, the
+                  approver, and downloads. Shown whenever an onboarding record exists, so a CONFIGURED
+                  target has a positive "this is onboarded" answer, not just an absence of progress. */}
+              {repo.onboardingDetail &&
+              !["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST"].includes(repo.onboardingDetail.state) ? (
+                <OnboardingRecord repoId={repo.repoId} detail={repo.onboardingDetail} configured={repo.configured} />
               ) : null}
 
               <div className="flex flex-col gap-2">

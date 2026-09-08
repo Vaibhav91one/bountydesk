@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
-import type { OnboardingProgress, OnboardingProposal, RepoStatus } from "@/lib/github/connections";
+import type { OnboardingDetail, OnboardingProgress, OnboardingProposal, RepoStatus } from "@/lib/github/connections";
 
 import { RepositorySheet } from "./repository-sheet";
 
@@ -75,6 +75,8 @@ export type RepositoryRow = {
   onboarding: OnboardingProposal | null;
   /** Onboarding in flight or refused (classifying, building, failed, unsupported), or null. */
   onboardingProgress: OnboardingProgress | null;
+  /** The full onboarding record for the panel's detail view and downloads, or null if never onboarded. */
+  onboardingDetail: OnboardingDetail | null;
 };
 
 /**

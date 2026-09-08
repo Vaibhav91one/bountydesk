@@ -70,7 +70,7 @@ test("a verdict written by the tool is returned to the caller and cleared", asyn
     .from(dbm.targetOnboarding)
     .where(dbm.eq(dbm.targetOnboarding.id, id));
   assert.equal(row.token, null, "the capability token is cleared");
-  assert.equal(row.rr, null, "the review result is cleared after it is read");
+  assert.deepEqual(row.rr, { verdict: "no", reason: "three interdependent services" }, "the verdict is kept as the durable record");
 });
 
 test("a review that cannot run is unsure, and clears its token", async () => {

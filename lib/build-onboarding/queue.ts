@@ -67,6 +67,7 @@ export type OnboardingAdvanceFields = Partial<{
   snapshotId: string;
   buildMarker: string;
   dockerfileText: string;
+  buildLog: string;
   proposedManifest: unknown;
 }>;
 
@@ -87,6 +88,15 @@ export type EnqueueInput = { repoId: number; repoFullName: string; sourceRef: st
  * doubles the work. Takes an optional tx so the GitHub trigger can enqueue inside the same
  * transaction that granted the repository (lib/github/lifecycle.ts).
  */
+/** Record a short human-readable note on what onboarding is doing now, for the connections panel. Best
+ *  effort: a progress write must never fail the step it annotates, so callers ignore its errors. */
+export async function setOnboardingProgress(onboardingId: string, note: string, tx: Executor = db): Promise<void> {
+  await tx
+    .update(targetOnboarding)
+    .set({ progressNote: note.slice(0, 200), updatedAt: new Date() })
+    .where(eq(targetOnboarding.id, onboardingId));
+}
+
 export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<void> {
   await tx
     .insert(targetOnboarding)
@@ -111,6 +121,9 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         snapshotId: null,
         buildMarker: null,
         dockerfileText: null,
+        buildLog: null,
+        progressNote: null,
+        reviewResult: null,
         proposedManifest: null,
         approvedBy: null,
         approvedAt: null,
