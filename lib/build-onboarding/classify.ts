@@ -34,8 +34,12 @@ const COMPOSE_PATHS = [
   // Common deployment layouts keep the Compose file below the repository root. The source reader
   // is intentionally read-only and has no directory-listing authority, so support reviewed
   // conventional paths explicitly rather than guessing from repo content.
+  "deploy/docker/compose.yaml",
+  "deploy/docker/compose.yml",
   "deploy/docker/docker-compose.yaml",
   "deploy/docker/docker-compose.yml",
+  "docker/compose.yaml",
+  "docker/compose.yml",
   "docker/docker-compose.yaml",
   "docker/docker-compose.yml",
 ];

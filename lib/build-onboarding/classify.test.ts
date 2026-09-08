@@ -170,6 +170,15 @@ test("classify discovers Compose files in the standard deployment directory", as
   assert.equal(plan.composePath, "deploy/docker/docker-compose.yml");
 });
 
+test("classify discovers nested compose.yml as well as docker-compose.yml", async () => {
+  const plan = await classify(
+    reader({ "deploy/docker/compose.yml": PG_COMPOSE, "package.json": "{}" }),
+    "owner/app",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  assert.equal(plan.composePath, "deploy/docker/compose.yml");
+});
+
 test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
   const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
   assert.equal(plan.strategy, "compose-mesh");
