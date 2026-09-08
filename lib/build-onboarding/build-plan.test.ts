@@ -78,6 +78,36 @@ test("a compose-mesh plan carries every service, one app and its dependencies", 
   assert.equal(dep?.port, 6379);
 });
 
+test("a compose-mesh service can carry an agent-authored Dockerfile text", () => {
+  const plan = parseBuildPlan({
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "app",
+    services: [
+      { service: "app", role: "app", port: 3000, build: { context: ".", dockerfileText: "FROM node:20\nCMD [\"node\",\"server.js\"]\n" } },
+      { service: "db", role: "dependency", port: 5432, image: "postgres:16" },
+    ],
+    runtime: { name: "app", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  });
+  if (plan.strategy !== "compose-mesh") throw new Error("narrowing");
+  const app = plan.services.find((s) => s.role === "app")!;
+  assert.match(app.build!.dockerfileText!, /FROM node:20/);
+  // A blank dockerfileText is rejected.
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        strategy: "compose-mesh",
+        ecosystem: "node",
+        composePath: "docker-compose.yml",
+        appService: "app",
+        services: [{ service: "app", role: "app", port: 3000, build: { context: ".", dockerfileText: "  " } }],
+        runtime: { name: "app", baseUrl: "http://localhost:3000", readinessPath: "/" },
+      }),
+    /dockerfileText must be a nonempty string/,
+  );
+});
+
 test("a compose-mesh service must set exactly one of build or image", () => {
   const base = {
     strategy: "compose-mesh",

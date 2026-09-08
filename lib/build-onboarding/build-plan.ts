@@ -84,8 +84,11 @@ export type ComposeMeshService = {
    *  app always has one (it is what gets probed); a dependency with no inbound port (a background
    *  worker) omits it, and is booted but neither addressed nor health-checked. */
   port?: number;
-  /** Build the image from the repo. Exactly one of build or image is set. */
-  build?: { context: string; dockerfile?: string };
+  /** Build the image from the repo. Exactly one of build or image is set. `dockerfileText`, when
+   *  present, is a Dockerfile the onboarding agent authored: the driver writes it into the context
+   *  before building, since the driver re-clones the repo and the agent's file is not in it. Absent
+   *  for the deterministic classifier, which points at a Dockerfile already in the repo. */
+  build?: { context: string; dockerfile?: string; dockerfileText?: string };
   /** Pull a published image (a stock datastore such as postgres:16). Exactly one of build/image. */
   image?: string;
   /** The service's environment. A value that names another compose service (a DB host) is rewritten
@@ -483,14 +486,22 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
   return services;
 }
 
-function parseMeshBuild(input: unknown, i: number): { context: string; dockerfile?: string } {
+function parseMeshBuild(input: unknown, i: number): { context: string; dockerfile?: string; dockerfileText?: string } {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     throw new Error(`build plan services[${i}].build must be an object`);
   }
   const b = input as Record<string, unknown>;
+  const dockerfileText = b.dockerfileText;
+  if (dockerfileText !== undefined) {
+    // Not optStr(): a Dockerfile is multi-line and ends on a newline. Same bound as agent-authored.
+    if (typeof dockerfileText !== "string" || dockerfileText.trim().length === 0 || dockerfileText.length > MAX_DOCKERFILE_CHARS) {
+      throw new Error(`build plan services[${i}].build.dockerfileText must be a nonempty string under ${MAX_DOCKERFILE_CHARS} characters`);
+    }
+  }
   return {
     context: relPath(optStr(b, "context") ?? ".", `services[${i}].build.context`),
     ...(optStr(b, "dockerfile") ? { dockerfile: relPath(optStr(b, "dockerfile")!, `services[${i}].build.dockerfile`) } : {}),
+    ...(typeof dockerfileText === "string" ? { dockerfileText } : {}),
   };
 }
 
