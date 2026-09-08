@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { onboardingSnapshotImageRef } from "./build-driver";
-import { injectProxyTrust, repoSlug } from "./daytona-build-driver";
+import { dockerEnvLine, injectProxyTrust, repoSlug } from "./daytona-build-driver";
 
 /**
  * The driver itself talks to live Daytona and a registry, so it is not unit-tested here. Its one
@@ -28,6 +28,17 @@ test("injectProxyTrust adds the trust env after each FROM and nowhere else", () 
   assert.match(out, /FROM base\nENV PIP_TRUSTED_HOST/);
   // A RUN line is untouched.
   assert.match(out, /\nRUN pip install flask\n/);
+});
+
+test("dockerEnvLine bakes a service's compose env, quoting values, and is empty for none", () => {
+  assert.equal(dockerEnvLine(undefined), "");
+  assert.equal(dockerEnvLine({}), "");
+  const line = dockerEnvLine({ POSTGRES_PASSWORD: "postgres", DB_HOST: "db" });
+  assert.match(line, /^ENV /);
+  assert.match(line, /POSTGRES_PASSWORD="postgres"/);
+  // A value naming a peer service is kept verbatim; /etc/hosts resolves it at provision time.
+  assert.match(line, /DB_HOST="db"/);
+  assert.match(line, /\n$/);
 });
 
 test("injectProxyTrust leaves a Dockerfile with no FROM unchanged", () => {

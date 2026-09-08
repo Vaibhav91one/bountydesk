@@ -80,6 +80,21 @@ export function injectProxyTrust(dockerfileText: string): string {
 }
 
 /**
+ * A Dockerfile ENV line baking a mesh service's compose environment into its image, or "" when it
+ * has none. compose applies a service's environment at run time; the reproduction sandbox boots the
+ * image with none, so a datastore that needs POSTGRES_PASSWORD to initialise, or an app that reads
+ * its DB host from the environment, must carry that config in the image. This is the test target's
+ * own configuration (a datastore password like "postgres"), not a platform secret, and the image is
+ * offline. A value that names a peer service (a DB host set to "db") is kept verbatim; the peer
+ * resolves through /etc/hosts at provision time.
+ */
+export function dockerEnvLine(env: Record<string, string> | undefined): string {
+  const entries = Object.entries(env ?? {});
+  if (entries.length === 0) return "";
+  return "ENV " + entries.map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(" ") + "\n";
+}
+
+/**
  * verifyNoEgress and waitForAppReady probe each node from inside with curl or wget. Minimal base
  * images (python:slim, and datastore images like postgres) ship neither, so a mesh built on them
  * cannot prove no egress or wait for readiness. Every mesh node's image therefore gets curl at build
@@ -236,7 +251,7 @@ async function buildMesh(
       const original = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
       const dfText =
         injectProxyTrust(original) +
-        `\nUSER root\n${ENSURE_PROBE_TOOL}\nRUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
+        `\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}RUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
       const prepared = Buffer.from(dfText, "utf8").toString("base64");
       await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
       const log = (
@@ -273,7 +288,7 @@ async function buildMesh(
       // rejecting a snapshot of a :latest service image. The datastore keeps its own entrypoint, so
       // it still auto-starts, and gets no marker (it is not a build we prove identity for).
       await run(sandbox, `docker pull ${shellArg(image)}`);
-      await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n`);
+      await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}`);
       await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
