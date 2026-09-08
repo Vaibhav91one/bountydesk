@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowSquareOut, CheckCircle, Warning } from "@phosphor-icons/react/ssr";
+import { useState } from "react";
+import { ArrowSquareOut, CheckCircle, ListChecks, TreeStructure, Warning } from "@phosphor-icons/react/ssr";
 import { GitHubLight } from "developer-icons";
 
 import { formatStamp } from "@/lib/format";
@@ -19,6 +20,7 @@ import {
 
 import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import { DownloadArtifact } from "./download-artifact";
+import { OnboardingDialog, type OnboardingTab } from "./onboarding-dialog";
 import type { RepositoryRow } from "./connection-tabs";
 import type { OnboardingDetail } from "@/lib/github/connections";
 
@@ -149,6 +151,10 @@ export function RepositorySheet({
   repo: RepositoryRow | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  // Which onboarding view the dialog is open on, or null when it is closed. Both buttons open the
+  // same dialog and only pick the starting tab; the toggle inside then switches freely.
+  const [dialogTab, setDialogTab] = useState<OnboardingTab | null>(null);
+
   return (
     <Sheet open={repo !== null} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="no-scrollbar gap-0 overflow-y-auto sm:max-w-md">
@@ -273,6 +279,36 @@ export function RepositorySheet({
               !["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST"].includes(repo.onboardingDetail.state) ? (
                 <OnboardingRecord repoId={repo.repoId} detail={repo.onboardingDetail} configured={repo.configured} />
               ) : null}
+
+              {repo.onboardingDetail ? (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 justify-center"
+                    onClick={() => setDialogTab("state")}
+                  >
+                    <ListChecks /> Onboarding state
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 justify-center"
+                    onClick={() => setDialogTab("architecture")}
+                  >
+                    <TreeStructure /> Architecture
+                  </Button>
+                </div>
+              ) : null}
+
+              <OnboardingDialog
+                open={dialogTab !== null}
+                tab={dialogTab ?? "state"}
+                onTabChange={setDialogTab}
+                onOpenChange={(next) => !next && setDialogTab(null)}
+                repositoryFullName={repo.fullName}
+                state={repo.onboardingDetail?.state ?? null}
+              />
 
               <div className="flex flex-col gap-2">
                 <Button
