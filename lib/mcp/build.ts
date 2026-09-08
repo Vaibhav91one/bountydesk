@@ -92,7 +92,7 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
 
   await db
     .update(targetOnboarding)
-    .set({ agentSandboxId: sandbox.id, updatedAt: new Date() })
+    .set({ agentSandboxId: sandbox.id, progressNote: "opened build sandbox", updatedAt: new Date() })
     .where(eq(targetOnboarding.id, row.id));
 
   // Clone the repo and start dockerd so the agent can build straight away. The clone URL is the
@@ -187,7 +187,7 @@ export async function commitTargetImage(input: CommitTargetInput): Promise<Build
   // not change state here (the worker owns the lease).
   await db
     .update(targetOnboarding)
-    .set({ buildPlan: plan, updatedAt: new Date() })
+    .set({ buildPlan: plan, progressNote: "recipe committed", updatedAt: new Date() })
     .where(eq(targetOnboarding.id, row.id));
 
   return {

@@ -48,6 +48,37 @@ export type ConnectionRepo = {
    *  already awaiting approval, or already configured). Lets the panel say "building" rather than
    *  look idle, and show why a repo cannot be onboarded. */
   onboardingProgress: OnboardingProgress | null;
+  /** The full onboarding record for the panel: what was built, the recipe, the sandboxability verdict,
+   *  the approver, and which artifacts can be downloaded. Present whenever an onboarding row exists (any
+   *  state, including CONFIGURED, so "was this properly onboarded?" has a positive answer). Null when the
+   *  repo has never been onboarded. */
+  onboardingDetail: OnboardingDetail | null;
+};
+
+export type OnboardingDetail = {
+  state: string;
+  /** A live note on what onboarding is doing now ("building the target image"), for in-flight states. */
+  progressNote: string | null;
+  /** The UNSUPPORTED not-flattenable reason or the FAILED last error; null otherwise. */
+  reason: string | null;
+  strategy: string | null;
+  ecosystem: string | null;
+  imageName: string | null;
+  imageDigest: string | null;
+  /** The source commit baked into the image and re-verified from inside the sandbox. */
+  buildMarker: string | null;
+  approvedBy: string | null;
+  /** ISO string, so it crosses from the server component into the client one. */
+  approvedAt: string | null;
+  /** The sandboxability review's verdict and reason, when a review ran and its result is still on the
+   *  row (it is cleared once consumed, so this is usually only set mid-review). */
+  review: { verdict: string; reason: string } | null;
+  /** Whether the Dockerfile / build log are stored, so the panel offers a download without shipping the
+   *  full text in the connections list (the download fetches it on demand). */
+  hasDockerfile: boolean;
+  hasBuildLog: boolean;
+  hasManifest: boolean;
+  hasBuildPlan: boolean;
 };
 
 export type OnboardingProgress = {
@@ -188,6 +219,62 @@ async function onboardingProgressByRepo(): Promise<Map<number, OnboardingProgres
   );
 }
 
+/**
+ * The full onboarding record for every repo that has one, keyed by repository id, for the panel's
+ * detail view and downloads. Presence flags stand in for the large text columns (Dockerfile, build
+ * log): the download fetches the text on demand rather than shipping it in the connections list.
+ */
+async function onboardingDetailByRepo(): Promise<Map<number, OnboardingDetail>> {
+  const rows = await db
+    .select({
+      repoId: targetOnboarding.repoId,
+      state: targetOnboarding.state,
+      progressNote: targetOnboarding.progressNote,
+      buildPlan: targetOnboarding.buildPlan,
+      lastError: targetOnboarding.lastError,
+      imageName: targetOnboarding.imageName,
+      imageDigest: targetOnboarding.imageDigest,
+      buildMarker: targetOnboarding.buildMarker,
+      approvedBy: targetOnboarding.approvedBy,
+      approvedAt: targetOnboarding.approvedAt,
+      reviewResult: targetOnboarding.reviewResult,
+      hasDockerfile: sql<boolean>`${targetOnboarding.dockerfileText} is not null`,
+      hasBuildLog: sql<boolean>`${targetOnboarding.buildLog} is not null`,
+      hasManifest: sql<boolean>`${targetOnboarding.proposedManifest} is not null`,
+      hasBuildPlan: sql<boolean>`${targetOnboarding.buildPlan} is not null`,
+    })
+    .from(targetOnboarding);
+
+  return new Map(
+    rows.map((row) => {
+      const plan = row.buildPlan as { strategy?: string; ecosystem?: string; reason?: string } | null;
+      const review = row.reviewResult as { verdict?: string; reason?: string } | null;
+      const reason =
+        row.state === "UNSUPPORTED" ? (plan?.reason ?? null) : row.state === "FAILED" ? row.lastError : null;
+      // The progress note only means something while a step is running; a resting row shows its state.
+      const inFlight = ["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST"].includes(row.state);
+      const detail: OnboardingDetail = {
+        state: row.state,
+        progressNote: inFlight ? row.progressNote : null,
+        reason,
+        strategy: plan?.strategy ?? null,
+        ecosystem: plan?.ecosystem ?? null,
+        imageName: row.imageName,
+        imageDigest: row.imageDigest,
+        buildMarker: row.buildMarker,
+        approvedBy: row.approvedBy,
+        approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
+        review: review?.verdict ? { verdict: review.verdict, reason: review.reason ?? "" } : null,
+        hasDockerfile: Boolean(row.hasDockerfile),
+        hasBuildLog: Boolean(row.hasBuildLog),
+        hasManifest: Boolean(row.hasManifest),
+        hasBuildPlan: Boolean(row.hasBuildPlan),
+      };
+      return [Number(row.repoId), detail] as const;
+    }),
+  );
+}
+
 export type Connection = {
   installationRowId: string;
   installationId: number;
@@ -237,6 +324,7 @@ export async function listConnections(): Promise<Connection[]> {
   const reports = await reportsByRepository();
   const onboardings = await awaitingApprovalOnboardings();
   const onboardingProgress = await onboardingProgressByRepo();
+  const onboardingDetail = await onboardingDetailByRepo();
   const rows = await db
     .select({
       installationRowId: githubInstallation.id,
@@ -300,6 +388,7 @@ export async function listConnections(): Promise<Connection[]> {
       reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
       onboarding: onboardings.get(row.repoId) ?? null,
       onboardingProgress: onboardingProgress.get(row.repoId) ?? null,
+      onboardingDetail: onboardingDetail.get(row.repoId) ?? null,
       status: repoStatus({
         installationSuspended: row.suspendedAt !== null,
         active: row.active ?? false,

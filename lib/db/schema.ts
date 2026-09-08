@@ -632,6 +632,15 @@ export const targetOnboarding = pgTable(
      *  ("yes"/"unsure"), then clears it. Null when no review has run. It is a routing hint, never a
      *  trust boundary: the build, offline-verify and approval gates are unchanged. */
     reviewResult: jsonb("review_result"),
+    /** A short human-readable note on what onboarding is doing right now ("reading the repository",
+     *  "building the target image", "opened build sandbox"), set by the worker and the build tools as
+     *  they work. The connections panel shows it in place of the coarse state label, so a multi-minute
+     *  agent turn reads as its real activity rather than one static "Classifying". Null when idle. */
+    progressNote: text("progress_note"),
+    /** The build driver's output from the rebuild that produced the pinned image, capped, kept so a
+     *  reviewer can download it from the connections panel. Null until the build step runs; on a failed
+     *  build the short reason stays in last_error. */
+    buildLog: text("build_log"),
     /** The target manifest derived from the build plan's runtime shape once the image exists,
      *  validated before it is stored. Null until the manifest step runs. */
     proposedManifest: jsonb("proposed_manifest"),

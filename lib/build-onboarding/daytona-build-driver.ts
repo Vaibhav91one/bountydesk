@@ -104,7 +104,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
         const buildMarker = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
 
         await startDockerDaemon(sandbox);
-        const dockerfileText = await buildImage(sandbox, plan, imageRef, buildMarker);
+        const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
 
         // Only now introduce the push credential, use it, and remove it, so the untrusted build ran
         // with no reusable token in the sandbox.
@@ -134,6 +134,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
           imageDigest: digest,
           snapshotId: snapshot.id,
           dockerfileText,
+          buildLog,
           buildMarker,
           buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest),
         };
@@ -144,14 +145,26 @@ export function createDaytonaBuildDriver(): BuildDriver {
   };
 }
 
+/** Cap on the captured build log kept on the row for download. BuildKit is chatty; the tail is what a
+ *  reviewer wants, so keep the last slice rather than the whole thing. */
+const BUILD_LOG_CAP = 64_000;
+
 /** Build the one image `imageRef` from the plan's strategy, and return the Dockerfile that built it
- *  (stored durably and offered for download). */
+ *  (stored durably and offered for download) plus the captured build output. */
 async function buildImage(
   sandbox: Sandbox,
   plan: Extract<BuildPlan, { strategy: "dockerfile" | "image" | "compose-synth" | "agent-authored" }>,
   imageRef: string,
   buildMarker: string,
-): Promise<string> {
+): Promise<{ dockerfileText: string; buildLog: string }> {
+  // Capture every `docker build` step's output, so a reviewer can download the log that produced the
+  // pinned image (on a failed build the short reason still goes to last_error via run()).
+  const buildLogs: string[] = [];
+  const dockerBuild = async (command: string) => {
+    buildLogs.push((await run(sandbox, command)).result);
+  };
+  const captured = () => ({ buildLog: buildLogs.join("\n\n").slice(-BUILD_LOG_CAP) });
+
   if (plan.strategy === "agent-authored") {
     // The agent converged on this Dockerfile by iterating in its own throwaway sandbox; the driver
     // rebuilds it here, against the repo it clones, for the pinned artifact. Write it into the context
@@ -168,11 +181,10 @@ async function buildImage(
       `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(buildMarker)} >> /work/source/${context}/Dockerfile.bountydesk`,
     );
     const dockerfileText = (await run(sandbox, `cat /work/source/${context}/Dockerfile.bountydesk`)).result;
-    await run(
-      sandbox,
+    await dockerBuild(
       `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} -t ${imageRef} .`,
     );
-    return dockerfileText;
+    return { dockerfileText, ...captured() };
   }
 
   if (plan.strategy === "dockerfile") {
@@ -187,11 +199,10 @@ async function buildImage(
     );
     const dockerfileText = (await run(sandbox, `cat /work/source/${context}/${dockerfilePath}`)).result;
     const buildArgs = renderBuildArgs(plan.buildArgs);
-    await run(
-      sandbox,
+    await dockerBuild(
       `cd /work/source/${context} && docker build -f ${dockerfilePath} ${PROXY_BUILD_ARGS} ${buildArgs} -t ${imageRef} .`,
     );
-    return dockerfileText;
+    return { dockerfileText, ...captured() };
   }
 
   if (plan.strategy === "image") {
@@ -202,15 +213,14 @@ async function buildImage(
       "",
     ].join("\n");
     await writeGenDockerfile(sandbox, dockerfile);
-    await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
-    return dockerfile;
+    await dockerBuild(`cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
+    return { dockerfileText: dockerfile, ...captured() };
   }
 
   // compose-synth: build the app service first, then the synthesized image FROM it.
   const context = plan.appContext ?? ".";
   const appDockerfile = plan.appDockerfile ?? "Dockerfile";
-  await run(
-    sandbox,
+  await dockerBuild(
     `cd /work/source/${context} && docker build -f ${appDockerfile} ${PROXY_BUILD_ARGS} -t ${APP_STAGE_TAG} .`,
   );
   const appStartCommand = await inspectStartCommand(sandbox, APP_STAGE_TAG);
@@ -232,8 +242,8 @@ async function buildImage(
     appPort,
   });
   await writeGenDockerfile(sandbox, dockerfile);
-  await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
-  return dockerfile;
+  await dockerBuild(`cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
+  return { dockerfileText: dockerfile, ...captured() };
 }
 
 /** The datastore credentials the app expects: the compose-declared values, or a stable default when

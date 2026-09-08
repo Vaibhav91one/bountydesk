@@ -22,6 +22,7 @@ import {
   fail,
   releaseUnstarted,
   renew,
+  setOnboardingProgress,
   LeaseLostError,
   type OnboardingLease,
 } from "./queue";
@@ -98,6 +99,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         // (an agent-authored plan, or a not-flattenable reason) onto build_plan. A repo that comes out
         // not-flattenable lands in UNSUPPORTED with the reason, an honest resting state a reviewer
         // reads, not a retried failure.
+        await setOnboardingProgress(lease.id, "reading the repository").catch(() => undefined);
         const doClassify = deps.classify ?? defaultClassify;
         let plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () => doClassify(lease.repoFullName));
 
@@ -114,6 +116,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
           // A "no" skips the multi-minute build turn and routes the repo to analysis-only; "yes"/"unsure"
           // fall through to the build agent unchanged. It is fail-open (any failure -> "unsure"), so an
           // unregistered review agent leaves onboarding behaving exactly as before.
+          await setOnboardingProgress(lease.id, "checking whether it can be sandboxed").catch(() => undefined);
           // withHeartbeat hands its operation the combined lease-loss signal; pass it into the default
           // review so a lost lease cancels the remote turn instead of leaving it polling after another
           // worker takes over. Injected reviews ignore the signal.
@@ -136,6 +139,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
               .set({ buildPlan: plan, updatedAt: new Date() })
               .where(eq(targetOnboarding.id, lease.id));
           } else {
+            await setOnboardingProgress(lease.id, "building the target image").catch(() => undefined);
             const runAgent =
               deps.runOnboardingAgent ??
               ((input: RunOnboardingAgentInput) => runOnboardingAgent(deps.agentClient, input, { signal: deps.signal }));
@@ -155,6 +159,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
       }
 
       case "PENDING_BUILD": {
+        await setOnboardingProgress(lease.id, "rebuilding and verifying the image").catch(() => undefined);
         const plan = buildablePlan(lease.buildPlan);
         const result = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) =>
           deps.buildDriver.build(
@@ -168,6 +173,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
           snapshotId: result.snapshotId,
           buildMarker: result.buildMarker,
           dockerfileText: result.dockerfileText,
+          buildLog: result.buildLog,
         });
         break;
       }

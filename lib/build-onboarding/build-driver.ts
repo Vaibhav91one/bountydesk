@@ -30,6 +30,8 @@ export type BuildResult = {
   snapshotId: string;
   /** The exact Dockerfile the image was built from. Stored durably and offered for download. */
   dockerfileText: string;
+  /** The captured output of the docker build steps, capped. Stored for a reviewer to download. */
+  buildLog: string;
   /** The commit baked into /etc/bountydesk-build-marker, re-verified from inside the sandbox. */
   buildMarker: string;
   /** A hash over the build plan, base-image digest and commit, so the pinned target identity records

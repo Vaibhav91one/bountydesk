@@ -25,6 +25,7 @@ const passthroughPaths = new Set([
   "/api/queue",
   "/api/home",
   "/api/active-reports",
+  "/api/connections",
 ]);
 
 const passthroughPrefixes = ["/_next/", "/backdrop/", "/mascot/", "/api/reports/"];

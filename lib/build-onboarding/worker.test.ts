@@ -60,6 +60,7 @@ const buildResult: BuildResult = {
   imageDigest: `sha256:${"a".repeat(64)}`,
   snapshotId: "snap-widget",
   dockerfileText: "FROM node:20\nCMD node server.js",
+  buildLog: "#1 building\n#2 done",
   buildMarker: "b".repeat(40),
   buildRecipeDigest: `sha256:${"c".repeat(64)}`,
 };
