@@ -5,6 +5,7 @@ import {
   BUILD_PURPOSE,
   createBuildSandbox,
   createSnapshot,
+  DaytonaError,
   deleteSnapshotByName,
   deleteSandbox,
   execute,
@@ -286,17 +287,27 @@ async function pushAndDigest(sandbox: Sandbox, imageRef: string, pushToken: stri
   ).result.trim();
 }
 
-/** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. */
+/** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. Daytona's
+ *  delete is eventually consistent, so a create right after a delete can still 409 on the name (more
+ *  likely with a mesh's several snapshots); delete again and retry a few times before giving up. */
 async function registerServiceSnapshot(serviceSlug: string, image: string): Promise<string> {
-  await deleteSnapshotByName(`onboarding-${serviceSlug}`);
-  const snapshot = await createSnapshot({
-    name: `onboarding-${serviceSlug}`,
-    image,
-    cpu: BUILD_CPU,
-    memoryGb: BUILD_MEMORY_GB,
-    diskGb: BUILD_DISK_GB,
-  });
-  return snapshot.id;
+  const name = `onboarding-${serviceSlug}`;
+  // Delete once. Onboarding is single-flight per repo (a leased row), so this name belongs to this
+  // build; deleting again on each retry could remove a snapshot another build just created under the
+  // same name, so on a 409 we only wait for the delete to propagate and retry the create.
+  await deleteSnapshotByName(name);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const snapshot = await createSnapshot({ name, image, cpu: BUILD_CPU, memoryGb: BUILD_MEMORY_GB, diskGb: BUILD_DISK_GB });
+      return snapshot.id;
+    } catch (error) {
+      if (error instanceof DaytonaError && error.status === 409 && attempt < 5) {
+        await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 /** Strip the tag or digest from an image reference to the untagged name ("postgres:16" -> "postgres",

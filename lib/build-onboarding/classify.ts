@@ -83,7 +83,28 @@ type ComposeService = {
   environment?: unknown;
   command?: unknown;
   depends_on?: unknown;
+  volumes?: unknown;
 };
+
+/** A service that mounts the host Docker socket is infrastructure that manages other containers (an
+ *  autoheal or watchtower sidecar), not part of the application under test. It has no place in an
+ *  offline reproduction sandbox (there is no Docker daemon to reach) and Daytona would reject a
+ *  snapshot of a :latest sidecar image, so the mesh drops it. */
+const DOCKER_SOCKET = "/var/run/docker.sock";
+
+function mountsDockerSocket(svc: ComposeService): boolean {
+  if (!Array.isArray(svc.volumes)) return false;
+  return svc.volumes.some((entry) => {
+    // Short syntax is "source:target[:mode]"; match the socket as a whole path (source or target),
+    // not a substring, so a path that merely contains the text (a "docker.sock.d" dir) is not caught.
+    if (typeof entry === "string") return entry.split(":").some((segment) => segment === DOCKER_SOCKET);
+    if (entry && typeof entry === "object") {
+      const { source, target } = entry as { source?: unknown; target?: unknown };
+      return source === DOCKER_SOCKET || target === DOCKER_SOCKET;
+    }
+    return false;
+  });
+}
 
 export type ComposeTopology =
   | {
@@ -187,10 +208,11 @@ export function parseComposeMesh(composeText: string): ComposeMeshTopology {
   if (!services || typeof services !== "object") {
     return { ok: false, reason: "compose file declares no services" };
   }
-  const entries = Object.entries(services);
+  // Drop host-infra sidecars (a docker-socket monitor) before counting: they are not part of the app.
+  const entries = Object.entries(services).filter(([, svc]) => !mountsDockerSocket(svc));
   if (entries.length < 2) {
-    // A single service is not a mesh; the flatten path's reason (dockerfile/image strategy) is clearer.
-    return { ok: false, reason: "compose file has a single service" };
+    // A single application service is not a mesh; the flatten path's reason is clearer.
+    return { ok: false, reason: "compose file has fewer than two application services" };
   }
   const allNames = new Set(entries.map(([name]) => name));
 
