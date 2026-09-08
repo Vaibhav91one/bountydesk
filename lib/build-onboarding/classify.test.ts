@@ -6,6 +6,7 @@ import {
   detectEcosystem,
   dockerfileExposePort,
   ecosystemFromDockerfile,
+  parseComposeMesh,
   parseComposeTopology,
   profileNameFromRepo,
   type SourceReader,
@@ -127,6 +128,82 @@ services:
   if (topo.ok) return;
   // cassandra maps to no engine, so it reads as no recognised datastore.
   assert.match(topo.reason, /no recognised datastore|no build recipe/);
+});
+
+const PG_COMPOSE = `
+services:
+  web:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_HOST: db
+    depends_on: [db]
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: secret
+`;
+
+test("parseComposeMesh enumerates services, picks the app, and infers the datastore port", () => {
+  const mesh = parseComposeMesh(PG_COMPOSE);
+  assert.equal(mesh.ok, true);
+  if (!mesh.ok) return;
+  assert.equal(mesh.appService, "web");
+  assert.equal(mesh.appPort, 8000);
+  const web = mesh.services.find((s) => s.service === "web")!;
+  assert.equal(web.role, "app");
+  assert.deepEqual(web.build, { context: "." });
+  // Peer comes from both depends_on and the DATABASE_HOST env naming the db service.
+  assert.deepEqual(web.peers, ["db"]);
+  const db = mesh.services.find((s) => s.service === "db")!;
+  assert.equal(db.role, "dependency");
+  assert.equal(db.image, "postgres:16");
+  assert.equal(db.port, 5432);
+});
+
+test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
+  const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  assert.equal(plan.appService, "web");
+  assert.equal(plan.services.length, 2);
+  assert.equal(plan.runtime?.baseUrl, "http://localhost:8000");
+});
+
+test("classify routes a two-app compose to a compose-mesh, one app and the rest dependencies", async () => {
+  const TWO_APP = `
+services:
+  web:
+    build: ./web
+    ports: ["8080:8080"]
+  api:
+    build: ./api
+    ports: ["9090:9090"]
+  db:
+    image: mariadb:10
+`;
+  const plan = await classify(reader({ "compose.yml": TWO_APP }), "owner/app");
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  assert.equal(plan.appService, "web");
+  assert.equal(plan.services.filter((s) => s.role === "app").length, 1);
+  assert.equal(plan.services.filter((s) => s.role === "dependency").length, 2);
+});
+
+test("a single-service compose is not a mesh and keeps the flatten reason", () => {
+  const mesh = parseComposeMesh(`
+services:
+  app:
+    build: .
+    ports: ["80:80"]
+`);
+  assert.equal(mesh.ok, false);
+});
+
+test("DVWA still flattens to compose-synth, not a mesh", async () => {
+  // A single app plus a recipe-backed datastore is the flatten case; the mesh must not grab it.
+  const plan = await classify(reader({ "docker-compose.yml": DVWA_COMPOSE }), "owner/dvwa");
+  assert.equal(plan.strategy, "compose-synth");
 });
 
 test("a repo with neither Dockerfile nor compose is not-flattenable", async () => {

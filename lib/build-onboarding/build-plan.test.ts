@@ -162,6 +162,31 @@ test("a compose-mesh plan rejects a bad port and a duplicate service", () => {
   );
 });
 
+test("a compose-mesh dependency may omit its port, but the app may not", () => {
+  const base = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "app",
+    runtime,
+  };
+  // A background worker with no inbound port is allowed as a dependency.
+  const plan = parseBuildPlan({
+    ...base,
+    services: [
+      { service: "app", role: "app", port: 3000, build: { context: "." } },
+      { service: "worker", role: "dependency", build: { context: "./worker" } },
+    ],
+  });
+  if (plan.strategy !== "compose-mesh") throw new Error("narrowing");
+  assert.equal(plan.services.find((s) => s.service === "worker")?.port, undefined);
+  // The app is probed, so it must declare a port.
+  assert.throws(
+    () => parseBuildPlan({ ...base, services: [{ service: "app", role: "app", build: { context: "." } }] }),
+    /app service must declare a port/,
+  );
+});
+
 test("an agent-authored plan carries the Dockerfile text and a build context", () => {
   const plan = parseBuildPlan({
     strategy: "agent-authored",

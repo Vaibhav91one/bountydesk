@@ -80,8 +80,10 @@ export type ComposeMeshService = {
   service: string;
   /** The app is the probed front door; a dependency is internal and never probed directly. */
   role: "app" | "dependency";
-  /** The container port the service listens on: the app's HTTP port, or the datastore's port. */
-  port: number;
+  /** The container port the service listens on: the app's HTTP port, or a datastore's port. The
+   *  app always has one (it is what gets probed); a dependency with no inbound port (a background
+   *  worker) omits it, and is booted but neither addressed nor health-checked. */
+  port?: number;
   /** Build the image from the repo. Exactly one of build or image is set. */
   build?: { context: string; dockerfile?: string };
   /** Pull a published image (a stock datastore such as postgres:16). Exactly one of build/image. */
@@ -443,8 +445,8 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
     }
 
     const port = s.port;
-    if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535) {
-      throw new Error(`build plan services[${i}].port must be an integer 1..65535`);
+    if (port !== undefined && (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65_535)) {
+      throw new Error(`build plan services[${i}].port must be an integer 1..65535 when present`);
     }
 
     // A service is either built from the repo or pulled as a published image, never both and never
@@ -458,7 +460,7 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
     const built: ComposeMeshService = {
       service,
       role: role as "app" | "dependency",
-      port,
+      ...(port !== undefined ? { port } : {}),
       ...(hasBuild ? { build: parseMeshBuild(s.build, i) } : {}),
       ...(hasImage ? { image: parseMeshImage(s.image, i) } : {}),
       ...(s.env !== undefined ? { env: parseBuildArgs(s.env) } : {}),
@@ -473,6 +475,10 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
   }
   if (apps[0].service !== appService) {
     throw new Error("build plan compose-mesh appService must name the service with role app");
+  }
+  // The app is what probe_target reaches, so its port is the target port and cannot be omitted.
+  if (apps[0].port === undefined) {
+    throw new Error("build plan compose-mesh app service must declare a port");
   }
   return services;
 }
