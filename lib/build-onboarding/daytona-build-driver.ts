@@ -292,13 +292,16 @@ async function pushAndDigest(sandbox: Sandbox, imageRef: string, pushToken: stri
  *  likely with a mesh's several snapshots); delete again and retry a few times before giving up. */
 async function registerServiceSnapshot(serviceSlug: string, image: string): Promise<string> {
   const name = `onboarding-${serviceSlug}`;
+  // Delete once. Onboarding is single-flight per repo (a leased row), so this name belongs to this
+  // build; deleting again on each retry could remove a snapshot another build just created under the
+  // same name, so on a 409 we only wait for the delete to propagate and retry the create.
+  await deleteSnapshotByName(name);
   for (let attempt = 1; ; attempt++) {
-    await deleteSnapshotByName(name);
     try {
       const snapshot = await createSnapshot({ name, image, cpu: BUILD_CPU, memoryGb: BUILD_MEMORY_GB, diskGb: BUILD_DISK_GB });
       return snapshot.id;
     } catch (error) {
-      if (error instanceof DaytonaError && error.status === 409 && attempt < 4) {
+      if (error instanceof DaytonaError && error.status === 409 && attempt < 5) {
         await new Promise((resolve) => setTimeout(resolve, 2000 * attempt));
         continue;
       }

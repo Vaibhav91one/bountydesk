@@ -90,13 +90,17 @@ type ComposeService = {
  *  autoheal or watchtower sidecar), not part of the application under test. It has no place in an
  *  offline reproduction sandbox (there is no Docker daemon to reach) and Daytona would reject a
  *  snapshot of a :latest sidecar image, so the mesh drops it. */
+const DOCKER_SOCKET = "/var/run/docker.sock";
+
 function mountsDockerSocket(svc: ComposeService): boolean {
   if (!Array.isArray(svc.volumes)) return false;
   return svc.volumes.some((entry) => {
-    if (typeof entry === "string") return entry.includes("/var/run/docker.sock");
+    // Short syntax is "source:target[:mode]"; match the socket as a whole path (source or target),
+    // not a substring, so a path that merely contains the text (a "docker.sock.d" dir) is not caught.
+    if (typeof entry === "string") return entry.split(":").some((segment) => segment === DOCKER_SOCKET);
     if (entry && typeof entry === "object") {
-      const source = (entry as { source?: unknown }).source;
-      return typeof source === "string" && source.includes("/var/run/docker.sock");
+      const { source, target } = entry as { source?: unknown; target?: unknown };
+      return source === DOCKER_SOCKET || target === DOCKER_SOCKET;
     }
     return false;
   });

@@ -211,6 +211,23 @@ services:
   assert.equal(mesh.appService, "web");
 });
 
+test("a volume that merely contains the socket text as a substring is not treated as a sidecar", () => {
+  const mesh = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["5000:5000"]
+    volumes:
+      - ./cfg:/app/var/run/docker.sock.d
+  db:
+    image: postgres:13
+`);
+  assert.equal(mesh.ok, true);
+  if (!mesh.ok) return;
+  // web keeps its place: its volume target only contains the socket path as a substring.
+  assert.deepEqual(mesh.services.map((s) => s.service).sort(), ["db", "web"]);
+});
+
 test("a compose that is only an app plus a docker-socket sidecar is not a mesh", () => {
   const mesh = parseComposeMesh(`
 services:
