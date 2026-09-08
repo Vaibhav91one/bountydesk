@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowSquareOut, CheckCircle, ListChecks, TreeStructure, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowSquareOut, Check, CheckCircle, Warning } from "@phosphor-icons/react/ssr";
 import { GitHubLight } from "developer-icons";
 
 import { formatStamp } from "@/lib/format";
@@ -281,24 +281,12 @@ export function RepositorySheet({
               ) : null}
 
               {repo.onboardingDetail ? (
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-center"
-                    onClick={() => setDialogTab("state")}
-                  >
-                    <ListChecks /> Onboarding state
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1 justify-center"
-                    onClick={() => setDialogTab("architecture")}
-                  >
-                    <TreeStructure /> Architecture
-                  </Button>
-                </div>
+                <Button
+                  className="w-full justify-center bg-phase-delivered text-background hover:bg-phase-delivered/90"
+                  onClick={() => setDialogTab("state")}
+                >
+                  <Check weight="bold" /> Onboarding
+                </Button>
               ) : null}
 
               <OnboardingDialog
