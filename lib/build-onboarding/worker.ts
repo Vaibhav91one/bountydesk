@@ -10,6 +10,11 @@ import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
 import { classify, rawSourceReader } from "./classify";
 import { knownTargetHints } from "./known-target-hints";
 import { runOnboardingAgent, type RunOnboardingAgentInput } from "./onboarding-agent";
+import {
+  runSandboxabilityReview,
+  type RunSandboxabilityReviewInput,
+} from "@/lib/analysis/sandboxability";
+import type { ReviewResult } from "@/lib/mcp/review";
 import { onboardingSnapshotImageRef, type BuildDriver } from "./build-driver";
 import {
   advance,
@@ -46,6 +51,10 @@ export type OnboardDeps = {
    *  tests exercise the ladder without a live TrueForge turn; defaults to the real agent turn, which
    *  writes its result onto the row's build_plan. */
   runOnboardingAgent?: (input: RunOnboardingAgentInput) => Promise<void>;
+  /** Run the read-only sandboxability review for a repo the deterministic classifier could not flatten,
+   *  before the build agent. Injectable so tests exercise the routing without a live review turn;
+   *  defaults to the real review, which is fail-open (any failure resolves to "unsure"). */
+  runSandboxabilityReview?: (input: RunSandboxabilityReviewInput) => Promise<ReviewResult>;
   /** The offline verify. Injectable so tests exercise the whole path without live Daytona. */
   provision?: typeof provisionTarget;
   teardown?: typeof teardownSandbox;
@@ -93,19 +102,48 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         let plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () => doClassify(lease.repoFullName));
 
         if (plan.strategy === "not-flattenable") {
-          // Store the deterministic plan first so the agent's tools read the detected ecosystem (and
-          // therefore its build-sandbox egress) from build_plan.
+          const ecosystem = plan.ecosystem;
+          // Store the deterministic plan first so the review and the agent read the detected ecosystem
+          // (and therefore the build-sandbox egress) from build_plan.
           await db
             .update(targetOnboarding)
             .set({ buildPlan: plan, updatedAt: new Date() })
             .where(eq(targetOnboarding.id, lease.id));
-          const runAgent =
-            deps.runOnboardingAgent ??
-            ((input: RunOnboardingAgentInput) => runOnboardingAgent(deps.agentClient, input, { signal: deps.signal }));
-          await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
-            runAgent({ onboardingId: lease.id, repoFullName: lease.repoFullName }),
-          );
-          plan = await readBuildPlan(lease.id);
+
+          // The sandboxability review (the read-only code-review pre-check) runs before the build agent.
+          // A "no" skips the multi-minute build turn and routes the repo to analysis-only; "yes"/"unsure"
+          // fall through to the build agent unchanged. It is fail-open (any failure -> "unsure"), so an
+          // unregistered review agent leaves onboarding behaving exactly as before.
+          // withHeartbeat hands its operation the combined lease-loss signal; pass it into the default
+          // review so a lost lease cancels the remote turn instead of leaving it polling after another
+          // worker takes over. Injected reviews ignore the signal.
+          const review = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) => {
+            const runReview =
+              deps.runSandboxabilityReview ??
+              ((input: RunSandboxabilityReviewInput) =>
+                runSandboxabilityReview(deps.agentClient, input, { signal }));
+            return runReview({ onboardingId: lease.id, repoFullName: lease.repoFullName });
+          });
+
+          if (review.verdict === "no") {
+            plan = {
+              strategy: "not-flattenable",
+              ecosystem,
+              reason: review.reason.trim().length > 0 ? review.reason : plan.reason,
+            };
+            await db
+              .update(targetOnboarding)
+              .set({ buildPlan: plan, updatedAt: new Date() })
+              .where(eq(targetOnboarding.id, lease.id));
+          } else {
+            const runAgent =
+              deps.runOnboardingAgent ??
+              ((input: RunOnboardingAgentInput) => runOnboardingAgent(deps.agentClient, input, { signal: deps.signal }));
+            await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
+              runAgent({ onboardingId: lease.id, repoFullName: lease.repoFullName }),
+            );
+            plan = await readBuildPlan(lease.id);
+          }
         }
 
         if (plan.strategy === "not-flattenable") {

@@ -148,6 +148,13 @@
       "when": 1788783601942,
       "tag": "0020_onboarding_agent_session",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788828560273,
+      "tag": "0021_sandboxability_review",
+      "breakpoints": true
     }
   ]
 }

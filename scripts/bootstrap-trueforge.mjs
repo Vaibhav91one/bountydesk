@@ -95,6 +95,16 @@ function desiredMcpServers() {
       },
     },
     {
+      name: "bountydesk-review",
+      description: "BountyDesk's read-only sandboxability review",
+      type: "remote",
+      url: `${appBaseUrl}/api/mcp/review`,
+      auth: {
+        type: "header",
+        headers: { Authorization: `Bearer ${requireEnv("MCP_SERVER_SECRET")}` },
+      },
+    },
+    {
       name: "scope-guard",
       description:
         "BountyDesk's ported scope-guard MCP server: egress allowlisting and the intrusive-action approval gate",

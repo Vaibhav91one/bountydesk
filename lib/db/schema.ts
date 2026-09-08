@@ -626,6 +626,12 @@ export const targetOnboarding = pgTable(
      *  open_build_sandbox and read by run_build_command / probe_built_container. Null when none is
      *  open; the sandbox itself is torn down when the agent step ends. */
     agentSandboxId: text("agent_sandbox_id"),
+    /** The sandboxability review's verdict, `{ verdict: "yes"|"no"|"unsure", reason }`, written by the
+     *  read-only review turn (lib/analysis, app/api/mcp/review) before the build agent runs. The worker
+     *  reads it to decide whether to skip the build turn (verdict "no" -> UNSUPPORTED) or proceed
+     *  ("yes"/"unsure"), then clears it. Null when no review has run. It is a routing hint, never a
+     *  trust boundary: the build, offline-verify and approval gates are unchanged. */
+    reviewResult: jsonb("review_result"),
     /** The target manifest derived from the build plan's runtime shape once the image exists,
      *  validated before it is stored. Null until the manifest step runs. */
     proposedManifest: jsonb("proposed_manifest"),
