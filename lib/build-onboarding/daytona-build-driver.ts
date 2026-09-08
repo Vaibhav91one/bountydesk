@@ -296,9 +296,13 @@ async function buildMesh(
       await run(sandbox, `docker pull ${shellArg(image)}`);
       await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}`);
       await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
+      // Daytona runs a sandbox's own init as pid 1 and the image entrypoint without its cmd, so a
+      // datastore (postgres's entrypoint needs the "postgres" arg) does not start on its own. Capture
+      // its full start command (entrypoint plus cmd) so the provisioner runs it.
+      const startCommand = await inspectMeshStartCommand(sandbox, imageRef);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
-      services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef });
+      services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef, startCommand });
     }
   }
 
@@ -504,7 +508,11 @@ async function inspectMeshStartCommand(sandbox: Sandbox, image: string): Promise
   };
   const parts = [...(await read("Entrypoint")), ...(await read("Cmd"))];
   if (parts.length === 0) throw new Error(`service image ${image} declares no CMD or ENTRYPOINT to start it`);
-  return parts.join(" ");
+  const command = parts.join(" ");
+  // Run the command in the image's WORKDIR: a relative launch (vuln-bank's CMD is "./start.sh") is
+  // resolved against it, and the provisioner runs the command from an unrelated directory otherwise.
+  const workdir = (await run(sandbox, `docker inspect --format='{{.Config.WorkingDir}}' ${image}`)).result.trim();
+  return workdir && workdir !== "/" ? `cd ${workdir} && ${command}` : command;
 }
 
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
