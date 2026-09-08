@@ -40,6 +40,15 @@ test("injectProxyTrust does not duplicate Alpine certificate flags", () => {
   assert.equal(out.match(/--no-check-certificate/g)?.length, 1);
 });
 
+test("injectProxyTrust handles chained apk installs without touching data", () => {
+  const out = injectProxyTrust(
+    "FROM alpine:3.24\n# apk add should stay unchanged\nENV NOTE=\"apk add unchanged\"\nRUN apk update && apk add curl\n",
+  );
+  assert.match(out, /apk update && apk --no-check-certificate add curl/);
+  assert.match(out, /# apk add should stay unchanged/);
+  assert.match(out, /ENV NOTE=\"apk add unchanged\"/);
+});
+
 test("dockerEnvLine bakes a service's compose env, quoting values, and is empty for none", () => {
   assert.equal(dockerEnvLine(undefined), "");
   assert.equal(dockerEnvLine({}), "");

@@ -77,10 +77,16 @@ const PROXY_TRUST_ENV =
 
 export function injectProxyTrust(dockerfileText: string): string {
   const withTrustEnv = dockerfileText.replace(/^([ \t]*FROM[ \t]+[^\n]+)$/gim, `$1\n${PROXY_TRUST_ENV}`);
-  // Alpine's apk does not honor the standard proxy trust environment. The Daytona build proxy
-  // presents its own certificate, so package installation must opt out of that one TLS check while
-  // the build sandbox still remains restricted to the selected egress hosts.
-  return withTrustEnv.replace(/\bapk\s+(?![^\n]*--no-check-certificate\b)([^\n]*\badd\b)/gi, "apk --no-check-certificate $1");
+  return withTrustEnv
+    .split("\n")
+    .map((line) => {
+      if (!/^\s*RUN\s+/i.test(line) || /#/.test(line)) return line;
+      return line.replace(
+        /\bapk(?!\s+--no-check-certificate)(?=\s+(?:(?!&&|;|\bapk\b)[^\n])*\badd\b)/gi,
+        "apk --no-check-certificate",
+      );
+    })
+    .join("\n");
 }
 
 /**
