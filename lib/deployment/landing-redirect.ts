@@ -36,7 +36,7 @@ export function landingRedirectEnabled(env: LandingRedirectEnv = process.env) {
   const explicit = env.BOUNTYDESK_LANDING_REDIRECT?.trim().toLowerCase();
   if (explicit) return ["1", "true", "yes", "on"].includes(explicit);
 
-  return env.VERCEL === "1" || env.BOUNTYDESK_LANDING_REDIRECT === "1";
+  return env.VERCEL === "1";
 }
 
 function configuredAppHost(env: LandingRedirectEnv): string | null {
