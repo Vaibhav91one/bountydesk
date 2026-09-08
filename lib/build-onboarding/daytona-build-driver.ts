@@ -250,6 +250,12 @@ async function buildMesh(
       const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
       const imageRef = `${imageName}:${buildTag}`;
       const stageTag = `bountydesk-mesh-${svc.service}`;
+      // A service Dockerfile the onboarding agent authored is not in the cloned repo, so write it
+      // into the context first; the deterministic classifier leaves this unset and uses the repo's.
+      if (svc.build.dockerfileText) {
+        const authored = Buffer.from(svc.build.dockerfileText, "utf8").toString("base64");
+        await run(sandbox, `mkdir -p /work/source/${context} && echo ${shellArg(authored)} | base64 -d > /work/source/${context}/${dockerfile}`);
+      }
       // Relax the proxy TLS check for package hosts (see PROXY_TRUST_ENV), then bake the marker,
       // pinned to root because a service Dockerfile may end on a non-root USER, so reproduction can
       // prove which build booted this service. Build from a derived Dockerfile so the customer's

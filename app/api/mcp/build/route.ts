@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { mcpServerSecret } from "@/lib/env";
 import {
+  commitComposeMesh,
   commitTargetImage,
   markUnsandboxable,
   openBuildSandbox,
@@ -82,10 +83,48 @@ function buildServer(): McpServer {
   );
 
   server.registerTool(
+    "commit_compose_mesh",
+    {
+      description:
+        "Commit a multi-service recipe, when the repo needs an app plus its own datastore (or several services) rather than one image. List every service: the one app you probe (role \"app\", with the loopback baseUrl's port) and its dependencies (role \"dependency\"). Each service is either built (a Dockerfile you authored, passed as build.dockerfileText, or a path already in the repo via build.context) or a stock image (image, e.g. \"postgres:16\"). Put a service's env (a DB password, or a host set to a peer service name) in env, and the services it connects to in peers. Give the target name, the app's loopback baseUrl, a same-origin readinessPath. The platform builds each service, runs them as linked sandboxes offline (the app reaches a dependency by its service name), verifies, and routes to a human reviewer. Prefer this over mark_unsandboxable when the only obstacle is that the repo needs more than one service. Gated: a human approves before this runs.",
+      inputSchema: {
+        capability: z.string(),
+        appService: z.string(),
+        name: z.string(),
+        baseUrl: z.string(),
+        readinessPath: z.string(),
+        composePath: z.string().optional(),
+        warmupSeconds: z.number().int().min(0).max(600).optional(),
+        services: z
+          .array(
+            z.object({
+              service: z.string(),
+              role: z.enum(["app", "dependency"]),
+              port: z.number().int().min(1).max(65535).optional(),
+              build: z
+                .object({
+                  context: z.string().optional(),
+                  dockerfile: z.string().optional(),
+                  dockerfileText: z.string().optional(),
+                })
+                .optional(),
+              image: z.string().optional(),
+              env: z.record(z.string(), z.string()).optional(),
+              peers: z.array(z.string()).optional(),
+            }),
+          )
+          .min(1),
+      },
+      annotations: { destructiveHint: true },
+    },
+    async (input) => render(await commitComposeMesh(input)),
+  );
+
+  server.registerTool(
     "mark_unsandboxable",
     {
       description:
-        "Declare that this repository cannot be built into one bootable offline image (it needs multiple running services, external network services it cannot reach offline, or credentials to boot). Give a short reason. Its reports will then take the analysis-only route instead of reproduction.",
+        "Declare that this repository cannot run offline at all: it depends on an external network service it cannot reach offline (a third-party API, a hosted database, a real auth provider), or it cannot start without real credentials. Do NOT use this just because the repo needs more than one service, use commit_compose_mesh for that. Give a short reason. Its reports will then take the analysis-only route instead of reproduction.",
       inputSchema: { capability: z.string(), reason: z.string() },
     },
     async ({ capability, reason }) => render(await markUnsandboxable(capability, reason)),

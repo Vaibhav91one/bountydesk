@@ -197,6 +197,60 @@ export async function commitTargetImage(input: CommitTargetInput): Promise<Build
   };
 }
 
+export type CommitComposeMeshInput = {
+  capability: string;
+  appService: string;
+  services: unknown;
+  name: string;
+  baseUrl: string;
+  readinessPath: string;
+  composePath?: string;
+  warmupSeconds?: number;
+};
+
+/**
+ * The agent's mesh recipe, for a repo that needs several services running together (an app plus its
+ * own datastore) rather than one image. The agent describes each service: the app it probes and its
+ * dependencies, each either built (a Dockerfile it authored, carried as dockerfileText) or a stock
+ * image it pulls. parseBuildPlan validates the whole topology; the driver then builds each service,
+ * runs them as linked sandboxes, and the mesh is offline-verified and human-approved like any target.
+ */
+export async function commitComposeMesh(input: CommitComposeMeshInput): Promise<BuildToolResult> {
+  const row = await resolveOnboarding(input.capability);
+  if (!row) return { ok: false, reason: "unknown capability" };
+
+  let plan;
+  try {
+    plan = parseBuildPlan({
+      strategy: "compose-mesh",
+      ecosystem: ecosystemOf(row),
+      composePath: input.composePath ?? "docker-compose.yml",
+      appService: input.appService,
+      services: input.services,
+      seed: { kind: "none" },
+      runtime: {
+        name: input.name,
+        baseUrl: input.baseUrl,
+        readinessPath: input.readinessPath,
+        ...(input.warmupSeconds !== undefined ? { warmupSeconds: input.warmupSeconds } : {}),
+      },
+    });
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+
+  await db
+    .update(targetOnboarding)
+    .set({ buildPlan: plan, progressNote: "mesh recipe committed", updatedAt: new Date() })
+    .where(eq(targetOnboarding.id, row.id));
+
+  return {
+    ok: true,
+    message:
+      "mesh recipe committed. The platform will build each service, verify the mesh boots offline with the app reaching its dependencies, and route it to a human reviewer.",
+  };
+}
+
 export async function markUnsandboxable(capability: string, reason: string): Promise<BuildToolResult> {
   const row = await resolveOnboarding(capability);
   if (!row) return { ok: false, reason: "unknown capability" };
