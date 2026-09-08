@@ -743,9 +743,13 @@ async function launchMeshService(sandbox: Sandbox, startCommand: string): Promis
  *  than an HTTP status. */
 async function waitForPortListening(sandbox: Sandbox, port: number, signal?: AbortSignal): Promise<void> {
   const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  // curl (present on every mesh node, see the build driver) tests the TCP connect: exit 7 is
+  // connection refused and 28 is a connect timeout, both "not up"; any other exit means the port
+  // accepted the connection (a datastore answers with a non-HTTP reply, which is still a connect).
+  // ss and netstat are absent from minimal datastore images, so this does not rely on them.
   const probe =
-    `ss -ltn 2>/dev/null | grep -q ':${port} ' && echo UP || ` +
-    `{ netstat -ltn 2>/dev/null | grep -q ':${port} ' && echo UP || echo DOWN; }`;
+    `curl -s -o /dev/null --connect-timeout 3 http://127.0.0.1:${port}/ >/dev/null 2>&1; ` +
+    `c=$?; if [ "$c" != "7" ] && [ "$c" != "28" ]; then echo UP; else echo DOWN; fi`;
   while (Date.now() < deadline) {
     throwIfAborted(signal);
     const result = await execute(sandbox, probe, 10);
