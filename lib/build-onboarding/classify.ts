@@ -440,7 +440,13 @@ export async function classify(
 
       const resolvedServices = mesh.services.map((service) =>
         service.build
-          ? { ...service, build: resolveComposeBuild(compose.path, service.build) }
+          ? {
+              ...service,
+              build: resolveComposeBuild(compose.path, {
+                context: service.build.context,
+                dockerfile: service.build.dockerfile ?? "Dockerfile",
+              }),
+            }
           : service,
       );
       const appSvc = resolvedServices.find((s) => s.role === "app")!;
