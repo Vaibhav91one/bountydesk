@@ -82,6 +82,22 @@ export type Sandbox = {
   public: boolean;
 };
 
+/**
+ * Join a reproduction sandbox to another sandbox's private link network.
+ *
+ * A multi-service target runs each service as its own reproduction sandbox. The service the agent
+ * probes is the parent, and every dependency (a database, a cache) is created linked to it: the
+ * child lands on the parent's runner and joins a link network the two share, so the app can reach
+ * the dependency by its sandbox id while both stay internet-blocked (proven in
+ * scripts/spike-linked-sandboxes.ts). The link changes nothing about egress: a linked child is
+ * still networkBlockAll with no allow-list, exactly like any other reproduction sandbox. It only
+ * adds a private route to its own group, which is isolated from every sandbox outside it.
+ */
+export type LinkSpec = {
+  /** The parent reproduction sandbox this child joins. Its id, from an earlier createSandbox. */
+  parentSandboxId: string;
+};
+
 export class DaytonaError extends Error {
   constructor(message: string, readonly status?: number) {
     super(message);
@@ -231,9 +247,22 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
  * `allowedImageNameOverride`, when given, is forwarded to assertSnapshotImage as the one
  * explicitly named exception to its digest-exact check -- see that function's doc comment for
  * why this exists and how narrow it is. Leave it unset and this behaves exactly as before.
+ *
+ * `link`, when given, joins this sandbox to a parent's private link network for a multi-service
+ * target (see LinkSpec). It adds a private in-group route only; every egress control above is
+ * unchanged, so a linked child is as internet-blocked as any other reproduction sandbox.
  */
-export async function createSandbox(spec: SandboxSpec, allowedImageNameOverride?: string): Promise<Sandbox> {
+export async function createSandbox(
+  spec: SandboxSpec,
+  allowedImageNameOverride?: string,
+  link?: LinkSpec,
+): Promise<Sandbox> {
   assertSafeSpec(spec);
+  // A malformed parent id must fail before any create: linking to the wrong sandbox, or to a
+  // string that is not a sandbox id at all, would put a service on a network it should not share.
+  if (link && !/^[A-Za-z0-9._-]{1,200}$/.test(link.parentSandboxId)) {
+    throw new UnsafeSandboxSpec("a linked sandbox needs the parent's sandbox id");
+  }
 
   // Verify the limits rather than request them: the provider rejects resource fields
   // alongside a snapshot, so the snapshot is where they actually come from.
@@ -254,6 +283,10 @@ export async function createSandbox(spec: SandboxSpec, allowedImageNameOverride?
     public: false,
     autoDeleteInterval: 0,
     labels: { ...spec.labels, [PURPOSE_LABEL]: PURPOSE },
+    // A dependency service joins its app's link group. networkBlockAll stays true above: linking
+    // adds a private in-group route, never internet egress. ephemeral ties the child's lifetime
+    // to the group so it cannot outlive the run that made it.
+    ...(link ? { linkedSandbox: link.parentSandboxId, ephemeral: true } : {}),
   };
 
   const created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
