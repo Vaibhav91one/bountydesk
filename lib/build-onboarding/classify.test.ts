@@ -206,6 +206,20 @@ test("classify discovers nested compose.yml as well as docker-compose.yml", asyn
   assert.equal(plan.composePath, "deploy/docker/compose.yml");
 });
 
+test("classify preserves bare image references with Compose interpolation", () => {
+  const topology = parseComposeMesh(`
+services:
+  app:
+    image: "example/app:\${VERSION:-latest}"
+    ports: ["8000:8000"]
+  db:
+    image: postgres:15
+`);
+  assert.equal(topology.ok, true);
+  if (!topology.ok) return;
+  assert.equal(topology.services.find((s) => s.service === "app")?.image, "example/app:latest");
+});
+
 test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
   const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
   assert.equal(plan.strategy, "compose-mesh");

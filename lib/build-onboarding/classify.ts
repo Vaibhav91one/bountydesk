@@ -57,6 +57,41 @@ const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
   { file: "Gemfile", ecosystem: "ruby" },
 ];
 
+/** Resolve defaulted Compose image variables without inventing a tag for required or conditional values. */
+function resolveComposeImage(image: string): string | undefined {
+  let out = "";
+  for (let i = 0; i < image.length; i++) {
+    if (image[i] === "\\" && image[i + 1] === "$" && image[i + 2] === "{") {
+      out += "${";
+      i += 2;
+      continue;
+    }
+    if (image[i] === "$" && image[i + 1] === "$") {
+      out += "$$";
+      i++;
+      continue;
+    }
+    if (image[i] !== "$" || image[i + 1] !== "{") {
+      if (image[i] === "$" && /[A-Za-z_]/.test(image[i + 1] ?? "")) return undefined;
+      out += image[i];
+      continue;
+    }
+    let depth = 1;
+    let end = i + 2;
+    for (; end < image.length && depth > 0; end++) {
+      if (image[end] === "{") depth++;
+      else if (image[end] === "}") depth--;
+    }
+    if (depth !== 0) return undefined;
+    const expression = image.slice(i + 2, end - 1);
+    const match = expression.match(/^([A-Za-z_][A-Za-z0-9_]*)(?::([-+?])|([-+?]))([\s\S]*)$/);
+    if (!match || (match[2] ?? match[3]) !== "-") return undefined;
+    out += match[4];
+    i = end - 1;
+  }
+  return /\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*/.test(out) ? undefined : out;
+}
+
 /** Map a compose service image to a datastore engine we can bundle, or undefined if it is not one. */
 function engineForImage(image: string): DatastoreEngine | undefined {
   const name = image.toLowerCase();
@@ -251,7 +286,8 @@ export function parseComposeMesh(composeText: string): ComposeMeshTopology {
   const meshServices: ComposeMeshService[] = [];
   for (const [name, svc] of entries) {
     const build = appBuildConfig(svc.build);
-    const image = typeof svc.image === "string" ? svc.image : undefined;
+    const rawImage = typeof svc.image === "string" ? svc.image : undefined;
+    const image = rawImage ? resolveComposeImage(rawImage) : undefined;
     if (!build && !image) {
       return { ok: false, reason: `service ${name} has neither a build nor an image, so it cannot run` };
     }
