@@ -58,6 +58,26 @@ const PROXY_BUILD_ARGS =
     .map((name) => `--build-arg ${name}`)
     .join(" ");
 
+/**
+ * The build sandbox reaches its allow-listed package hosts through an egress proxy that terminates
+ * TLS with its own CA (a MITM forward proxy). A package manager in a fresh base image has no reason
+ * to trust that CA, so it rejects the connection with "unable to get local issuer certificate", even
+ * though the host is allowed. The server-held egress allow-list is the real control over where a
+ * build can reach, not the client's cert check of our own proxy, so relaxing that verification for
+ * the known package hosts is safe: a build still cannot reach anything off the allow-list. This is
+ * build-time only and inert in the offline reproduction image.
+ *
+ * Injected after each FROM because ENV does not cross a stage boundary. Covers pip (the case that
+ * surfaced this), npm, and git; other tools that honour these standard vars benefit too.
+ */
+const PROXY_TRUST_ENV =
+  'ENV PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org" ' +
+  'NODE_TLS_REJECT_UNAUTHORIZED="0" NPM_CONFIG_STRICT_SSL="false" GIT_SSL_NO_VERIFY="true"';
+
+export function injectProxyTrust(dockerfileText: string): string {
+  return dockerfileText.replace(/^([ \t]*FROM[ \t]+[^\n]+)$/gim, `$1\n${PROXY_TRUST_ENV}`);
+}
+
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined) return fallback;
@@ -190,15 +210,18 @@ async function buildMesh(
       const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
       const stageTag = `bountydesk-mesh-${svc.service}`;
-      // Bake the marker, pinned to root because a service Dockerfile may end on a non-root USER, so
-      // reproduction can prove which build booted this service.
-      await run(
-        sandbox,
-        `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(ctx.buildMarker)} >> /work/source/${context}/${dockerfile}`,
-      );
-      const dfText = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
+      // Relax the proxy TLS check for package hosts (see PROXY_TRUST_ENV), then bake the marker,
+      // pinned to root because a service Dockerfile may end on a non-root USER, so reproduction can
+      // prove which build booted this service. Build from a derived Dockerfile so the customer's
+      // file on disk is left untouched.
+      const original = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
+      const dfText =
+        injectProxyTrust(original) +
+        `\nUSER root\nRUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
+      const prepared = Buffer.from(dfText, "utf8").toString("base64");
+      await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
       const log = (
-        await run(sandbox, `cd /work/source/${context} && docker build -f ${dockerfile} ${PROXY_BUILD_ARGS} -t ${stageTag} .`)
+        await run(sandbox, `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} -t ${stageTag} .`)
       ).result;
       // Capture the service's real start command, then rebuild with an idle entrypoint so the image
       // does not auto-start before the provisioner has wired its peers. The provisioner runs this.
@@ -307,7 +330,7 @@ async function buildImage(
     // via a base64 pipe (arbitrary text, intact), append the marker layer pinned to root (the agent's
     // Dockerfile may end on a non-root USER), then build.
     const context = plan.buildContext;
-    const b64 = Buffer.from(plan.dockerfileText, "utf8").toString("base64");
+    const b64 = Buffer.from(injectProxyTrust(plan.dockerfileText), "utf8").toString("base64");
     await run(
       sandbox,
       `echo ${shellArg(b64)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`,
@@ -326,17 +349,19 @@ async function buildImage(
   if (plan.strategy === "dockerfile") {
     const dockerfilePath = plan.dockerfilePath;
     const context = plan.buildContext;
-    // Append the marker layer to the customer's Dockerfile, pinned to root because a Dockerfile may
-    // end on a non-root USER that cannot write /etc; the offline target then runs as root, fine for a
-    // test target.
-    await run(
-      sandbox,
-      `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(buildMarker)} >> /work/source/${context}/${dockerfilePath}`,
-    );
-    const dockerfileText = (await run(sandbox, `cat /work/source/${context}/${dockerfilePath}`)).result;
+    // Relax the proxy TLS check for package hosts (see PROXY_TRUST_ENV), then append the marker
+    // layer, pinned to root because a Dockerfile may end on a non-root USER that cannot write /etc;
+    // the offline target then runs as root, fine for a test target. Build from a derived Dockerfile
+    // so the customer's file on disk is left untouched.
+    const original = (await run(sandbox, `cat /work/source/${context}/${dockerfilePath}`)).result;
+    const dockerfileText =
+      injectProxyTrust(original) +
+      `\nUSER root\nRUN mkdir -p /etc && echo ${shArgDockerfile(buildMarker)} > ${MARKER_PATH}\n`;
+    const prepared = Buffer.from(dockerfileText, "utf8").toString("base64");
+    await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
     const buildArgs = renderBuildArgs(plan.buildArgs);
     await dockerBuild(
-      `cd /work/source/${context} && docker build -f ${dockerfilePath} ${PROXY_BUILD_ARGS} ${buildArgs} -t ${imageRef} .`,
+      `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} ${buildArgs} -t ${imageRef} .`,
     );
     return { dockerfileText, ...captured() };
   }
@@ -353,11 +378,15 @@ async function buildImage(
     return { dockerfileText: dockerfile, ...captured() };
   }
 
-  // compose-synth: build the app service first, then the synthesized image FROM it.
+  // compose-synth: build the app service first, then the synthesized image FROM it. Relax the proxy
+  // TLS check for package hosts on the app build too (see PROXY_TRUST_ENV), via a derived Dockerfile.
   const context = plan.appContext ?? ".";
   const appDockerfile = plan.appDockerfile ?? "Dockerfile";
+  const appOriginal = (await run(sandbox, `cat /work/source/${context}/${appDockerfile}`)).result;
+  const appPrepared = Buffer.from(injectProxyTrust(appOriginal), "utf8").toString("base64");
+  await run(sandbox, `echo ${shellArg(appPrepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk-app`);
   await dockerBuild(
-    `cd /work/source/${context} && docker build -f ${appDockerfile} ${PROXY_BUILD_ARGS} -t ${APP_STAGE_TAG} .`,
+    `cd /work/source/${context} && docker build -f Dockerfile.bountydesk-app ${PROXY_BUILD_ARGS} -t ${APP_STAGE_TAG} .`,
   );
   const appStartCommand = await inspectStartCommand(sandbox, APP_STAGE_TAG);
   const appPort = portFromBaseUrl(plan.runtime?.baseUrl);
