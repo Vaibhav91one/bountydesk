@@ -15,7 +15,7 @@ import agentDefinition from "@/agent/bountydesk.agent.json";
 import { appBaseUrl } from "@/lib/auth/oauth";
 import { mcpServerSecret, requireEnv, scopeGuardToken } from "@/lib/env";
 
-import { buildBuildServerManifest, buildMcpServerManifest, buildScopeGuardServerManifest } from "./agent-config";
+import { buildBuildServerManifest, buildMcpServerManifest, buildReviewServerManifest, buildScopeGuardServerManifest } from "./agent-config";
 import { parseFrontmatter } from "./skill-frontmatter";
 
 /** The one agent BountyDesk owns. `createSession` resolves sessions by this name. */
@@ -73,6 +73,7 @@ export function desiredMcpServers(): DesiredMcpServer[] {
   return [
     buildMcpServerManifest(appBaseUrl(), mcpServerSecret()),
     buildBuildServerManifest(appBaseUrl(), mcpServerSecret()),
+    buildReviewServerManifest(appBaseUrl(), mcpServerSecret()),
     buildScopeGuardServerManifest(requireEnv("SCOPE_GUARD_URL"), scopeGuardToken()),
   ];
 }

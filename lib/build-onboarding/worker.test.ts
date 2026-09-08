@@ -100,6 +100,9 @@ function deps(over: Partial<OnboardDeps>): OnboardDeps {
     buildDriver: fakeBuildDriver(),
     agentClient: fakeAgentClient(null),
     classify: async () => widgetPlan,
+    // Default the sandboxability review to "unsure" so a not-flattenable repo falls through to the
+    // build agent, the behaviour these tests exercise. Tests of the review's own routing override it.
+    runSandboxabilityReview: async () => ({ verdict: "unsure", reason: "" }),
     provision: async () => ({ sandboxId: "sbx-verify", appPort: 3000 }),
     teardown: async () => {},
     leaseSeconds: 60,
@@ -173,6 +176,67 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
   // UNSUPPORTED is terminal: a further claim does not pick it up.
   await worker.onboardOnce("w1", deps({}));
   assert.equal(await stateOf(repoId), "UNSUPPORTED");
+});
+
+test("a sandboxability review of 'no' goes straight to UNSUPPORTED, skipping the build agent", async () => {
+  const repoId = await connectedRepo("acme/microservices");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git" });
+
+  let agentRan = false;
+  let built = false;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "no Dockerfile" }),
+      runSandboxabilityReview: async () => ({ verdict: "no", reason: "compose declares three interdependent services" }),
+      runOnboardingAgent: async () => { agentRan = true; },
+      buildDriver: { async build() { built = true; return buildResult; } },
+    }),
+  );
+
+  assert.equal(await stateOf(repoId), "UNSUPPORTED");
+  assert.equal(agentRan, false, "a 'no' verdict never runs the build agent");
+  assert.equal(built, false, "a 'no' verdict never builds");
+  const [row] = await dbm.db
+    .select({ buildPlan: dbm.targetOnboarding.buildPlan })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal((row.buildPlan as { reason?: string }).reason, "compose declares three interdependent services");
+});
+
+test("a sandboxability review of 'yes' hands off to the build agent", async () => {
+  const repoId = await connectedRepo("acme/reviewyes");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/reviewyes", sourceRef: "https://x/reviewyes.git" });
+
+  let agentRan = false;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      classify: async () => ({ strategy: "not-flattenable", ecosystem: "node", reason: "no Dockerfile" }),
+      runSandboxabilityReview: async () => ({ verdict: "yes", reason: "single self-contained Express app" }),
+      runOnboardingAgent: async ({ onboardingId }) => {
+        agentRan = true;
+        await dbm.db
+          .update(dbm.targetOnboarding)
+          .set({
+            buildPlan: {
+              strategy: "agent-authored",
+              ecosystem: "node",
+              dockerfileText: "FROM node:20-slim\n",
+              buildContext: ".",
+              seed: { kind: "none" },
+              runtime: { name: "reviewyes", baseUrl: "http://localhost:3000", readinessPath: "/" },
+            },
+          })
+          .where(dbm.eq(dbm.targetOnboarding.id, onboardingId));
+      },
+    }),
+  );
+
+  assert.equal(agentRan, true, "a 'yes' verdict runs the build agent");
+  assert.equal(await stateOf(repoId), "PENDING_BUILD");
 });
 
 test("the agent rung commits an agent-authored plan and the row goes to build", async () => {

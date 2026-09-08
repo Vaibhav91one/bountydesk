@@ -38,6 +38,22 @@ export function buildBuildServerManifest(appBaseUrl: string, secret: string) {
  */
 export const BUILD_APPROVAL_GATED_TOOLS = [] as const;
 
+/** The sandboxability review's one tool: report whether a repo can be built into one offline image. A
+ *  read-only pre-check the onboarding worker runs before the build agent; the route resolves the row by
+ *  the review's capability token. Same secret auth as the other connectors. */
+export function buildReviewServerManifest(appBaseUrl: string, secret: string) {
+  return {
+    name: "bountydesk-review",
+    description: "BountyDesk's read-only sandboxability review",
+    type: "remote" as const,
+    url: `${appBaseUrl}/api/mcp/review`,
+    auth: {
+      type: "header" as const,
+      headers: { Authorization: `Bearer ${secret}` },
+    },
+  };
+}
+
 /**
  * The scope-guard connector: full tool surface (scope_check, http_probe, tcp_probe,
  * scope_add/remove/add_temporary, request_intrusive_approval, verify_grant, osv_query,

@@ -647,3 +647,66 @@ test("buildAgentDraftedPayload cites the target image digest only when a target 
     assert.ok(body.trimEnd().endsWith("<!-- bountydesk-delivery:v1 -->"));
   }
 });
+
+/** A connected repository whose onboarding ended UNSUPPORTED (no bound target), for the analysis-only
+ *  reason branch. */
+async function seedUnsupportedRepo(): Promise<string> {
+  const repoId = Number(`6${randomUUID().replace(/\D/g, "").slice(0, 8)}`);
+  const [installation] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({
+      installationId: Number(`5${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+      accountLogin: `acct-${randomUUID()}`,
+      accountId: Number(`4${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
+    })
+    .returning({ id: dbm.githubInstallation.id });
+  const [repo] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({ installationId: installation.id, repoId, fullName: `owner/unsupported-${randomUUID()}` })
+    .returning({ id: dbm.connectedRepository.id });
+  await dbm.db
+    .insert(dbm.targetOnboarding)
+    .values({ repoId, repoFullName: `owner/unsupported`, sourceRef: "https://x/u.git", state: "UNSUPPORTED" });
+  return repo.id;
+}
+
+async function verdictOf(reportId: string) {
+  const [row] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome, summary: dbm.verdict.summary, evidence: dbm.verdict.evidence })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, reportId));
+  return row;
+}
+
+test("synthesized analysis-only names an unsandboxable repo as repository-not-onboardable", async () => {
+  const connectedRepositoryId = await seedUnsupportedRepo();
+  const { reportId } = await seedDraftableReport({ connectedRepositoryId, state: "TRIAGING" });
+
+  const result = await publishVerdictModule.synthesizeAnalysisOnlyVerdict(reportId, dbm.db);
+  assert.ok(result, "a verdict is synthesized");
+
+  const v = await verdictOf(reportId);
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal(v.summary, publishVerdictModule.SYNTHESIZED_ANALYSIS_SUMMARY, "the outbound summary stays the constant");
+  assert.deepEqual(v.evidence, {
+    source: "server-synthesized",
+    reproduction: "unavailable",
+    reason: "repository-not-onboardable",
+  });
+});
+
+test("synthesized analysis-only for a report with no target says no-reproduction-target", async () => {
+  const { reportId } = await seedDraftableReport({ state: "TRIAGING" });
+
+  const result = await publishVerdictModule.synthesizeAnalysisOnlyVerdict(reportId, dbm.db);
+  assert.ok(result);
+
+  const v = await verdictOf(reportId);
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+  assert.equal(v.summary, publishVerdictModule.SYNTHESIZED_ANALYSIS_SUMMARY);
+  assert.deepEqual(v.evidence, {
+    source: "server-synthesized",
+    reproduction: "unavailable",
+    reason: "no-reproduction-target",
+  });
+});

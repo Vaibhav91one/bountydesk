@@ -1,0 +1,1 @@
+ALTER TABLE "target_onboarding" ADD COLUMN "review_result" jsonb;
