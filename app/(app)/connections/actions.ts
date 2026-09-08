@@ -10,16 +10,22 @@ import {
   type ApproveResult,
 } from "@/lib/build-onboarding/approve-request";
 
-export type { ApproveResult };
+import { selectOnboardingArtifact } from "./artifact-select";
 
-export type OnboardingArtifactKind = "dockerfile" | "manifest" | "buildplan" | "buildlog";
-export type ArtifactResult = { ok: true; filename: string; text: string } | { ok: false; error: string };
+export type { ApproveResult };
+export type { OnboardingArtifactKind, ArtifactResult } from "./artifact-select";
+type OnboardingArtifactKind = "dockerfile" | "manifest" | "buildplan" | "buildlog";
+type ArtifactResult = { ok: true; filename: string; text: string } | { ok: false; error: string };
 
 /**
  * Return an onboarding artifact for download: the Dockerfile the agent authored, the proposed target
- * manifest, the build plan, or the build log. Reviewer-gated, and the text is fetched on demand here
- * rather than shipped in the connections list. The repository id is validated to a positive integer;
- * the row is looked up by it server-side, so nothing a caller passes selects a different repo's data.
+ * manifest, the build plan, or the build log. The text is fetched on demand here rather than shipped
+ * in the connections list.
+ *
+ * Reviewer authorization is the access boundary: a reviewer sees the whole connections screen, so any
+ * reviewer may fetch any repository's onboarding artifacts, which is intended. `repoId` selects the
+ * onboarding row (validated to a positive integer and used in a parameterized lookup); it is not a
+ * per-repo authorization check, and nothing here should later be made to rely on it as one.
  */
 export async function getOnboardingArtifact(
   repoId: number,
@@ -41,27 +47,7 @@ export async function getOnboardingArtifact(
     .limit(1);
   if (!row) return { ok: false, error: "no onboarding record for that repository" };
 
-  const base = row.repoFullName.split("/").pop() ?? "target";
-  switch (kind) {
-    case "dockerfile":
-      return row.dockerfileText
-        ? { ok: true, filename: "Dockerfile", text: row.dockerfileText }
-        : { ok: false, error: "no Dockerfile was recorded" };
-    case "manifest":
-      return row.proposedManifest
-        ? { ok: true, filename: `${base}.manifest.json`, text: JSON.stringify(row.proposedManifest, null, 2) }
-        : { ok: false, error: "no manifest was proposed" };
-    case "buildplan":
-      return row.buildPlan
-        ? { ok: true, filename: `${base}.build-plan.json`, text: JSON.stringify(row.buildPlan, null, 2) }
-        : { ok: false, error: "no build plan was recorded" };
-    case "buildlog":
-      return row.buildLog
-        ? { ok: true, filename: `${base}.build.log`, text: row.buildLog }
-        : { ok: false, error: "no build log was recorded" };
-    default:
-      return { ok: false, error: "unknown artifact" };
-  }
+  return selectOnboardingArtifact(row, kind);
 }
 
 /**

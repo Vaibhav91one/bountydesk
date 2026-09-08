@@ -176,8 +176,13 @@ function unsure(reason: string): ReviewResult {
   return { verdict: "unsure", reason };
 }
 
-/** Read the verdict the tool wrote and clear it. A turn that ended without calling the tool leaves no
- *  result, which is "unsure" -- fall through to the build agent. */
+/** Read the verdict the tool wrote. A turn that ended without calling the tool leaves no result, which
+ *  is "unsure" -- fall through to the build agent.
+ *
+ *  The result is left on the row rather than cleared: it is the durable record of the review the
+ *  connections panel shows once onboarding reaches a resting state. Nothing overwrites it after this
+ *  turn (the token is cleared in the caller's finally, so no later tool call resolves), and a
+ *  re-onboard resets it to null when it mints its own token. */
 async function readVerdict(onboardingId: string, capability: string): Promise<ReviewResult> {
   const [row] = await db
     .select({ reviewResult: targetOnboarding.reviewResult, token: targetOnboarding.agentCapabilityToken })
@@ -186,14 +191,6 @@ async function readVerdict(onboardingId: string, capability: string): Promise<Re
     .limit(1);
   // A replacement step may have taken the row over (new token); then this review's result is moot.
   if (!row || row.token !== capability) return unsure("the review did not complete for this attempt");
-
-  // Clear the result fenced on the token, so a replacement review that wrote its own result between
-  // the read above and here is not erased.
-  await db
-    .update(targetOnboarding)
-    .set({ reviewResult: null, updatedAt: new Date() })
-    .where(and(eq(targetOnboarding.id, onboardingId), eq(targetOnboarding.agentCapabilityToken, capability)))
-    .catch(() => undefined);
 
   const result = row.reviewResult as { verdict?: unknown; reason?: unknown } | null;
   const verdict = result?.verdict;
