@@ -76,6 +76,9 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   // Repos pinned as filter pills, GitHub-issue style: a report is kept only if its repo is selected.
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
+  // Which suggestion the arrow keys have moved to, so Enter can pick it. onMouseDown gives mouse
+  // users a path but fires before the input's blur; keyboard users get here instead.
+  const [activeSuggestion, setActiveSuggestion] = useState(0);
 
   // The repos that actually have reports, for the suggestion list. Deriving from the rows in hand
   // means the suggestions are exactly the repos worth scoping to, with no extra fetch.
@@ -93,6 +96,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const addRepo = (repo: string) => {
     setSelectedRepos((current) => (current.includes(repo) ? current : [...current, repo]));
     setQuery("");
+    setActiveSuggestion(0);
   };
   const removeRepo = (repo: string) => setSelectedRepos((current) => current.filter((r) => r !== repo));
 
@@ -113,7 +117,6 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       id: row.id,
       hidden:
         !matchesFilter(row, filter) ||
-        // Repo pills scope to their repos; free text then narrows within them.
         (selectedRepos.length > 0 && !selectedRepos.includes(row.origin)) ||
         // Title, issue number and origin, because those are the three things somebody arrives
         // holding. Not the state: that is what the chips above are for.
@@ -205,31 +208,60 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           <Input
             type="search"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setActiveSuggestion(0);
+            }}
             onFocus={() => setSearchFocused(true)}
             onBlur={() => setSearchFocused(false)}
+            onKeyDown={(event) => {
+              if (repoSuggestions.length === 0) return;
+              const active = Math.min(activeSuggestion, repoSuggestions.length - 1);
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                setActiveSuggestion(Math.min(active + 1, repoSuggestions.length - 1));
+              } else if (event.key === "ArrowUp") {
+                event.preventDefault();
+                setActiveSuggestion(Math.max(active - 1, 0));
+              } else if (event.key === "Enter") {
+                // Pick the highlighted repo rather than submitting the surrounding form.
+                event.preventDefault();
+                addRepo(repoSuggestions[active]);
+              }
+            }}
             placeholder="Filter by repository, or search title & issue"
             aria-label="Search reports"
+            role="combobox"
+            aria-expanded={searchFocused && repoSuggestions.length > 0}
+            aria-controls="repo-suggestions"
             className="h-11 border-border/50 pl-9 text-body"
           />
           {searchFocused && repoSuggestions.length > 0 && (
-            <ul className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md">
-              {repoSuggestions.map((repo) => (
-                <li key={repo}>
-                  <button
-                    type="button"
-                    // mouseDown, not click: fire before the input's blur hides this list.
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      addRepo(repo);
-                    }}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-muted"
-                  >
-                    <GithubLogo weight="fill" className="size-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{repo}</span>
-                  </button>
-                </li>
-              ))}
+            <ul
+              id="repo-suggestions"
+              role="listbox"
+              className="absolute top-full z-20 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-border bg-popover py-1 text-popover-foreground shadow-md"
+            >
+              {repoSuggestions.map((repo, i) => {
+                const active = i === Math.min(activeSuggestion, repoSuggestions.length - 1);
+                return (
+                  <li key={repo} role="option" aria-selected={active}>
+                    <button
+                      type="button"
+                      // mouseDown, not click: fire before the input's blur hides this list.
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        addRepo(repo);
+                      }}
+                      onMouseEnter={() => setActiveSuggestion(i)}
+                      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm ${active ? "bg-muted" : ""}`}
+                    >
+                      <GithubLogo weight="fill" className="size-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{repo}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

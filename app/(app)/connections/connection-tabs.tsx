@@ -132,7 +132,8 @@ export function ConnectionTabs({
   // sheet is driven by this local state, not read back from the URL. Deriving `open` from
   // useSearchParams meant closing had to wait for router.replace to commit an RSC round-trip before the
   // exit animation could even start, which read as a lag. Now the close is instant and the URL is
-  // updated in the background; the effect below re-syncs from the URL for a deep link or Back/Forward.
+  // updated in the background; the render-time reconcile just below re-syncs from the URL for a deep
+  // link or Back/Forward.
   const urlRepo = params.get("repo");
   const [open, setOpen] = useState<string | null>(urlRepo);
   // Reconcile from the URL during render (React's "adjust state on prop change" pattern), so a deep
