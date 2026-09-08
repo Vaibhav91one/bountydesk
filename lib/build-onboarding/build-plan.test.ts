@@ -53,6 +53,115 @@ test("a compose-synth plan carries the app service, datastores and an http seed"
   assert.deepEqual(plan.extraEgressHosts, ["deb.debian.org"]);
 });
 
+test("a compose-mesh plan carries every service, one app and its dependencies", () => {
+  const plan = parseBuildPlan({
+    strategy: "compose-mesh",
+    ecosystem: "python",
+    composePath: "docker-compose.yml",
+    appService: "vote",
+    services: [
+      { service: "vote", role: "app", port: 80, build: { context: "./vote" }, peers: ["redis"], env: { REDIS_HOST: "redis" } },
+      { service: "redis", role: "dependency", port: 6379, image: "redis:7-alpine" },
+    ],
+    runtime: { name: "vote", baseUrl: "http://localhost:80", readinessPath: "/" },
+  });
+  if (plan.strategy !== "compose-mesh") throw new Error("narrowing");
+  assert.equal(plan.appService, "vote");
+  assert.equal(plan.services.length, 2);
+  const app = plan.services.find((s) => s.role === "app");
+  assert.equal(app?.service, "vote");
+  assert.deepEqual(app?.build, { context: "./vote" });
+  assert.deepEqual(app?.peers, ["redis"]);
+  assert.equal(app?.env?.REDIS_HOST, "redis");
+  const dep = plan.services.find((s) => s.role === "dependency");
+  assert.equal(dep?.image, "redis:7-alpine");
+  assert.equal(dep?.port, 6379);
+});
+
+test("a compose-mesh service must set exactly one of build or image", () => {
+  const base = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "app",
+    runtime,
+  };
+  // Neither build nor image: nothing to boot.
+  assert.throws(
+    () => parseBuildPlan({ ...base, services: [{ service: "app", role: "app", port: 3000 }] }),
+    /exactly one of build or image/,
+  );
+  // Both: ambiguous.
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        ...base,
+        services: [{ service: "app", role: "app", port: 3000, build: { context: "." }, image: "node:20" }],
+      }),
+    /exactly one of build or image/,
+  );
+});
+
+test("a compose-mesh plan must have exactly one app, and appService must name it", () => {
+  const base = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    runtime,
+  };
+  // Two apps.
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        ...base,
+        appService: "a",
+        services: [
+          { service: "a", role: "app", port: 3000, build: { context: "." } },
+          { service: "b", role: "app", port: 3001, build: { context: "." } },
+        ],
+      }),
+    /exactly one service with role app/,
+  );
+  // appService points at a dependency, not the app.
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        ...base,
+        appService: "db",
+        services: [
+          { service: "app", role: "app", port: 3000, build: { context: "." } },
+          { service: "db", role: "dependency", port: 5432, image: "postgres:16" },
+        ],
+      }),
+    /appService must name the service with role app/,
+  );
+});
+
+test("a compose-mesh plan rejects a bad port and a duplicate service", () => {
+  const base = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "app",
+    runtime,
+  };
+  assert.throws(
+    () => parseBuildPlan({ ...base, services: [{ service: "app", role: "app", port: 0, build: { context: "." } }] }),
+    /port must be an integer/,
+  );
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        ...base,
+        services: [
+          { service: "app", role: "app", port: 3000, build: { context: "." } },
+          { service: "app", role: "dependency", port: 5432, image: "postgres:16" },
+        ],
+      }),
+    /duplicate service/,
+  );
+});
+
 test("an agent-authored plan carries the Dockerfile text and a build context", () => {
   const plan = parseBuildPlan({
     strategy: "agent-authored",
