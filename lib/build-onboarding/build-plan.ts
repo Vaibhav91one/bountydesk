@@ -479,6 +479,15 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
   if (apps[0].service !== appService) {
     throw new Error("build plan compose-mesh appService must name the service with role app");
   }
+  // Peer names become /etc/hosts entries in the reproduction mesh, so every edge must point at a
+  // declared node. An unknown name would otherwise be silently dropped during provisioning.
+  for (const service of services) {
+    for (const peer of service.peers ?? []) {
+      if (!seen.has(peer)) {
+        throw new Error(`build plan services[${service.service}].peers references unknown service ${peer}`);
+      }
+    }
+  }
   // The app is what probe_target reaches, so its port is the target port and cannot be omitted.
   if (apps[0].port === undefined) {
     throw new Error("build plan compose-mesh app service must declare a port");

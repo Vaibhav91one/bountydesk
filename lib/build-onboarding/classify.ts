@@ -57,39 +57,50 @@ const ECOSYSTEM_MARKERS: Array<{ file: string; ecosystem: Ecosystem }> = [
   { file: "Gemfile", ecosystem: "ruby" },
 ];
 
-/** Resolve defaulted Compose image variables without inventing a tag for required or conditional values. */
-function resolveComposeImage(image: string): string | undefined {
+/**
+ * Resolve defaulted Compose variables in any scalar (`${VAR:-default}`, `${VAR-default}`), leaving an
+ * escaped `$$` alone. Returns undefined for a required/conditional expression, a bare `$VAR`, or an
+ * unterminated brace, so the caller can refuse rather than bake an unresolved placeholder into a real
+ * value. Used for both image references and environment values: an env value the compose file wrote as
+ * `${DB_HOST:-db}` has to resolve to `db` before it can name a peer.
+ */
+function resolveComposeValue(input: string): string | undefined {
   let out = "";
-  for (let i = 0; i < image.length; i++) {
-    if (image[i] === "\\" && image[i + 1] === "$" && image[i + 2] === "{") {
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === "\\" && input[i + 1] === "$" && input[i + 2] === "{") {
       out += "${";
       i += 2;
       continue;
     }
-    if (image[i] === "$" && image[i + 1] === "$") {
+    if (input[i] === "$" && input[i + 1] === "$") {
       out += "$$";
       i++;
       continue;
     }
-    if (image[i] !== "$" || image[i + 1] !== "{") {
-      if (image[i] === "$" && /[A-Za-z_]/.test(image[i + 1] ?? "")) return undefined;
-      out += image[i];
+    if (input[i] !== "$" || input[i + 1] !== "{") {
+      if (input[i] === "$" && /[A-Za-z_]/.test(input[i + 1] ?? "")) return undefined;
+      out += input[i];
       continue;
     }
     let depth = 1;
     let end = i + 2;
-    for (; end < image.length && depth > 0; end++) {
-      if (image[end] === "{") depth++;
-      else if (image[end] === "}") depth--;
+    for (; end < input.length && depth > 0; end++) {
+      if (input[end] === "{") depth++;
+      else if (input[end] === "}") depth--;
     }
     if (depth !== 0) return undefined;
-    const expression = image.slice(i + 2, end - 1);
+    const expression = input.slice(i + 2, end - 1);
     const match = expression.match(/^([A-Za-z_][A-Za-z0-9_]*)(?::([-+?])|([-+?]))([\s\S]*)$/);
     if (!match || (match[2] ?? match[3]) !== "-") return undefined;
     out += match[4];
     i = end - 1;
   }
   return /\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*/.test(out) ? undefined : out;
+}
+
+/** Resolve defaulted Compose image variables without inventing a tag for required or conditional values. */
+function resolveComposeImage(image: string): string | undefined {
+  return resolveComposeValue(image);
 }
 
 /** Map a compose service image to a datastore engine we can bundle, or undefined if it is not one. */
@@ -137,7 +148,36 @@ type ComposeService = {
   command?: unknown;
   depends_on?: unknown;
   volumes?: unknown;
+  privileged?: unknown;
+  network_mode?: unknown;
+  cap_add?: unknown;
+  devices?: unknown;
+  pid?: unknown;
 };
+
+/**
+ * Fields whose meaning the mesh cannot reproduce, so a compose file that relies on one is refused
+ * rather than admitted with the field silently dropped. Each is an environment property the offline
+ * linked-sandbox model does not have: no Docker daemon, no host network, no host device or kernel
+ * capability, no shared PID namespace. Booting such a service without them would not be the app the
+ * repo describes, so the honest answer is a not-flattenable reason a reviewer reads.
+ */
+function unsupportedServiceProperty(name: string, svc: ComposeService): string | undefined {
+  if (svc.privileged === true) return `service ${name} runs privileged, which the offline sandbox does not allow`;
+  if (typeof svc.network_mode === "string" && svc.network_mode.toLowerCase() === "host") {
+    return `service ${name} uses host networking, which the mesh replaces with its own private link group`;
+  }
+  if (Array.isArray(svc.cap_add) && svc.cap_add.length > 0) {
+    return `service ${name} requests extra kernel capabilities, which the offline sandbox does not grant`;
+  }
+  if (Array.isArray(svc.devices) && svc.devices.length > 0) {
+    return `service ${name} maps host devices, which are unavailable in a reproduction sandbox`;
+  }
+  if (typeof svc.pid === "string" && svc.pid.toLowerCase() === "host") {
+    return `service ${name} shares the host PID namespace, which is unavailable in a reproduction sandbox`;
+  }
+  return undefined;
+}
 
 /** A service that mounts the host Docker socket is infrastructure that manages other containers (an
  *  autoheal or watchtower sidecar), not part of the application under test. It has no place in an
@@ -250,7 +290,7 @@ export type ComposeMeshTopology =
  * the provisioner substitutes for the compose service name at boot. Peers come from depends_on and
  * from env values that name another service, so the provisioner knows what to rewrite.
  */
-export function parseComposeMesh(composeText: string): ComposeMeshTopology {
+export function parseComposeMesh(composeText: string, appServiceOverride?: string): ComposeMeshTopology {
   let doc: unknown;
   try {
     doc = yaml.load(composeText);
@@ -269,22 +309,47 @@ export function parseComposeMesh(composeText: string): ComposeMeshTopology {
   }
   const allNames = new Set(entries.map(([name]) => name));
 
-  // The app is a non-datastore service that publishes a web port. Prefer one with a host `ports`
-  // mapping (the front door a compose author publishes), else the first with an exposed port.
+  // The app is the one service the agent probes. Only one can be, so an ambiguous file is refused
+  // rather than guessed at: silently naming the first candidate the app would relabel a second real
+  // front door as an internal dependency and stop probing it. An explicit override, from a reviewed
+  // hint or a target hint, is the escape hatch.
+  const isDatastoreService = (svc: ComposeService): boolean =>
+    typeof svc.image === "string" && engineForImage(svc.image) !== undefined;
   const appCandidates = entries.filter(([, svc]) => {
-    const isDatastore = typeof svc.image === "string" && engineForImage(svc.image) !== undefined;
-    if (isDatastore) return false;
+    if (isDatastoreService(svc)) return false;
     return (firstPort(svc.ports) ?? firstPort(svc.expose)) !== undefined;
   });
-  if (appCandidates.length === 0) {
+
+  let appEntry: [string, ComposeService] | undefined;
+  if (appServiceOverride) {
+    appEntry = appCandidates.find(([name]) => name === appServiceOverride);
+    if (!appEntry) {
+      return { ok: false, reason: `app service ${appServiceOverride} is not a service that publishes an HTTP port` };
+    }
+  } else if (appCandidates.length === 1) {
+    appEntry = appCandidates[0]!;
+  } else if (appCandidates.length > 1) {
+    // A host `ports` mapping is a declared front door; a bare `expose` is internal. That distinction
+    // is only decisive when exactly one candidate has it.
+    const published = appCandidates.filter(([, svc]) => firstPort(svc.ports) !== undefined);
+    if (published.length === 1) {
+      appEntry = published[0]!;
+    } else {
+      return {
+        ok: false,
+        reason: `more than one service publishes an HTTP port (${appCandidates.map(([name]) => name).join(", ")}); name the app explicitly`,
+      };
+    }
+  } else {
     return { ok: false, reason: "no service publishes an HTTP port to probe" };
   }
-  const appEntry = appCandidates.find(([, svc]) => firstPort(svc.ports) !== undefined) ?? appCandidates[0]!;
   const appName = appEntry[0];
   const appPort = firstPort(appEntry[1].ports) ?? firstPort(appEntry[1].expose)!;
 
   const meshServices: ComposeMeshService[] = [];
   for (const [name, svc] of entries) {
+    const unsupported = unsupportedServiceProperty(name, svc);
+    if (unsupported) return { ok: false, reason: unsupported };
     const build = appBuildConfig(svc.build);
     const rawImage = typeof svc.image === "string" ? svc.image : undefined;
     const image = rawImage ? resolveComposeImage(rawImage) : undefined;
@@ -324,17 +389,21 @@ function datastorePortForImage(image: string): number | undefined {
   return undefined;
 }
 
-/** compose env, restricted to entries a build plan accepts: env-name keys with single-line values. */
+/** compose env, restricted to entries a build plan accepts: env-name keys with single-line values.
+ *  A value written as `${VAR:-default}` is resolved first, so the app reaches its peer through the
+ *  resolved host rather than a literal placeholder that can never resolve inside the sandbox. */
 function meshEnv(environment: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(normalizeEnv(environment))) {
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) && !/[\r\n]/.test(v)) out[k] = v;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || /[\r\n]/.test(v)) continue;
+    const resolved = resolveComposeValue(v);
+    if (resolved !== undefined) out[k] = resolved;
   }
   return out;
 }
 
 /** The compose service names a service connects to: its depends_on, plus any env value that names
- *  another service (a database host set to the db service's name). */
+ *  another service (a database host set to the db service's name, including via `${DB_HOST:-db}`). */
 function servicePeers(svc: ComposeService, allNames: Set<string>, self: string): string[] {
   const peers = new Set<string>();
   const dep = svc.depends_on;
@@ -343,7 +412,10 @@ function servicePeers(svc: ComposeService, allNames: Set<string>, self: string):
   } else if (dep && typeof dep === "object") {
     for (const k of Object.keys(dep as Record<string, unknown>)) peers.add(k);
   }
-  for (const v of Object.values(normalizeEnv(svc.environment))) if (allNames.has(v)) peers.add(v);
+  for (const value of Object.values(normalizeEnv(svc.environment))) {
+    const resolved = resolveComposeValue(value) ?? value;
+    if (allNames.has(resolved)) peers.add(resolved);
+  }
   peers.delete(self);
   return [...peers].filter((n) => allNames.has(n));
 }
@@ -447,6 +519,10 @@ export type ClassifyOptions = {
    *  isolated sandbox: DVWA needs `low` security instead of its `impossible` default and its login
    *  wall off, so a stateless probe can reach the injectable page. */
   envOverridesHint?: Record<string, string>;
+  /** Name the probed app for a compose file with more than one HTTP front door. Without it an
+   *  ambiguous mesh is refused rather than guessed at, so a real target names its app rather than
+   *  trusting the classifier to prefer the right one. */
+  meshAppServiceHint?: string;
 };
 
 /**
@@ -471,8 +547,16 @@ export async function classify(
       // sandbox, which covers the cases flatten rejects (more than one app, a recipe-less datastore
       // like postgres, an image-only app). If the mesh does not fit either, keep flatten's reason,
       // which is the clearer one for a single-service or genuinely unsupportable repo.
-      const mesh = parseComposeMesh(compose.text);
-      if (!mesh.ok) return { strategy: "not-flattenable", ecosystem, reason: topology.reason };
+      const mesh = parseComposeMesh(compose.text, options.meshAppServiceHint);
+      if (!mesh.ok) {
+        // The mesh's own reason is the specific one when the file is a genuine multi-service compose
+        // (an ambiguous front door, an unusable service); fall back to flatten's otherwise, which is
+        // clearer for a single-service or unsupported repo.
+        const reason = mesh.reason.includes("compose file has fewer than two")
+          ? topology.reason
+          : mesh.reason;
+        return { strategy: "not-flattenable", ecosystem, reason };
+      }
 
       const resolvedServices = mesh.services.map((service) =>
         service.build

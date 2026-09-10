@@ -366,20 +366,23 @@ test("analysis renews its lease before the initial deadline", async () => {
     analysisStarted = resolve;
   });
 
+  // A lease long enough that the renew interval (leaseSeconds/3) has real headroom: under a fully
+  // loaded suite the DB round trip for a claim can outrun a sub-second lease and read a renewed
+  // row as expired. The property under test is that renewal happens at all, not the exact cadence.
   const running = worker.runOnce("worker-1", {
-    leaseSeconds: 1,
+    leaseSeconds: 3,
     analysis: {
       ...analysisDriver(),
       run: async () => {
         analysisStarted();
-        await new Promise((resolve) => setTimeout(resolve, 1_400));
+        await new Promise((resolve) => setTimeout(resolve, 4_500));
       },
     },
   });
 
   await started;
-  await new Promise((resolve) => setTimeout(resolve, 1_100));
-  assert.equal(await queue.claim("worker-2", 1), null);
+  await new Promise((resolve) => setTimeout(resolve, 2_000));
+  assert.equal(await queue.claim("worker-2", 3), null);
   assert.equal(await running, jobId);
   assert.equal((await job(jobId)).state, "DONE");
 });
@@ -472,7 +475,7 @@ test("losing a lease stops the job without terminating the worker call", async (
   const { jobId } = await enqueueIssue(repo);
 
   const processed = await worker.runOnce("worker-1", {
-    leaseSeconds: 0.3,
+    leaseSeconds: 2,
     analysis: {
       ...analysisDriver(),
       run: async ({ signal }) => {

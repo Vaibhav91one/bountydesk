@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 
 import { requireEnv, requireSecret } from "@/lib/env";
 import {
@@ -10,8 +10,10 @@ import {
   deleteSandbox,
   execute,
   PURPOSE_LABEL,
+  type CreateSnapshotSpec,
   type ExecResult,
   type Sandbox,
+  type SnapshotInfo,
 } from "@/lib/sandbox/daytona";
 
 import type { BuildPlan } from "./build-plan";
@@ -24,6 +26,8 @@ import {
 } from "./build-driver";
 import { synthesizeComposeDockerfile } from "./compose-compiler";
 import { getDatastoreRecipe, type DatastoreCreds } from "./datastore-recipes";
+import { meshBuildPlan } from "./mesh-build-plan";
+import { sourceIdentityDigest } from "./source-identity";
 import { selectEgressHosts } from "./egress-profiles";
 
 /**
@@ -137,6 +141,13 @@ export function createDaytonaBuildDriver(): BuildDriver {
         throw new Error(`build called for a not-flattenable repo: ${plan.reason}`);
       }
 
+      // The source identity is checked before any provider configuration is read: a build with no
+      // immutable commit must fail for that reason, not incidentally on a missing snapshot name.
+      const resolvedCommitSha = input.resolvedCommitSha;
+      if (!resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(resolvedCommitSha)) {
+        throw new Error("onboarding build requires a server-resolved 40-character commit SHA");
+      }
+
       const baseSnapshot = requireEnv("BUILD_BASE_SNAPSHOT");
       const ghcrNamespace = requireEnv("GHCR_NAMESPACE").replace(/\/+$/, "");
       const pushToken = requireSecret("GHCR_PUSH_TOKEN");
@@ -162,18 +173,26 @@ export function createDaytonaBuildDriver(): BuildDriver {
       );
 
       try {
-        await run(sandbox, `git clone --depth 1 ${shellArg(cloneUrl)} /work/source`);
-        // The resolved commit is both baked into the marker and returned; the reproduction path
-        // re-verifies it from inside the booted image. sourceRef is a clone URL, not a commit, so the
-        // pin is this resolved HEAD, recorded in the recipe digest below.
+        await run(sandbox, `git clone --no-checkout ${shellArg(cloneUrl)} /work/source`);
+        await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(resolvedCommitSha)}`);
         const buildMarker = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
+        if (buildMarker.toLowerCase() !== resolvedCommitSha.toLowerCase()) {
+          throw new Error(`cloned source resolved to ${buildMarker}, expected ${resolvedCommitSha}`);
+        }
 
         await startDockerDaemon(sandbox);
 
         // A mesh builds one image per service and registers one snapshot each, so it owns the whole
         // push-and-register flow rather than the single-image path below.
         if (plan.strategy === "compose-mesh") {
-          return await buildMesh(sandbox, plan, { ghcrNamespace, pushToken, slug, buildMarker });
+          return await buildMesh(sandbox, plan, {
+            ghcrNamespace,
+            pushToken,
+            slug,
+            buildMarker,
+            resolvedCommitSha,
+            sourceArchiveDigest: input.sourceArchiveDigest,
+          });
         }
 
         const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
@@ -208,7 +227,13 @@ export function createDaytonaBuildDriver(): BuildDriver {
           dockerfileText,
           buildLog,
           buildMarker,
-          buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest),
+          buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest, {
+            repoFullName: input.repoFullName,
+            resolvedCommitSha,
+            sourceArchiveDigest: input.sourceArchiveDigest,
+          }),
+          resolvedCommitSha,
+          ...(input.sourceArchiveDigest ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
         };
       } finally {
         await deleteSandbox(sandbox.id).catch(() => undefined);
@@ -222,17 +247,42 @@ export function createDaytonaBuildDriver(): BuildDriver {
 const BUILD_LOG_CAP = 64_000;
 
 /**
+ * The provider operations the mesh builder performs, behind an interface so its orchestration is
+ * tested deterministically without a live Daytona account or registry. The live wiring is the
+ * default; a test passes fakes and asserts the command transcript.
+ */
+export type MeshBuildRuntime = {
+  /** `run` keeps the live helper's contract: it throws on a non-zero exit, so a caller never has to
+   *  check an exit code. A fake that returns a failed ExecResult instead would let a broken build
+   *  silently continue. */
+  run(sandbox: Sandbox, command: string): Promise<ExecResult>;
+  createSnapshot(spec: CreateSnapshotSpec): Promise<SnapshotInfo>;
+  deleteSnapshotByName(name: string): Promise<void>;
+};
+
+const liveMeshRuntime: MeshBuildRuntime = { run, createSnapshot, deleteSnapshotByName };
+
+/**
  * Build a compose-mesh: one image per service, one snapshot per service. A service with a build
  * context is built from the repo and pushed to ghcr with the marker baked in; a service that names a
  * stock image is pulled (to capture its digest) and its public tag is registered as a snapshot
  * directly. The returned BuildResult mirrors the app service at the top level so the single-image
  * consumers keep working, and carries every service in `services` for the mesh provisioner.
  */
-async function buildMesh(
+export async function buildMesh(
   sandbox: Sandbox,
   plan: Extract<BuildPlan, { strategy: "compose-mesh" }>,
-  ctx: { ghcrNamespace: string; pushToken: string; slug: string; buildMarker: string },
+  ctx: {
+    ghcrNamespace: string;
+    pushToken: string;
+    slug: string;
+    buildMarker: string;
+    resolvedCommitSha: string;
+    sourceArchiveDigest?: string;
+    runtime?: MeshBuildRuntime;
+  },
 ): Promise<BuildResult> {
+  const runtime = ctx.runtime ?? liveMeshRuntime;
   const services: BuiltService[] = [];
   let app: BuiltService | undefined;
   let appDockerfileText = "";
@@ -244,7 +294,13 @@ async function buildMesh(
   // forces Daytona to pull the image this build actually produced.
   const buildTag = `bountydesk-${randomBytes(4).toString("hex")}`;
 
-  for (const svc of plan.services) {
+  const plannedServices = meshBuildPlan(plan, {
+    ghcrNamespace: ctx.ghcrNamespace,
+    slug: ctx.slug,
+    buildTag,
+  });
+  for (const planned of plannedServices) {
+    const svc = plan.services.find((service) => service.service === planned.service)!;
     const serviceSlug = `${ctx.slug}-${svc.service}`;
     const common = {
       service: svc.service,
@@ -255,37 +311,37 @@ async function buildMesh(
     };
 
     if (svc.build) {
-      const context = svc.build.context;
-      const dockerfile = svc.build.dockerfile ?? "Dockerfile";
-      const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
-      const imageRef = `${imageName}:${buildTag}`;
+      const context = planned.build!.context;
+      const dockerfile = planned.build!.dockerfile;
+      const imageName = planned.imageName;
+      const imageRef = planned.imageTag;
       const stageTag = `bountydesk-mesh-${svc.service}`;
       // A service Dockerfile the onboarding agent authored is not in the cloned repo, so write it
       // into the context first; the deterministic classifier leaves this unset and uses the repo's.
-      if (svc.build.dockerfileText) {
-        const authored = Buffer.from(svc.build.dockerfileText, "utf8").toString("base64");
-        await run(sandbox, `mkdir -p /work/source/${context} && echo ${shellArg(authored)} | base64 -d > /work/source/${context}/${dockerfile}`);
+      if (planned.build?.dockerfileText) {
+        const authored = Buffer.from(planned.build.dockerfileText, "utf8").toString("base64");
+        await runtime.run(sandbox, `mkdir -p /work/source/${context} && echo ${shellArg(authored)} | base64 -d > /work/source/${context}/${dockerfile}`);
       }
       // Relax the proxy TLS check for package hosts (see PROXY_TRUST_ENV), then bake the marker,
       // pinned to root because a service Dockerfile may end on a non-root USER, so reproduction can
       // prove which build booted this service. Build from a derived Dockerfile so the customer's
       // file on disk is left untouched.
-      const original = (await run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
+      const original = (await runtime.run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
       const dfText =
         injectProxyTrust(original) +
         `\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}RUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
       const prepared = Buffer.from(dfText, "utf8").toString("base64");
-      await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
+      await runtime.run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
       const log = (
-        await run(sandbox, `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} -t ${stageTag} .`)
+        await runtime.run(sandbox, `cd /work/source/${context} && docker build -f Dockerfile.bountydesk ${PROXY_BUILD_ARGS} -t ${stageTag} .`)
       ).result;
       // Capture the service's real start command, then rebuild with an idle entrypoint so the image
       // does not auto-start before the provisioner has wired its peers. The provisioner runs this.
-      const startCommand = await inspectMeshStartCommand(sandbox, stageTag);
-      await writeGenDockerfile(sandbox, `FROM ${stageTag}\nENTRYPOINT ["tail", "-f", "/dev/null"]\nCMD []\n`);
-      await run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
-      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
-      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
+      const startCommand = await inspectMeshStartCommand(sandbox, stageTag, runtime);
+      await writeGenDockerfile(sandbox, `FROM ${stageTag}\nENTRYPOINT ["tail", "-f", "/dev/null"]\nCMD []\n`, runtime);
+      await runtime.run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
+      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
       const built: BuiltService = {
         ...common,
         imageName,
@@ -302,22 +358,22 @@ async function buildMesh(
         appBuildLog = log;
       }
     } else {
-      const image = svc.image!;
-      const imageName = `${ctx.ghcrNamespace}/${serviceSlug}`;
-      const imageRef = `${imageName}:${buildTag}`;
+      const image = planned.image!;
+      const imageName = planned.imageName;
+      const imageRef = planned.imageTag;
       // Derive an image that adds curl (for the egress and readiness probes) so a minimal datastore
       // image still verifies, and push it under our own immutable tag. This also avoids Daytona
       // rejecting a snapshot of a :latest service image. The datastore keeps its own entrypoint, so
       // it still auto-starts, and gets no marker (it is not a build we prove identity for).
-      await run(sandbox, `docker pull ${shellArg(image)}`);
-      await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}`);
-      await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
+      await runtime.run(sandbox, `docker pull ${shellArg(image)}`);
+      await writeGenDockerfile(sandbox, `FROM ${image}\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}`, runtime);
+      await runtime.run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
       // Daytona runs a sandbox's own init as pid 1 and the image entrypoint without its cmd, so a
       // datastore (postgres's entrypoint needs the "postgres" arg) does not start on its own. Capture
       // its full start command (entrypoint plus cmd) so the provisioner runs it.
-      const startCommand = await inspectMeshStartCommand(sandbox, imageRef);
-      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken);
-      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef);
+      const startCommand = await inspectMeshStartCommand(sandbox, imageRef, runtime);
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
+      const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
       services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef, startCommand });
     }
   }
@@ -330,37 +386,56 @@ async function buildMesh(
     dockerfileText: appDockerfileText,
     buildLog: appBuildLog.slice(-BUILD_LOG_CAP),
     buildMarker: ctx.buildMarker,
-    buildRecipeDigest: buildRecipeDigest(plan, ctx.buildMarker, app.imageDigest),
+    buildRecipeDigest: buildRecipeDigest(plan, ctx.buildMarker, app.imageDigest, {
+      resolvedCommitSha: ctx.resolvedCommitSha,
+      sourceArchiveDigest: ctx.sourceArchiveDigest,
+      serviceDigests: services.map((service) => ({
+        service: service.service,
+        imageDigest: service.imageDigest,
+        snapshotId: service.snapshotId,
+      })),
+    }),
+    resolvedCommitSha: ctx.resolvedCommitSha,
+    ...(ctx.sourceArchiveDigest ? { sourceArchiveDigest: ctx.sourceArchiveDigest } : {}),
     services,
   };
 }
 
 /** Push a built image and read back its pushed digest. The credential is introduced right before the
  *  push and removed right after, so no untrusted build step ran with a reusable token in the sandbox. */
-async function pushAndDigest(sandbox: Sandbox, imageRef: string, pushToken: string): Promise<string> {
+async function pushAndDigest(
+  sandbox: Sandbox,
+  imageRef: string,
+  pushToken: string,
+  runtime: MeshBuildRuntime,
+): Promise<string> {
   try {
-    await run(sandbox, `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`);
-    await run(sandbox, `docker push ${imageRef}`);
+    await runtime.run(sandbox, `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`);
+    await runtime.run(sandbox, `docker push ${imageRef}`);
   } finally {
-    await run(sandbox, "docker logout ghcr.io").catch(() => undefined);
+    await runtime.run(sandbox, "docker logout ghcr.io").catch(() => undefined);
   }
   return (
-    await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
+    await runtime.run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
   ).result.trim();
 }
 
 /** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. Daytona's
  *  delete is eventually consistent, so a create right after a delete can still 409 on the name (more
  *  likely with a mesh's several snapshots); delete again and retry a few times before giving up. */
-async function registerServiceSnapshot(serviceSlug: string, image: string): Promise<string> {
+async function registerServiceSnapshot(
+  serviceSlug: string,
+  image: string,
+  runtime: MeshBuildRuntime,
+): Promise<string> {
   const name = `onboarding-${serviceSlug}`;
   // Delete once. Onboarding is single-flight per repo (a leased row), so this name belongs to this
   // build; deleting again on each retry could remove a snapshot another build just created under the
   // same name, so on a 409 we only wait for the delete to propagate and retry the create.
-  await deleteSnapshotByName(name);
+  await runtime.deleteSnapshotByName(name);
   for (let attempt = 1; ; attempt++) {
     try {
-      const snapshot = await createSnapshot({ name, image, cpu: BUILD_CPU, memoryGb: BUILD_MEMORY_GB, diskGb: BUILD_DISK_GB });
+      const snapshot = await runtime.createSnapshot({ name, image, cpu: BUILD_CPU, memoryGb: BUILD_MEMORY_GB, diskGb: BUILD_DISK_GB });
       return snapshot.id;
     } catch (error) {
       if (error instanceof DaytonaError && error.status === 409 && attempt < 5) {
@@ -511,9 +586,13 @@ async function inspectStartCommand(sandbox: Sandbox, image: string): Promise<str
 /** The full command a mesh service starts with: its entrypoint and its command combined, since a
  *  service may set either or both. The provisioner runs this after the image's entrypoint was
  *  overridden to idle, so it must be the complete launch line, not just the CMD. */
-async function inspectMeshStartCommand(sandbox: Sandbox, image: string): Promise<string> {
+async function inspectMeshStartCommand(
+  sandbox: Sandbox,
+  image: string,
+  runtime: MeshBuildRuntime = liveMeshRuntime,
+): Promise<string> {
   const read = async (field: "Entrypoint" | "Cmd"): Promise<string[]> => {
-    const raw = (await run(sandbox, `docker inspect --format='{{json .Config.${field}}}' ${image}`)).result.trim();
+    const raw = (await runtime.run(sandbox, `docker inspect --format='{{json .Config.${field}}}' ${image}`)).result.trim();
     if (!raw || raw === "null") return [];
     try {
       const parsed = JSON.parse(raw) as unknown;
@@ -527,7 +606,7 @@ async function inspectMeshStartCommand(sandbox: Sandbox, image: string): Promise
   const command = parts.join(" ");
   // Run the command in the image's WORKDIR: a relative launch (vuln-bank's CMD is "./start.sh") is
   // resolved against it, and the provisioner runs the command from an unrelated directory otherwise.
-  const workdir = (await run(sandbox, `docker inspect --format='{{.Config.WorkingDir}}' ${image}`)).result.trim();
+  const workdir = (await runtime.run(sandbox, `docker inspect --format='{{.Config.WorkingDir}}' ${image}`)).result.trim();
   return workdir && workdir !== "/" ? `cd ${workdir} && ${command}` : command;
 }
 
@@ -563,17 +642,46 @@ function portFromBaseUrl(baseUrl: string | undefined): number {
   return n;
 }
 
-async function writeGenDockerfile(sandbox: Sandbox, dockerfile: string): Promise<void> {
+async function writeGenDockerfile(
+  sandbox: Sandbox,
+  dockerfile: string,
+  runtime: MeshBuildRuntime = liveMeshRuntime,
+): Promise<void> {
   // Write via a base64 pipe so an arbitrary Dockerfile (with quotes, newlines) reaches the file
   // intact regardless of shell quoting.
   const b64 = Buffer.from(dockerfile, "utf8").toString("base64");
-  await run(sandbox, `mkdir -p /work/gen && echo ${shellArg(b64)} | base64 -d > /work/gen/Dockerfile`);
+  await runtime.run(sandbox, `mkdir -p /work/gen && echo ${shellArg(b64)} | base64 -d > /work/gen/Dockerfile`);
 }
 
-function buildRecipeDigest(plan: BuildPlan, buildMarker: string, imageDigest: string): string {
-  return `sha256:${createHash("sha256")
-    .update(JSON.stringify({ plan, buildMarker, imageDigest }))
-    .digest("hex")}`;
+/**
+ * The build's canonical identity. Delegates to sourceIdentityDigest so there is one digest function
+ * in the codebase: the same source/repo/plan/service inputs produce the same digest whether they are
+ * hashed here or by anything else that records target identity, and unordered service lists can never
+ * produce false drift between two builds of the same source.
+ */
+function buildRecipeDigest(
+  plan: BuildPlan,
+  buildMarker: string,
+  imageDigest: string,
+  identity: {
+    repoFullName?: string;
+    resolvedCommitSha?: string;
+    sourceArchiveDigest?: string;
+    serviceDigests?: Array<{ service: string; imageDigest: string; snapshotId: string }>;
+  } = {},
+): string {
+  const resolvedCommitSha = identity.resolvedCommitSha ?? buildMarker;
+  return sourceIdentityDigest({
+    repoFullName: identity.repoFullName ?? "",
+    resolvedCommitSha,
+    ...(identity.sourceArchiveDigest ? { sourceArchiveDigest: identity.sourceArchiveDigest } : {}),
+    plan,
+    ...(identity.serviceDigests ? { services: identity.serviceDigests } : {}),
+    // The app digest and marker are part of identity too, so two builds from the same source that
+    // produced different artifacts cannot share a digest.
+    imageDigest,
+    buildMarker,
+  });
 }
 
 /** Run a build command and fail loudly on a non-zero exit, keeping the log tail where the failure is. */

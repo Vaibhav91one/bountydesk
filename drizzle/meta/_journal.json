@@ -169,6 +169,13 @@
       "when": 1788849114729,
       "tag": "0023_wakeful_sue_storm",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789016684238,
+      "tag": "0024_goofy_gideon",
+      "breakpoints": true
     }
   ]
 }

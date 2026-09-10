@@ -14,8 +14,12 @@ import type { BuildPlan } from "./build-plan";
 export type BuildInput = {
   /** owner/name, used to name the image and label the sandbox. */
   repoFullName: string;
-  /** The commit or ref the driver checks out, so the build is pinned to an exact source. */
+  /** Provenance URL/ref. The build driver must not treat a mutable value as an immutable pin. */
   sourceRef: string;
+  /** Full commit SHA resolved by the trusted controller before customer code runs. */
+  resolvedCommitSha?: string;
+  /** Digest of the trusted source archive, when one was staged. */
+  sourceArchiveDigest?: string;
   /** The classifier's plan, deciding the build strategy, ecosystem egress and (for compose) the
    *  datastores to bundle and seed. Must be a buildable strategy, never `not-flattenable`. */
   plan: BuildPlan;
@@ -67,9 +71,11 @@ export type BuildResult = {
   buildLog: string;
   /** The commit baked into /etc/bountydesk-build-marker, re-verified from inside the sandbox. */
   buildMarker: string;
-  /** A hash over the build plan, base-image digest and commit, so the pinned target identity records
-   *  how it was built and not only what came out (docs/decisions.md Q20). */
+  /** Canonical hash over source identity, plan, base identity, and every service artifact. */
   buildRecipeDigest: string;
+  /** The exact source identity used by the build. */
+  resolvedCommitSha?: string;
+  sourceArchiveDigest?: string;
   /** Present for a compose-mesh build: every service, the app and its dependencies. The top-level
    *  image fields above mirror the app service, so the single-image consumers keep working. */
   services?: BuiltService[];

@@ -109,6 +109,13 @@ export class TargetProfileExistsError extends Error {
 
 export async function configureTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
   const definition = targetDefinitionForInput(input);
+  if (
+    input.targetDefinition &&
+    input.targetDefinition.name !== JUICE_SHOP_PROFILE_NAME &&
+    (!input.buildRecipeDigest || !input.resolvedCommitSha)
+  ) {
+    throw new Error("dynamic target configuration requires build identity");
+  }
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
@@ -151,6 +158,9 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
         config,
         scopeRules: definition.scopeRules,
         dockerfileText: input.dockerfileText ?? null,
+        buildRecipeDigest: input.buildRecipeDigest ?? null,
+        resolvedCommitSha: input.resolvedCommitSha ?? null,
+        sourceArchiveDigest: input.sourceArchiveDigest ?? null,
       })
       .onConflictDoNothing({ target: targetProfile.name })
       .returning();
@@ -170,7 +180,10 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
       target.imageDigest !== input.imageDigest ||
       target.snapshotId !== input.snapshotId ||
       !isDeepStrictEqual(target.config, config) ||
-      !isDeepStrictEqual(target.scopeRules, definition.scopeRules)
+      !isDeepStrictEqual(target.scopeRules, definition.scopeRules) ||
+      target.buildRecipeDigest !== (input.buildRecipeDigest ?? null) ||
+      target.resolvedCommitSha !== (input.resolvedCommitSha ?? null) ||
+      target.sourceArchiveDigest !== (input.sourceArchiveDigest ?? null)
     ) {
       throw new TargetProfileExistsError(`${definition.name} exists with different pinned target settings`);
     }
@@ -211,6 +224,13 @@ export async function rotateJuiceShopTarget(
 
 export async function rotateTarget(input: ConfigureTargetInput): Promise<ConfiguredTarget> {
   const definition = targetDefinitionForInput(input);
+  if (
+    input.targetDefinition &&
+    input.targetDefinition.name !== JUICE_SHOP_PROFILE_NAME &&
+    (!input.buildRecipeDigest || !input.resolvedCommitSha)
+  ) {
+    throw new Error("dynamic target rotation requires build identity");
+  }
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
@@ -270,6 +290,9 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
         config,
         scopeRules: definition.scopeRules,
         ...(input.dockerfileText !== undefined ? { dockerfileText: input.dockerfileText } : {}),
+        ...(input.buildRecipeDigest !== undefined ? { buildRecipeDigest: input.buildRecipeDigest } : {}),
+        ...(input.resolvedCommitSha !== undefined ? { resolvedCommitSha: input.resolvedCommitSha } : {}),
+        ...(input.sourceArchiveDigest !== undefined ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
         updatedAt: new Date(),
       })
       .where(eq(targetProfile.id, target.id))

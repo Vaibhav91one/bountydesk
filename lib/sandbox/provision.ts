@@ -110,6 +110,16 @@ function imageRefForProfile(imageName: string, imageDigest: string): string {
   return `${imageName}@${imageDigest}`;
 }
 
+function assertSafeMeshStartCommand(service: string, value: string): void {
+  if (value.length === 0 || value.length > 1_000 || /[\r\n]/.test(value)) {
+    throw new ProvisionCouldNotDeployError(`mesh service ${service} has an invalid start command`);
+  }
+  const head = (value.trim().split(/\s+/, 1)[0] ?? "").split("/").pop()?.toLowerCase() ?? "";
+  if (/^(docker|docker-compose|podman|nerdctl)$/.test(head) || /(?:^|[;&|]\s*)(?:docker|docker-compose|podman|nerdctl)\s/.test(value)) {
+    throw new ProvisionCouldNotDeployError(`mesh service ${service} has a host-level start command`);
+  }
+}
+
 export function timeoutSignal(outer?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(HTTP_TIMEOUT_MS);
   return outer ? AbortSignal.any([outer, timeout]) : timeout;
@@ -578,13 +588,17 @@ export type MeshProvisionAuthorization = {
  * so the wiring is unit-tested without a live sandbox.
  */
 export function peerHostsCommand(peers: Array<{ name: string; sandboxId: string }>): string {
-  return peers
-    .map(
-      (p) =>
-        `ip=$(getent hosts ${shArg(p.sandboxId)} | awk '{print $1}'); ` +
-        `if [ -n "$ip" ]; then echo "$ip ${p.name}" >> /etc/hosts; fi`,
-    )
-    .join("; ");
+  if (peers.length === 0) return "";
+  return (
+    peers
+      .map(
+        (p) =>
+          `ip=$(getent hosts ${shArg(p.sandboxId)} | awk '{print $1}'); ` +
+          `if [ -z "$ip" ]; then echo 'peer lookup failed' >&2; exit 1; fi; ` +
+          `echo "$ip ${p.name}" >> /etc/hosts`,
+      )
+      .join("; ") + "; echo BOUNTYDESK_PEERS_OK"
+  );
 }
 
 function shArg(value: string): string {
@@ -608,9 +622,25 @@ export async function provisionMesh(
   opts?: { signal?: AbortSignal },
 ): Promise<{ sandboxId: string; appPort: number; sandboxIds: string[] }> {
   throwIfAborted(opts?.signal);
-  const app = auth.services.find((s) => s.role === "app");
-  if (!app || app.port === undefined) {
-    throw new ProvisionCouldNotDeployError("compose-mesh has no app service with a port");
+  const names = new Set<string>();
+  for (const service of auth.services) {
+    if (!service.service || names.has(service.service)) {
+      throw new ProvisionCouldNotDeployError("compose-mesh has duplicate or empty service names");
+    }
+    names.add(service.service);
+  }
+  const apps = auth.services.filter((service) => service.role === "app");
+  const app = apps[0];
+  if (apps.length !== 1 || !app || app.service !== auth.appService || app.port === undefined) {
+    throw new ProvisionCouldNotDeployError("compose-mesh must have exactly one named app service with a port");
+  }
+  for (const service of auth.services) {
+    for (const peer of service.peers ?? []) {
+      if (!names.has(peer)) {
+        throw new ProvisionCouldNotDeployError(`compose-mesh service ${service.service} references unknown peer ${peer}`);
+      }
+    }
+    if (service.startCommand) assertSafeMeshStartCommand(service.service, service.startCommand);
   }
 
   const created: Array<{ service: string; sandbox: Sandbox }> = [];
@@ -620,21 +650,35 @@ export async function provisionMesh(
     if (!found) throw new Error(`mesh service ${service} was not provisioned`);
     return found.sandbox;
   };
-  const teardownAll = async () => {
+  const replaceCreatedSandbox = (service: string, sandbox: Sandbox): void => {
+    const found = created.find((c) => c.service === service);
+    if (!found) throw new Error(`mesh service ${service} was not provisioned`);
+    found.sandbox = sandbox;
+  };
+  const teardownAll = async (): Promise<unknown[]> => {
+    const errors: unknown[] = [];
     for (const c of [...created].reverse()) {
-      await teardownSandbox(c.sandbox.id, opts?.signal?.aborted === true).catch(() => undefined);
+      try {
+        await teardownSandbox(c.sandbox.id, opts?.signal?.aborted === true);
+      } catch (error) {
+        errors.push(error);
+      }
     }
+    return errors;
   };
 
   try {
-    // 1. App (parent) first, then each dependency linked to it.
-    const appSandbox = await bootMeshService(app, undefined, auth, opts?.signal);
-    created.push({ service: app.service, sandbox: appSandbox });
-    idByService.set(app.service, appSandbox.id);
+    // 1. App (parent) first, then each dependency linked to it. Register each id immediately after
+    // createSandbox returns, before the follow-up inspection can fail and otherwise orphan it.
+    const appSandbox = await bootMeshService(app, undefined, auth, opts?.signal, (sandbox) => {
+      created.push({ service: app.service, sandbox });
+      idByService.set(app.service, sandbox.id);
+    }, (sandbox) => replaceCreatedSandbox(app.service, sandbox));
     for (const dep of auth.services.filter((s) => s.role !== "app")) {
-      const sandbox = await bootMeshService(dep, appSandbox.id, auth, opts?.signal);
-      created.push({ service: dep.service, sandbox });
-      idByService.set(dep.service, sandbox.id);
+      await bootMeshService(dep, appSandbox.id, auth, opts?.signal, (sandbox) => {
+        created.push({ service: dep.service, sandbox });
+        idByService.set(dep.service, sandbox.id);
+      }, (sandbox) => replaceCreatedSandbox(dep.service, sandbox));
     }
 
     // 2. Verify the graph: every node blocks egress, every built node is the build we expect.
@@ -652,11 +696,18 @@ export async function provisionMesh(
     // 3. Wire /etc/hosts so a compose service name resolves to its peer's link ip.
     for (const c of created) {
       const svc = auth.services.find((s) => s.service === c.service)!;
-      const peerNames = svc.peers ?? auth.services.filter((s) => s.service !== c.service).map((s) => s.service);
-      const peers = peerNames
-        .map((name) => ({ name, sandboxId: idByService.get(name) }))
-        .filter((p): p is { name: string; sandboxId: string } => Boolean(p.sandboxId));
-      if (peers.length) await execute(c.sandbox, peerHostsCommand(peers), 20);
+      const peerNames = svc.peers ?? [];
+      const peers = peerNames.map((name) => {
+        const sandboxId = idByService.get(name);
+        if (!sandboxId) throw new Error(`mesh peer ${name} for ${c.service} was not provisioned`);
+        return { name, sandboxId };
+      });
+      if (peers.length) {
+        const wiring = await execute(c.sandbox, peerHostsCommand(peers), 20);
+        if (wiring.exitCode !== 0 || !wiring.result.includes("BOUNTYDESK_PEERS_OK")) {
+          throw new Error(`mesh service ${c.service} could not wire its peers`);
+        }
+      }
     }
 
     // 4. Start built dependencies (a pulled datastore already auto-started from its own entrypoint).
@@ -679,8 +730,13 @@ export async function provisionMesh(
 
     return { sandboxId: appSandbox.id, appPort: app.port, sandboxIds: created.map((c) => c.sandbox.id) };
   } catch (error) {
-    await teardownAll();
+    const cleanupErrors = await teardownAll();
     rethrowIfAborted(error, opts?.signal);
+    if (cleanupErrors.length) {
+      throw new ProvisionTargetUnavailableError(
+        `${errorMessage(error)}; mesh cleanup failed: ${cleanupErrors.map(errorMessage).join("; ")}`,
+      );
+    }
     if (error instanceof ProvisionCouldNotDeployError || error instanceof ProvisionTargetUnavailableError) {
       throw error;
     }
@@ -694,7 +750,9 @@ async function bootMeshService(
   svc: MeshServiceAuth,
   parentSandboxId: string | undefined,
   auth: MeshProvisionAuthorization,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  onCreated: (sandbox: Sandbox) => void,
+  onInspected: (sandbox: Sandbox) => void,
 ): Promise<Sandbox> {
   const imageRef = imageRefForProfile(svc.imageName, svc.imageDigest);
   // A snapshot the build step just created can still be materialising ("pulling"); the mesh boots
@@ -710,6 +768,9 @@ async function bootMeshService(
     snapshotInfo = await getSnapshot(svc.snapshotId);
   }
   throwIfAborted(signal);
+  if (snapshotInfo.state !== "active") {
+    throw new Error(`snapshot ${svc.snapshotId} for ${svc.service} did not become active`);
+  }
   const sandbox = await createSandbox(
     {
       snapshot: svc.snapshotId,
@@ -727,8 +788,11 @@ async function bootMeshService(
     svc.snapshotImageRefOverride,
     parentSandboxId ? { parentSandboxId } : undefined,
   );
+  onCreated(sandbox);
   throwIfAborted(signal);
-  return await getSandbox(sandbox.id);
+  const inspected = await getSandbox(sandbox.id);
+  onInspected(inspected);
+  return inspected;
 }
 
 /** Launch a service's start command detached, the same way waitForAppReady launches the app: its own

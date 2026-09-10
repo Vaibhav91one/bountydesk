@@ -217,6 +217,23 @@ test("a compose-mesh dependency may omit its port, but the app may not", () => {
   );
 });
 
+test("a compose-mesh plan rejects peers that are not declared services", () => {
+  assert.throws(
+    () =>
+      parseBuildPlan({
+        strategy: "compose-mesh",
+        ecosystem: "node",
+        composePath: "docker-compose.yml",
+        appService: "app",
+        services: [
+          { service: "app", role: "app", port: 3000, build: { context: "." }, peers: ["missing-db"] },
+        ],
+        runtime,
+      }),
+    /references unknown service missing-db/,
+  );
+});
+
 test("an agent-authored plan carries the Dockerfile text and a build context", () => {
   const plan = parseBuildPlan({
     strategy: "agent-authored",

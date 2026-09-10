@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { onboardingSnapshotImageRef } from "./build-driver";
-import { dockerEnvLine, injectProxyTrust, repoSlug } from "./daytona-build-driver";
+import { createDaytonaBuildDriver, dockerEnvLine, injectProxyTrust, repoSlug } from "./daytona-build-driver";
 
 /**
  * The driver itself talks to live Daytona and a registry, so it is not unit-tested here. Its one
@@ -62,6 +62,28 @@ test("dockerEnvLine bakes a service's compose env, quoting values, and is empty 
 
 test("injectProxyTrust leaves a Dockerfile with no FROM unchanged", () => {
   assert.equal(injectProxyTrust("RUN echo hi\n"), "RUN echo hi\n");
+});
+
+test("the driver refuses to build without a server-resolved commit, before touching Daytona", async () => {
+  // No DAYTONA_API_KEY and no BUILD_BASE_SNAPSHOT are set here: if the driver reached the provider
+  // it would fail on an env read instead of the identity check, which is the thing under test.
+  const driver = createDaytonaBuildDriver();
+  const plan = {
+    strategy: "dockerfile" as const,
+    ecosystem: "node" as const,
+    dockerfilePath: "Dockerfile",
+    buildContext: ".",
+    seed: { kind: "none" as const },
+    runtime: { name: "app", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  };
+
+  for (const missing of [undefined, "HEAD", "main", "abc123", "a".repeat(39)]) {
+    await assert.rejects(
+      driver.build({ repoFullName: "acme/app", sourceRef: "https://github.com/acme/app.git", resolvedCommitSha: missing, plan }),
+      /server-resolved 40-character commit SHA/,
+      `${String(missing)} must never reach a build`,
+    );
+  }
 });
 
 test("the slug is a registry-safe, lowercase identifier", () => {

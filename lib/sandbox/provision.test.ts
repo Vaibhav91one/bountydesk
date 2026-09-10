@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { classifyEgressProbe, peerHostsCommand } from "./provision";
+import {
+  classifyEgressProbe,
+  peerHostsCommand,
+  provisionMesh,
+  ProvisionCouldNotDeployError,
+} from "./provision";
 
 const DENIAL = "Internet is restricted";
 
@@ -17,12 +22,50 @@ test("peerHostsCommand resolves each peer by sandbox id and appends its service 
   assert.match(cmd, /echo "\$ip db" >> \/etc\/hosts/);
   assert.match(cmd, /getent hosts 'sb-redis-2'/);
   assert.match(cmd, /echo "\$ip redis" >> \/etc\/hosts/);
-  // Only writes when the lookup found an ip, so a missing peer does not corrupt /etc/hosts.
-  assert.match(cmd, /if \[ -n "\$ip" \]/);
+  // Missing peer resolution exits before reporting the wiring marker.
+  assert.match(cmd, /if \[ -z "\$ip" \]; then echo 'peer lookup failed'/);
+  assert.match(cmd, /echo BOUNTYDESK_PEERS_OK/);
 });
 
 test("peerHostsCommand is empty for a service with no peers", () => {
   assert.equal(peerHostsCommand([]), "");
+});
+
+test("provisionMesh fails closed before creating sandboxes for invalid topology", async () => {
+  const base = {
+    targetProfileId: "profile-1",
+    appService: "web",
+    readinessPath: "/",
+    services: [
+      {
+        service: "web",
+        role: "app" as const,
+        imageName: "ghcr.io/example/web",
+        imageDigest: "sha256:" + "a".repeat(64),
+        snapshotId: "snap-web",
+        port: 8080,
+      },
+    ],
+  };
+
+  await assert.rejects(
+    provisionMesh({ ...base, appService: "wrong" }),
+    (error: unknown) => error instanceof ProvisionCouldNotDeployError && /named app service/.test(error.message),
+  );
+  await assert.rejects(
+    provisionMesh({
+      ...base,
+      services: [{ ...base.services[0], peers: ["missing"] }],
+    }),
+    (error: unknown) => error instanceof ProvisionCouldNotDeployError && /unknown peer/.test(error.message),
+  );
+  await assert.rejects(
+    provisionMesh({
+      ...base,
+      services: [{ ...base.services[0], startCommand: "cd /app && docker run example" }],
+    }),
+    (error: unknown) => error instanceof ProvisionCouldNotDeployError && /host-level/.test(error.message),
+  );
 });
 
 test("curl: 403 with the denial body is the only pass", () => {

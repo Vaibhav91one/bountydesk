@@ -75,7 +75,6 @@ test("an unknown target profile id is refused, not treated as a caller-supplied 
 
 test("meshServicesFromConfig is null for a single-image profile and maps a mesh profile", () => {
   assert.equal(authorize.meshServicesFromConfig({ baseUrl: "http://localhost:80" }), null);
-  assert.equal(authorize.meshServicesFromConfig({ services: [] }), null);
 
   const services = authorize.meshServicesFromConfig({
     services: [
@@ -109,9 +108,41 @@ test("meshServicesFromConfig refuses a mesh with no app service", () => {
   assert.throws(
     () =>
       authorize.meshServicesFromConfig({
-        services: [{ service: "db", role: "dependency", imageName: "postgres", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db" }],
+        services: [{ service: "db", role: "dependency", imageName: "postgres", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db", port: 5432 }],
       }),
-    /no app service/,
+    /exactly one app service/,
+  );
+});
+
+test("meshServicesFromConfig rejects a present malformed services field", () => {
+  assert.throws(() => authorize.meshServicesFromConfig({ services: {} }), /nonempty array/);
+  assert.throws(() => authorize.meshServicesFromConfig({ services: [] }), /nonempty array/);
+});
+
+test("meshServicesFromConfig rejects malformed persisted topology", () => {
+  const validApp = {
+    service: "web",
+    role: "app",
+    imageName: "ghcr.io/x/web",
+    imageDigest: "sha256:" + "a".repeat(64),
+    snapshotId: "snap-web",
+    port: 8000,
+  };
+  assert.throws(
+    () => authorize.meshServicesFromConfig({ services: [validApp, { ...validApp, service: "web-2", role: "app" }] }),
+    /exactly one app service/,
+  );
+  assert.throws(
+    () => authorize.meshServicesFromConfig({ services: [{ ...validApp, imageDigest: "mutable" }] }),
+    /malformed/,
+  );
+  assert.throws(
+    () => authorize.meshServicesFromConfig({ services: [{ ...validApp, peers: ["missing"] }] }),
+    /unknown peer/,
+  );
+  assert.throws(
+    () => authorize.meshServicesFromConfig({ services: [{ ...validApp, startCommand: "cd /app && docker run x" }] }),
+    /host-level/,
   );
 });
 

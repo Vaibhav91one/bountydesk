@@ -81,6 +81,62 @@ test("claim takes a build row and skips the human-gated and terminal states", as
   assert.equal(seen.size, 1);
 });
 
+test("source identity persists through enqueue, claim, and advance", async () => {
+  await drainAll();
+  const repoId = 800_300;
+  const commit = "b".repeat(40);
+  const archiveDigest = `sha256:${"c".repeat(64)}`;
+  await queue.enqueue({
+    repoId,
+    repoFullName: "acme/identity",
+    sourceRef: "https://github.com/acme/identity.git",
+    resolvedCommitSha: commit,
+    sourceArchiveDigest: archiveDigest,
+  });
+
+  const lease = await queue.claim("w-identity", 60);
+  assert.ok(lease);
+  assert.equal(lease!.resolvedCommitSha, commit);
+  assert.equal(lease!.sourceArchiveDigest, archiveDigest);
+  assert.equal(lease!.buildRecipeDigest, null);
+
+  const recipeDigest = `sha256:${"d".repeat(64)}`;
+  await queue.advance(lease!, "PENDING_MANIFEST", {
+    imageName: "ghcr.io/acme/identity",
+    imageDigest: `sha256:${"e".repeat(64)}`,
+    snapshotId: "snap-identity",
+    buildMarker: commit,
+    buildRecipeDigest: recipeDigest,
+  });
+
+  const [after] = await dbm.db
+    .select({
+      buildRecipeDigest: dbm.targetOnboarding.buildRecipeDigest,
+      resolvedCommitSha: dbm.targetOnboarding.resolvedCommitSha,
+    })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal(after.buildRecipeDigest, recipeDigest);
+  assert.equal(after.resolvedCommitSha, commit);
+});
+
+test("setResolvedSourceIdentity refuses a mutable ref and a lost lease", async () => {
+  await drainAll();
+  await seed("PENDING_PLAN");
+  const lease = await queue.claim("w-resolve", 60);
+  assert.ok(lease);
+
+  await assert.rejects(queue.setResolvedSourceIdentity(lease!, "HEAD"), /full commit SHA/);
+  await assert.rejects(queue.setResolvedSourceIdentity(lease!, "abc123"), /full commit SHA/);
+
+  await queue.setResolvedSourceIdentity(lease!, "F".repeat(40));
+  const [row] = await dbm.db
+    .select({ resolvedCommitSha: dbm.targetOnboarding.resolvedCommitSha })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.id, lease!.id));
+  assert.equal(row.resolvedCommitSha, "f".repeat(40), "a resolved SHA is normalized to lowercase");
+});
+
 test("advance moves state, writes step output, and rejects a lost lease", async () => {
   await drainAll();
   const row = await seed("PENDING_BUILD");

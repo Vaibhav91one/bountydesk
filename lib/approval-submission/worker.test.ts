@@ -453,6 +453,9 @@ test("turn handoff invalidates a poller lease that belongs to the old turn", asy
     pendingVerdictId: leasedSession.pendingVerdictId,
     pendingApprovedContentHash: leasedSession.pendingApprovedContentHash,
     sandboxId: leasedSession.sandboxId,
+    sandboxIds: Array.isArray(leasedSession.sandboxIds)
+      ? leasedSession.sandboxIds.filter((id): id is string => typeof id === "string")
+      : null,
     lastMirroredEventId: leasedSession.lastMirroredEventId,
     finalSummary: leasedSession.finalSummary,
     fence: leasedSession.fence,

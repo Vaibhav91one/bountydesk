@@ -6,6 +6,20 @@ approves it writes the `TargetProfile`. The first live run of the whole chain, a
 `crccheck/docker-hello-world`, proved the build, GHCR push, snapshot, manifest proposal and
 approval all work, and surfaced the items below. This is the future-work record for the pipeline.
 
+## Source identity is resolved before customer code runs
+
+The driver used to clone the repository's default HEAD and bake whatever that resolved to as the
+build marker, so a build could not prove which commit it built. That is closed: the trusted worker
+resolves a full commit SHA for the onboarding row before classification reads any source, and the
+build driver checks out that exact SHA and asserts `git rev-parse HEAD` matches before running the
+customer's build. The agent's own iteration sandbox checks out the same SHA.
+
+The resolved commit and an optional source-archive digest are stored on the onboarding row, and the
+resulting identity (repository, commit, archive digest, plan, every service image digest and
+snapshot) is folded into a `build_recipe_digest` that a dynamic `TargetProfile` write refuses to go
+without. Remaining work: a trusted controller that stages a source archive so the archive digest is
+populated rather than optional.
+
 ## Make the registry handoff pluggable, not GHCR-specific
 
 A registry cannot be removed from the design. Daytona turns one of three things into a snapshot:
@@ -51,10 +65,9 @@ image itself, booted offline from the snapshot with no Docker daemon inside, so 
 with `docker: not found`. The start command has to be the in-container command that launches the
 app (the busybox target's `httpd`, a node start, and so on), never a `docker run` of the image.
 
-Future work: tighten `agent/target-onboarding.agent.json` so the agent states the start command
-runs inside the already-running container, and reject a `startCommand` that begins with `docker`,
-`podman` or `nerdctl` at manifest parse time in `lib/targets/manifest.ts`, so a host-model command
-cannot reach a profile even if the agent proposes one.
+The parser, onboarding worker, reproduction authorization, and mesh provisioner now reject
+host-model commands. Keep the agent instruction aligned with that contract, and retain regression
+tests for `docker`, `docker-compose`, `podman`, and `nerdctl` commands, including shell wrappers.
 
 ## configureTarget requires an active connected repository
 
@@ -70,15 +83,10 @@ connected-repo check for GitHub-sourced targets.
 
 ## The build egress allowlist is per-ecosystem
 
-A target's own build pulls from its language package host, so `BUILD_EGRESS_ALLOWLIST` has to name
-that host or the build fails closed. It started with the git host, the image registries and their
-blob CDNs, and npm. Alpine's `dl-cdn.alpinelinux.org` and PyPI's `pypi.org` and
-`files.pythonhosted.org` were added for Python or Alpine targets. A target on another ecosystem
-needs its hosts added too: Debian and Ubuntu apt (`deb.debian.org`, `security.debian.org`),
-Composer (`repo.packagist.org`), Maven Central (`repo.maven.apache.org`), and so on. This stays an
-allowlist, so an unlisted ecosystem is refused rather than reaching anywhere, and the reproduction
-sandbox is untouched and stays offline. A cleaner long-term shape is a per-ecosystem allowlist the
-platform selects from the target's detected build system, rather than one growing global list.
+The build driver now selects a bounded per-ecosystem egress allowlist from
+`lib/build-onboarding/egress-profiles.ts` and adds only plan-declared extra hosts. The reproduction
+sandbox remains offline. New ecosystems or package hosts need an explicit profile and test update; do
+not restore a global allowlist that widens every build.
 
 ## Resolved
 

@@ -175,6 +175,10 @@ export const targetProfile = pgTable(
      * artifact and cite the image digest in the delivered comment.
      */
     dockerfileText: text("dockerfile_text"),
+    /** Canonical source/artifact identity for dynamically onboarded targets. */
+    buildRecipeDigest: text("build_recipe_digest"),
+    resolvedCommitSha: text("resolved_commit_sha"),
+    sourceArchiveDigest: text("source_archive_digest"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -473,6 +477,8 @@ export const agentSession = pgTable(
      * itself; it does not clear these columns, which is deliberate -- they stay as a record of
      * which sandbox this session used, not a liveness flag. */
     sandboxId: text("sandbox_id"),
+    /** All sandboxes owned by this run. App sandboxId remains the only probe capability. */
+    sandboxIds: jsonb("sandbox_ids"),
     appPort: integer("app_port"),
     /** Local bookkeeping only, never a report state: RUNNING | INVESTIGATING | AWAITING_APPROVAL_HARNESS | DONE_NO_ACTION | ERROR | CANCELLED. */
     turnStatus: text("turn_status").notNull().default("RUNNING"),
@@ -601,8 +607,14 @@ export const targetOnboarding = pgTable(
     id: id(),
     repoId: bigint("repo_id", { mode: "number" }).notNull(),
     repoFullName: text("repo_full_name").notNull(),
-    /** What the build driver clones and builds: a git URL or ref for the target's source. */
+    /** Provenance URL or ref supplied by intake. It is not an immutable build pin. */
     sourceRef: text("source_ref").notNull(),
+    /** Full commit SHA resolved by the trusted controller before customer code runs. */
+    resolvedCommitSha: text("resolved_commit_sha"),
+    /** Digest of a trusted source archive, when the controller stages one. */
+    sourceArchiveDigest: text("source_archive_digest"),
+    /** Canonical identity of the verified build and every mesh artifact. */
+    buildRecipeDigest: text("build_recipe_digest"),
     /** PENDING_PLAN | PENDING_BUILD | PENDING_MANIFEST | AWAITING_APPROVAL | APPROVED | CONFIGURED
      *  | FAILED | UNSUPPORTED. A row now starts at PENDING_PLAN so the classifier decides how the
      *  one image is built before the build runs. */

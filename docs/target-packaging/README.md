@@ -2,13 +2,13 @@
 
 A target is a passive test application BountyDesk builds once, snapshots, and boots offline to
 reproduce a report against. This is the contract a repo has to meet to be onboarded, and the recipes
-for the common shapes. The rules come from one fact: the reproduction sandbox boots exactly one
-image with no network (see `docs/decisions.md` Q16, Q18, Q23), so everything the app needs at run
-time has to be inside that one image, with its data already there.
+for the common shapes. The default reproduction path boots one image with no network (see
+`docs/decisions.md` Q16, Q18 and Q23). A reviewed compose-mesh plan is the narrow exception: it
+boots one pinned sandbox per service in a private linked group, while every node remains offline.
 
 ## The contract
 
-An onboardable target produces one image that:
+An onboardable single-image target produces one image that:
 
 - serves HTTP on a single port bound to `0.0.0.0` (the sandbox probes `127.0.0.1`, so a
   loopback-only bind is not reachable),
@@ -18,12 +18,21 @@ An onboardable target produces one image that:
 - answers a readiness path with a 2xx once it is up,
 - starts from one command or entrypoint that launches the datastore (if any) and then the app.
 
+A compose-mesh target instead has one app service and one or more dependencies. Each service gets a
+pinned image and Daytona snapshot. Reproduction creates the app as the parent and dependencies as
+linked children with `networkBlockAll: true`; service names are wired through the private link, not
+through Docker or runtime image pulls. The worker verifies egress on every node and build markers on services built from repository source;
+stock image services intentionally have no repository marker. It starts dependencies before the app and
+tears down the whole group on failure. Only the app sandbox
+is stored in the agent session and exposed to `probe_target`. Dependencies are internal capability,
+not additional agent targets.
+
 If a repo cannot be reduced to that, it is not rejected outright: it falls to the reachability
 pre-check for an evidenced analysis-only verdict, or, with an explicit opt-in, to reaching a running
 instance the customer already operates. Prefer the offline image whenever the app can be packaged
 into one, because only that path earns a reproduced verdict.
 
-## The three build strategies
+## The four build strategies
 
 The onboarding classifier picks one and records it in the build plan
 (`lib/build-onboarding/build-plan.ts`).
@@ -48,7 +57,32 @@ compiler reads the compose file and, for the supported shape (one app service pl
 known set: MariaDB/MySQL, Postgres, Redis), synthesizes a self-contained Dockerfile that installs
 the datastore into the app image, points the app at `127.0.0.1`, seeds at build, and starts both.
 Anything outside that shape (two app services, an unknown service image, host networking) is
-`not-flattenable`.
+`not-flattenable` for compose-synth and is considered for the mesh path.
+
+### compose-mesh
+
+A multi-service compose file can use `compose-mesh` when it has one identifiable HTTP front door and
+services that can be built or pulled ahead of time. The classifier records the service graph, the
+build worker produces one digest-pinned snapshot per service, and the reproduction worker links the
+sandboxes privately. The mesh never runs Compose or a Docker daemon at reproduction time.
+
+The admitted subset is deliberately narrow. Accepted: `build.context` with a Dockerfile path,
+published or exported ports, map or list `environment`, `depends_on` by name, and env values that
+name another service, including defaulted interpolation such as `${DB_HOST:-db}`.
+
+Refused rather than quietly dropped, because the offline linked-sandbox model has no equivalent:
+
+- a second service that publishes an HTTP port, when no explicit app is named. Two published front
+  doors are ambiguous, and silently naming one the app would stop probing the other. The mesh accepts
+  a named app through the reviewer's hint instead.
+- `privileged: true`, `network_mode: host`, `cap_add`, `devices`, `pid: host`.
+- absolute or traversal build paths, and a Dockerfile path that escapes its context.
+- an image reference whose interpolation cannot be resolved to a concrete value, and a bare `$VAR`.
+- a peer that names a service the file does not declare.
+- a host-level start command such as `docker run`, `docker compose`, `podman` or `nerdctl`.
+
+A service listening only on the internal network (`expose`) is admitted as a dependency; when exactly
+one candidate is published and the rest are only exposed, the published one is the app.
 
 ## Build egress is per ecosystem
 
