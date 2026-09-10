@@ -100,7 +100,19 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
   // either fails, the sandbox is unusable, so surface the error and tear it down rather than
   // reporting a ready sandbox the agent then works against blindly.
   const cloneUrl = `https://github.com/${row.repoFullName}.git`;
-  const clone = await runInit(sandbox, `git clone --depth 1 ${shArg(cloneUrl)} /work/source`);
+  if (!row.resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(row.resolvedCommitSha)) {
+    return failOpen(row.id, sandbox.id, "the server has not resolved an immutable source commit");
+  }
+  const clone = await runInit(sandbox, `git clone --no-checkout ${shArg(cloneUrl)} /work/source`);
+  if (clone.exitCode === 0) {
+    const checkout = await runInit(
+      sandbox,
+      `cd /work/source && git checkout --detach ${shArg(row.resolvedCommitSha)}`,
+    );
+    if (checkout.exitCode !== 0) {
+      return failOpen(row.id, sandbox.id, `could not checkout the resolved source commit: ${checkout.output.slice(-500)}`);
+    }
+  }
   if (clone.exitCode !== 0) {
     return failOpen(row.id, sandbox.id, `could not clone the repository: ${clone.output.slice(-500)}`);
   }

@@ -4,6 +4,7 @@ import {
   targetProvisioningFromConfig,
   type TargetProvisioningConfig,
 } from "./registry";
+import { isValidImageDigest, isValidSnapshotId } from "./validation";
 
 /**
  * The mesh services pinned in a target profile's config, mapped to what the provisioner needs to
@@ -12,22 +13,45 @@ import {
  * boot the whole mesh instead of one image.
  */
 export function meshServicesFromConfig(config: unknown): MeshServiceAuth[] | null {
-  const services = (config as { services?: unknown } | null)?.services;
-  if (!Array.isArray(services) || services.length === 0) return null;
+  if (typeof config !== "object" || config === null) return null;
+  const configObject = config as { services?: unknown };
+  if (configObject.services === undefined) return null;
+  if (!Array.isArray(configObject.services) || configObject.services.length === 0) {
+    throw new Error("pinned mesh services must be a nonempty array");
+  }
+  const services = configObject.services;
   const out: MeshServiceAuth[] = [];
-  let hasApp = false;
+  const names = new Set<string>();
   for (const raw of services) {
-    const s = raw as Record<string, unknown>;
+    const s = raw as Record<string, unknown> | null;
     if (
-      typeof s?.service !== "string" ||
+      !s ||
+      typeof s.service !== "string" ||
+      !/^[A-Za-z0-9._-]+$/.test(s.service) ||
+      names.has(s.service) ||
       (s.role !== "app" && s.role !== "dependency") ||
       typeof s.imageName !== "string" ||
+      !/^[A-Za-z0-9._/-]+$/.test(s.imageName) ||
       typeof s.imageDigest !== "string" ||
-      typeof s.snapshotId !== "string"
+      !isValidImageDigest(s.imageDigest) ||
+      typeof s.snapshotId !== "string" ||
+      !isValidSnapshotId(s.snapshotId)
     ) {
-      throw new Error("a pinned mesh service is missing required fields");
+      throw new Error("a pinned mesh service is malformed");
     }
-    if (s.role === "app") hasApp = true;
+    names.add(s.service);
+
+    if (s.port !== undefined && (typeof s.port !== "number" || !Number.isInteger(s.port) || s.port < 1 || s.port > 65_535)) {
+      throw new Error(`pinned mesh service ${s.service} has an invalid port`);
+    }
+    if (s.role === "app" && s.port === undefined) {
+      throw new Error(`pinned mesh app ${s.service} has no port`);
+    }
+    if (s.startCommand !== undefined) assertSafeMeshStartCommand(s.service, s.startCommand);
+    if (s.peers !== undefined && (!Array.isArray(s.peers) || s.peers.some((p) => typeof p !== "string"))) {
+      throw new Error(`pinned mesh service ${s.service} has invalid peers`);
+    }
+
     out.push({
       service: s.service,
       role: s.role,
@@ -35,14 +59,31 @@ export function meshServicesFromConfig(config: unknown): MeshServiceAuth[] | nul
       imageDigest: s.imageDigest,
       snapshotId: s.snapshotId,
       ...(typeof s.snapshotImageRef === "string" ? { snapshotImageRefOverride: s.snapshotImageRef } : {}),
-      ...(typeof s.port === "number" ? { port: s.port } : {}),
+      ...(s.port !== undefined ? { port: s.port as number } : {}),
       ...(typeof s.buildMarker === "string" ? { buildMarker: s.buildMarker } : {}),
       ...(typeof s.startCommand === "string" ? { startCommand: s.startCommand } : {}),
-      ...(Array.isArray(s.peers) ? { peers: s.peers.filter((p): p is string => typeof p === "string") } : {}),
+      ...(Array.isArray(s.peers) ? { peers: s.peers as string[] } : {}),
     });
   }
-  if (!hasApp) throw new Error("pinned mesh services have no app service");
+  const apps = out.filter((service) => service.role === "app");
+  if (apps.length !== 1) throw new Error("pinned mesh services must have exactly one app service");
+  for (const service of out) {
+    for (const peer of service.peers ?? []) {
+      if (!names.has(peer)) throw new Error(`pinned mesh service ${service.service} references unknown peer ${peer}`);
+    }
+  }
   return out;
+}
+
+function assertSafeMeshStartCommand(service: string, value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1_000 || /[\r\n]/.test(value)) {
+    throw new Error(`pinned mesh service ${service} has an invalid start command`);
+  }
+  const head = (value.trim().split(/\s+/, 1)[0] ?? "").split("/").pop()?.toLowerCase() ?? "";
+  if (/^(docker|docker-compose|podman|nerdctl)$/.test(head) || /(?:^|[;&|]\s*)(?:docker|docker-compose|podman|nerdctl)\s/.test(value)) {
+    throw new Error(`pinned mesh service ${service} has a host-level start command`);
+  }
+  return value;
 }
 
 export type ReproductionAuthorization =

@@ -14,6 +14,7 @@ import type { TrueForgeClient } from "@/lib/trueforge/client";
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
 import { classify, rawSourceReader } from "./classify";
 import { knownTargetHints } from "./known-target-hints";
+import { resolveRepositoryCommit } from "./source-identity";
 import { runOnboardingAgent, type RunOnboardingAgentInput } from "./onboarding-agent";
 import {
   runSandboxabilityReview,
@@ -28,6 +29,7 @@ import {
   releaseUnstarted,
   renew,
   setOnboardingProgress,
+  setResolvedSourceIdentity,
   LeaseLostError,
   type OnboardingLease,
 } from "./queue";
@@ -52,7 +54,9 @@ export type OnboardDeps = {
   agentClient: TrueForgeClient;
   /** Classify the repo into a build plan. Injectable so tests exercise the path without fetching the
    *  real repo source; defaults to the deterministic classifier over the public source. */
-  classify?: (repoFullName: string) => Promise<BuildPlan>;
+  classify?: (repoFullName: string, resolvedCommitSha?: string) => Promise<BuildPlan>;
+  /** Resolve the server-owned repository ref to an immutable commit before source reads/builds. */
+  resolveCommit?: (repoFullName: string, sourceRef: string) => Promise<string>;
   /** Run the onboarding agent for a repo the deterministic classifier could not flatten. Injectable so
    *  tests exercise the ladder without a live TrueForge turn; defaults to the real agent turn, which
    *  writes its result onto the row's build_plan. */
@@ -63,13 +67,15 @@ export type OnboardDeps = {
   runSandboxabilityReview?: (input: RunSandboxabilityReviewInput) => Promise<ReviewResult>;
   /** The offline verify. Injectable so tests exercise the whole path without live Daytona. */
   provision?: typeof provisionTarget;
+  provisionMesh?: typeof provisionMesh;
   teardown?: typeof teardownSandbox;
   leaseSeconds?: number;
   signal?: AbortSignal;
 };
 
-function defaultClassify(repoFullName: string): Promise<BuildPlan> {
-  return classify(rawSourceReader(repoFullName), repoFullName, knownTargetHints(repoFullName));
+function defaultClassify(repoFullName: string, resolvedCommitSha?: string): Promise<BuildPlan> {
+  if (!resolvedCommitSha) throw new Error("onboarding classification requires a server-resolved commit SHA");
+  return classify(rawSourceReader(repoFullName, resolvedCommitSha), repoFullName, knownTargetHints(repoFullName));
 }
 
 /** Re-read the plan the onboarding agent wrote onto the row through its commit/mark tools. A row with
@@ -93,6 +99,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
   if (!lease) return null;
 
   const provision = deps.provision ?? provisionTarget;
+  const provisionMeshFn = deps.provisionMesh ?? provisionMesh;
   const teardown = deps.teardown ?? teardownSandbox;
 
   try {
@@ -105,8 +112,18 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         // not-flattenable lands in UNSUPPORTED with the reason, an honest resting state a reviewer
         // reads, not a retried failure.
         await setOnboardingProgress(lease.id, "reading the repository").catch(() => undefined);
+        if (!lease.resolvedCommitSha) {
+          const resolveCommit = deps.resolveCommit ?? resolveRepositoryCommit;
+          const resolvedCommitSha = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
+            resolveCommit(lease.repoFullName, lease.sourceRef),
+          );
+          await setResolvedSourceIdentity(lease, resolvedCommitSha);
+          lease.resolvedCommitSha = resolvedCommitSha;
+        }
         const doClassify = deps.classify ?? defaultClassify;
-        let plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () => doClassify(lease.repoFullName));
+        let plan = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
+          doClassify(lease.repoFullName, lease.resolvedCommitSha ?? undefined),
+        );
 
         if (plan.strategy === "not-flattenable") {
           const ecosystem = plan.ecosystem;
@@ -168,7 +185,13 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         const plan = buildablePlan(lease.buildPlan);
         const result = await withHeartbeat(lease, leaseSeconds, deps.signal, (signal) =>
           deps.buildDriver.build(
-            { repoFullName: lease.repoFullName, sourceRef: lease.sourceRef, plan },
+            {
+              repoFullName: lease.repoFullName,
+              sourceRef: lease.sourceRef,
+              ...(lease.resolvedCommitSha ? { resolvedCommitSha: lease.resolvedCommitSha } : {}),
+              ...(lease.sourceArchiveDigest ? { sourceArchiveDigest: lease.sourceArchiveDigest } : {}),
+              plan,
+            },
             { signal },
           ),
         );
@@ -177,6 +200,9 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
           imageDigest: result.imageDigest,
           snapshotId: result.snapshotId,
           buildMarker: result.buildMarker,
+          buildRecipeDigest: result.buildRecipeDigest,
+          ...(result.resolvedCommitSha ? { resolvedCommitSha: result.resolvedCommitSha } : {}),
+          ...(result.sourceArchiveDigest ? { sourceArchiveDigest: result.sourceArchiveDigest } : {}),
           dockerfileText: result.dockerfileText,
           buildLog: result.buildLog,
           // A compose-mesh build carries every service; a single-image build has none, and the
@@ -204,7 +230,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
       }
 
       case "APPROVED": {
-        await verifyAndWrite(lease, provision, teardown, leaseSeconds, deps.signal);
+        await verifyAndWrite(lease, provision, provisionMeshFn, teardown, leaseSeconds, deps.signal);
         await advance(lease, "CONFIGURED");
         break;
       }
@@ -241,12 +267,20 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
 async function verifyAndWrite(
   lease: OnboardingLease,
   provision: typeof provisionTarget,
+  provisionMeshFn: typeof provisionMesh,
   teardown: typeof teardownSandbox,
   leaseSeconds: number,
   outerSignal?: AbortSignal,
 ): Promise<void> {
-  if (!lease.imageName || !lease.imageDigest || !lease.snapshotId || !lease.buildMarker) {
-    throw new Error("approved onboarding row is missing its build outputs");
+  if (
+    !lease.imageName ||
+    !lease.imageDigest ||
+    !lease.snapshotId ||
+    !lease.buildMarker ||
+    !lease.buildRecipeDigest ||
+    !lease.resolvedCommitSha
+  ) {
+    throw new Error("approved onboarding row is missing its build outputs or identity");
   }
   const manifest = asTargetDefinition(lease.proposedManifest);
   const definition: TargetDefinition = { ...manifest, imageName: lease.imageName };
@@ -263,7 +297,7 @@ async function verifyAndWrite(
   let sandboxIds: string[];
   if (builtServices) {
     const result = await withHeartbeat(lease, leaseSeconds, outerSignal, (signal) =>
-      provisionMesh(
+      provisionMeshFn(
         {
           targetProfileId: lease.id,
           appService: appServiceName(builtServices),
@@ -295,7 +329,25 @@ async function verifyAndWrite(
     );
     sandboxIds = [sandboxId];
   }
-  for (const id of sandboxIds) await teardown(id, false);
+  // Attempt every verification sandbox before surfacing a failure: a sequential loop that threw on
+  // the first delete would leave the rest running with nothing left holding their ids. The write
+  // below still waits for a clean teardown, so an orphaned sandbox fails the step rather than being
+  // recorded as configured.
+  const teardownErrors: unknown[] = [];
+  for (const id of sandboxIds) {
+    try {
+      await teardown(id, false);
+    } catch (error) {
+      teardownErrors.push(error);
+    }
+  }
+  if (teardownErrors.length > 0) {
+    throw new Error(
+      `could not tear down ${teardownErrors.length} of ${sandboxIds.length} verification sandboxes: ${teardownErrors
+        .map((error) => (error instanceof Error ? error.message : String(error)))
+        .join("; ")}`,
+    );
+  }
 
   // The mesh services are pinned into the profile config so the reproduction run boots the same mesh.
   const pinnedDefinition: TargetDefinition = builtServices
@@ -307,6 +359,9 @@ async function verifyAndWrite(
     imageDigest: lease.imageDigest,
     snapshotId: lease.snapshotId,
     buildMarker: lease.buildMarker,
+    buildRecipeDigest: lease.buildRecipeDigest ?? undefined,
+    resolvedCommitSha: lease.resolvedCommitSha ?? undefined,
+    sourceArchiveDigest: lease.sourceArchiveDigest ?? undefined,
     snapshotImageRefOverride: snapshotImageRef,
     dockerfileText: lease.dockerfileText ?? undefined,
   };
@@ -351,22 +406,45 @@ function asTargetDefinition(value: unknown): TargetDefinition {
   return value as TargetDefinition;
 }
 
-/** Read the built mesh services stored at the build step. Null (a single-image build) is the common
- *  case. Server-authored (written by the build driver), so a light shape check at the seam is enough. */
-function parseBuiltServices(value: unknown): BuiltService[] | null {
-  if (!Array.isArray(value) || value.length === 0) return null;
+/** Read the built mesh services stored at the build step. Null means a single-image build; a
+ * present but malformed value fails closed instead of silently downgrading to that path. */
+export function parseBuiltServices(value: unknown): BuiltService[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("stored built services must be a nonempty array");
+  }
+  const names = new Set<string>();
+  const apps: BuiltService[] = [];
   for (const raw of value) {
     const svc = raw as Partial<BuiltService> | null;
     if (
       typeof svc !== "object" ||
       svc === null ||
       typeof svc.service !== "string" ||
+      !/^[A-Za-z0-9._-]+$/.test(svc.service) ||
+      names.has(svc.service) ||
       (svc.role !== "app" && svc.role !== "dependency") ||
       typeof svc.imageName !== "string" ||
       typeof svc.imageDigest !== "string" ||
+      !/^sha256:[0-9a-f]{64}$/.test(svc.imageDigest) ||
       typeof svc.snapshotId !== "string"
     ) {
-      throw new Error("a stored built service is missing required fields");
+      throw new Error("a stored built service is malformed");
+    }
+    names.add(svc.service);
+    if (svc.role === "app") apps.push(svc as BuiltService);
+    if (svc.port !== undefined && (!Number.isInteger(svc.port) || svc.port < 1 || svc.port > 65_535)) {
+      throw new Error(`stored built service ${svc.service} has an invalid port`);
+    }
+    if (svc.peers !== undefined && (!Array.isArray(svc.peers) || svc.peers.some((peer) => typeof peer !== "string"))) {
+      throw new Error(`stored built service ${svc.service} has invalid peers`);
+    }
+    assertSafeMeshStartCommand(svc.service, svc.startCommand);
+  }
+  if (apps.length !== 1) throw new Error("stored built services must have exactly one app service");
+  for (const raw of value as BuiltService[]) {
+    for (const peer of raw.peers ?? []) {
+      if (!names.has(peer)) throw new Error(`stored built service ${raw.service} references unknown peer ${peer}`);
     }
   }
   return value as BuiltService[];

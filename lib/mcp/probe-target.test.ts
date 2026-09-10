@@ -39,7 +39,14 @@ let seq = 0;
  * inactive, for the tests that prove probeTarget refuses to serve a session past that point.
  */
 async function seedSession(
-  overrides: { sandboxId?: string | null; appPort?: number | null; noTargetProfile?: boolean; revoked?: boolean } = {},
+  overrides: {
+    sandboxId?: string | null;
+    appPort?: number | null;
+    noTargetProfile?: boolean;
+    revoked?: boolean;
+    /** For a mesh session: every sandbox the run owns. Only the app id is probeable. */
+    sandboxIds?: string[];
+  } = {},
 ): Promise<string> {
   seq += 1;
   const n = seq;
@@ -100,6 +107,7 @@ async function seedSession(
     sessionId: `session-${n}`,
     sandboxId: overrides.sandboxId === undefined ? null : overrides.sandboxId,
     appPort: overrides.appPort === undefined ? null : overrides.appPort,
+    ...(overrides.sandboxIds ? { sandboxIds: overrides.sandboxIds } : {}),
   });
 
   return capabilityToken;
@@ -227,6 +235,39 @@ test("resolves the session's sandbox, injects the preview token fresh, strips a 
   );
   assert.notEqual(headers.get("host"), "attacker.example", "a caller-supplied Host must never reach the outbound request");
   assert.equal(headers.get("x-real-header"), "kept", "only Host is stripped, not every caller header");
+});
+
+test("a mesh session probes only the app sandbox, never a linked dependency", async () => {
+  const capability = await seedSession({
+    sandboxId: "sandbox-app",
+    appPort: 5000,
+    sandboxIds: ["sandbox-app", "sandbox-db"],
+  });
+
+  const calls: string[] = [];
+  const stub = (async (input: string | URL | Request) => {
+    const url = typeof input === "string" ? input : input.toString();
+    calls.push(url);
+    if (url.includes("/ports/") && url.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ url: "https://preview.example", token: "preview-token-abc" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as typeof fetch;
+
+  const result = await withFetch(stub, () =>
+    probeTargetModule.probeTarget({ capability, method: "GET", path: "/" }),
+  );
+  assert.equal(result.ok, true);
+
+  assert.ok(calls.some((url) => url.includes("sandbox-app")), "the app sandbox is the one reached");
+  assert.equal(
+    calls.some((url) => url.includes("sandbox-db")),
+    false,
+    "a dependency sandbox is internal and must never be addressable through the agent capability",
+  );
 });
 
 test("refuses cleanly when the preview-url lookup fails", async () => {

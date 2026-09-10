@@ -46,6 +46,9 @@ export type OnboardingLease = {
   repoId: number;
   repoFullName: string;
   sourceRef: string;
+  resolvedCommitSha: string | null;
+  sourceArchiveDigest: string | null;
+  buildRecipeDigest: string | null;
   state: OnboardingState;
   buildPlan: unknown;
   imageName: string | null;
@@ -67,6 +70,9 @@ export type OnboardingAdvanceFields = Partial<{
   imageDigest: string;
   snapshotId: string;
   buildMarker: string;
+  buildRecipeDigest: string;
+  resolvedCommitSha: string;
+  sourceArchiveDigest: string;
   dockerfileText: string;
   buildLog: string;
   builtServices: unknown;
@@ -82,7 +88,13 @@ export class LeaseLostError extends Error {
   }
 }
 
-export type EnqueueInput = { repoId: number; repoFullName: string; sourceRef: string };
+export type EnqueueInput = {
+  repoId: number;
+  repoFullName: string;
+  sourceRef: string;
+  resolvedCommitSha?: string;
+  sourceArchiveDigest?: string;
+};
 
 /**
  * Insert an onboarding row for a repo, idempotently. The unique index on repo_id makes a second
@@ -99,6 +111,27 @@ export async function setOnboardingProgress(onboardingId: string, note: string, 
     .where(eq(targetOnboarding.id, onboardingId));
 }
 
+/** Persist the trusted source identity before classification or customer code runs. */
+export async function setResolvedSourceIdentity(
+  lease: OnboardingLease,
+  resolvedCommitSha: string,
+  sourceArchiveDigest?: string,
+): Promise<void> {
+  if (!/^[0-9a-f]{40}$/i.test(resolvedCommitSha)) {
+    throw new Error("resolved source identity must be a full commit SHA");
+  }
+  const updated = await db
+    .update(targetOnboarding)
+    .set({
+      resolvedCommitSha: resolvedCommitSha.toLowerCase(),
+      ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
+      updatedAt: new Date(),
+    })
+    .where(heldBy(lease))
+    .returning({ id: targetOnboarding.id });
+  if (updated.length === 0) throw new LeaseLostError(lease.id);
+}
+
 export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<void> {
   await tx
     .insert(targetOnboarding)
@@ -106,6 +139,9 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
       repoId: input.repoId,
       repoFullName: input.repoFullName,
       sourceRef: input.sourceRef,
+      ...(input.resolvedCommitSha ? { resolvedCommitSha: input.resolvedCommitSha } : {}),
+      sourceArchiveDigest: input.sourceArchiveDigest ?? null,
+      buildRecipeDigest: null,
     })
     .onConflictDoUpdate({
       target: targetOnboarding.repoId,
@@ -117,6 +153,9 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         state: "PENDING_PLAN",
         repoFullName: input.repoFullName,
         sourceRef: input.sourceRef,
+        resolvedCommitSha: input.resolvedCommitSha ?? null,
+        sourceArchiveDigest: input.sourceArchiveDigest ?? null,
+        buildRecipeDigest: null,
         buildPlan: null,
         imageName: null,
         imageDigest: null,
@@ -151,6 +190,9 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     repo_id: string | number;
     repo_full_name: string;
     source_ref: string;
+    resolved_commit_sha: string | null;
+    source_archive_digest: string | null;
+    build_recipe_digest: string | null;
     state: OnboardingState;
     build_plan: unknown;
     image_name: string | null;
@@ -184,6 +226,9 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
               ${targetOnboarding.repoId}           as repo_id,
               ${targetOnboarding.repoFullName}     as repo_full_name,
               ${targetOnboarding.sourceRef}        as source_ref,
+              ${targetOnboarding.resolvedCommitSha} as resolved_commit_sha,
+              ${targetOnboarding.sourceArchiveDigest} as source_archive_digest,
+              ${targetOnboarding.buildRecipeDigest} as build_recipe_digest,
               ${targetOnboarding.state}            as state,
               ${targetOnboarding.buildPlan}        as build_plan,
               ${targetOnboarding.imageName}        as image_name,
@@ -205,6 +250,9 @@ export async function claim(owner: string, leaseSeconds = 60): Promise<Onboardin
     repoId: Number(row.repo_id),
     repoFullName: row.repo_full_name,
     sourceRef: row.source_ref,
+    resolvedCommitSha: row.resolved_commit_sha,
+    sourceArchiveDigest: row.source_archive_digest,
+    buildRecipeDigest: row.build_recipe_digest,
     state: row.state,
     buildPlan: row.build_plan,
     imageName: row.image_name,

@@ -2,11 +2,12 @@ import { type ClassifyOptions } from "./classify";
 
 /**
  * A few app-specific hints the deterministic classifier cannot infer from the source: how to seed an
- * app whose setup runs through its own HTTP endpoint, and the environment that makes its reported
- * vulnerability reachable in an isolated sandbox. These are known passive test targets, keyed by repo,
- * so DVWA and its kin onboard end to end without a model in the loop. A repo not listed here classifies
- * with no hints: an env-based app needs none, and one that needs seeding onboards its image but reaches
- * a reviewer (or this file) for the seed step.
+ * app whose setup runs through its own HTTP endpoint, the environment that makes its reported
+ * vulnerability reachable in an isolated sandbox, and which service is the app when a compose file
+ * publishes more than one HTTP port. These are known passive test targets, keyed by repo, so DVWA and
+ * its kin onboard end to end without a model in the loop. A repo not listed here classifies with no
+ * hints: an env-based app needs none, and one that needs seeding onboards its image but reaches a
+ * reviewer (or this file) for the seed step.
  */
 
 /**
@@ -39,6 +40,11 @@ const DVWA_SETUP_SQL = [
 const DVWA_SETUP_SEED_COMMAND = `mysql dvwa -e "${DVWA_SETUP_SQL}" && mysql dvwa -e "SELECT COUNT(*) FROM users"`;
 
 const HINTS: Record<string, ClassifyOptions> = {
+  // vuln-bank publishes a second HTTP port on its web service (`5000:5000` and `80:5000`), so the
+  // front-door candidates are ambiguous by port alone; the app is still the `web` service.
+  "vaibhav91one/vuln-bank": {
+    meshAppServiceHint: "web",
+  },
   "vaibhav91one/dvwa": {
     // DVWA creates its schema and default users from /setup.php, not on boot, so seed it at build.
     composeSeedHint: { kind: "command", command: DVWA_SETUP_SEED_COMMAND },

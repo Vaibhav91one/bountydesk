@@ -16,6 +16,9 @@ export type TargetPin = {
   snapshotId: string | null;
   buildMarker?: string;
   snapshotImageRefOverride?: string;
+  buildRecipeDigest?: string;
+  resolvedCommitSha?: string;
+  sourceArchiveDigest?: string;
 };
 
 export type TargetDefinition = {

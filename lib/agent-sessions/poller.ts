@@ -220,7 +220,9 @@ async function endWithoutAgentVerdict(
     }
     await release(lease, { ...updates, ...pending }, tx);
   });
-  if (lease.sandboxId) await teardownSandbox(lease.sandboxId, true);
+  for (const sandboxId of lease.sandboxIds ?? (lease.sandboxId ? [lease.sandboxId] : [])) {
+    await teardownSandbox(sandboxId, true);
+  }
   return lease.id;
 }
 

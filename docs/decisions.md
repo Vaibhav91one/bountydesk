@@ -595,10 +595,13 @@ how to admit arbitrary repos without weakening the reproduction guarantees Q16, 
 
 The hard constraint is fixed and stays fixed: the reproduction sandbox boots exactly one image with
 no network. `createSandbox` hardcodes `networkBlockAll: true`, sends one snapshot and no
-env/secrets, and Daytona as wrapped runs one container per snapshot. So a datastore cannot be a
-second container at reproduction time; it has to live inside the single image, with its data seeded
-at build so every fresh sandbox starts identical and the canary oracle stays reproducible. This is
-the model Q18 already chose for Juice Shop.
+env/secrets, and Daytona as wrapped runs one container per snapshot. For the default admission path,
+a datastore cannot be a second container at reproduction time; it has to live inside the single image,
+with its data seeded at build so every fresh sandbox starts identical and the canary oracle stays
+reproducible. This is the model Q18 already chose for Juice Shop. A reviewed `compose-mesh` plan is a
+narrow linked-sandbox exception now implemented in onboarding: each service is pinned and offline-
+verified in its own sandbox with `networkBlockAll: true`; the private link connects only that group and
+never provides internet egress or a Docker runtime.
 
 A repo is admitted by trying tiers in priority order, and the strength of a verdict degrades
 honestly as the tier weakens:
@@ -607,11 +610,13 @@ honestly as the tier weakens:
   source and emits a build plan (`lib/build-onboarding/build-plan.ts`) naming one of three
   strategies, each of which produces one pinned image: `dockerfile` (a Dockerfile path, context
   subdir and non-secret build args), `image` (`FROM` a pinned published image plus the build
-  marker), or `compose-synth` (parse `compose.yml`, and for the supported shape of one app service
-  plus known datastores, synthesize a self-contained Dockerfile that installs the datastore into the
-  app image, rewrites the DB host to loopback, seeds at build, and starts both from one entrypoint).
-  The synthesis generalizes Sentinel's `sandbox-setup/dvwa.sh`. This tier keeps full isolation,
-  determinism and the canary-backed `REPRODUCED`.
+  marker), `compose-synth` (parse `compose.yml`, and for the supported shape of one app service plus
+  known datastores, synthesize a self-contained Dockerfile that installs the datastore into the app
+  image, rewrites the DB host to loopback, seeds at build, and starts both from one entrypoint), or
+  `compose-mesh` (pin one image and snapshot per service, then boot a private linked group with the app
+  as the only probe surface). The synthesis generalizes Sentinel's `sandbox-setup/dvwa.sh`. Both
+  offline shapes keep the authorization gate, per-node egress checks, and canary-backed
+  `REPRODUCED` requirements. Mesh never runs customer Compose or a Docker daemon during reproduction.
 - **Tier R, static reachability pre-check (any repo, no boot).** The check Konvu's product is built
   on: does the reported symbol get imported and invoked, is the code path reachable, are the
   exploit's conditions present, decided without running the app. It gates and prioritizes whether a
@@ -629,8 +634,9 @@ honestly as the tier weakens:
 What does not change: the authorization gate from Q22 holds at every tier, so no tier fakes a
 stronger verdict than its isolation earns; the human still installs the App and approves the built
 target, and Tier B adds one more explicit opt-in. Rejected outright is running the customer's
-compose, or any Docker daemon, inside the reproduction sandbox: it would need egress to pull images
-and would drag untrusted multi-container orchestration into the one place the design keeps offline
-and single-artifact. The genuine multi-container topology Q18 and Q20 sketch (separate PoC, target
-and oracle containers the platform runs) stays unbuilt; Tier B reaches a customer-run target
-instead of the platform orchestrating containers.
+compose, or any Docker daemon, inside a reproduction sandbox: it would need egress to pull images
+and would drag untrusted orchestration into the one place the design keeps offline. Compose-mesh is
+not that model. Its build worker resolves and pins each service before reproduction, and its runtime
+only creates individually controlled linked sandboxes with no runtime pulls. The remaining unproven
+parts are provider-backed build and full target onboarding evidence, which must be recorded separately
+from mocked lifecycle tests.

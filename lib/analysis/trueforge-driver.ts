@@ -149,6 +149,7 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
 export function createTrueforgeAnalysisDriver(
   client: TrueForgeClient = createTrueForgeClient(),
   provision: typeof provisionTarget = provisionTarget,
+  provisionMeshFn: typeof provisionMesh = provisionMesh,
 ): AnalysisDriver {
   return {
     async ensureSession({ reportId, signal }: AnalysisContext): Promise<void> {
@@ -303,7 +304,7 @@ export function createTrueforgeAnalysisDriver(
       // first: a turn already exists (a retry, or the loser of a concurrent race below) means
       // this report was already provisioned once, so there's nothing to redo -- provisioning
       // again here would boot a second sandbox nobody would ever store a reference to.
-      let provisioned: { sandboxId: string; appPort: number } | null = null;
+      let provisioned: { sandboxId: string; appPort: number; sandboxIds: string[] } | null = null;
       if (targetInfo && targetInfo.snapshotId) {
         const [existing] = await db
           .select({ turnId: agentSession.turnId })
@@ -324,7 +325,7 @@ export function createTrueforgeAnalysisDriver(
               // single-image target boots one snapshot exactly as before.
               const meshServices = meshServicesFromConfig(context.targetConfig);
               if (meshServices) {
-                const mesh = await provisionMesh(
+                const mesh = await provisionMeshFn(
                   {
                     targetProfileId: context.targetProfileId as string,
                     appService: meshServices.find((s) => s.role === "app")!.service,
@@ -334,9 +335,13 @@ export function createTrueforgeAnalysisDriver(
                   },
                   { signal },
                 );
-                provisioned = { sandboxId: mesh.sandboxId, appPort: mesh.appPort };
+                provisioned = {
+                  sandboxId: mesh.sandboxId,
+                  appPort: mesh.appPort,
+                  sandboxIds: mesh.sandboxIds,
+                };
               } else {
-                provisioned = await provision(
+                const single = await provision(
                   {
                     imageName: targetInfo.imageName,
                     imageDigest: targetInfo.imageDigest,
@@ -347,6 +352,7 @@ export function createTrueforgeAnalysisDriver(
                   appPort,
                   { signal },
                 );
+                provisioned = { ...single, sandboxIds: [single.sandboxId] };
               }
             } catch {
               // A genuine cancellation must still propagate as one, not be swallowed into "no
@@ -438,16 +444,21 @@ export function createTrueforgeAnalysisDriver(
               turnId,
               turnStatus: "RUNNING",
               sandboxId: provisioned?.sandboxId ?? null,
+              sandboxIds: provisioned?.sandboxIds ?? null,
               appPort: provisioned?.appPort ?? null,
               updatedAt: new Date(),
             })
             .where(eq(agentSession.id, session.id));
         });
       } catch (error) {
-        if (provisioned) await teardownSandbox(provisioned.sandboxId, true);
+        if (provisioned) {
+          for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
+        }
         throw error;
       }
-      if (lostRace && provisioned) await teardownSandbox(provisioned.sandboxId, true);
+      if (lostRace && provisioned) {
+        for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
+      }
 
       if (signal.aborted) throw signal.reason;
     },

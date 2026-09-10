@@ -80,7 +80,11 @@ not started.
   the PoC, and evaluate the oracle outside the PoC environment.
 - Implement both frozen scenarios from Q18 and always tear down through provider TTL plus reconciler.
 - Add the dynamic tier only after the pinned connected-fork path works end to end. The trusted
-  controller resolves the commit, then downloads, hashes and stages a public source archive.
+  controller resolves the commit, then downloads, hashes and stages a public source archive. The
+  current dynamic onboarding path also supports a reviewed compose-mesh plan: it builds each service
+  into its own pinned snapshot, verifies the linked offline group, and stores the service graph on the
+  target profile. Mocked lifecycle tests cover the orchestration; provider-backed build and full live
+  onboarding still need separate evidence.
   The build sandbox consumes that archive without a repository token. Build,
   then reproduce against the immutable output in a second sandbox with no network. Require
   build authorisation before source execution, then require a separate reproduction approval

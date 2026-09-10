@@ -11,6 +11,27 @@ import {
   profileNameFromRepo,
   type SourceReader,
 } from "./classify";
+import { knownTargetHints } from "./known-target-hints";
+
+test("known hints name the app for an owned mesh target with two published ports", async () => {
+  const VULN_BANK = `
+services:
+  web:
+    build: .
+    ports: ["5000:5000", "80:5000"]
+    depends_on: [db]
+  db:
+    image: postgres:13
+`;
+  const plan = await classify(
+    reader({ "docker-compose.yml": VULN_BANK }),
+    "Vaibhav91one/vuln-bank",
+    knownTargetHints("Vaibhav91one/vuln-bank"),
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  assert.equal(plan.appService, "web");
+});
 
 function reader(files: Record<string, string>): SourceReader {
   return { async readFile(path: string) { return files[path] ?? null; } };
@@ -220,6 +241,56 @@ services:
   assert.equal(topology.services.find((s) => s.service === "app")?.image, "example/app:latest");
 });
 
+test("a service relying on an environment the sandbox cannot provide is refused, not silently dropped", () => {
+  const base = (extra: string) => `
+services:
+  web:
+    build: .
+    ports: ["5000:5000"]
+${extra}
+  db:
+    image: postgres:13
+`;
+
+  const privileged = parseComposeMesh(base("    privileged: true"));
+  assert.equal(privileged.ok, false);
+  if (!privileged.ok) assert.match(privileged.reason, /runs privileged/);
+
+  const hostNetwork = parseComposeMesh(base("    network_mode: host"));
+  assert.equal(hostNetwork.ok, false);
+  if (!hostNetwork.ok) assert.match(hostNetwork.reason, /host networking/);
+
+  const caps = parseComposeMesh(base('    cap_add: ["NET_ADMIN"]'));
+  assert.equal(caps.ok, false);
+  if (!caps.ok) assert.match(caps.reason, /kernel capabilities/);
+
+  const devices = parseComposeMesh(base('    devices: ["/dev/kvm"]'));
+  assert.equal(devices.ok, false);
+  if (!devices.ok) assert.match(devices.reason, /host devices/);
+
+  const pidHost = parseComposeMesh(base("    pid: host"));
+  assert.equal(pidHost.ok, false);
+  if (!pidHost.ok) assert.match(pidHost.reason, /host PID namespace/);
+});
+
+test("a peer declared through a defaulted env value is resolved, not left literal", () => {
+  const topology = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["5000:5000"]
+    environment:
+      DB_HOST: "\${DB_HOST:-db}"
+  db:
+    image: postgres:13
+`);
+  assert.equal(topology.ok, true);
+  if (!topology.ok) return;
+  const web = topology.services.find((service) => service.service === "web")!;
+  assert.equal(web.env?.DB_HOST, "db", "the placeholder must resolve to the peer name");
+  assert.deepEqual(web.peers, ["db"], "the resolved value must register the peer edge");
+});
+
 test("classify routes a single-app-plus-postgres compose to a compose-mesh plan", async () => {
   const plan = await classify(reader({ "docker-compose.yml": PG_COMPOSE, "package.json": "{}" }), "owner/app");
   assert.equal(plan.strategy, "compose-mesh");
@@ -229,8 +300,8 @@ test("classify routes a single-app-plus-postgres compose to a compose-mesh plan"
   assert.equal(plan.runtime?.baseUrl, "http://localhost:8000");
 });
 
-test("classify routes a two-app compose to a compose-mesh, one app and the rest dependencies", async () => {
-  const TWO_APP = `
+test("classify refuses a compose with two published front doors instead of guessing the app", () => {
+  const TWO_PUBLISHED = `
 services:
   web:
     build: ./web
@@ -241,12 +312,69 @@ services:
   db:
     image: mariadb:10
 `;
-  const plan = await classify(reader({ "compose.yml": TWO_APP }), "owner/app");
+  const mesh = parseComposeMesh(TWO_PUBLISHED);
+  assert.equal(mesh.ok, false);
+  if (mesh.ok) return;
+  assert.match(mesh.reason, /more than one service publishes an HTTP port \(web, api\)/);
+});
+
+test("classify accepts a mesh when the front door is named explicitly", async () => {
+  const TWO_PUBLISHED = `
+services:
+  web:
+    build: ./web
+    ports: ["8080:8080"]
+  api:
+    build: ./api
+    ports: ["9090:9090"]
+  db:
+    image: mariadb:10
+`;
+  const plan = await classify(reader({ "compose.yml": TWO_PUBLISHED }), "owner/app", {
+    meshAppServiceHint: "api",
+  });
   assert.equal(plan.strategy, "compose-mesh");
   if (plan.strategy !== "compose-mesh") return;
-  assert.equal(plan.appService, "web");
+  assert.equal(plan.appService, "api");
   assert.equal(plan.services.filter((s) => s.role === "app").length, 1);
   assert.equal(plan.services.filter((s) => s.role === "dependency").length, 2);
+});
+
+test("a published front door wins over an internal expose when only one is published", () => {
+  const ONE_PUBLISHED = `
+services:
+  web:
+    build: ./web
+    ports: ["8080:8080"]
+  metrics:
+    build: ./metrics
+    expose: ["9090"]
+  db:
+    image: postgres:16
+`;
+  const mesh = parseComposeMesh(ONE_PUBLISHED);
+  assert.equal(mesh.ok, true);
+  if (!mesh.ok) return;
+  assert.equal(mesh.appService, "web");
+  assert.equal(mesh.appPort, 8080);
+});
+
+test("classify reports the mesh's own reason for an ambiguous front door", async () => {
+  const TWO_PUBLISHED = `
+services:
+  web:
+    build: ./web
+    ports: ["8080:8080"]
+  api:
+    build: ./api
+    ports: ["9090:9090"]
+  db:
+    image: mariadb:10
+`;
+  const plan = await classify(reader({ "compose.yml": TWO_PUBLISHED }), "owner/app");
+  assert.equal(plan.strategy, "not-flattenable");
+  if (plan.strategy !== "not-flattenable") return;
+  assert.match(plan.reason, /more than one service publishes an HTTP port/);
 });
 
 test("parseComposeMesh drops a docker-socket sidecar and meshes the real services", () => {

@@ -104,6 +104,8 @@ test("configuring a selected target profile writes an independent profile row", 
     imageDigest: `sha256:${"3".repeat(64)}`,
     snapshotId: "snapshot-webgoat",
     buildMarker: "webgoat-build-1",
+    buildRecipeDigest: `sha256:${"4".repeat(64)}`,
+    resolvedCommitSha: "a".repeat(40),
   });
 
   const [row] = await dbm.db
@@ -118,6 +120,71 @@ test("configuring a selected target profile writes an independent profile row", 
     readinessPath: "/WebGoat",
     expectedBuildMarker: "webgoat-build-1",
   });
+});
+
+test("a dynamic target without build identity is refused before any profile write", async () => {
+  await connectedRepo(700_009, "Vaibhav91one/WebGoat");
+
+  await assert.rejects(
+    targets.configureTarget({
+      repoId: 700_009,
+      targetName: "webgoat-identity",
+      targetDefinition: {
+        name: "webgoat-identity",
+        repoFullName: "Vaibhav91one/WebGoat",
+        envPrefix: "WEBGOAT",
+        imageName: "ghcr.io/vaibhav91one/webgoat",
+        config: { baseUrl: "http://localhost:8080", readinessPath: "/WebGoat" },
+        scopeRules: [{ allow: "localhost" }],
+        provisioning: { readinessPath: "/WebGoat" },
+      },
+      imageDigest: `sha256:${"7".repeat(64)}`,
+      snapshotId: "snapshot-identity",
+      buildMarker: "b".repeat(40),
+    }),
+    /requires build identity/,
+  );
+
+  const rows = await dbm.db
+    .select({ id: dbm.targetProfile.id })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.name, "webgoat-identity"));
+  assert.equal(rows.length, 0, "no profile may be written without identity");
+});
+
+test("a dynamic target persists its build identity on the profile", async () => {
+  await connectedRepo(700_010, "Vaibhav91one/WebGoat");
+  const recipeDigest = `sha256:${"8".repeat(64)}`;
+  const commit = "a".repeat(40);
+
+  const configured = await targets.configureTarget({
+    repoId: 700_010,
+    targetName: "webgoat-pinned",
+    targetDefinition: {
+      name: "webgoat-pinned",
+      repoFullName: "Vaibhav91one/WebGoat",
+      envPrefix: "WEBGOAT",
+      imageName: "ghcr.io/vaibhav91one/webgoat",
+      config: { baseUrl: "http://localhost:8080", readinessPath: "/WebGoat" },
+      scopeRules: [{ allow: "localhost" }],
+      provisioning: { readinessPath: "/WebGoat" },
+    },
+    imageDigest: `sha256:${"9".repeat(64)}`,
+    snapshotId: "snapshot-pinned",
+    buildMarker: commit,
+    buildRecipeDigest: recipeDigest,
+    resolvedCommitSha: commit,
+  });
+
+  const [row] = await dbm.db
+    .select({
+      buildRecipeDigest: dbm.targetProfile.buildRecipeDigest,
+      resolvedCommitSha: dbm.targetProfile.resolvedCommitSha,
+    })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, configured.targetProfileId));
+  assert.equal(row.buildRecipeDigest, recipeDigest);
+  assert.equal(row.resolvedCommitSha, commit);
 });
 
 test("configuring refuses a repository that does not match the target profile", async () => {
@@ -139,6 +206,8 @@ test("configuring refuses a repository that does not match the target profile", 
       imageDigest: `sha256:${"3".repeat(64)}`,
       snapshotId: "snapshot-webgoat",
       buildMarker: "webgoat-build-1",
+      buildRecipeDigest: `sha256:${"4".repeat(64)}`,
+      resolvedCommitSha: "a".repeat(40),
     }),
     /does not match target profile webgoat/,
   );

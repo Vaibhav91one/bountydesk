@@ -16,8 +16,16 @@ type RecordModule = typeof import("./record");
 
 let dbm: DbModule;
 let record: RecordModule;
+const storageEnv = {
+  url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  key: process.env.SUPABASE_SERVICE_ROLE_KEY,
+};
 
 before(async () => {
+  // This suite asserts the no-storage contract. npm test loads .env.local globally, so clear
+  // storage credentials for this test process rather than depending on the caller's environment.
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   const { createSchema } = await import("@/lib/db/testing");
   schema = await createSchema("artifacts_record");
   dbm = await import("@/lib/db");
@@ -26,6 +34,8 @@ before(async () => {
 });
 
 after(async () => {
+  if (storageEnv.url !== undefined) process.env.NEXT_PUBLIC_SUPABASE_URL = storageEnv.url;
+  if (storageEnv.key !== undefined) process.env.SUPABASE_SERVICE_ROLE_KEY = storageEnv.key;
   await dbm?.client.end({ timeout: 5 });
   await schema?.drop();
 });

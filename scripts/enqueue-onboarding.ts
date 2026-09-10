@@ -24,7 +24,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Derived, not caller-provided: the same shape the GitHub trigger uses.
+  // This command accepts provenance only. The trusted worker/controller must resolve and persist a
+  // full commit SHA before classification or customer code runs.
   const sourceRef = `https://github.com/${repoFullName}.git`;
   await enqueue({ repoId, repoFullName, sourceRef });
   console.log(`enqueued onboarding for ${repoFullName} (repo ${repoId})`);

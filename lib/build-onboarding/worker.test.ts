@@ -31,6 +31,17 @@ after(async () => {
   await schema?.drop();
 });
 
+test("malformed stored mesh services fail closed instead of downgrading", async () => {
+  const { parseBuiltServices } = await import("./worker");
+  assert.equal(parseBuiltServices(null), null);
+  assert.throws(() => parseBuiltServices({}), /nonempty array/);
+  assert.throws(() => parseBuiltServices([]), /nonempty array/);
+  assert.throws(
+    () => parseBuiltServices([{ service: "web", role: "app", imageName: "x", imageDigest: "mutable", snapshotId: "snap" }]),
+    /malformed/,
+  );
+});
+
 test("mesh start commands run inside the service and reject host container commands", async () => {
   const { assertSafeMeshStartCommand } = await import("./worker");
   assert.equal(assertSafeMeshStartCommand("web", "  ./start.sh  "), "./start.sh");
@@ -65,6 +76,7 @@ const widgetPlan: BuildPlan = {
 };
 
 const buildResult: BuildResult = {
+  resolvedCommitSha: "a".repeat(40),
   imageName: "ghcr.io/acme/widget",
   imageDigest: `sha256:${"a".repeat(64)}`,
   snapshotId: "snap-widget",
@@ -113,6 +125,7 @@ function deps(over: Partial<OnboardDeps>): OnboardDeps {
     // Default the sandboxability review to "unsure" so a not-flattenable repo falls through to the
     // build agent, the behaviour these tests exercise. Tests of the review's own routing override it.
     runSandboxabilityReview: async () => ({ verdict: "unsure", reason: "" }),
+    resolveCommit: async () => "a".repeat(40),
     provision: async () => ({ sandboxId: "sbx-verify", appPort: 3000 }),
     teardown: async () => {},
     leaseSeconds: 60,
@@ -145,7 +158,7 @@ async function stateOf(repoId: number): Promise<string> {
 test("classify then build stores the outputs and advances to the manifest step", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git", resolvedCommitSha: "a".repeat(40) });
 
   await worker.onboardOnce("w1", deps({})); // PENDING_PLAN -> PENDING_BUILD
   assert.equal(await stateOf(repoId), "PENDING_BUILD");
@@ -155,12 +168,16 @@ test("classify then build stores the outputs and advances to the manifest step",
   const [row] = await dbm.db
     .select({
       imageDigest: dbm.targetOnboarding.imageDigest,
+      buildRecipeDigest: dbm.targetOnboarding.buildRecipeDigest,
+      resolvedCommitSha: dbm.targetOnboarding.resolvedCommitSha,
       dockerfileText: dbm.targetOnboarding.dockerfileText,
       buildPlan: dbm.targetOnboarding.buildPlan,
     })
     .from(dbm.targetOnboarding)
     .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
   assert.equal(row.imageDigest, buildResult.imageDigest);
+  assert.equal(row.buildRecipeDigest, buildResult.buildRecipeDigest);
+  assert.equal(row.resolvedCommitSha, buildResult.resolvedCommitSha);
   assert.match(row.dockerfileText ?? "", /FROM node:20/);
   assert.equal((row.buildPlan as { strategy?: string }).strategy, "dockerfile");
 });
@@ -168,7 +185,7 @@ test("classify then build stores the outputs and advances to the manifest step",
 test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", async () => {
   const repoId = await connectedRepo("acme/multi");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/multi", sourceRef: "https://x/multi.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/multi", sourceRef: "https://x/multi.git", resolvedCommitSha: "a".repeat(40) });
 
   let built = false;
   await worker.onboardOnce(
@@ -191,7 +208,7 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
 test("a sandboxability review of 'no' goes straight to UNSUPPORTED, skipping the build agent", async () => {
   const repoId = await connectedRepo("acme/microservices");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git", resolvedCommitSha: "a".repeat(40) });
 
   let agentRan = false;
   let built = false;
@@ -218,7 +235,7 @@ test("a sandboxability review of 'no' goes straight to UNSUPPORTED, skipping the
 test("a sandboxability review of 'yes' hands off to the build agent", async () => {
   const repoId = await connectedRepo("acme/reviewyes");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/reviewyes", sourceRef: "https://x/reviewyes.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/reviewyes", sourceRef: "https://x/reviewyes.git", resolvedCommitSha: "a".repeat(40) });
 
   let agentRan = false;
   await worker.onboardOnce(
@@ -252,7 +269,7 @@ test("a sandboxability review of 'yes' hands off to the build agent", async () =
 test("the agent rung commits an agent-authored plan and the row goes to build", async () => {
   const repoId = await connectedRepo("acme/nodockerfile");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/nodockerfile", sourceRef: "https://x/nodockerfile.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/nodockerfile", sourceRef: "https://x/nodockerfile.git", resolvedCommitSha: "a".repeat(40) });
 
   let built = false;
   const overrides: Partial<OnboardDeps> = {
@@ -293,7 +310,7 @@ test("the agent rung commits an agent-authored plan and the row goes to build", 
 test("the agent rung can declare a repo unsandboxable", async () => {
   const repoId = await connectedRepo("acme/microservices");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/microservices", sourceRef: "https://x/microservices.git", resolvedCommitSha: "a".repeat(40) });
 
   let built = false;
   await worker.onboardOnce(
@@ -318,7 +335,7 @@ test("the agent rung can declare a repo unsandboxable", async () => {
 test("the manifest is derived from the build plan and reaches the human gate", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git", resolvedCommitSha: "a".repeat(40) });
 
   await toManifest(worker);
   await worker.onboardOnce("w1", deps({})); // PENDING_MANIFEST -> AWAITING_APPROVAL
@@ -337,7 +354,7 @@ test("the manifest is derived from the build plan and reaches the human gate", a
 test("the worker never advances a row out of AWAITING_APPROVAL on its own", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git", resolvedCommitSha: "a".repeat(40) });
   await toManifest(worker);
   await worker.onboardOnce("w1", deps({}));
   assert.equal(await stateOf(repoId), "AWAITING_APPROVAL");
@@ -350,7 +367,7 @@ test("the worker never advances a row out of AWAITING_APPROVAL on its own", asyn
 test("an approved row verifies offline and writes the TargetProfile", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git", resolvedCommitSha: "a".repeat(40) });
   await toManifest(worker);
   await worker.onboardOnce("w1", deps({})); // -> AWAITING_APPROVAL
 
@@ -393,10 +410,89 @@ test("an approved row verifies offline and writes the TargetProfile", async () =
   assert.ok(repo.targetProfileId);
 });
 
+test("an approved compose mesh verifies every service and pins the service graph", async () => {
+  const repoId = await connectedRepo("acme/mesh-widget");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/mesh-widget", sourceRef: "https://x/mesh-widget.git", resolvedCommitSha: "a".repeat(40) });
+
+  const meshPlan: BuildPlan = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "web",
+    services: [
+      { service: "web", role: "app", port: 3000, build: { context: "." }, peers: ["db"] },
+      { service: "db", role: "dependency", port: 5432, image: "postgres:16" },
+    ],
+    seed: { kind: "none" },
+    runtime: { name: "mesh-widget", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  };
+  const services = [
+    {
+      service: "web",
+      role: "app" as const,
+      imageName: "ghcr.io/acme/mesh-widget-web",
+      imageDigest: `sha256:${"d".repeat(64)}`,
+      snapshotId: "snap-web",
+      snapshotImageRef: "ghcr.io/acme/mesh-widget-web:bountydesk-onboarding",
+      port: 3000,
+      buildMarker: "e".repeat(40),
+      startCommand: "node server.js",
+      peers: ["db"],
+    },
+    {
+      service: "db",
+      role: "dependency" as const,
+      imageName: "ghcr.io/acme/mesh-widget-db",
+      imageDigest: `sha256:${"f".repeat(64)}`,
+      snapshotId: "snap-db",
+      snapshotImageRef: "ghcr.io/acme/mesh-widget-db:bountydesk-onboarding",
+      port: 5432,
+      startCommand: "postgres",
+    },
+  ];
+
+  await worker.onboardOnce("w1", deps({ classify: async () => meshPlan, buildDriver: fakeBuildDriver({ ...buildResult, imageName: services[0].imageName, services: services as BuildResult["services"] }) }));
+  await worker.onboardOnce("w1", deps({ classify: async () => meshPlan, buildDriver: fakeBuildDriver({ ...buildResult, imageName: services[0].imageName, services: services as BuildResult["services"] }) }));
+  await worker.onboardOnce("w1", deps({ classify: async () => meshPlan, buildDriver: fakeBuildDriver({ ...buildResult, imageName: services[0].imageName, services: services as BuildResult["services"] }) }));
+  assert.equal(await stateOf(repoId), "AWAITING_APPROVAL");
+
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "APPROVED", approvedBy: "octocat", approvedAt: new Date() })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  let verifiedServices: string[] = [];
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      classify: async () => meshPlan,
+      buildDriver: fakeBuildDriver({ ...buildResult, imageName: services[0].imageName, services: services as BuildResult["services"] }),
+      provisionMesh: async (authorization) => {
+        verifiedServices = authorization.services.map((service) => service.service);
+        return { sandboxId: "sb-web", appPort: 3000, sandboxIds: ["sb-web", "sb-db"] };
+      },
+      teardown: async () => {},
+    }),
+  );
+
+  assert.deepEqual(verifiedServices, ["web", "db"]);
+  assert.equal(await stateOf(repoId), "CONFIGURED");
+  const [profile] = await dbm.db
+    .select({ config: dbm.targetProfile.config })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.name, "mesh-widget"));
+  assert.ok(profile);
+  assert.deepEqual(
+    (profile.config as { services: Array<{ service: string }> }).services.map((service) => service.service),
+    ["web", "db"],
+  );
+});
+
 test("a failed offline verify leaves the row unwritten", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
-  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git" });
+  await queue.enqueue({ repoId, repoFullName: "acme/widget", sourceRef: "https://x/widget.git", resolvedCommitSha: "a".repeat(40) });
   await toManifest(worker);
   await worker.onboardOnce("w1", deps({})); // -> AWAITING_APPROVAL
   await dbm.db
@@ -422,4 +518,86 @@ test("a failed offline verify leaves the row unwritten", async () => {
     .from(dbm.connectedRepository)
     .where(dbm.eq(dbm.connectedRepository.repoId, repoId));
   assert.equal(repo.targetProfileId, null);
+});
+
+test("a mesh verify tears down every sandbox even when one delete fails", async () => {
+  const repoId = await connectedRepo("acme/mesh-teardown");
+  await drain();
+  await queue.enqueue({
+    repoId,
+    repoFullName: "acme/mesh-teardown",
+    sourceRef: "https://x/mesh-teardown.git",
+    resolvedCommitSha: "a".repeat(40),
+  });
+
+  const meshPlan: BuildPlan = {
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "web",
+    services: [
+      { service: "web", role: "app", port: 3000, build: { context: "." }, peers: ["db"] },
+      { service: "db", role: "dependency", port: 5432, image: "postgres:16" },
+    ],
+    seed: { kind: "none" },
+    runtime: { name: "mesh-teardown", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  };
+  const services = [
+    {
+      service: "web",
+      role: "app" as const,
+      imageName: "ghcr.io/acme/mesh-teardown-web",
+      imageDigest: `sha256:${"d".repeat(64)}`,
+      snapshotId: "snap-web",
+      snapshotImageRef: "ghcr.io/acme/mesh-teardown-web:bountydesk-onboarding",
+      port: 3000,
+      buildMarker: "e".repeat(40),
+      startCommand: "node server.js",
+      peers: ["db"],
+    },
+    {
+      service: "db",
+      role: "dependency" as const,
+      imageName: "ghcr.io/acme/mesh-teardown-db",
+      imageDigest: `sha256:${"f".repeat(64)}`,
+      snapshotId: "snap-db",
+      snapshotImageRef: "ghcr.io/acme/mesh-teardown-db:bountydesk-onboarding",
+      port: 5432,
+      startCommand: "postgres",
+    },
+  ];
+  const driver = fakeBuildDriver({
+    ...buildResult,
+    imageName: services[0].imageName,
+    services: services as BuildResult["services"],
+  });
+  const overrides: Partial<OnboardDeps> = {
+    classify: async () => meshPlan,
+    buildDriver: driver,
+    provisionMesh: async () => ({ sandboxId: "sb-web", appPort: 3000, sandboxIds: ["sb-web", "sb-db"] }),
+  };
+
+  await worker.onboardOnce("w1", deps(overrides));
+  await worker.onboardOnce("w1", deps(overrides));
+  await worker.onboardOnce("w1", deps(overrides));
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "APPROVED" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  const attempted: string[] = [];
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      ...overrides,
+      teardown: async (id: string) => {
+        attempted.push(id);
+        // The app delete fails; the dependency delete must still be attempted.
+        if (id === "sb-web") throw new Error("daytona delete 500");
+      },
+    }),
+  );
+
+  assert.deepEqual([...attempted].sort(), ["sb-db", "sb-web"], "every sandbox is attempted");
+  assert.equal(await stateOf(repoId), "APPROVED", "an orphaned sandbox must not be recorded as configured");
 });

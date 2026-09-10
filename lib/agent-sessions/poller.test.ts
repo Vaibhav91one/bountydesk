@@ -79,6 +79,8 @@ async function seedSession(
       | "DELIVERED"
       | "CANCELLED";
     sandboxId?: string;
+    /** For a mesh session: every linked sandbox the run owns, app first. */
+    sandboxIds?: string[];
   } = {},
 ) {
   seq += 1;
@@ -115,6 +117,7 @@ async function seedSession(
       turnId: `turn-${n}`,
       sandboxId: opts.sandboxId ?? null,
       appPort: opts.sandboxId ? 3000 : null,
+      ...(opts.sandboxIds ? { sandboxIds: opts.sandboxIds } : {}),
     })
     .returning({ id: dbm.agentSession.id });
 
@@ -800,6 +803,24 @@ test("an error snapshot tears down the session's provisioned sandbox", async () 
   await poller.pollOnce("w-error-sandbox", { client });
 
   assert.deepEqual(deleteSandboxCalls, ["sandbox-error-path"]);
+});
+
+test("an error in a mesh session tears down every linked sandbox, not just the app", async () => {
+  await drainOthers();
+  deleteSandboxCalls = [];
+  await seedSession({
+    sandboxId: "sandbox-mesh-app",
+    sandboxIds: ["sandbox-mesh-app", "sandbox-mesh-db"],
+  });
+  const client = fakeClient({ status: "error", message: "the model blew up" });
+
+  await poller.pollOnce("w-mesh-error", { client });
+
+  assert.deepEqual(
+    [...deleteSandboxCalls].sort(),
+    ["sandbox-mesh-app", "sandbox-mesh-db"],
+    "a linked dependency must not be left to the provider TTL",
+  );
 });
 
 test("a session with no provisioned sandbox never calls teardown", async () => {

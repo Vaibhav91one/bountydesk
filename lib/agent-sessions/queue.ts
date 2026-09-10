@@ -41,10 +41,10 @@ export type AgentSessionLease = {
   pendingToolCallId: string | null;
   pendingVerdictId: string | null;
   pendingApprovedContentHash: string | null;
-  /** The Daytona sandbox lib/analysis/trueforge-driver.ts provisioned for this session, if
-   * any -- carried on the lease so the poller's terminal paths (lib/agent-sessions/poller.ts)
-   * can tear it down without a second query. */
+  /** App sandbox exposed to probe_target. */
   sandboxId: string | null;
+  /** Every Daytona sandbox owned by this session, including linked dependencies. */
+  sandboxIds: string[] | null;
   lastMirroredEventId: string | null;
   /** The agent's closing summary, once captured. Carried so a poll can tell whether it still
    * needs to fetch one (see lib/agent-sessions/poller.ts). */
@@ -88,6 +88,7 @@ export async function claim(
     pending_verdict_id: string | null;
     pending_approved_content_hash: string | null;
     sandbox_id: string | null;
+    sandbox_ids: unknown;
     last_mirrored_event_id: string | null;
     final_summary: string | null;
     fence: string | number;
@@ -119,6 +120,7 @@ export async function claim(
               ${agentSession.pendingVerdictId}              as pending_verdict_id,
               ${agentSession.pendingApprovedContentHash}    as pending_approved_content_hash,
               ${agentSession.sandboxId}                     as sandbox_id,
+              ${agentSession.sandboxIds}                     as sandbox_ids,
               ${agentSession.lastMirroredEventId}           as last_mirrored_event_id,
               ${agentSession.finalSummary}                  as final_summary,
               ${agentSession.fence}                         as fence
@@ -139,6 +141,11 @@ export async function claim(
     pendingVerdictId: row.pending_verdict_id,
     pendingApprovedContentHash: row.pending_approved_content_hash,
     sandboxId: row.sandbox_id,
+    sandboxIds: Array.isArray(row.sandbox_ids)
+      ? row.sandbox_ids.filter((id): id is string => typeof id === "string")
+      : row.sandbox_id
+        ? [row.sandbox_id]
+        : null,
     lastMirroredEventId: row.last_mirrored_event_id,
     finalSummary: row.final_summary,
     fence: Number(row.fence),

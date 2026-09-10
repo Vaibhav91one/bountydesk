@@ -89,7 +89,7 @@ async function seedReport(
   return row.id;
 }
 
-async function seedTargetProfile(overrides: { name?: string } = {}): Promise<{
+async function seedTargetProfile(overrides: { name?: string; config?: Record<string, unknown> } = {}): Promise<{
   id: string;
   name: string;
   imageName: string;
@@ -106,7 +106,7 @@ async function seedTargetProfile(overrides: { name?: string } = {}): Promise<{
       imageName,
       imageDigest,
       snapshotId: "snapshot-1",
-      config: { baseUrl: "http://localhost:3000", provisioning: TEST_PROVISIONING },
+      config: overrides.config ?? { baseUrl: "http://localhost:3000", provisioning: TEST_PROVISIONING },
       scopeRules: [],
     })
     .returning({ id: dbm.targetProfile.id });
@@ -703,6 +703,77 @@ test("run's turn message treats a revoked repository grant the same as no target
   assert.ok(!message.includes(target.name), "a revoked target's name must not be handed to the agent as authorized");
 });
 
+test("run() selects the mesh provisioner and persists every owned sandbox", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-v17.3.0", config: {
+    baseUrl: "http://localhost:3000",
+    provisioning: TEST_PROVISIONING,
+    services: [
+      { service: "web", role: "app", imageName: "ghcr.io/x/web", imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap-web", port: 3000 },
+      { service: "db", role: "dependency", imageName: "ghcr.io/x/db", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db", port: 5432 },
+    ],
+  }});
+  const reportId = await seedReport("TRIAGING", target.id);
+  let selected = false;
+  const fakeMesh = async () => {
+    selected = true;
+    return { sandboxId: "sandbox-web", appPort: 3000, sandboxIds: ["sandbox-web", "sandbox-db"] };
+  };
+  const client = fakeClient();
+  const d = driver.createTrueforgeAnalysisDriver(client, undefined, fakeMesh);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+  const [session] = await dbm.db.select().from(dbm.agentSession).where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(selected, true);
+  assert.equal(session.sandboxId, "sandbox-web");
+  assert.deepEqual(session.sandboxIds, ["sandbox-web", "sandbox-db"]);
+});
+
+test("run() tears down every mesh sandbox when it loses the turn race", async () => {
+  const target = await seedTargetProfile({
+    name: "mesh-lost-race-target",
+    config: {
+      baseUrl: "http://localhost:3000",
+      provisioning: TEST_PROVISIONING,
+      services: [
+        { service: "web", role: "app", imageName: "ghcr.io/x/web", imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap-web", port: 3000 },
+        { service: "db", role: "dependency", imageName: "ghcr.io/x/db", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db", port: 5432 },
+      ],
+    },
+  });
+  const reportId = await seedReport("TRIAGING", target.id);
+  deleteSandboxCalls = [];
+
+  // Two callers both pass the unlocked pre-check before either takes the row lock, so both
+  // provision; the loser must clean up its own group. The client delays createTurn so the race is
+  // real rather than settled in the microtask queue.
+  const client = fakeClient({
+    async createTurn() {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { turnId: "turn-winner", snapshot: { status: "running" } };
+    },
+  });
+  let meshCalls = 0;
+  const fakeMesh = async () => {
+    meshCalls += 1;
+    return {
+      sandboxId: `race-app-${meshCalls}`,
+      appPort: 3000,
+      sandboxIds: [`race-app-${meshCalls}`, `race-db-${meshCalls}`],
+    };
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, undefined, fakeMesh);
+  await d.ensureSession(context(reportId));
+  await Promise.all([d.run(context(reportId)), d.run(context(reportId))]);
+
+  assert.equal(meshCalls, 2, "both callers provision before the lock settles the race");
+  assert.deepEqual(
+    [...deleteSandboxCalls].sort(),
+    ["race-app-2", "race-db-2"],
+    "the losing attempt tears down its own group, dependencies included",
+  );
+});
+
 test("run() provisions the target before opening its row-locking transaction, and persists the result", async () => {
   const target = await seedTargetProfile({ name: "juice-shop-provision-order" });
   const reportId = await seedReport("TRIAGING", target.id);
@@ -837,4 +908,42 @@ test("run() tears down a provisioned sandbox when createTurn fails before it is 
     .where(dbm.eq(dbm.agentSession.reportId, reportId));
   assert.equal(session.sandboxId, null);
   assert.equal(session.turnId, null);
+});
+
+test("run() tears down every mesh sandbox when createTurn fails before the write commits", async () => {
+  const target = await seedTargetProfile({
+    name: "mesh-orphan-target",
+    config: {
+      baseUrl: "http://localhost:3000",
+      provisioning: TEST_PROVISIONING,
+      services: [
+        { service: "web", role: "app", imageName: "ghcr.io/x/web", imageDigest: "sha256:" + "a".repeat(64), snapshotId: "snap-web", port: 3000 },
+        { service: "db", role: "dependency", imageName: "ghcr.io/x/db", imageDigest: "sha256:" + "b".repeat(64), snapshotId: "snap-db", port: 5432 },
+      ],
+    },
+  });
+  const reportId = await seedReport("TRIAGING", target.id);
+  deleteSandboxCalls = [];
+
+  const client = fakeClient({
+    async createTurn() {
+      throw new Error("TrueForge is unreachable");
+    },
+  });
+  const fakeMesh = async () => ({
+    sandboxId: "mesh-orphan-app",
+    appPort: 3000,
+    sandboxIds: ["mesh-orphan-app", "mesh-orphan-db"],
+  });
+
+  const d = driver.createTrueforgeAnalysisDriver(client, undefined, fakeMesh);
+  await d.ensureSession(context(reportId));
+
+  await assert.rejects(() => d.run(context(reportId)), /TrueForge is unreachable/);
+
+  assert.deepEqual(
+    [...deleteSandboxCalls].sort(),
+    ["mesh-orphan-app", "mesh-orphan-db"],
+    "a linked dependency provisioned before the write failed must not be left to the provider TTL",
+  );
 });
