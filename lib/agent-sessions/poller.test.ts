@@ -7,6 +7,7 @@ import type {
   ObservedToolCall,
   PendingToolCall,
   TrueForgeClient,
+  TurnInput,
   TurnSnapshot,
 } from "@/lib/trueforge/client";
 
@@ -180,6 +181,25 @@ function writeProbeCall(capability: string, overrides: Partial<PendingToolCall> 
     toolName: "probe_target_write",
     toolInfoType: "mcp",
     argumentsJson: JSON.stringify({ capability, method: "POST", path: "/login.php" }),
+    ...overrides,
+  };
+}
+
+function scopeGuardCall(
+  capability: string,
+  toolName:
+    | "request_intrusive_approval"
+    | "scope_add"
+    | "scope_remove"
+    | "scope_add_temporary",
+  overrides: Partial<PendingToolCall> = {},
+): PendingToolCall {
+  return {
+    threadId: "thread-scope",
+    toolCallId: `call-${toolName}`,
+    toolName,
+    toolInfoType: "mcp",
+    argumentsJson: JSON.stringify({ capability }),
     ...overrides,
   };
 }
@@ -491,6 +511,134 @@ test("a pending write probe is auto-approved and the session follows the resumed
     events.some((e) => e.type === "agent.write_probe_auto_approved"),
     "the auto-approval is recorded in the session event log",
   );
+});
+
+test("scope-guard intrusive approval is denied and the investigation continues", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const call = scopeGuardCall(fixture.capabilityToken, "request_intrusive_approval");
+  let createTurnCalls = 0;
+  const base = fakeClient({ status: "awaiting_approval", pending: [call] });
+  const client: TrueForgeClient = {
+    ...base,
+    findTurnByInput: async () =>
+      (createTurnCalls > 0 ? { turnId: "scope-resumed" } : null),
+    createTurn: async (_sessionId, input) => {
+      createTurnCalls += 1;
+      const approval = input[0];
+      assert.equal(approval.type, "user.tool_approval");
+      if (approval.type === "user.tool_approval") {
+        assert.equal(approval.threadId, call.threadId);
+        assert.equal(approval.toolCallId, call.toolCallId);
+        assert.deepEqual(approval.approval, {
+          status: "deny",
+          reason:
+            "grants are not available in this pipeline; reach the target through probe_target and probe_target_write, which need no grant, and continue without one.",
+        });
+      }
+      return { turnId: "scope-resumed", snapshot: { status: "running" } };
+    },
+  };
+
+  await poller.pollOnce("w-scope-deny", { client });
+  assert.equal(createTurnCalls, 1);
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnId, "scope-resumed");
+  assert.equal(row.pendingThreadId, null);
+  assert.equal(row.pendingToolCallId, null);
+  assert.equal(row.pendingVerdictId, null);
+  assert.equal(row.pendingApprovedContentHash, null);
+  assert.equal((await reportRow(fixture.reportId)).state, "TRIAGING");
+
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-scope-deny-retry", { client });
+  assert.equal(createTurnCalls, 1, "retry must adopt the existing denial turn");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data, eventKey: dbm.sessionEvent.eventKey })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+  const denied = events.find((event) => event.type === "agent.scope_tool_denied");
+  assert.deepEqual(denied?.data, {
+    toolName: call.toolName,
+    toolCallId: call.toolCallId,
+    reason:
+      "grants are not available in this pipeline; reach the target through probe_target and probe_target_write, which need no grant, and continue without one.",
+  });
+  assert.equal(denied?.eventKey, `agent.scope_tool_denied:${call.toolCallId}`);
+});
+
+test("all scope mutation approvals are denied without widening scope", async () => {
+  for (const toolName of ["scope_add", "scope_remove", "scope_add_temporary"] as const) {
+    await drainOthers();
+    const fixture = await seedSession({ reportState: "REPRODUCING" });
+    const call = scopeGuardCall(fixture.capabilityToken, toolName);
+    const base = fakeClient({ status: "awaiting_approval", pending: [call] });
+    let submitted: TurnInput | undefined;
+    const client: TrueForgeClient = {
+      ...base,
+      findTurnByInput: async () => null,
+      createTurn: async (_sessionId, input) => {
+        submitted = input[0];
+        assert.deepEqual(submitted, {
+          type: "user.tool_approval",
+          threadId: call.threadId,
+          toolCallId: call.toolCallId,
+          approval: {
+            status: "deny",
+            reason: "scope changes are not available; continue within the current scope.",
+          },
+        });
+        return { turnId: `scope-${toolName}-resumed`, snapshot: { status: "running" } };
+      },
+    };
+
+    await poller.pollOnce(`w-${toolName}-deny`, { client });
+
+    assert.ok(submitted, `${toolName} denial must submit a chained turn`);
+    const row = await sessionRow(fixture.agentSessionId);
+    assert.equal(row.turnStatus, "RUNNING");
+    assert.equal(row.turnId, `scope-${toolName}-resumed`);
+    assert.equal(row.pendingThreadId, null);
+    assert.equal(row.pendingToolCallId, null);
+    assert.equal((await reportRow(fixture.reportId)).state, "REPRODUCING");
+    const events = await dbm.db
+      .select({
+        type: dbm.sessionEvent.type,
+        data: dbm.sessionEvent.data,
+        eventKey: dbm.sessionEvent.eventKey,
+      })
+      .from(dbm.sessionEvent)
+      .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+    const denied = events.find((event) => event.type === "agent.scope_tool_denied");
+    assert.deepEqual(denied?.data, {
+      toolName,
+      toolCallId: call.toolCallId,
+      reason: "scope changes are not available; continue within the current scope.",
+    });
+    assert.equal(denied?.eventKey, `agent.scope_tool_denied:${call.toolCallId}`);
+  }
+});
+
+test("a gated scope name from a non-MCP tool is refused", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [scopeGuardCall(fixture.capabilityToken, "scope_add", { toolInfoType: "truefoundry-system" })],
+  });
+
+  await poller.pollOnce("w-non-mcp-scope", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /unsupported pending tool call/);
+  assert.equal((await reportRow(fixture.reportId)).state, "ANALYSIS_ONLY");
 });
 
 test("a wrong tool name is refused loudly and never touches report state", async () => {

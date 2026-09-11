@@ -78,8 +78,8 @@ export function buildScopeGuardServerManifest(scopeGuardUrl: string, token: stri
 /**
  * The four tools that must never run without a human clicking Allow in TrueForge first.
  * `agent/bountydesk.agent.json`'s scope-guard connector sets `requireApprovalForTools` to
- * this, the same way it does for `publish_verdict` - see AGENTS.md's hardening notes on
- * advisory-only enforcement.
+ * this. The agent-session poller denies these calls when no human grant surface is available,
+ * so the gate stays fail-closed without killing the investigation.
  */
 export const SCOPE_GUARD_APPROVAL_GATED_TOOLS = [
   "request_intrusive_approval",
