@@ -8,7 +8,6 @@
 
 <p align="center">
   <a href="https://github.com/Vaibhav91one/bountydesk/actions/workflows/ci.yml"><img src="https://github.com/Vaibhav91one/bountydesk/actions/workflows/ci.yml/badge.svg" alt="ci"></a>
-  <img src="https://img.shields.io/badge/Qodo-reviewed-101828" alt="Qodo reviewed">
   <img src="https://img.shields.io/badge/TrueForge-agent_harness-635bff" alt="TrueForge agent harness">
   <img src="https://img.shields.io/badge/demo-Juice_Shop_v17.3.0-0ea5e9" alt="demo Juice Shop v17.3.0">
 </p>
@@ -211,7 +210,7 @@ Copy `env.example` to `.env.local` and fill it in. Only the database block is re
 
 ## Qodo Code Review Evidence
 
-Every substantive change lands through a pull request reviewed by Qodo before merge. Branch protection requires the `build` and `qodo-reviewed` checks, and direct pushes to `main` are blocked.
+During the hackathon window, every substantive change landed through a pull request reviewed by Qodo before merge. The Qodo trial expired in September 2026 and the trail ended there, so the table below is a historical record of that period, not a description of the current process. Today a merge needs a pull request, a green `build` check, and resolved conversations.
 
 | PR | What Qodo found | What changed |
 |---|---|---|
@@ -225,7 +224,7 @@ Every substantive change lands through a pull request reviewed by Qodo before me
 
 ## Disclosure: AI use
 
-This project was built with AI coding assistance under human direction. All changes are human-reviewed and merged through the Qodo-reviewed pull-request process. Security-sensitive logic, including scope enforcement, intake authentication, delivery idempotency, and the approval gate, carries tests.
+This project was built with AI coding assistance under human direction. All changes are human-reviewed and merged through pull requests; during the hackathon window those reviews were Qodo's. Security-sensitive logic, including scope enforcement, intake authentication, delivery idempotency, and the approval gate, carries tests.
 
 ## License
 

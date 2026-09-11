@@ -102,10 +102,14 @@ placeholders only.
 
 ## Working rules
 
-Every substantive change ships through a Qodo-reviewed PR. Branch protection enforces this:
-`main` requires a PR, the `build` and `qodo-reviewed` checks, and resolved conversations, with
-admins included. A direct push does not produce the required review record, and that record
-cannot be backfilled.
+Every substantive change ships through a PR. Branch protection enforces this: `main` requires a
+PR, a green `build` check, and resolved conversations, with admins included. A direct push is
+rejected by branch protection, and a push that bypassed review cannot be backfilled as a
+review record.
+
+Until September 2026 the review gate was Qodo's, enforced through a `qodo-reviewed` check.
+The Qodo trial expired and the workspace has no free tier, so the gate was removed; the
+Qodo-reviewed PR trail from the hackathon window stays in `README.md` as history.
 
 Security-sensitive changes land with a test. That means the scope guard, the canary oracle,
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
@@ -159,36 +163,22 @@ closing line about how solid the foundation now is.
 How this repo is run, and what is already set up.
 
 `main` is protected, and this is enforced rather than a convention. A PR is required, the
-`build` and `qodo-reviewed` checks must pass, every conversation must be resolved, admins are
+`build` check must pass, every conversation must be resolved, admins are
 included through `enforce_admins`, and force-pushes and branch deletion are off. A direct push
 is rejected with `GH006 … Changes must be made through a pull request`.
 
-The loop for every change: branch off `main`, commit, push, open a PR, let the Qodo Code
-Review App review it, address each finding in the thread with either a fix or a reasoned
-dismissal, wait for green checks, then `gh pr merge <n> --squash --delete-branch`. Qodo
-submits a formal review on its first pass and edits that same comment on later pushes, so the
-`qodo-reviewed` check accepts either signal and waits for it rather than failing on timing.
+The loop for every change: branch off `main`, commit, push, open a PR, self-review the diff
+and address what you find, resolve every conversation, wait for the `build` check and the
+Vercel preview to be green, then `gh pr merge <n> --squash --delete-branch`.
 
 Do not open a standalone PR for each trivial edit. Keep small, related changes on a scoped
 branch until they form one coherent, reviewable improvement, then open a single PR for that
 work. Do not bundle unrelated changes to make a PR look larger, and do not use this rule to
 push directly to `main`.
 
-The Qodo review trail has a few additional requirements:
-
-- If Qodo does not start automatically, comment `/agentic_review` on the PR.
-- Fix every valid High-severity finding before merge. Dismiss a finding only with a reasoned
-  response in its thread.
-- After pushing fixes to the same PR, run `/agentic_review` again when needed. Confirm that
-  Qodo reviewed the current head commit, not only an earlier revision.
-- Keep the exact `## Qodo Code Review Evidence` heading in `README.md`. It must link to at
-  least one representative merged PR with meaningful project code, explain in one or two
-  lines what Qodo found and what was fixed or intentionally dismissed, and leave the initial
-  and follow-up reviews visible in that PR's history.
-
-Qodo Agent Skills are an optional helper for resolving findings. Install them with
-`npx skills add qodo-ai/qodo-skills/skills`, then use `qodo-pr-resolver`. The skill does not
-replace the required Qodo review, follow-up review, green checks, or resolved conversations.
+A review finding, wherever it comes from, is addressed before merge: either fix it or reply
+in its thread with the reason it does not apply. A High-severity finding on a security
+surface is never merged unfixed.
 
 Every PR description uses this template. Replace the placeholder text, check every applicable
 type of change, and leave unrelated boxes unchecked.
@@ -245,8 +235,8 @@ own backend, never the primary checkout. No shared branch, no shared database, n
 Own worktree. Prefer the Agent tool's `isolation: "worktree"`, which runs the agent on an
 isolated copy and removes it again if nothing changed. By hand it is
 `git worktree add ../bd-<task> -b <task-branch>`, cleaned up with `git worktree remove` once
-the PR merges. Each worktree opens its own PR, and merges still serialize through Qodo and CI
-on `main`.
+the PR merges. Each worktree opens its own PR, and merges still serialize through CI on
+`main`.
 
 Own database. Give each agent a distinct `DATABASE_URL` so one agent's migrations and jobs
 rows cannot collide with another's. The cheapest isolation is a throwaway local Postgres per

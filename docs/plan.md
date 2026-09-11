@@ -8,7 +8,7 @@ the "Backlog" section at the end says which held-out work that opens up and whic
 
 **Status:** complete.
 
-- Next.js/TypeScript scaffold, CI, contribution rules, branch protection and Qodo review trail.
+- Next.js/TypeScript scaffold, CI, contribution rules, branch protection and the review trail. The Qodo gate ran until its trial expired in September 2026; merges since then need a PR, the `build` check, and resolved conversations.
 - Environment template and committed architecture/design records.
 
 **Exit:** clean install, lint and production build pass through a reviewed PR.
