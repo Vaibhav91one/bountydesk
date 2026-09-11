@@ -85,6 +85,47 @@ test("createTurn resolves to running when the turn has not settled yet", async (
   );
 });
 
+test("createTurn serializes a denied tool approval with TrueForge wire keys", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  await withFetch(
+    (async (_input, init) => {
+      requestBody = JSON.parse(String(init?.body));
+      return json({
+        data: {
+          id: "turn_denied",
+          session_id: "sess_1",
+          previous_turn_id: "turn_1",
+          created_at: "2026-01-01T00:00:00Z",
+          state: { status: "running" },
+        },
+      });
+    }) as typeof fetch,
+    async () => {
+      const client = createTrueForgeClient();
+      const result = await client.createTurn("sess_1", [
+        {
+          type: "user.tool_approval",
+          threadId: "thread_1",
+          toolCallId: "call_1",
+          approval: { status: "deny", reason: "scope changes are not available" },
+        },
+      ]);
+      assert.equal(result.turnId, "turn_denied");
+      assert.deepEqual(requestBody, {
+        input: [
+          {
+            type: "user.tool_approval",
+            thread_id: "thread_1",
+            tool_call_id: "call_1",
+            approval: { status: "deny", reason: "scope changes are not available" },
+          },
+        ],
+        stream: false,
+      });
+    },
+  );
+});
+
 test("getTurn resolves done with no requiredActions to done_no_action", async () => {
   await withFetch(
     (async () =>
