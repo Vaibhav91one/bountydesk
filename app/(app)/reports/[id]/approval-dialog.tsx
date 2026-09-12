@@ -22,12 +22,9 @@ import type { LifecycleEventView } from "@/lib/reports/case-view";
 import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
 import type { ToolCallView } from "@/lib/reports/tool-call-view";
 
-import { AgentChat, type ChatTurn } from "./agent-chat";
+import { AgentChat } from "./agent-chat";
 import { AgentTrace } from "./agent-trace";
 import { VerdictCard } from "./verdict-card";
-
-/** The tabs on the chat, and the thing each one answers about. */
-const TOPICS = ["Evidence", "Target", "What approving binds"];
 
 /**
  * Everything a reviewer needs before signing, in one place.
@@ -54,8 +51,6 @@ export function ApprovalDialog({
   summary,
   revision,
   destination,
-  targetName,
-  reproductionRan,
   findings,
   speaker,
   speakerScope,
@@ -77,8 +72,6 @@ export function ApprovalDialog({
   summary: string;
   revision: number;
   destination: string;
-  targetName: string | null;
-  reproductionRan: boolean;
   /** What the agent's own investigation found, beyond the summary. May be empty. */
   findings: Finding[];
   speaker: MascotKey;
@@ -90,9 +83,7 @@ export function ApprovalDialog({
 }) {
   const queryClient = useQueryClient();
   const [chatting, setChatting] = useState(false);
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
-  const [topic, setTopic] = useState(TOPICS[0]);
-  const [thinking, setThinking] = useState(false);
+  const [reason, setReason] = useState<string | null>(null);
   const [acting, setActing] = useState<"allow" | "deny" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
@@ -105,51 +96,6 @@ export function ApprovalDialog({
       setDecision(null);
     }
   }
-
-  /**
-   * What the agent answers with.
-   *
-   * Assembled from this report's own record, never invented, and keyed to whichever tab is
-   * open. Every sentence restates something already on this screen: the findings list, the
-   * summary, or (when one exists) a recorded oracle result. Nothing here is a fresh claim.
-   */
-  function reply(): string {
-    if (topic === "Target") {
-      return targetName
-        ? `This report is bound to the pinned target ${targetName}. My investigation ran against that image and nothing else; the scope guard takes the target from the server-held profile, not from anything I wrote.`
-        : "No target profile is bound to this report, so there was nothing authorised to investigate. That is why the run stopped at analysis only.";
-    }
-
-    if (topic === "What approving binds") {
-      return `Approving records your decision against revision ${revision} and hash ${contentHash.slice(0, 12)}. The submission worker relays that to the harness, and publish_verdict refuses any payload whose hash differs. It does not close the issue, and it does not change the verdict.`;
-    }
-
-    if (reproductionRan) {
-      return `The oracle observed this run's canary outside the sandbox, and that is what decided the outcome. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
-    }
-
-    if (findings.length === 0) {
-      return `My own investigation is what decided this, not an external oracle. I found nothing beyond what the summary already says: ${summary}`;
-    }
-
-    const list = findings.map((finding) => `${finding.title} (${finding.severity})`).join(", ");
-    return `My own investigation is what decided this, not an external oracle. What I found: ${list}. The verdict reads ${outcomeLabel.toLowerCase()}: ${summary}`;
-  }
-
-  function send(text: string) {
-    setTurns((current) => [...current, { id: current.length, from: "reviewer", text }]);
-    setThinking(true);
-    window.setTimeout(() => {
-      setTurns((current) => [
-        ...current,
-        { id: current.length, from: "agent", text: reply(), source: topic },
-      ]);
-      setThinking(false);
-    }, 900);
-  }
-
-  // The last thing the reviewer wrote, which is what a denial carries as its reason.
-  const reason = [...turns].reverse().find((turn) => turn.from === "reviewer")?.text ?? null;
 
   async function decide(kind: "allow" | "deny") {
     if (acting) return;
@@ -252,15 +198,10 @@ export function ApprovalDialog({
 
               {chatting ? (
                 <AgentChat
-                  turns={turns}
-                  thinking={thinking}
-                  topics={TOPICS}
-                  topic={topic}
-                  onTopic={setTopic}
-                  onSend={send}
-                  onDeny={() => decide("deny")}
-                  denying={acting === "deny"}
-                  canDeny={reason !== null && acting === null}
+                  reportId={reportId}
+                  revision={revision}
+                  contentHash={contentHash}
+                  onReasonChange={setReason}
                 />
               ) : null}
             </>

@@ -61,8 +61,6 @@ export function CaseApproval({
       summary={status.verdict.summary}
       revision={status.verdict.revision}
       destination={status.destination}
-      targetName={status.target?.name ?? null}
-      reproductionRan={status.verdict.reproductionRan}
       findings={status.verdict.findings}
       speaker="awaiting-approval"
       speakerScope="approval-speaker"

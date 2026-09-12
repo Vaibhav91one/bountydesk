@@ -236,20 +236,15 @@ export function VerdictCard({
           )
         ) : (
         <span className="flex shrink-0 items-center justify-end gap-2">
-          {/* Not approving is meant to be a conversation, and the conversation is not built.
-              Parked rather than removed: the panel behind it works, but nothing a reviewer
-              typed would reach the harness, so offering it would promise a channel that does
-              not exist. It sits apart from the pair that decide. */}
-          <Button size="sm" variant="outline" onClick={onChat} disabled title="Coming soon">
-            {/* Agent Bounty rather than a speech-bubble glyph: the button names it, so it
-                should look like it. */}
+          {/* Chat is advisory and has no path to either decision. Approval and denial remain
+              separate guarded controls beside it. */}
+          <Button size="sm" variant="outline" onClick={onChat} disabled={disabled}>
             <AnimatedMascotSvg
               state={chatMascot}
               scope={chatMascotScope}
               className="-my-1 size-6 shrink-0 [&>svg]:block [&>svg]:size-full"
             />
             Chat with Agent Bounty
-            <span className="text-meta text-muted-foreground">Coming soon</span>
           </Button>
 
           {/* Both outcomes stay reachable, and next to each other. The conversation was going
