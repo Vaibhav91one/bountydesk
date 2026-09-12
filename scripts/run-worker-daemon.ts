@@ -29,6 +29,11 @@ import { createTrueForgeClient } from "@/lib/trueforge/client";
 import { onboardOnce } from "@/lib/build-onboarding/worker";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
+import {
+  reviewerChatEnabled,
+  sweepExpiredLeases as sweepReviewerChat,
+} from "@/lib/reviewer-chat/queue";
+import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -164,6 +169,7 @@ async function main(): Promise<void> {
   const approvalSubmissionOwner = `daemon-approval-submission-${randomUUID()}`;
   const deliveryOwner = `daemon-delivery-${randomUUID()}`;
   const onboardingOwner = `daemon-build-onboarding-${randomUUID()}`;
+  const reviewerChatOwner = `daemon-reviewer-chat-${randomUUID()}`;
   const buildDriver = createDaytonaBuildDriver();
 
   const queues: QueueSpec[] = [
@@ -213,6 +219,19 @@ async function main(): Promise<void> {
         }),
       sweepOnce: sweepOnboarding,
     },
+    ...(reviewerChatEnabled()
+      ? [{
+          name: "reviewer-chat",
+          claimOnce: (signal: AbortSignal) =>
+            runReviewerChatOnce(reviewerChatOwner, {
+              client: trueForgeClient,
+              leaseSeconds: LEASE_SECONDS,
+              signal,
+            }),
+          sweepOnce: sweepReviewerChat,
+          claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+        } satisfies QueueSpec]
+      : []),
   ];
 
   // runDaemon runs a claim loop and a sweeper per queue, and /healthz watches all of them, so

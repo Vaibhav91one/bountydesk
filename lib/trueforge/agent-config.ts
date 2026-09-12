@@ -87,3 +87,19 @@ export const SCOPE_GUARD_APPROVAL_GATED_TOOLS = [
   "scope_remove",
   "scope_add_temporary",
 ] as const;
+
+/**
+ * Reviewer chat is a separate TrueForge agent, not a reduced version of the investigation agent.
+ * Keeping this builder free of URLs, credentials, connectors, and target capabilities makes the
+ * no-tool boundary explicit at the call site and gives config tests one stable contract to check.
+ */
+export function buildChatAgentManifest() {
+  return {
+    mcpServers: [] as const,
+    requireApprovalForTools: [] as const,
+    config: {
+      sandbox: { enabled: false },
+      dynamic_sub_agents: { enabled: false },
+    },
+  };
+}

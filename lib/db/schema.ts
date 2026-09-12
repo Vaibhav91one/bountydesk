@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -10,6 +11,7 @@ import {
   pgTable,
   text,
   timestamp,
+  unique,
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
@@ -79,6 +81,36 @@ export const scopeGuardAuditVerdict = pgEnum("scope_guard_audit_verdict", [
   "allowed",
   "denied",
   "mutated",
+]);
+
+export const investigationRunReason = pgEnum("investigation_run_reason", [
+  "INITIAL",
+  "REVIEWER_GUIDANCE",
+  "REPORTER_REPLY",
+]);
+
+export const investigationRunStatus = pgEnum("investigation_run_status", [
+  "PENDING",
+  "RUNNING",
+  "AWAITING_APPROVAL",
+  "SUPERSEDED",
+  "DONE",
+  "ERROR",
+  "CANCELLED",
+]);
+
+export const reviewerChatThreadStatus = pgEnum("reviewer_chat_thread_status", [
+  "OPEN",
+  "RUNNING",
+  "DONE",
+  "ERROR",
+  "CANCELLED",
+]);
+
+export const reviewerChatMessageSender = pgEnum("reviewer_chat_message_sender", [
+  "REVIEWER",
+  "AGENT",
+  "SYSTEM",
 ]);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
@@ -305,11 +337,178 @@ export const verdict = pgTable(
   },
   (t) => [
     uniqueIndex("verdict_report_revision_key").on(t.reportId, t.revision),
+    // Composite identity lets chat and supersession rows prove that a verdict belongs to the
+    // report named beside it, rather than trusting two independent caller-supplied foreign keys.
+    unique("verdict_report_id_key").on(t.reportId, t.id),
     index("verdict_report_idx").on(t.reportId),
   ],
 );
 
 /** Immutable record of a human decision. Never updated, only inserted. */
+/**
+ * One durable investigation attempt for a report. A reviewer-guided run is a new row rather
+ * than a mutation of the previous run, so the report can show which run produced each finding.
+ * The lease columns are worker bookkeeping, not another lifecycle state.
+ */
+export const investigationRun = pgTable(
+  "investigation_run",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    runNumber: integer("run_number").notNull(),
+    parentRunId: uuid("parent_run_id"),
+    reason: investigationRunReason("reason").notNull(),
+    status: investigationRunStatus("status").notNull().default("PENDING"),
+    trueforgeSessionId: text("trueforge_session_id"),
+    currentTurnId: text("current_turn_id"),
+    targetProfileId: uuid("target_profile_id").references(() => targetProfile.id, {
+      onDelete: "restrict",
+    }),
+    targetIdentityHash: text("target_identity_hash"),
+    guidanceHash: text("guidance_hash"),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "investigation_run_parent_run_id_fk",
+      columns: [t.parentRunId],
+      foreignColumns: [t.id],
+    }),
+    foreignKey({
+      name: "investigation_run_report_parent_fk",
+      columns: [t.reportId, t.parentRunId],
+      foreignColumns: [t.reportId, t.id],
+    }),
+    uniqueIndex("investigation_run_report_run_number_key").on(t.reportId, t.runNumber),
+    unique("investigation_run_report_id_key").on(t.reportId, t.id),
+    uniqueIndex("investigation_run_trueforge_session_id_key").on(t.trueforgeSessionId),
+    index("investigation_run_report_idx").on(t.reportId),
+    index("investigation_run_parent_idx").on(t.parentRunId),
+    index("investigation_run_status_idx").on(t.status),
+  ],
+);
+
+/**
+ * A reviewer's durable conversation context. The verdict fields are a snapshot of the exact
+ * revision being discussed; they do not give the chat permission to alter that verdict.
+ */
+export const reviewerChatThread = pgTable(
+  "reviewer_chat_thread",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    verdictId: uuid("verdict_id").references(() => verdict.id, { onDelete: "restrict" }),
+    verdictRevision: integer("verdict_revision"),
+    verdictContentHash: text("verdict_content_hash"),
+    reviewerId: text("reviewer_id").notNull(),
+    trueforgeSessionId: text("trueforge_session_id"),
+    status: reviewerChatThreadStatus("status").notNull().default("OPEN"),
+    leaseOwner: text("lease_owner"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    fence: bigint("fence", { mode: "number" }).notNull().default(0),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "reviewer_chat_thread_report_verdict_fk",
+      columns: [t.reportId, t.verdictId],
+      foreignColumns: [verdict.reportId, verdict.id],
+    }),
+    index("reviewer_chat_thread_report_idx").on(t.reportId),
+    index("reviewer_chat_thread_verdict_idx").on(t.verdictId),
+    uniqueIndex("reviewer_chat_thread_active_verdict_key")
+      .on(t.reportId, t.verdictId)
+      .where(sql`${t.status} in ('OPEN', 'RUNNING') and ${t.verdictId} is not null`),
+    uniqueIndex("reviewer_chat_thread_active_report_key")
+      .on(t.reportId)
+      .where(sql`${t.status} in ('OPEN', 'RUNNING') and ${t.verdictId} is null`),
+    uniqueIndex("reviewer_chat_thread_trueforge_session_id_key").on(t.trueforgeSessionId),
+    check(
+      "reviewer_chat_thread_verdict_snapshot_check",
+      sql`(${t.verdictId} is null and ${t.verdictRevision} is null and ${t.verdictContentHash} is null)
+        or (${t.verdictId} is not null and ${t.verdictRevision} is not null and ${t.verdictContentHash} is not null)`,
+    ),
+  ],
+);
+
+/** Reviewer and agent messages are evidence, so they can only be inserted. */
+export const reviewerChatMessage = pgTable(
+  "reviewer_chat_message",
+  {
+    id: id(),
+    threadId: uuid("thread_id")
+      .notNull()
+      .references(() => reviewerChatThread.id, { onDelete: "restrict" }),
+    clientRequestId: text("client_request_id").notNull(),
+    sender: reviewerChatMessageSender("sender").notNull(),
+    body: text("body").notNull(),
+    bodyHash: text("body_hash").notNull(),
+    modelName: text("model_name"),
+    providerTurnId: text("provider_turn_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("reviewer_chat_message_thread_request_key").on(t.threadId, t.clientRequestId),
+    index("reviewer_chat_message_thread_idx").on(t.threadId, t.createdAt),
+    check(
+      "reviewer_chat_message_body_length_check",
+      sql`char_length(${t.body}) between 1 and 20000`,
+    ),
+    check("reviewer_chat_message_request_id_check", sql`char_length(${t.clientRequestId}) between 1 and 200`),
+  ],
+);
+
+/**
+ * Immutable link from an old verdict to a reviewer-requested run. Verdict payload, content hash,
+ * and revision remain untouched; a later run may produce the next verdict revision separately.
+ */
+export const verdictSupersession = pgTable(
+  "verdict_supersession",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    oldVerdictId: uuid("old_verdict_id")
+      .notNull()
+      .references(() => verdict.id, { onDelete: "restrict" }),
+    supersededByRunId: uuid("superseded_by_run_id")
+      .notNull()
+      .references(() => investigationRun.id, { onDelete: "restrict" }),
+    reason: text("reason").notNull(),
+    actor: text("actor").notNull(),
+    guidanceHash: text("guidance_hash"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "verdict_supersession_report_verdict_fk",
+      columns: [t.reportId, t.oldVerdictId],
+      foreignColumns: [verdict.reportId, verdict.id],
+    }),
+    foreignKey({
+      name: "verdict_supersession_report_run_fk",
+      columns: [t.reportId, t.supersededByRunId],
+      foreignColumns: [investigationRun.reportId, investigationRun.id],
+    }),
+    uniqueIndex("verdict_supersession_old_verdict_id_key").on(t.oldVerdictId),
+    index("verdict_supersession_report_idx").on(t.reportId),
+  ],
+);
+
 export const approvalDecision = pgTable(
   "approval_decision",
   {
