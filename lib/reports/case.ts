@@ -13,6 +13,7 @@ import {
   sessionEvent,
   targetProfile,
   verdict,
+  verdictSupersession,
 } from "@/lib/db";
 import { MAX_ATTEMPTS as HANDOFF_MAX_ATTEMPTS } from "@/lib/approval-submission/queue";
 export {
@@ -23,8 +24,9 @@ export {
   type CaseEvent,
   type CaseFile,
   type CaseVerdict,
+  type CaseVerdictHistoryEntry,
 } from "@/lib/reports/case-facts";
-import type { CaseFile } from "@/lib/reports/case-facts";
+import type { CaseFile, CaseVerdictHistoryEntry } from "@/lib/reports/case-facts";
 
 /**
  * Everything one report has to show, read in one snapshot.
@@ -177,6 +179,34 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         .orderBy(desc(verdict.revision))
         .limit(1);
 
+      // The whole revision history for the artifacts panel and the superseded labels. The
+      // supersession rows name the verdicts that are dead history, which is a smaller set than
+      // "everything but the newest" the moment a run drafts a revision nobody has answered yet.
+      const historyRows = await tx
+        .select({
+          id: verdict.id,
+          outcome: verdict.outcome,
+          summary: verdict.summary,
+          revision: verdict.revision,
+          createdAt: verdict.createdAt,
+          supersededById: verdictSupersession.supersededByRunId,
+        })
+        .from(verdict)
+        .leftJoin(
+          verdictSupersession,
+          eq(verdictSupersession.oldVerdictId, verdict.id),
+        )
+        .where(eq(verdict.reportId, id))
+        .orderBy(desc(verdict.revision));
+      const verdictHistory: CaseVerdictHistoryEntry[] = historyRows.map((v) => ({
+        id: v.id,
+        revision: v.revision,
+        outcome: v.outcome,
+        summary: v.summary,
+        createdAt: v.createdAt,
+        superseded: v.supersededById !== null,
+      }));
+
       const latest = canShowPending && pending ? pending : newest;
 
       const [decision] = latest
@@ -253,8 +283,11 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           contentType: artifact.contentType,
           storagePath: artifact.storagePath,
           createdAt: artifact.createdAt,
+          verdictId: artifact.verdictId,
+          verdictRevision: verdict.revision,
         })
         .from(artifact)
+        .leftJoin(verdict, eq(verdict.id, artifact.verdictId))
         .where(eq(artifact.reportId, id))
         .orderBy(desc(artifact.createdAt));
 
@@ -290,6 +323,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           ? { name: row.targetName, imageDigest: row.targetDigest ?? "" }
           : null,
         verdict: latest ?? null,
+        verdictHistory,
         approval: decision ?? null,
         delivery: dispatch ?? null,
         // The retry ceiling is a module constant rather than a column on this table, unlike
@@ -298,9 +332,12 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         handoff: handoff ? { ...handoff, maxAttempts: HANDOFF_MAX_ATTEMPTS } : null,
         awaitingVerdictId,
         events: events.map((e) => ({ ...e, channel: e.type.split(".")[0] })),
-        artifacts: artifacts.map(({ storagePath, ...rest }) => ({
+        artifacts: artifacts.map(({ storagePath, verdictRevision, ...rest }) => ({
           ...rest,
           stored: storagePath !== null,
+          // A row whose verdict link is gone (or never existed) shares the ungrouped section
+          // rather than crashing the page over bookkeeping.
+          verdictRevision: verdictRevision ?? 0,
         })),
       };
     },

@@ -85,8 +85,13 @@ export function LifecycleList({
                 )}
               />
 
-              <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
-                {step.label}
+              {/* line-clamp-2 rather than truncate: a step label or event name can run long
+                  (an approval request with its reason inline, a mirrored tool name), and one
+                  line of ellipsis was cutting the part that identified the row. Two lines,
+                  then ellipsis, keeps rows readable without letting any one of them push the
+                  layout wide. */}
+              <span className="min-w-0 flex-1 text-body font-medium text-foreground">
+                <span className="line-clamp-2">{step.label}</span>
               </span>
 
               <span className="shrink-0 text-meta text-muted-foreground">{step.note}</span>
@@ -114,8 +119,10 @@ export function LifecycleList({
                     {step.events.map((event) => (
                       <li key={event.seq} className="flex items-center gap-4">
                         <ToolCallHover detail={detailFor(event.eventKey)} fallback={fallbackFor(event)}>
-                          <span className="min-w-0 flex-1 truncate text-meta text-muted-foreground">
-                            {event.type}
+                          {/* Same two-line rule as the step label: a long mirrored event name
+                              wraps once and clamps rather than overflowing the panel. */}
+                          <span className="min-w-0 flex-1 text-meta text-muted-foreground">
+                            <span className="line-clamp-2">{event.type}</span>
                           </span>
                           <span className="shrink-0 font-mono text-meta tabular-nums text-muted-foreground">
                             {event.at}

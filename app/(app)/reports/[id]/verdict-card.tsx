@@ -5,6 +5,7 @@ import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
@@ -70,6 +71,7 @@ export function VerdictCard({
   denying,
   disabled,
   decision,
+  superseded,
 }: {
   /** The exact outbound comment body. Kept for the download's Blob fallback, not rendered raw. */
   payload: string;
@@ -101,6 +103,8 @@ export function VerdictCard({
    * approve handler is passed: null then means a verdict exists that nobody has answered.
    */
   decision?: { decision: string; reviewer: string; note: string | null; at: string } | null;
+  /** True when a later run superseded this verdict. The card keeps rendering it as history. */
+  superseded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const evidence = EVIDENCE[outcome] ?? EVIDENCE.INCONCLUSIVE;
@@ -109,8 +113,13 @@ export function VerdictCard({
     <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
       <div className="flex flex-col gap-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-body font-medium text-foreground">
-            {approve ? "Post this comment to the issue?" : "The comment on record"}
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="text-body font-medium text-foreground">
+              {approve ? "Post this comment to the issue?" : "The comment on record"}
+            </span>
+            {superseded ? (
+              <Badge variant="outline">Superseded by a re-check</Badge>
+            ) : null}
           </span>
           <VerdictDialog
             outcomeLabel={outcomeLabel}
