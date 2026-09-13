@@ -74,6 +74,8 @@ export type CaseFile = {
    * reports today. Read from agent_session, where the driver records it. */
   sandbox: { id: string; appPort: number | null } | null;
   verdict: CaseVerdict | null;
+  /** Every revision on record, newest first. Length 0 for a report with no verdict yet. */
+  verdictHistory: CaseVerdictHistoryEntry[];
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
   delivery: {
     state: string;
@@ -116,6 +118,25 @@ export type CaseArtifact = {
   contentType: string;
   stored: boolean;
   createdAt: Date;
+  /** The verdict this artifact belongs to, so the panel can group by revision. Null only for
+   * legacy rows written before the column existed or for report-scoped kinds. */
+  verdictId: string | null;
+  /** Same as verdictId, resolved to the revision number for grouping; 0 when unknown. */
+  verdictRevision: number;
+};
+
+/** One revision in the report's verdict history, newest first. The case file shows the current
+ * verdict as the decision surface; this list is what the artifacts panel and the superseded
+ * labels read, so a reviewer can tell which run produced what. */
+export type CaseVerdictHistoryEntry = {
+  id: string;
+  revision: number;
+  outcome: string;
+  summary: string;
+  createdAt: Date;
+  /** True when a later run superseded this verdict: it is immutable history, no longer
+   * approvable, and the UI marks it as such. */
+  superseded: boolean;
 };
 
 /**

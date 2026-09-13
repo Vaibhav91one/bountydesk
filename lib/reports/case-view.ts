@@ -64,6 +64,8 @@ export type CaseArtifactView = {
   bytes: number;
   contentType: string;
   stored: boolean;
+  /** The revision this artifact belongs to. 0 when the row predates verdict linkage. */
+  verdictRevision: number;
 };
 
 export type CaseVerdictView = {
@@ -78,8 +80,21 @@ export type CaseVerdictView = {
   /** "Agent Bounty says" or "The oracle says". See draftedByAgent below. */
   verdictLabel: string;
   reproductionRan: boolean;
+  /** True when a later run superseded this verdict: immutable history, not approvable. */
+  superseded: boolean;
   payloadArtifactId: string | null;
   findingsArtifactId: string | null;
+};
+
+/** The revision list the artifacts panel groups by; see CaseVerdictHistoryEntry. */
+export type CaseVerdictHistoryView = {
+  id: string;
+  revision: number;
+  outcome: string;
+  outcomeLabel: string;
+  summary: string;
+  createdAt: string;
+  superseded: boolean;
 };
 
 export type CaseLiveView = {
@@ -136,6 +151,9 @@ export type CaseLiveView = {
 
   steps: LifecycleStepView[];
   artifacts: CaseArtifactView[];
+  /** Every revision on record, newest first. Drives the artifacts panel's grouping and the
+   * superseded labels, so a reviewer can see which run produced what. */
+  verdictHistory: CaseVerdictHistoryView[];
   /** Whether this deployment can store artifact bytes at all right now. An artifact row records
    *  whether its own upload succeeded, and the table is append-only, so a row that missed
    *  storage stays empty for good; this says whether the next one will miss it too, which is
@@ -470,18 +488,28 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
           findings: verdictFindings(file.verdict.evidence),
           verdictLabel: draftedByAgent ? "Agent Bounty says" : "The oracle says",
           reproductionRan: !draftedByAgent,
-          // The stored exact-comment artifact, when the post-commit recorder managed to write
-          // it. The download prefers its signed URL and falls back to the payload text.
+          superseded:
+            file.verdictHistory.find((v) => v.id === file.verdict!.id)?.superseded ?? false,
+          // The stored exact-comment artifact for THIS verdict, when the post-commit recorder
+          // managed to write it. The download prefers its signed URL and falls back to the
+          // payload text. Scoped to this verdict's rows, never the first verdict-payload on
+          // file: a re-check run means several revisions share the report.
           payloadArtifactId:
-            file.artifacts.find((art) => art.kind === "verdict-payload")?.id ?? null,
+            file.artifacts.find(
+              (art) => art.kind === "verdict-payload" && art.verdictId === file.verdict!.id,
+            )?.id ?? null,
           // What the findings table and the sheet offer in place of the evidence reference the
           // agent cited. Only when the bytes actually landed: artifact recording is best-effort
           // and writes a row with no stored path when storage is off or an upload failed, and a
           // download keyed to such a row would only error. Null here makes the views fall back
           // to showing the reference inline, so a reviewer is never left with neither.
           findingsArtifactId:
-            file.artifacts.find((art) => art.kind === "findings-evidence" && art.stored)?.id ??
-            null,
+            file.artifacts.find(
+              (art) =>
+                art.kind === "findings-evidence" &&
+                art.stored &&
+                art.verdictId === file.verdict!.id,
+            )?.id ?? null,
         }
       : null,
 
@@ -506,6 +534,18 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
       bytes: art.bytes,
       contentType: art.contentType,
       stored: art.stored,
+      verdictRevision: art.verdictRevision,
+    })),
+    // Serialized at the same moment as everything else on this view, so the revision the
+    // artifacts panel groups by never disagrees with the verdict card beside it.
+    verdictHistory: file.verdictHistory.map((v) => ({
+      id: v.id,
+      revision: v.revision,
+      outcome: v.outcome,
+      outcomeLabel: outcomeLabel(v.outcome),
+      summary: v.summary,
+      createdAt: v.createdAt.toISOString(),
+      superseded: v.superseded,
     })),
   };
 }

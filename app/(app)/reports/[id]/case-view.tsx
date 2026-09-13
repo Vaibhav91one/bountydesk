@@ -19,6 +19,7 @@ import { ArtifactsPanel } from "./artifacts-panel";
 import { FindingsPanel } from "./findings-panel";
 import { LifecycleList } from "./lifecycle-list";
 import { StatusCard } from "./status-card";
+import { SummaryCard } from "./summary-card";
 import { VerdictCard } from "./verdict-card";
 
 function Panel({
@@ -120,13 +121,7 @@ export function CaseView({
       </div>
 
       {status.finalSummary ? (
-        <Panel title="Summary and next steps">
-          {/* The agent's own closing message, captured from its turn. Rendered as text, never
-              as HTML: the agent may have read prompt-injection content while probing an
-              untrusted target, so its prose is shown, not interpreted. whitespace-pre-wrap
-              keeps the paragraph and list breaks it wrote. */}
-          <p className="whitespace-pre-wrap text-body text-foreground">{status.finalSummary}</p>
-        </Panel>
+        <SummaryCard summary={status.finalSummary} updatedAt={status.updatedAt} />
       ) : null}
 
       {/* No card around it. The table carries its own border, and a "Findings" header over a
@@ -158,6 +153,7 @@ export function CaseView({
           speakerScope="record-speaker"
           chatMascot="greeting"
           chatMascotScope="record-chat"
+          superseded={status.verdict.superseded}
           decision={
             status.approval
               ? {
@@ -186,6 +182,7 @@ export function CaseView({
           storageConfigured={status.storageConfigured}
           imageDigest={status.target?.imageDigest || null}
           contentHash={status.verdict?.contentHash ?? null}
+          verdictHistory={status.verdictHistory}
         />
       </Panel>
     </div>

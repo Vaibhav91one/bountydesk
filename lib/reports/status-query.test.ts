@@ -39,6 +39,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     finalSummary: null,
     destination: "#18",
     verdict: null,
+    verdictHistory: [],
     approval: null,
     delivery: null,
     handoff: null,
