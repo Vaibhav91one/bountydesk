@@ -163,6 +163,16 @@ function heldBy(lease: AgentSessionLease) {
   );
 }
 
+/** Verify ownership before a transaction mutates report or verdict state. */
+export async function assertHeld(lease: AgentSessionLease, tx: Executor = db): Promise<void> {
+  const [row] = await tx
+    .select({ id: agentSession.id })
+    .from(agentSession)
+    .where(heldBy(lease))
+    .limit(1);
+  if (!row) throw new LeaseLostError(lease.id);
+}
+
 /** Extend a held lease without changing its owner or fence. */
 export async function renew(lease: AgentSessionLease, leaseSeconds: number): Promise<void> {
   if (!Number.isFinite(leaseSeconds) || leaseSeconds <= 0) {

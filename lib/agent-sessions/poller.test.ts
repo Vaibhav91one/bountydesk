@@ -439,9 +439,14 @@ test("a valid single publish_verdict call moves the report and records the pendi
   assert.equal(row.leaseOwner, null);
 });
 
-test("the pending call stays bound to the verdict prepared before the turn started", async () => {
+test("the pending call binds to the newest revision, which a re-check run's draft is", async () => {
   await drainOthers();
   const fixture = await seedSession();
+  // A revision-2 row is what a re-check run produces: the only production writer of revisions
+  // past 1 is draftVerdictFromPendingCall inside a re-check, which rewrites this session's
+  // capability and turn before drafting. The poller therefore binds to the newest revision,
+  // and the approval gate still refuses anything the reviewer was not shown (decide() pins
+  // the exact verdictId the page rendered).
   const [newer] = await dbm.db
     .insert(dbm.verdict)
     .values({
@@ -461,8 +466,8 @@ test("the pending call stays bound to the verdict prepared before the turn start
   await poller.pollOnce("w-prepared-verdict", { client });
 
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.pendingVerdictId, fixture.verdictId);
-  assert.notEqual(row.pendingVerdictId, newer.id);
+  assert.equal(row.pendingVerdictId, newer.id);
+  assert.equal(row.pendingApprovedContentHash, "hash-the-model-never-saw");
 });
 
 test("a pending write probe is auto-approved and the session follows the resumed turn", async () => {

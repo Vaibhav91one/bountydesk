@@ -710,3 +710,75 @@ test("synthesized analysis-only for a report with no target says no-reproduction
     reason: "no-reproduction-target",
   });
 });
+
+test("a re-check run drafts revision 2, never overwriting revision 1", async () => {
+  const fixture = await seedFixture({ approval: "none" });
+
+  // Simulate the superseded first run: a revision-1 verdict exists with a supersession link,
+  // and the re-check run's agent_session carries a fresh capability.
+  const [run] = await dbm.db
+    .insert(dbm.investigationRun)
+    .values({
+      reportId: fixture.reportId,
+      runNumber: 2,
+      reason: "REVIEWER_GUIDANCE",
+      status: "RUNNING",
+      trueforgeSessionId: `recheck-session-${randomUUID()}`,
+    })
+    .returning({ id: dbm.investigationRun.id });
+  await dbm.db.insert(dbm.verdictSupersession).values({
+    reportId: fixture.reportId,
+    oldVerdictId: fixture.verdictId,
+    supersededByRunId: run.id,
+    reason: "reviewer-guided-recheck",
+    actor: "test-reviewer",
+  });
+
+  const result = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "The re-check found nothing further.",
+    findings: [],
+  });
+
+  assert.equal(result.ok, true, (result as { reason?: string }).reason);
+  const newId = (result as { verdictId: string }).verdictId;
+  assert.notEqual(newId, fixture.verdictId);
+
+  const revisions = await dbm.db
+    .select({ revision: dbm.verdict.revision, id: dbm.verdict.id })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId))
+    .orderBy(dbm.verdict.revision);
+  assert.equal(revisions.length, 2);
+  assert.equal(revisions[0].id, fixture.verdictId, "revision 1 stays immutable history");
+  assert.equal(revisions[1].id, newId);
+  assert.equal(revisions[1].revision, 2);
+});
+
+test("publishVerdict refuses an approved verdict that a re-check has superseded", async () => {
+  const fixture = await seedFixture({ approval: "approved" });
+
+  const [run] = await dbm.db
+    .insert(dbm.investigationRun)
+    .values({
+      reportId: fixture.reportId,
+      runNumber: 2,
+      reason: "REVIEWER_GUIDANCE",
+      status: "PENDING",
+    })
+    .returning({ id: dbm.investigationRun.id });
+  await dbm.db.insert(dbm.verdictSupersession).values({
+    reportId: fixture.reportId,
+    oldVerdictId: fixture.verdictId,
+    supersededByRunId: run.id,
+    reason: "reviewer-guided-recheck",
+    actor: "test-reviewer",
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /superseded/);
+  assert.equal(await deliveryCount(fixture.verdictId), 0, "nothing may be enqueued for dead text");
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL", "the report is not disturbed");
+});

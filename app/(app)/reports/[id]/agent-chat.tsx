@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwise, ArrowUp, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
+import { requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -132,11 +133,13 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
  */
 export function AgentChat({
   reportId,
+  verdictId,
   revision,
   contentHash,
   onReasonChange,
 }: {
   reportId: string;
+  verdictId: string;
   revision: number;
   contentHash: string;
   onReasonChange: (reason: string | null) => void;
@@ -148,6 +151,28 @@ export function AgentChat({
   const [sending, setSending] = useState<ChatRequest | null>(null);
   const [failed, setFailed] = useState<ChatRequest | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [recheckError, setRecheckError] = useState<string | null>(null);
+
+  const requestRecheck = useCallback(async () => {
+    if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
+    // The guidance is the reviewer's typed question, or a neutral default when they never
+    // typed one. The server re-validates everything: this string is a suggestion, never
+    // authority over target, tools, or approval.
+    const guidance =
+      draft.trim() ||
+      "The reviewer asked for a fresh look at this report. Investigate it from scratch and draft your own conclusion.";
+    setRecheckState("sending");
+    setRecheckError(null);
+    try {
+      const result = await requestRecheckAction(reportId, verdictId, guidance);
+      if (!result.ok) throw new Error(result.error ?? "The re-check could not be started.");
+      setRecheckState("sent");
+    } catch (error) {
+      setRecheckState("error");
+      setRecheckError(error instanceof Error ? error.message : "The re-check could not be started.");
+    }
+  }, [draft, reportId, verdictId]);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -308,13 +333,28 @@ export function AgentChat({
             <Button
               size="xs"
               variant="outline"
-              disabled
-              title="Guided re-check is not available yet. It will supersede this verdict and start a new run."
+              onClick={() => void requestRecheck()}
+              disabled={Boolean(sending) || recheckState === "sending"}
+              title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
             >
-              Ask to re-check
-              <span className="text-meta text-muted-foreground">Coming soon</span>
+              {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
             </Button>
           </div>
+
+          {recheckState === "error" ? (
+            <div className="border-t border-destructive/30 bg-destructive/5 px-4 py-3" role="alert">
+              <span className="text-meta text-destructive">{recheckError}</span>
+            </div>
+          ) : null}
+
+          {recheckState === "sent" ? (
+            <div className="border-t border-border/50 bg-muted/40 px-4 py-3">
+              <span className="text-meta text-muted-foreground">
+                Re-check started. This verdict is superseded and can no longer be approved; the
+                fresh investigation will produce a new revision for review.
+              </span>
+            </div>
+          ) : null}
 
           <div className="p-2">
             <div className="flex cursor-text flex-col gap-2 rounded-md border border-border/50 bg-background p-2.5 focus-within:border-ring">

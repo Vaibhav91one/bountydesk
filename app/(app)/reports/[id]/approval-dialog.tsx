@@ -199,6 +199,7 @@ export function ApprovalDialog({
               {chatting ? (
                 <AgentChat
                   reportId={reportId}
+                  verdictId={verdictId}
                   revision={revision}
                   contentHash={contentHash}
                   onReasonChange={setReason}
