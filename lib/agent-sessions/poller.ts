@@ -1,4 +1,4 @@
-import { and, db, eq, report, verdict } from "@/lib/db";
+import { and, db, eq, investigationRun, report, sql, verdict } from "@/lib/db";
 import {
   draftVerdictFromPendingCall,
   publishVerdictInputSchema,
@@ -19,6 +19,7 @@ import {
 import { SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "@/lib/trueforge/agent-config";
 
 import {
+  assertHeld,
   claim,
   LeaseLostError,
   markMirrored,
@@ -181,11 +182,23 @@ async function refuseUnresolvablePending(
  * Sandbox teardown stays after the transaction commits, same reasoning as everywhere in this
  * file: a Daytona network call is not something to hold report.state's row lock across.
  */
+async function updateInvestigationRunStatus(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  sessionId: string,
+  status: "AWAITING_APPROVAL" | "DONE" | "ERROR" | "CANCELLED",
+): Promise<void> {
+  await tx
+    .update(investigationRun)
+    .set({ status, ...(status !== "AWAITING_APPROVAL" ? { finishedAt: new Date() } : {}), updatedAt: new Date() })
+    .where(eq(investigationRun.trueforgeSessionId, sessionId));
+}
+
 async function endWithoutAgentVerdict(
   lease: AgentSessionLease,
   updates: { turnStatus: "DONE_NO_ACTION" | "ERROR" | "CANCELLED"; lastError?: string },
 ): Promise<string> {
   await db.transaction(async (tx) => {
+    await assertHeld(lease, tx);
     const [reportRow] = await tx
       .select({ state: report.state })
       .from(report)
@@ -220,6 +233,11 @@ async function endWithoutAgentVerdict(
       }
     }
     await release(lease, { ...updates, ...pending }, tx);
+    await updateInvestigationRunStatus(
+      tx,
+      lease.sessionId,
+      updates.turnStatus === "DONE_NO_ACTION" ? "DONE" : updates.turnStatus === "CANCELLED" ? "CANCELLED" : "ERROR",
+    );
   });
   for (const sandboxId of lease.sandboxIds ?? (lease.sandboxId ? [lease.sandboxId] : [])) {
     await teardownSandbox(sandboxId, true);
@@ -265,8 +283,10 @@ async function finishWithoutApproval(
 async function handleVerifiedPendingCall(
   lease: AgentSessionLease,
   call: PendingToolCall,
+  draftedVerdictId?: string,
 ): Promise<string> {
   await db.transaction(async (tx) => {
+    await assertHeld(lease, tx);
     // Locks the report so a concurrent poll (a retried tick overlapping this one) cannot
     // also observe a pre-ANALYSIS_ONLY state and race this transition.
     const [reportRow] = await tx
@@ -279,17 +299,24 @@ async function handleVerifiedPendingCall(
       throw new Error(`agent session ${lease.id}: report ${lease.reportId} no longer exists`);
     }
 
-    // The driver prepares revision 1 before it starts this turn. A later draft was not part
-    // of the turn and cannot silently replace the exact payload the pending call refers to.
+    // The driver prepares the newest verdict revision before it starts this turn: revision 1
+    // for a first run, N+1 for a re-check run. A draft older than the newest was not part of
+    // the turn and cannot silently replace the exact payload the pending call refers to.
     const [verdictRow] = await tx
       .select({
         id: verdict.id,
         reportId: verdict.reportId,
         contentHash: verdict.contentHash,
         outcome: verdict.outcome,
+        revision: verdict.revision,
       })
       .from(verdict)
-      .where(and(eq(verdict.reportId, lease.reportId), eq(verdict.revision, 1)))
+      .where(
+        and(
+          eq(verdict.reportId, lease.reportId),
+          eq(verdict.revision, sql`(select max(${verdict.revision}) from ${verdict} where ${verdict.reportId} = ${lease.reportId})`),
+        ),
+      )
       .limit(1);
 
     if (!verdictRow) {
@@ -319,6 +346,7 @@ async function handleVerifiedPendingCall(
         lease.pendingThreadId !== call.threadId ||
         lease.pendingToolCallId !== call.toolCallId ||
         lease.pendingVerdictId !== verdictRow.id ||
+        (draftedVerdictId !== undefined && draftedVerdictId !== verdictRow.id) ||
         lease.pendingApprovedContentHash !== verdictRow.contentHash
       ) {
         await release(
@@ -346,6 +374,8 @@ async function handleVerifiedPendingCall(
     // A report already at AWAITING_APPROVAL, or an ANALYSIS_ONLY verdict already parked in the
     // analysis lane, is the idempotent retry case. Later lifecycle states are refused above,
     // because a delayed harness result cannot reopen approval.
+
+    await updateInvestigationRunStatus(tx, lease.sessionId, "AWAITING_APPROVAL");
 
     await release(
       lease,
@@ -387,7 +417,7 @@ async function handleAgentDraftedPendingCall(
   if (!drafted.ok) {
     return refuseUnresolvablePending(lease, `publish_verdict draft refused: ${drafted.reason}`);
   }
-  return handleVerifiedPendingCall(lease, call);
+  return handleVerifiedPendingCall(lease, call, drafted.verdictId);
 }
 
 /**
@@ -654,7 +684,7 @@ async function runWithHeartbeat<T>(
   const signal = AbortSignal.any([base, AbortSignal.timeout(deadlineMs * CALLS_PER_CLAIM)]);
   const intervalMs = Math.max(
     MIN_HEARTBEAT_INTERVAL_MS,
-    Math.floor((leaseSeconds * 1000) / 3),
+    Math.min(100, Math.floor((leaseSeconds * 1000) / 3)),
   );
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;

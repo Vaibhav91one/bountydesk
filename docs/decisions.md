@@ -640,3 +640,39 @@ not that model. Its build worker resolves and pins each service before reproduct
 only creates individually controlled linked sandboxes with no runtime pulls. The remaining unproven
 parts are provider-backed build and full target onboarding evidence, which must be recorded separately
 from mocked lifecycle tests.
+
+### Q24 — Reviewer-guided re-checks and verdict revisions (2026-09-12)
+
+A reviewer who wants a different look at a report, rather than a plain approve or deny, can
+supersede the pending verdict and start a fresh investigation run. The decision here covers the
+two halves: how a run is recorded, and what a superseded verdict may still do.
+
+`investigation_run` is the durable record of each attempt. A report's first run is `INITIAL`
+(backfilled lazily on first re-check for reports created before the table existed, so no data
+migration ships), and a re-check opens a `REVIEWER_GUIDANCE` run whose parent is the run that
+drafted the superseded verdict. The run carries the target identity and a hash of the reviewer's
+guidance, never the guidance text itself twice: the reviewer-chat thread already holds the words.
+
+The report graph gains one edge, `AWAITING_APPROVAL -> REPRODUCING`, and nothing else. It is taken
+only by `requestRecheck` (`lib/investigation-runs/recheck.ts`), which locks the report, session,
+and verdict, recomputes the payload hash server-side, refuses any verdict that already has a
+decision or a supersession row, and only then clears the pending tuple and writes the link. The
+old verdict row is never edited: `verdict_supersession` is a separate immutable link, and
+`appendVerdictRevision` (not `ensureInitialVerdict`) writes the fresh run's draft as revision
+N+1 with its own content hash.
+
+Three gates close on a superseded verdict, all tested:
+
+- `decide()` (app/review/actions.ts) refuses to approve or deny it, even a replay of an earlier
+  decision, so a stale approval page can never ship text the reviewer moved past.
+- `publishVerdict` (lib/mcp/publish-verdict.ts) refuses to enqueue delivery for it even with an
+  approval in hand.
+- The reviewer-chat worker already refused to converse about a superseded verdict; re-check is the
+  only thing that creates one.
+
+The re-check worker (`lib/investigation-runs/queue.ts`) rotates the capability token, creates a
+fresh TrueForge session, provisions a fresh sandbox group from the same server-bound target
+profile (guidance never selects target, tool, or scope), and starts the turn with the guidance
+wrapped in `[UNTRUSTED_REVIEWER_GUIDANCE]` delimiters. All existing gates stay: scope-guard
+denials, write-probe auto-approval, the publish authorization check, and the human approval the
+new revision still needs before anything is delivered.

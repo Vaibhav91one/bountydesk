@@ -12,9 +12,11 @@ import {
   eq,
   report,
   verdict,
+  verdictSupersession,
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
+import { requestRecheck } from "@/lib/investigation-runs/recheck";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
@@ -95,6 +97,19 @@ async function decide(
         .select({ decision: approvalDecision.decision })
         .from(approvalDecision)
         .where(eq(approvalDecision.verdictId, v.id));
+
+      // A verdict superseded by a re-check can never receive a decision: the run that drafted it
+      // is over, and approving dead text the reviewer has explicitly moved past would ship a
+      // comment the report has already moved on from. Checked before the replay branch so a
+      // re-check after an earlier decision of the same outcome is still refused.
+      const [supersededRow] = await tx
+        .select({ id: verdictSupersession.id })
+        .from(verdictSupersession)
+        .where(eq(verdictSupersession.oldVerdictId, v.id))
+        .limit(1);
+      if (supersededRow) {
+        return { ok: false, error: "this verdict has been superseded by a re-check" };
+      }
 
       if (existing) {
         if (existing.decision !== outcome) {
@@ -289,4 +304,21 @@ export async function denyVerdict(
 ): Promise<ActionResult> {
   const session = await requireReviewer();
   return decide(reportId, verdictId, "DENIED", session.login, note);
+}
+
+/**
+ * Supersede the pending verdict and open a fresh REVIEWER_GUIDANCE investigation run. The
+ * reviewer's guidance steers the next investigation; it never edits the old verdict (that row
+ * stays immutable history), never approves anything, and never selects a target or tool. The
+ * fresh run drafts its own new verdict revision, which needs its own human approval.
+ */
+export async function requestRecheckAction(
+  reportId: string,
+  verdictId: string,
+  guidance: string,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  const result = await requestRecheck(reportId, verdictId, guidance, session.login);
+  revalidateReportViews(reportId);
+  return result.ok ? { ok: true } : { ok: false, error: result.reason };
 }

@@ -465,3 +465,74 @@ test("a signed-in caller who is not on the reviewer allowlist never reaches the 
 
   assert.equal((await decisionsFor(verdictId)).length, 0);
 });
+
+test("approving a verdict superseded by a re-check is refused", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, verdictId } = await seedPendingReport();
+
+  // A re-check superseded this verdict: the run row and link exist, the report went back to
+  // REPRODUCING. A stale approval page still submits the dead verdict's id.
+  const [run] = await dbm.db
+    .insert(dbm.investigationRun)
+    .values({ reportId, runNumber: 2, reason: "REVIEWER_GUIDANCE", status: "PENDING" })
+    .returning({ id: dbm.investigationRun.id });
+  await dbm.db.insert(dbm.verdictSupersession).values({
+    reportId,
+    oldVerdictId: verdictId,
+    supersededByRunId: run.id,
+    reason: "reviewer-guided-recheck",
+    actor: "reviewer-1",
+  });
+  await dbm.db
+    .update(dbm.report)
+    .set({ state: "REPRODUCING" })
+    .where(dbm.eq(dbm.report.id, reportId));
+
+  const allow = await actions.allowVerdict(reportId, verdictId);
+  assert.equal(allow.ok, false);
+  assert.match(allow.error ?? "", /superseded/);
+  assert.equal((await decisionsFor(verdictId)).length, 0);
+
+  const deny = await actions.denyVerdict(reportId, verdictId);
+  assert.equal(deny.ok, false);
+  assert.match(deny.error ?? "", /superseded/);
+  assert.equal((await decisionsFor(verdictId)).length, 0);
+});
+
+test("requestRecheckAction supersedes the pending verdict and opens a guidance run", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, verdictId } = await seedPendingReport();
+
+  const result = await actions.requestRecheckAction(
+    reportId,
+    verdictId,
+    "check the auth endpoints again",
+  );
+  assert.equal(result.ok, true);
+
+  const [supersession] = await dbm.db
+    .select()
+    .from(dbm.verdictSupersession)
+    .where(dbm.eq(dbm.verdictSupersession.oldVerdictId, verdictId));
+  assert.ok(supersession);
+  assert.equal(supersession.reason, "reviewer-guided-recheck");
+
+  assert.equal(await reportState(reportId), "REPRODUCING");
+  assert.equal((await decisionsFor(verdictId)).length, 0, "a re-check never decides anything");
+
+  // The old verdict can no longer be approved even from a stale page.
+  const stale = await actions.allowVerdict(reportId, verdictId);
+  assert.equal(stale.ok, false);
+  assert.match(stale.error ?? "", /superseded/);
+});
+
+test("requestRecheckAction refuses guidance from an unauthenticated caller", async () => {
+  signOut();
+  const { reportId, verdictId } = await seedPendingReport();
+
+  await assert.rejects(
+    () => actions.requestRecheckAction(reportId, verdictId, "look again"),
+    /NEXT_REDIRECT/,
+  );
+  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});

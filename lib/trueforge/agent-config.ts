@@ -96,6 +96,7 @@ export const SCOPE_GUARD_APPROVAL_GATED_TOOLS = [
 export function buildChatAgentManifest() {
   return {
     mcpServers: [] as const,
+    skills: [] as const,
     requireApprovalForTools: [] as const,
     config: {
       sandbox: { enabled: false },

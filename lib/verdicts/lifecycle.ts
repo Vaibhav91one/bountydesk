@@ -1,4 +1,4 @@
-import { db, sql, verdict, type Executor } from "@/lib/db";
+import { db, eq, sql, verdict, type Executor } from "@/lib/db";
 import { isDeepStrictEqual } from "node:util";
 
 import { computeContentHash } from "./hash";
@@ -40,6 +40,70 @@ export type Verdict = {
   payload: string;
   contentHash: string;
 };
+
+/**
+ * The revision a re-check run's draft becomes: one past the highest revision on record. The
+ * agent-drafted path (lib/mcp/publish-verdict.ts) reads this inside its own transaction, so a
+ * concurrent draft lands at a different revision through the unique (report_id, revision)
+ * index rather than a race in application code.
+ */
+export async function nextVerdictRevision(
+  reportId: string,
+  tx: Executor = db,
+): Promise<number> {
+  const [row] = await tx
+    .select({ max: sql<number | null>`max(${verdict.revision})` })
+    .from(verdict)
+    .where(eq(verdict.reportId, reportId));
+  return (row?.max ?? 0) + 1;
+}
+
+/**
+ * Create revision N+1 of a report's verdict: what a re-check run drafts. Unlike
+ * ensureInitialVerdict this never reconciles with an existing row: each call is a new
+ * revision of the agent's own fresh conclusion, and two drafts from the same run would be a
+ * bug worth failing loudly on, not a retry to deduplicate. The database's unique
+ * (report_id, revision) index is the backstop if the max read races.
+ */
+export async function appendVerdictRevision(
+  input: NewInitialVerdict & { revision: number },
+  tx: Executor = db,
+): Promise<Verdict> {
+  if (input.revision <= 1) {
+    throw new Error(`appendVerdictRevision: revision ${input.revision} is not a follow-up`);
+  }
+  const marker = `<!-- bountydesk-delivery:${input.id} -->`;
+  if (input.payload.split(marker).length !== 2) {
+    throw new VerdictIntegrityError(input.reportId, "delivery marker");
+  }
+  const contentHash = computeContentHash(input.payload);
+  const evidence = input.evidence ?? {};
+
+  const inserted = await tx
+    .insert(verdict)
+    .values({
+      id: input.id,
+      reportId: input.reportId,
+      outcome: input.outcome,
+      summary: input.summary,
+      evidence,
+      payload: input.payload,
+      contentHash,
+      revision: input.revision,
+    })
+    .onConflictDoNothing({ target: [verdict.reportId, verdict.revision] })
+    .returning({
+      id: verdict.id,
+      outcome: verdict.outcome,
+      summary: verdict.summary,
+      evidence: verdict.evidence,
+      payload: verdict.payload,
+      contentHash: verdict.contentHash,
+    });
+
+  if (inserted.length > 0) return inserted[0];
+  throw new VerdictIntegrityError(input.reportId, `revision ${input.revision} already exists`);
+}
 
 /**
  * Create the first revision of a report's verdict, or return the one that already exists.

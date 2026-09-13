@@ -34,6 +34,8 @@ import {
   sweepExpiredLeases as sweepReviewerChat,
 } from "@/lib/reviewer-chat/queue";
 import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
+import { runRecheckOnce } from "@/lib/investigation-runs/queue";
+import { db, and, eq, investigationRun, sql } from "@/lib/db";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -232,6 +234,28 @@ async function main(): Promise<void> {
           claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
         } satisfies QueueSpec]
       : []),
+    {
+      // Re-check runs are rare and self-contained: claim one, provision, hand the turn to the
+      // agent-sessions poller. Slow loop budget because provisioning a mesh can take minutes.
+      name: "investigation-recheck",
+      claimOnce: (signal: AbortSignal) =>
+        runRecheckOnce(`daemon-recheck-${randomUUID()}`).then(
+          (id) => (signal.aborted && id === null ? null : id),
+        ),
+      sweepOnce: async () => {
+        // Expired re-check leases reset to PENDING so the claim query can pick them up again.
+        await db
+          .update(investigationRun)
+          .set({ status: "PENDING", leaseOwner: null, leaseExpiresAt: null })
+          .where(
+            and(
+              eq(investigationRun.status, "RUNNING"),
+              eq(investigationRun.reason, "REVIEWER_GUIDANCE"),
+              sql`${investigationRun.leaseExpiresAt} < now()`,
+            ),
+          );
+      },
+    },
   ];
 
   // runDaemon runs a claim loop and a sweeper per queue, and /healthz watches all of them, so

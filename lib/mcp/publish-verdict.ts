@@ -12,6 +12,7 @@ import {
   targetOnboarding,
   targetProfile,
   verdict,
+  verdictSupersession,
   type Executor,
 } from "@/lib/db";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
@@ -19,7 +20,7 @@ import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
-import { ensureInitialVerdict } from "@/lib/verdicts/lifecycle";
+import { appendVerdictRevision, ensureInitialVerdict, nextVerdictRevision } from "@/lib/verdicts/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type PublishVerdictResult = { ok: true } | { ok: false; reason: string };
@@ -270,6 +271,48 @@ async function persistAgentDraftedVerdict(
 }
 
 /**
+ * The re-check run's write: same authorization gate as the initial draft, but the revision is
+ * the next one on record rather than 1, and no superseded verdict can be re-drafted. An
+ * append, not an update: the old revision stays immutable history.
+ */
+async function persistFollowUpVerdict(
+  reportId: string,
+  verdictId: string,
+  revision: number,
+  draft: VerdictDraft,
+  tx: Executor,
+): Promise<DraftVerdictResult> {
+  const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
+  if (!allowed.ok) return allowed;
+
+  const [targetRow] = await tx
+    .select({ imageName: targetProfile.imageName, imageDigest: targetProfile.imageDigest })
+    .from(report)
+    .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  const targetRef =
+    targetRow?.imageName && targetRow.imageDigest
+      ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
+      : null;
+
+  const payload = buildAgentDraftedPayload(verdictId, draft, targetRef);
+  const row = await appendVerdictRevision(
+    {
+      id: verdictId,
+      reportId,
+      outcome: draft.outcome,
+      summary: draft.summary,
+      evidence: { source: "agent-drafted", findings: draft.findings, revision },
+      payload,
+      revision,
+    },
+    tx,
+  );
+  return { ok: true, verdictId: row.id };
+}
+
+/**
  * Called from lib/agent-sessions/poller.ts once it has parsed a pending publish_verdict call's
  * arguments into the full draft shape. Resolves the report from the capability token -- the
  * model never supplies a report or verdict id directly -- then reuses whatever revision-1
@@ -299,28 +342,47 @@ export async function draftVerdictFromPendingCall(
   }
   const draft = parsed.data;
 
-  let sandboxToTearDown: string | null = null;
+  let sandboxesToTearDown: string[] = [];
   let reportForArtifacts: string | null = null;
 
   const result = await db.transaction(async (tx): Promise<DraftVerdictResult> => {
     const [session] = await tx
-      .select({ reportId: agentSession.reportId, sandboxId: agentSession.sandboxId })
+      .select({ reportId: agentSession.reportId, sandboxId: agentSession.sandboxId, sandboxIds: agentSession.sandboxIds })
       .from(agentSession)
       .where(eq(agentSession.capabilityToken, capability))
       .limit(1)
       .for("update");
     if (!session) return { ok: false, reason: "unknown capability" };
 
-    const [existing] = await tx
+    // Lock the report before allocating a revision. This serializes max+1 with another draft and
+    // keeps the unique revision index from becoming the normal race detector.
+    await tx.select({ id: report.id }).from(report).where(eq(report.id, session.reportId)).for("update");
+
+    // Reuse revision 1 for initial-run retries. A follow-up run is explicitly identified by an
+    // existing supersession row, so a stale retry cannot accidentally create revision 2.
+    const [initial] = await tx
       .select({ id: verdict.id })
       .from(verdict)
       .where(and(eq(verdict.reportId, session.reportId), eq(verdict.revision, 1)))
       .limit(1);
-    const verdictId = existing?.id ?? randomUUID();
+    const [supersession] = await tx
+      .select({ id: verdictSupersession.id })
+      .from(verdictSupersession)
+      .where(eq(verdictSupersession.reportId, session.reportId))
+      .limit(1);
+    const revision = supersession ? await nextVerdictRevision(session.reportId, tx) : 1;
+    const verdictId = initial && revision === 1 ? initial.id : randomUUID();
 
-    const outcome = await persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx);
+    const outcome =
+      revision === 1
+        ? await persistAgentDraftedVerdict(session.reportId, verdictId, draft, tx)
+        : await persistFollowUpVerdict(session.reportId, verdictId, revision, draft, tx);
     if (outcome.ok) {
-      sandboxToTearDown = session.sandboxId;
+      sandboxesToTearDown = Array.isArray(session.sandboxIds)
+        ? session.sandboxIds.filter((id): id is string => typeof id === "string")
+        : session.sandboxId
+          ? [session.sandboxId]
+          : [];
       reportForArtifacts = session.reportId;
     }
     return outcome;
@@ -334,11 +396,9 @@ export async function draftVerdictFromPendingCall(
     await recordVerdictArtifacts(reportForArtifacts, result.verdictId);
   }
 
-  if (result.ok && sandboxToTearDown) {
-    // cancellationInFlight: true always swallows a delete failure into a log line rather than
-    // throwing -- there is no cancellation concept on this path, only "never block a successful
-    // publish on cleanup."
-    await teardownSandbox(sandboxToTearDown, true);
+  if (result.ok) {
+    // Never block a successful publish on cleanup, but attempt every linked mesh sandbox.
+    for (const sandboxId of sandboxesToTearDown) await teardownSandbox(sandboxId, true);
   }
 
   return result;
@@ -402,6 +462,18 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
     // approved verdict.
     if (verdictRow.reportId !== session.reportId) {
       return { ok: false, reason: "verdict does not belong to this session's report" };
+    }
+
+    // A verdict superseded by a re-check cannot be delivered even with an approval in hand:
+    // the reviewer asked for a fresh investigation, so this text is no longer what they meant
+    // to send. Re-checked and re-approved revisions reach here without a supersession row.
+    const [supersededRow] = await tx
+      .select({ id: verdictSupersession.id })
+      .from(verdictSupersession)
+      .where(eq(verdictSupersession.oldVerdictId, verdictRow.id))
+      .limit(1);
+    if (supersededRow) {
+      return { ok: false, reason: "verdict has been superseded by a re-check" };
     }
 
     const recomputedHash = computeContentHash(verdictRow.payload);
