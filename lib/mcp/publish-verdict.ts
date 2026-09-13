@@ -6,9 +6,12 @@ import {
   approvalDecision,
   connectedRepository,
   db,
+  desc,
   eq,
+  gt,
   report,
   REPORT_TERMINAL_STATES,
+  sql,
   targetOnboarding,
   targetProfile,
   verdict,
@@ -271,6 +274,25 @@ async function persistAgentDraftedVerdict(
 }
 
 /**
+ * The target reference a rebuilt payload needs to compare against a stored content hash: the
+ * same select persistFollowUpVerdict uses, factored out so both stay identical.
+ */
+async function targetRefForReport(
+  reportId: string,
+  tx: Executor,
+): Promise<{ imageName: string; imageDigest: string } | null> {
+  const [targetRow] = await tx
+    .select({ imageName: targetProfile.imageName, imageDigest: targetProfile.imageDigest })
+    .from(report)
+    .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  return targetRow?.imageName && targetRow.imageDigest
+    ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
+    : null;
+}
+
+/**
  * The re-check run's write: same authorization gate as the initial draft, but the revision is
  * the next one on record rather than 1, and no superseded verdict can be re-drafted. An
  * append, not an update: the old revision stays immutable history.
@@ -285,16 +307,7 @@ async function persistFollowUpVerdict(
   const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
   if (!allowed.ok) return allowed;
 
-  const [targetRow] = await tx
-    .select({ imageName: targetProfile.imageName, imageDigest: targetProfile.imageDigest })
-    .from(report)
-    .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
-    .where(eq(report.id, reportId))
-    .limit(1);
-  const targetRef =
-    targetRow?.imageName && targetRow.imageDigest
-      ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
-      : null;
+  const targetRef = await targetRefForReport(reportId, tx);
 
   const payload = buildAgentDraftedPayload(verdictId, draft, targetRef);
   const row = await appendVerdictRevision(
@@ -370,8 +383,46 @@ export async function draftVerdictFromPendingCall(
       .from(verdictSupersession)
       .where(eq(verdictSupersession.reportId, session.reportId))
       .limit(1);
-    const revision = supersession ? await nextVerdictRevision(session.reportId, tx) : 1;
-    const verdictId = initial && revision === 1 ? initial.id : randomUUID();
+
+    let revision: number;
+    let verdictId: string;
+    if (supersession) {
+      // A follow-up run drafts exactly one revision. The same pending call reaches this
+      // function more than once (the poller re-reads a turn whose arguments still carry the
+      // draft), so a second draft must return the revision this run already minted rather than
+      // minting N+2, which would orphan the pending tuple bound to N+1 and wedge the session in
+      // ERROR. Identical content is the retry; different content is a disagreement between two
+      // drafts of the same run and fails loudly, the same rule ensureInitialVerdict applies.
+      const [current] = await tx
+        .select({ id: verdict.id, contentHash: verdict.contentHash })
+        .from(verdict)
+        .where(
+          and(
+            eq(verdict.reportId, session.reportId),
+            gt(verdict.revision, 1),
+            sql`${verdict.id} not in (select ${verdictSupersession.oldVerdictId} from ${verdictSupersession} where ${verdictSupersession.reportId} = ${session.reportId})`,
+          ),
+        )
+        .orderBy(desc(verdict.revision))
+        .limit(1);
+      if (current) {
+        const targetRow = await targetRefForReport(session.reportId, tx);
+        const rebuiltPayload = buildAgentDraftedPayload(current.id, draft, targetRow);
+        if (computeContentHash(rebuiltPayload) === current.contentHash) {
+          sandboxesToTearDown = []; // nothing new persisted; the run's sandboxes were already torn down
+          return { ok: true, verdictId: current.id };
+        }
+        return {
+          ok: false,
+          reason: "this run already drafted a different revision; a second draft cannot replace it",
+        };
+      }
+      revision = await nextVerdictRevision(session.reportId, tx);
+      verdictId = randomUUID();
+    } else {
+      revision = 1;
+      verdictId = initial && revision === 1 ? initial.id : randomUUID();
+    }
 
     const outcome =
       revision === 1

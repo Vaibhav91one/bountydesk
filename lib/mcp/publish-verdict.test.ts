@@ -753,6 +753,34 @@ test("a re-check run drafts revision 2, never overwriting revision 1", async () 
   assert.equal(revisions[0].id, fixture.verdictId, "revision 1 stays immutable history");
   assert.equal(revisions[1].id, newId);
   assert.equal(revisions[1].revision, 2);
+
+  // The poller re-reads a pending call whose arguments still carry the draft, so the same
+  // draft arrives twice. The second call must return the revision this run minted, not a
+  // revision 3 that would orphan the pending tuple bound to revision 2.
+  const retried = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "The re-check found nothing further.",
+    findings: [],
+  });
+  assert.equal(retried.ok, true, (retried as { reason?: string }).reason);
+  assert.equal((retried as { verdictId: string }).verdictId, newId, "an identical re-draft reuses the run's revision");
+
+  const revisionsAfterRetry = await dbm.db
+    .select({ revision: dbm.verdict.revision })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId))
+    .orderBy(dbm.verdict.revision);
+  assert.equal(revisionsAfterRetry.length, 2, "no revision 3 is minted by a retry");
+
+  // A differently worded draft of the same run is a disagreement between two drafts, not a
+  // retry: it must be refused rather than minting a replacement revision.
+  const conflicting = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "A different conclusion entirely.",
+    findings: [],
+  });
+  assert.equal(conflicting.ok, false);
+  assert.match((conflicting as { reason: string }).reason, /already drafted a different revision/);
 });
 
 test("publishVerdict refuses an approved verdict that a re-check has superseded", async () => {
