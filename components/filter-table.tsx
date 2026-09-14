@@ -58,6 +58,7 @@ export function FilterTable({
   empty,
   label,
   minWidth = 560,
+  rowClassName,
 }: {
   columns: TableColumn[];
   filters?: TableFilter[];
@@ -69,6 +70,12 @@ export function FilterTable({
   /** Names the scroll region. "Table" tells a screen-reader user nothing about which one. */
   label: string;
   minWidth?: number;
+  /**
+   * Extra classes for a row's own element, after the defaults. The rows separate themselves
+   * with a half-opacity border, which is fine on a dense queue and invisible on a dark card
+   * with two rows; a table that needs a firmer divider passes one here.
+   */
+  rowClassName?: string;
 }) {
   // An inline style, not a grid-cols-[...] class. Tailwind reads source for literal class
   // names, so a template built from props compiles to nothing and every column collapses.
@@ -154,7 +161,7 @@ export function FilterTable({
               }}
             >
               <div className="overflow-hidden">
-                <RowBody row={row} columns={columns} template={template} />
+                <RowBody row={row} columns={columns} template={template} rowClassName={rowClassName} />
               </div>
             </div>
           ))}
@@ -178,10 +185,12 @@ function RowBody({
   row,
   columns,
   template,
+  rowClassName,
 }: {
   row: TableRow;
   columns: TableColumn[];
   template: string;
+  rowClassName?: string;
 }) {
   const cells = columns.map((column, index) => (
     <span
@@ -192,7 +201,10 @@ function RowBody({
     </span>
   ));
 
-  const className = "grid border-b border-border/50 text-left last:border-b-0";
+  const className = cn(
+    "grid border-b border-border/50 text-left last:border-b-0",
+    rowClassName,
+  );
 
   // The row's control is one button in the first cell, stretched over the whole row by its
   // ::after, rather than a button wrapping every cell. A cell can hold a form or a button of

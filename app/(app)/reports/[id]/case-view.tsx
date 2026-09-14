@@ -19,8 +19,9 @@ import { ArtifactsPanel } from "./artifacts-panel";
 import { FindingsPanel } from "./findings-panel";
 import { LifecycleList } from "./lifecycle-list";
 import { StatusCard } from "./status-card";
-import { SummaryCard } from "./summary-card";
+import { SummaryDialog } from "./summary-dialog";
 import { VerdictCard } from "./verdict-card";
+import { VerdictDialog } from "./verdict-dialog";
 
 function Panel({
   title,
@@ -120,8 +121,26 @@ export function CaseView({
         </Panel>
       </div>
 
-      {status.finalSummary ? (
-        <SummaryCard summary={status.finalSummary} updatedAt={status.updatedAt} />
+      {/* Two records behind two buttons, side by side: the agent's closing message and the
+          comment it drafted. Both ran long enough inline to crowd out everything under them,
+          and a reviewer who wants either opens it where a dialog bounds the length. */}
+      {status.finalSummary || (status.verdict && !status.awaitingVerdictId) ? (
+        <div className="flex flex-wrap gap-2">
+          {status.finalSummary ? (
+            <SummaryDialog summary={status.finalSummary} updatedAt={status.updatedAt} />
+          ) : null}
+          {status.verdict && !status.awaitingVerdictId ? (
+            <VerdictDialog
+              outcomeLabel={status.verdict.outcomeLabel}
+              revision={status.verdict.revision}
+              summary={status.verdict.summary}
+              findings={status.verdict.findings}
+              payload={status.verdict.payload}
+              payloadArtifactId={status.verdict.payloadArtifactId}
+              findingsArtifactId={status.verdict.findingsArtifactId}
+            />
+          ) : null}
+        </div>
       ) : null}
 
       {/* No card around it. The table carries its own border, and a "Findings" header over a

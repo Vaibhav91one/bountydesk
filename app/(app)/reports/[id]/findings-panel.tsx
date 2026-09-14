@@ -86,7 +86,16 @@ export function FindingsPanel({
 
   return (
     <>
-      <FilterTable columns={COLUMNS} rows={rows} label="Findings" empty="No findings drafted." />
+      {/* border-border, not the /50 default: two findings on a dark card separated by a
+          half-opacity line read as one blob, and a table of findings is exactly where the
+          boundary between rows matters. */}
+      <FilterTable
+        columns={COLUMNS}
+        rows={rows}
+        label="Findings"
+        empty="No findings drafted."
+        rowClassName="border-border"
+      />
 
       {findingsArtifactId ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -119,15 +128,12 @@ export function FindingsPanel({
                 <section className="flex flex-col items-start gap-2 border-t border-border/50 pt-5">
                   <h3 className="text-meta text-muted-foreground">Evidence</h3>
                   {findingsArtifactId ? (
-                    <>
-                      <p className="text-body text-muted-foreground">
-                        The run recorded every finding and the evidence it cites as a file.
-                      </p>
-                      <ArtifactDownload
-                        artifactId={findingsArtifactId}
-                        label="Download findings"
-                      />
-                    </>
+                    // The download lives under the table, not here: this sheet is about one
+                    // finding, and the file holds all of them.
+                    <p className="text-body text-muted-foreground">
+                      The run recorded every finding and the evidence each one cites as a file,
+                      downloadable below the findings table.
+                    </p>
                   ) : (
                     // No downloadable file, so the citation the agent gave is the only evidence
                     // there is. It names a path inside the harness sandbox.

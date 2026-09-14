@@ -110,7 +110,10 @@ function RevisionGroups({
     <div className="flex flex-col gap-4">
       {revisionOrder.map((revision) => {
         const entry = historyById.get(revision);
-        const isOpen = open[`rev-${revision}`] ?? revision === latest;
+        // Every group starts closed, the latest included: twelve rows of four identical kinds
+        // was the wall this grouping exists to break up, and opening the newest by default
+        // rebuilt two-thirds of it.
+        const isOpen = open[`rev-${revision}`] ?? false;
 
         return (
           <div key={revision} className="flex flex-col gap-1">
