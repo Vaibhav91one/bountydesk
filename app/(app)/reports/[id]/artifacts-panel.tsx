@@ -1,7 +1,9 @@
-import { File, Hash } from "@phosphor-icons/react/ssr";
+import { useState } from "react";
+import { CaretDown, File, Hash } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import type { CaseArtifactView, CaseVerdictHistoryView } from "@/lib/reports/case-view";
+import { cn } from "@/lib/utils";
 
 import { ArtifactDownload } from "./artifact-download";
 
@@ -84,6 +86,84 @@ function ArtifactRow({ art }: { art: CaseArtifactView }) {
   );
 }
 
+/**
+ * Collapsible groups, one per revision.
+ *
+ * The newest revision is expanded and reads "Latest revision", because that is the run whose
+ * verdict the reviewer is being asked to approve; older revisions come after it collapsed, each
+ * a single heading row to open only when a reviewer is comparing runs. Same grid-template-rows
+ * transition as the lifecycle list, so nothing measures anything.
+ */
+function RevisionGroups({
+  revisionOrder,
+  byRevision,
+  historyById,
+}: {
+  revisionOrder: number[];
+  byRevision: Map<number, CaseArtifactView[]>;
+  historyById: Map<number, CaseVerdictHistoryView>;
+}) {
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const latest = revisionOrder[0];
+
+  return (
+    <div className="flex flex-col gap-4">
+      {revisionOrder.map((revision) => {
+        const entry = historyById.get(revision);
+        const isOpen = open[`rev-${revision}`] ?? revision === latest;
+
+        return (
+          <div key={revision} className="flex flex-col gap-1">
+            <button
+              type="button"
+              aria-expanded={isOpen}
+              onClick={() => setOpen((current) => ({ ...current, [`rev-${revision}`]: !isOpen }))}
+              className="flex w-full flex-wrap items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-muted/40"
+            >
+              <span className="text-body font-medium text-foreground">
+                {revision === latest ? "Latest revision" : `Revision ${revision}`}
+              </span>
+              {revision === 0 ? (
+                <span className="text-meta text-muted-foreground">Earlier runs</span>
+              ) : entry ? (
+                <span className="text-meta text-muted-foreground">
+                  {entry.outcomeLabel} · {new Date(entry.createdAt).toLocaleDateString()}
+                </span>
+              ) : null}
+              {entry?.superseded ? (
+                <Badge variant="outline">Superseded by a re-check</Badge>
+              ) : null}
+              <span className="ml-auto shrink-0 text-meta text-muted-foreground">
+                {byRevision.get(revision)!.length}
+              </span>
+              <CaretDown
+                aria-hidden="true"
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground transition-transform duration-300",
+                  isOpen && "rotate-180",
+                )}
+              />
+            </button>
+
+            <div
+              className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)]"
+              style={{ gridTemplateRows: isOpen ? "1fr" : "0fr", opacity: isOpen ? 1 : 0 }}
+            >
+              <div className="overflow-hidden">
+                <ul className="flex flex-col">
+                  {byRevision.get(revision)!.map((art) => (
+                    <ArtifactRow key={art.id} art={art} />
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ArtifactsPanel({
   artifacts,
   imageDigest,
@@ -119,24 +199,6 @@ export function ArtifactsPanel({
   const revisionOrder = [...byRevision.keys()].sort((a, b) => b - a);
   const historyById = new Map(verdictHistory.map((v) => [v.revision, v]));
 
-  function GroupHeading({ revision }: { revision: number }) {
-    if (revision === 0) {
-      return <span className="text-meta text-muted-foreground">Earlier runs</span>;
-    }
-    const entry = historyById.get(revision);
-    return (
-      <span className="flex flex-wrap items-baseline gap-2">
-        <span className="text-body font-medium text-foreground">Revision {revision}</span>
-        {entry ? (
-          <span className="text-meta text-muted-foreground">
-            {entry.outcomeLabel} · {new Date(entry.createdAt).toLocaleDateString()}
-          </span>
-        ) : null}
-        {entry?.superseded ? <Badge variant="outline">Superseded by a re-check</Badge> : null}
-      </span>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-5">
       {artifacts.length === 0 ? (
@@ -144,16 +206,11 @@ export function ArtifactsPanel({
           This run has recorded no artifacts.
         </p>
       ) : (
-        revisionOrder.map((revision) => (
-          <div key={revision} className="flex flex-col gap-2">
-            <GroupHeading revision={revision} />
-            <ul className="flex flex-col">
-              {byRevision.get(revision)!.map((art) => (
-                <ArtifactRow key={art.id} art={art} />
-              ))}
-            </ul>
-          </div>
-        ))
+        <RevisionGroups
+          revisionOrder={revisionOrder}
+          byRevision={byRevision}
+          historyById={historyById}
+        />
       )}
 
       {!storageConfigured && artifacts.length > 0 ? (
