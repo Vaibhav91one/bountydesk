@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/sheet";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
-import { ArtifactDownload } from "./artifact-download";
 import { FindingDescription } from "./finding-description";
 
 /**
@@ -71,8 +70,8 @@ export function FindingsPanel({
     id: `${finding.title}-${index}`,
     onSelect: () => setSelected(finding),
     cells: [
-      <span key="title" className="flex min-w-0 flex-col gap-1">
-        <span className="line-clamp-2 font-medium text-foreground">{finding.title}</span>
+      <span key="title" className="flex min-w-0 flex-col gap-1 py-1">
+        <span className="line-clamp-2 font-medium leading-relaxed text-foreground">{finding.title}</span>
       </span>,
       <Badge key="severity" variant={SEVERITY_VARIANT[finding.severity]}>
         {finding.severity}
@@ -92,15 +91,6 @@ export function FindingsPanel({
         empty="No findings drafted."
         rowClassName="border-border"
       />
-
-      {findingsArtifactId ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-meta text-muted-foreground">
-            Every finding above, with the evidence each one cites.
-          </span>
-          <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
-        </div>
-      ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         {/* Wider than the repository panel next door: a finding carries reproduction steps, and
@@ -124,11 +114,9 @@ export function FindingsPanel({
                 <section className="flex flex-col items-start gap-2 border-t border-border/50 pt-5">
                   <h3 className="text-meta text-muted-foreground">Evidence</h3>
                   {findingsArtifactId ? (
-                    // The download lives under the table, not here: this sheet is about one
-                    // finding, and the file holds all of them.
                     <p className="text-body text-muted-foreground">
-                      The run recorded every finding and the evidence each one cites as a file,
-                      downloadable below the findings table.
+                      The run recorded every finding and the evidence each one cites in the findings
+                      artifact.
                     </p>
                   ) : (
                     // No downloadable file, so the citation the agent gave is the only evidence
