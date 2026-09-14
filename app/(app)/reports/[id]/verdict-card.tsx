@@ -121,43 +121,53 @@ export function VerdictCard({
               <Badge variant="outline">Superseded by a re-check</Badge>
             ) : null}
           </span>
-          <VerdictDialog
-            outcomeLabel={outcomeLabel}
-            revision={revision}
-            summary={summary}
-            findings={findings}
-            payload={payload}
-            payloadArtifactId={payloadArtifactId}
-            findingsArtifactId={findingsArtifactId}
-          />
-        </div>
-
-        {/* Attributed, because a reviewer approving a comment should be able to see at a
-            glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
-        <div className="flex gap-3">
-          <AnimatedMascotSvg
-            state={speaker}
-            scope={speakerScope}
-            className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
-          />
-
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <span className="flex items-center gap-1.5">
-              <span className="text-meta text-foreground">Agent Bounty</span>
-              <span className="text-meta text-muted-foreground">drafted this reply</span>
-            </span>
-
-            {/* Rendered from the structured summary and findings, not by parsing the markdown
-                payload: the bytes the hash in the drawer binds are unchanged, and rendering the
-                agent's fields as text is safe by construction where interpreting its markdown
-                would not be. */}
-            <VerdictBody
+          {/* The comment itself opens from the button row on the case page. Here, the record
+              keeps what approving bound: the heading names it, the drawer under it carries the
+              hashes, and the footer the decision. Approve mode still renders the full body
+              inline below, because that dialog is where the exact text is approved. */}
+          {approve ? (
+            <VerdictDialog
+              outcomeLabel={outcomeLabel}
+              revision={revision}
               summary={summary}
               findings={findings}
+              payload={payload}
+              payloadArtifactId={payloadArtifactId}
               findingsArtifactId={findingsArtifactId}
             />
-          </div>
+          ) : null}
         </div>
+
+        {approve ? (
+          <>
+            {/* Attributed, because a reviewer approving a comment should be able to see at a
+                glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
+            <div className="flex gap-3">
+              <AnimatedMascotSvg
+                state={speaker}
+                scope={speakerScope}
+                className="size-11 shrink-0 [&>svg]:block [&>svg]:size-full"
+              />
+
+              <div className="flex min-w-0 flex-1 flex-col gap-2">
+                <span className="flex items-center gap-1.5">
+                  <span className="text-meta text-foreground">Agent Bounty</span>
+                  <span className="text-meta text-muted-foreground">drafted this reply</span>
+                </span>
+
+                {/* Rendered from the structured summary and findings, not by parsing the
+                    markdown payload: the bytes the hash in the drawer binds are unchanged, and
+                    rendering the agent's fields as text is safe by construction where
+                    interpreting its markdown would not be. */}
+                <VerdictBody
+                  summary={summary}
+                  findings={findings}
+                  findingsArtifactId={findingsArtifactId}
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
       </div>
 
       <div className="border-t border-border/50">

@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowsOut, DownloadSimple } from "@phosphor-icons/react/ssr";
+import { ArrowsOut } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,8 +14,6 @@ import {
 } from "@/components/ui/dialog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
-import { getArtifactDownloadUrl } from "./actions";
-import { ArtifactDownload } from "./artifact-download";
 import { FindingDescription } from "./finding-description";
 
 const SEVERITY_VARIANT: Record<
@@ -80,15 +77,6 @@ export function VerdictBody({
               )}
             </div>
           ))}
-
-          {findingsArtifactId ? (
-            <span className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/50 border-dashed px-4 py-3">
-              <span className="text-meta text-muted-foreground">
-                Every finding above, with the evidence each one cites.
-              </span>
-              <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
-            </span>
-          ) : null}
         </div>
       ) : null}
     </div>
@@ -96,14 +84,12 @@ export function VerdictBody({
 }
 
 /**
- * The full verdict, and a way to save it.
+ * The full verdict behind a button.
  *
- * The card next to this shows a preview; this dialog shows the whole thing with nothing clamped,
- * and downloads the exact comment body. The download prefers the stored verdict-payload
- * artifact's signed URL (lib/storage/artifacts.ts), the same path ArtifactsPanel uses, so the
- * bytes a reviewer saves are the ones the delivery worker will send. When those bytes are not
- * stored, or the sign fails, it falls back to a Blob of the payload text this page already
- * holds, so the button is never a dead link.
+ * The case page keeps only the record's shape (heading, binding, decision); this dialog shows
+ * the whole comment with nothing clamped. Downloads live with the artifacts panel, where every
+ * revision's payload and findings file already sit, so the dialog is read-only content and
+ * carries no buttons of its own.
  */
 export function VerdictDialog({
   outcomeLabel,
@@ -118,42 +104,17 @@ export function VerdictDialog({
   revision: number;
   summary: string;
   findings: Finding[];
-  /** The exact outbound comment body, used for the Blob fallback. */
+  /** The exact outbound comment body. Used only to mark the artifact scope below. */
   payload: string;
-  /** The stored verdict-payload artifact, when one exists. Null falls straight to the Blob. */
+  /** The stored verdict-payload artifact, when one exists. */
   payloadArtifactId: string | null;
   /** The stored findings file, when one exists. */
   findingsArtifactId?: string | null;
 }) {
-  const [busy, setBusy] = useState(false);
-
-  function saveBlob() {
-    const url = URL.createObjectURL(new Blob([payload], { type: "text/markdown" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `verdict-revision-${revision}.md`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function download() {
-    if (busy) return;
-    setBusy(true);
-    try {
-      if (payloadArtifactId) {
-        const result = await getArtifactDownloadUrl(payloadArtifactId);
-        if ("url" in result) {
-          window.open(result.url, "_blank", "noopener,noreferrer");
-          return;
-        }
-      }
-      // No stored bytes, or the sign failed: hand over the text the page already has rather than
-      // an error the reviewer cannot act on.
-      saveBlob();
-    } finally {
-      setBusy(false);
-    }
-  }
+  // The payload and its stored artifact id are what the dialog is about; both stay in props so
+  // this component keeps describing the same verdict as the artifacts panel beside it.
+  void payload;
+  void payloadArtifactId;
 
   return (
     <Dialog>
@@ -184,12 +145,6 @@ export function VerdictDialog({
             findings={findings}
             findingsArtifactId={findingsArtifactId}
           />
-        </div>
-
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t border-border/50 bg-card px-5 py-3">
-          <Button size="sm" variant="outline" onClick={download} loading={busy}>
-            <DownloadSimple className="size-4" /> Download
-          </Button>
         </div>
       </DialogContent>
     </Dialog>
