@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/sheet";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
-import { ArtifactDownload } from "./artifact-download";
 import { FindingDescription } from "./finding-description";
 
 /**
@@ -25,10 +24,10 @@ import { FindingDescription } from "./finding-description";
  * recorded, which a reviewer can download and read; the reference the agent cited names a path
  * inside the harness sandbox, and printing that on screen offered a check nobody could perform.
  *
- * The row clamps the long fields to two lines so a verbose finding cannot blow out the table. The
- * untruncated text lives in the sheet a row opens, laid out as the agent wrote it: reproduction
- * steps as steps. An empty list means the run drafted a verdict with nothing beyond its summary,
- * which the summary itself already says.
+ * The table keeps each finding to its title and severity so it stays scannable. The full text lives
+ * in the sheet a row opens, laid out as the agent wrote it: reproduction steps as steps. An empty
+ * list means the run drafted a verdict with nothing beyond its summary, which the summary itself
+ * already says.
  */
 
 const SEVERITY_VARIANT: Record<Finding["severity"], "destructive" | "default" | "secondary" | "outline"> = {
@@ -73,10 +72,6 @@ export function FindingsPanel({
     cells: [
       <span key="title" className="flex min-w-0 flex-col gap-1">
         <span className="line-clamp-2 font-medium text-foreground">{finding.title}</span>
-        {/* The description rides under the title rather than in its own column: it is the long
-            field, and a column wide enough for it would starve the other two. Clamped here,
-            full in the sheet. */}
-        <span className="line-clamp-2 text-meta text-muted-foreground">{finding.description}</span>
       </span>,
       <Badge key="severity" variant={SEVERITY_VARIANT[finding.severity]}>
         {finding.severity}
@@ -96,15 +91,6 @@ export function FindingsPanel({
         empty="No findings drafted."
         rowClassName="border-border"
       />
-
-      {findingsArtifactId ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="text-meta text-muted-foreground">
-            Every finding above, with the evidence each one cites.
-          </span>
-          <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
-        </div>
-      ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         {/* Wider than the repository panel next door: a finding carries reproduction steps, and

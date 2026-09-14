@@ -2,6 +2,7 @@
 
 import { ArrowsOut } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -121,7 +122,7 @@ export function VerdictDialog({
       <DialogTrigger
         render={
           <Button size="sm" variant="outline">
-            <ArrowsOut className="size-4" /> View full verdict
+            <RollingIcon icon={ArrowsOut} className="size-4" /> View full verdict
           </Button>
         }
       />
