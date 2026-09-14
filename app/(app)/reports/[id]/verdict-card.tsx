@@ -259,7 +259,7 @@ export function VerdictCard({
             <AnimatedMascotSvg
               state={chatMascot}
               scope={chatMascotScope}
-              className="-my-1 size-6 shrink-0 [&>svg]:block [&>svg]:size-full"
+              className="-my-1 size-8 shrink-0 [&>svg]:block [&>svg]:size-full"
             />
             Chat with Agent Bounty
           </Button>

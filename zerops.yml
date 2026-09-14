@@ -32,6 +32,7 @@ zerops:
       envVariables:
         NODE_ENV: production
         TRUEFORGE_URL: http://trueforge:8791
+        REVIEWER_CHAT_ENABLED: "true"
         # The daemon runs a claim loop and a sweeper for each of the five queues plus the
         # agent-session poller: eleven loops that each want a connection at once, most of all at
         # startup when they all fire together. A pool below that count starves the loops that lose

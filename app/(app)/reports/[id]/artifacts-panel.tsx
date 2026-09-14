@@ -58,6 +58,13 @@ function Address({ label, value }: { label: string; value: string }) {
   );
 }
 
+const DOWNLOAD_LABEL: Record<string, string> = {
+  "investigation-transcript": "Download Investigation transcript",
+  "verdict-payload": "Download Verdict payload",
+  "findings-evidence": "Download Findings",
+  "target-dockerfile": "Download Target Dockerfile",
+};
+
 function ArtifactRow({ art }: { art: CaseArtifactView }) {
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border/50 py-3 last:border-b-0">
@@ -75,7 +82,10 @@ function ArtifactRow({ art }: { art: CaseArtifactView }) {
       </span>
 
       {art.stored ? (
-        <ArtifactDownload artifactId={art.id} />
+        <ArtifactDownload
+          artifactId={art.id}
+          label={DOWNLOAD_LABEL[art.kind] ?? `Download ${KIND_LABEL[art.kind] ?? art.kind}`}
+        />
       ) : (
         <span className="max-w-xs text-meta text-muted-foreground">
           Recorded without its bytes, so there is nothing to download. Artifact rows cannot be

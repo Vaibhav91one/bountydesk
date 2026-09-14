@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowClockwise, ArrowUp, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
 import { requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 type ChatSender = "REVIEWER" | "AGENT" | "SYSTEM";
@@ -153,6 +154,11 @@ export function AgentChat({
   const [sendError, setSendError] = useState<string | null>(null);
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const requestRecheck = useCallback(async () => {
     if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
@@ -357,39 +363,40 @@ export function AgentChat({
           ) : null}
 
           <div className="p-2">
-            <div className="flex cursor-text flex-col gap-2 rounded-md border border-border/50 bg-background p-2.5 focus-within:border-ring">
-              <input
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                send();
+              }}
+              onClick={() => inputRef.current?.focus()}
+              className="flex cursor-text flex-col gap-2 rounded-md border border-border/50 bg-background p-2.5 focus-within:border-ring"
+            >
+              <Input
+                ref={inputRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    send();
-                  }
-                }}
                 placeholder="Ask about this verdict"
                 aria-label="Message to Agent Bounty"
                 disabled={Boolean(sending)}
-                className="bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-60"
+                className="h-9 border-0 bg-transparent px-0 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
               />
               <div className="flex items-center justify-between gap-3">
                 <span className="text-meta text-muted-foreground/70">
                   Plain text only. Approval and denial are separate.
                 </span>
-                <button
-                  type="button"
+                <Button
+                  type="submit"
+                  size="icon-sm"
+                  variant="default"
                   aria-label="Send advisory message"
                   disabled={!canSend}
-                  onClick={send}
-                  className={cn(
-                    "flex size-7 items-center justify-center rounded-md transition-colors duration-200 enabled:active:scale-[0.96]",
-                    canSend ? "bg-foreground text-background" : "bg-border text-muted-foreground",
-                  )}
+                  loading={Boolean(sending)}
+                  className="size-8 rounded-md"
                 >
-                  {sending ? <CircleNotch className="size-4 animate-spin" /> : <ArrowUp weight="bold" className="size-4" />}
-                </button>
+                  <ArrowUp weight="bold" className="size-4" />
+                </Button>
               </div>
-            </div>
+            </form>
           </div>
 
           {failedRequest ? (
