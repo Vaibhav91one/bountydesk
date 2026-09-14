@@ -154,8 +154,6 @@ export function CaseView({
           destination={status.destination}
           speaker="awaiting-approval"
           speakerScope="record-speaker"
-          chatMascot="greeting"
-          chatMascotScope="record-chat"
           superseded={status.verdict.superseded}
           decision={
             status.approval

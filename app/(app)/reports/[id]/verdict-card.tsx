@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
+import { CaretDown, ChatCircleDots, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -62,8 +62,6 @@ export function VerdictCard({
   destination,
   speaker,
   speakerScope = "speaker",
-  chatMascot,
-  chatMascotScope = "chat",
   onChat,
   approve,
   approving,
@@ -90,8 +88,6 @@ export function VerdictCard({
   /** Agent Bounty. The comment is what it drafted, so it says so. */
   speaker: MascotKey;
   speakerScope?: string;
-  chatMascot: MascotKey;
-  chatMascotScope?: string;
   onChat?: () => void;
   approve?: () => void;
   approving?: boolean;
@@ -125,15 +121,17 @@ export function VerdictCard({
               keeps what approving bound: the heading names it, the drawer under it carries the
               hashes, and the footer the decision. Approve mode still renders the full body
               inline below, because that dialog is where the exact text is approved. */}
-          <VerdictDialog
-            outcomeLabel={outcomeLabel}
-            revision={revision}
-            summary={summary}
-            findings={findings}
-            payload={payload}
-            payloadArtifactId={payloadArtifactId}
-            findingsArtifactId={findingsArtifactId}
-          />
+          {!approve ? (
+            <VerdictDialog
+              outcomeLabel={outcomeLabel}
+              revision={revision}
+              summary={summary}
+              findings={findings}
+              payload={payload}
+              payloadArtifactId={payloadArtifactId}
+              findingsArtifactId={findingsArtifactId}
+            />
+          ) : null}
         </div>
 
         {approve ? (
@@ -256,11 +254,7 @@ export function VerdictCard({
           {/* Chat is advisory and has no path to either decision. Approval and denial remain
               separate guarded controls beside it. */}
           <Button size="sm" variant="outline" onClick={onChat} disabled={disabled}>
-            <AnimatedMascotSvg
-              state={chatMascot}
-              scope={chatMascotScope}
-              className="-my-1 size-8 shrink-0 [&>svg]:block [&>svg]:size-full"
-            />
+            <RollingIcon icon={ChatCircleDots} className="size-4" />
             Chat with Agent Bounty
           </Button>
 

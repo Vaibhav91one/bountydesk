@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,6 @@ export function ApprovalDialog({
   findings,
   speaker,
   speakerScope,
-  chatMascot,
-  chatMascotScope,
   events,
   details,
 }: {
@@ -76,8 +74,6 @@ export function ApprovalDialog({
   findings: Finding[];
   speaker: MascotKey;
   speakerScope: string;
-  chatMascot: MascotKey;
-  chatMascotScope: string;
   events: LifecycleEventView[];
   details?: Record<string, ToolCallView>;
 }) {
@@ -88,9 +84,15 @@ export function ApprovalDialog({
   const [result, setResult] = useState<ActionResult | null>(null);
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
   const [open, setOpen] = useState(false);
+  const chatBackRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (chatting) chatBackRef.current?.focus();
+  }, [chatting]);
 
   function onOpenChange(next: boolean) {
     setOpen(next);
+    if (!next) setChatting(false);
     if (next) {
       setResult(null);
       setDecision(null);
@@ -134,69 +136,83 @@ export function ApprovalDialog({
         }
       />
 
-      <DialogContent className="no-scrollbar max-h-[85vh] gap-0 overflow-y-auto p-0 sm:max-w-3xl">
-        <DialogHeader className="border-b border-border/50 p-5">
-          <DialogTitle>Sign the verdict</DialogTitle>
-          <DialogDescription>
-            The run has stopped here. Approve the exact words below, or say what is wrong with
-            them.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <div
+            className={`flex h-full w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
+              chatting ? "-translate-x-1/2" : "translate-x-0"
+            }`}
+          >
+            <section className="min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={chatting} inert={chatting || undefined}>
+              <DialogHeader className="border-b border-border/50 p-5">
+                <DialogTitle>Sign the verdict</DialogTitle>
+                <DialogDescription>
+                  The run has stopped here. Approve the exact words below, or say what is wrong with
+                  them.
+                </DialogDescription>
+              </DialogHeader>
 
-        <div className="flex flex-col gap-5 p-5">
-          <AgentTrace rows={events} details={details} />
+              <div className="flex flex-col gap-5 p-5">
+                <AgentTrace rows={events} details={details} />
 
-          {decision ? (
-            <p
-              role="status"
-              className="flex items-start gap-2.5 rounded-md bg-emerald-500/10 px-4 py-3 text-body text-emerald-400"
-            >
-              <CheckCircle className="mt-0.5 size-4 shrink-0" />
-              {decision === "ALLOWED"
-                ? "Approved. BountyDesk is moving the exact signed verdict through delivery."
-                : "Denied. Nothing will be posted, and the report is closed on BountyDesk's side."}
-            </p>
-          ) : (
-            <>
-              {/* Every refusal string comes from the action, which is the thing that actually
-                  re-reads and locks the rows. Restating it here would be a second opinion. */}
-              {result && !result.ok ? (
-                <p
-                  role="alert"
-                  className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-body text-destructive"
-                >
-                  <Warning className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    {result.error}. Nothing was recorded; reload to see the state the database is
-                    actually in.
-                  </span>
-                </p>
-              ) : null}
+                {decision ? (
+                  <p
+                    role="status"
+                    className="flex items-start gap-2.5 rounded-md bg-emerald-500/10 px-4 py-3 text-body text-emerald-400"
+                  >
+                    <CheckCircle className="mt-0.5 size-4 shrink-0" />
+                    {decision === "ALLOWED"
+                      ? "Approved. BountyDesk is moving the exact signed verdict through delivery."
+                      : "Denied. Nothing will be posted, and the report is closed on BountyDesk's side."}
+                  </p>
+                ) : (
+                  <>
+                    {result && !result.ok ? (
+                      <p
+                        role="alert"
+                        className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-body text-destructive"
+                      >
+                        <Warning className="mt-0.5 size-4 shrink-0" />
+                        <span>
+                          {result.error}. Nothing was recorded; reload to see the state the database is
+                          actually in.
+                        </span>
+                      </p>
+                    ) : null}
 
-              <VerdictCard
-                payload={payload}
-                payloadArtifactId={payloadArtifactId}
-                findingsArtifactId={findingsArtifactId}
-                outcome={outcome}
-                outcomeLabel={outcomeLabel}
-                summary={summary}
-                findings={findings}
-                revision={revision}
-                contentHash={contentHash}
-                destination={destination}
-                speaker={speaker}
-                speakerScope={speakerScope}
-                chatMascot={chatMascot}
-                chatMascotScope={chatMascotScope}
-                onChat={() => setChatting(true)}
-                approve={() => decide("allow")}
-                approving={acting === "allow"}
-                deny={() => decide("deny")}
-                denying={acting === "deny"}
-                disabled={acting !== null}
-              />
+                    <VerdictCard
+                      payload={payload}
+                      payloadArtifactId={payloadArtifactId}
+                      findingsArtifactId={findingsArtifactId}
+                      outcome={outcome}
+                      outcomeLabel={outcomeLabel}
+                      summary={summary}
+                      findings={findings}
+                      revision={revision}
+                      contentHash={contentHash}
+                      destination={destination}
+                      speaker={speaker}
+                      speakerScope={speakerScope}
+                      onChat={() => setChatting(true)}
+                      approve={() => decide("allow")}
+                      approving={acting === "allow"}
+                      deny={() => decide("deny")}
+                      denying={acting === "deny"}
+                      disabled={acting !== null}
+                    />
+                  </>
+                )}
+              </div>
+            </section>
 
-              {chatting ? (
+            <section className="min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={!chatting} inert={!chatting || undefined}>
+              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border/50 bg-popover p-4">
+                <Button ref={chatBackRef} type="button" size="sm" variant="ghost" onClick={() => setChatting(false)}>
+                  <ArrowLeft className="size-4" /> Back
+                </Button>
+                <h2 className="text-body font-medium text-foreground">Chat with Agent Bounty</h2>
+              </div>
+              <div className="p-5">
                 <AgentChat
                   reportId={reportId}
                   verdictId={verdictId}
@@ -204,9 +220,9 @@ export function ApprovalDialog({
                   contentHash={contentHash}
                   onReasonChange={setReason}
                 />
-              ) : null}
-            </>
-          )}
+              </div>
+            </section>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
