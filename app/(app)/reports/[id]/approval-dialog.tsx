@@ -139,7 +139,7 @@ export function ApprovalDialog({
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div
-            className={`flex h-full min-h-0 w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
+            className={`flex h-0 min-h-0 flex-1 w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
               chatting ? "-translate-x-1/2" : "translate-x-0"
             }`}
           >
