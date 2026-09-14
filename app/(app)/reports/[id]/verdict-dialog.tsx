@@ -127,8 +127,8 @@ export function VerdictDialog({
         }
       />
 
-      <DialogContent className="no-scrollbar flex max-h-[85vh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b border-border/50 p-5">
+      <DialogContent className="no-scrollbar flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="sticky top-0 z-10 shrink-0 border-b border-border/50 bg-popover p-5 pr-14">
           <DialogTitle className="flex flex-wrap items-center gap-2">
             {outcomeLabel}
             <span className="text-meta font-normal text-muted-foreground">
@@ -140,7 +140,7 @@ export function VerdictDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-w-0 p-5">
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto p-5">
           <VerdictBody
             summary={summary}
             findings={findings}

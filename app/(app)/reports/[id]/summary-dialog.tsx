@@ -42,8 +42,8 @@ export function SummaryDialog({
           </Button>
         }
       />
-      <DialogContent className="no-scrollbar flex max-h-[85vh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-2xl">
-        <DialogHeader>
+      <DialogContent className="no-scrollbar flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
+        <DialogHeader className="sticky top-0 z-10 shrink-0 border-b border-border/50 bg-popover p-5 pr-14">
           <DialogTitle>Agent summary</DialogTitle>
           <DialogDescription>
             {"Agent Bounty's closing message for the latest run, "}
@@ -54,7 +54,7 @@ export function SummaryDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="px-6 pb-6">
+        <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-5">
           <div className="rounded-md border border-border/50 bg-muted/30 px-4 py-3">
             <p className="whitespace-pre-wrap break-words text-body text-foreground">{summary}</p>
           </div>
