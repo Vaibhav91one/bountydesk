@@ -34,7 +34,12 @@ export function SummaryCard({
         </span>
       </header>
 
-      <p className="whitespace-pre-wrap break-words text-body text-foreground">{summary}</p>
+      {/* Its own block, not a paragraph of the page: the agent's message is a record from a
+          run, and a muted surface keeps it visually separate from a verdict's own summary the
+          way the transcript sits apart from a report's body. */}
+      <div className="rounded-md border border-border/50 bg-muted/30 px-4 py-3">
+        <p className="whitespace-pre-wrap break-words text-body text-foreground">{summary}</p>
+      </div>
 
       <span className="text-meta text-muted-foreground">
         {"Agent Bounty's closing message for the latest run. The findings table above carries the "}
