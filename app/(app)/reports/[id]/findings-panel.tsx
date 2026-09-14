@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/sheet";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
+import { ArtifactDownload } from "./artifact-download";
 import { FindingDescription } from "./finding-description";
 
 /**
@@ -91,6 +92,15 @@ export function FindingsPanel({
         empty="No findings drafted."
         rowClassName="border-border"
       />
+
+      {findingsArtifactId ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-meta text-muted-foreground">
+            Every finding above, with the evidence each one cites.
+          </span>
+          <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
+        </div>
+      ) : null}
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         {/* Wider than the repository panel next door: a finding carries reproduction steps, and

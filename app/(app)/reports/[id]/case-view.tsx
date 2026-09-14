@@ -16,13 +16,11 @@ import {
 } from "@/lib/reports/status-query";
 
 import { ArtifactsPanel } from "./artifacts-panel";
-import { ArtifactDownload } from "./artifact-download";
 import { FindingsPanel } from "./findings-panel";
 import { LifecycleList } from "./lifecycle-list";
 import { StatusCard } from "./status-card";
 import { SummaryDialog } from "./summary-dialog";
 import { VerdictCard } from "./verdict-card";
-import { VerdictDialog } from "./verdict-dialog";
 
 function Panel({
   title,
@@ -89,8 +87,6 @@ export function CaseView({
     enabled: status.eventCount > 0,
     refetchInterval: () => toolCallsRefetchInterval(status),
   });
-  const findingsArtifactId = status.verdict?.findingsArtifactId ?? null;
-
   return (
     <div className="flex flex-col gap-4 p-8">
       <StatusCard
@@ -103,7 +99,15 @@ export function CaseView({
       {/* The pipeline beside the shape it runs through. Equal height on purpose: they are
           two views of the same run, and one of them ending early reads as unfinished. */}
       <div className="grid items-stretch gap-4 lg:grid-cols-2">
-        <Panel title="Lifecycle" className="p-0">
+        <Panel
+          title="Lifecycle"
+          className="p-0"
+          aside={
+            status.finalSummary ? (
+              <SummaryDialog summary={status.finalSummary} updatedAt={status.updatedAt} />
+            ) : null
+          }
+        >
           <LifecycleList steps={status.steps} details={details} />
         </Panel>
 
@@ -122,30 +126,6 @@ export function CaseView({
           />
         </Panel>
       </div>
-
-      {/* Long reads and findings download share one action row, so related reviewer controls stay
-          together instead of splitting across the page. */}
-      {status.finalSummary || findingsArtifactId || (status.verdict && !status.awaitingVerdictId) ? (
-        <div className="flex flex-wrap gap-2">
-          {status.finalSummary ? (
-            <SummaryDialog summary={status.finalSummary} updatedAt={status.updatedAt} />
-          ) : null}
-          {status.verdict && !status.awaitingVerdictId ? (
-            <VerdictDialog
-              outcomeLabel={status.verdict.outcomeLabel}
-              revision={status.verdict.revision}
-              summary={status.verdict.summary}
-              findings={status.verdict.findings}
-              payload={status.verdict.payload}
-              payloadArtifactId={status.verdict.payloadArtifactId}
-              findingsArtifactId={status.verdict.findingsArtifactId}
-            />
-          ) : null}
-          {findingsArtifactId ? (
-            <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
-          ) : null}
-        </div>
-      ) : null}
 
       {/* No card around it. The table carries its own border, and a "Findings" header over a
           column already headed Finding was chrome saying the same word twice. */}

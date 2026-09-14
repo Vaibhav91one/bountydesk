@@ -125,17 +125,15 @@ export function VerdictCard({
               keeps what approving bound: the heading names it, the drawer under it carries the
               hashes, and the footer the decision. Approve mode still renders the full body
               inline below, because that dialog is where the exact text is approved. */}
-          {approve ? (
-            <VerdictDialog
-              outcomeLabel={outcomeLabel}
-              revision={revision}
-              summary={summary}
-              findings={findings}
-              payload={payload}
-              payloadArtifactId={payloadArtifactId}
-              findingsArtifactId={findingsArtifactId}
-            />
-          ) : null}
+          <VerdictDialog
+            outcomeLabel={outcomeLabel}
+            revision={revision}
+            summary={summary}
+            findings={findings}
+            payload={payload}
+            payloadArtifactId={payloadArtifactId}
+            findingsArtifactId={findingsArtifactId}
+          />
         </div>
 
         {approve ? (
