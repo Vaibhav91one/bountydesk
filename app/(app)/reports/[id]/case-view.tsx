@@ -16,6 +16,7 @@ import {
 } from "@/lib/reports/status-query";
 
 import { ArtifactsPanel } from "./artifacts-panel";
+import { ArtifactDownload } from "./artifact-download";
 import { FindingsPanel } from "./findings-panel";
 import { LifecycleList } from "./lifecycle-list";
 import { StatusCard } from "./status-card";
@@ -88,6 +89,7 @@ export function CaseView({
     enabled: status.eventCount > 0,
     refetchInterval: () => toolCallsRefetchInterval(status),
   });
+  const findingsArtifactId = status.verdict?.findingsArtifactId ?? null;
 
   return (
     <div className="flex flex-col gap-4 p-8">
@@ -121,10 +123,9 @@ export function CaseView({
         </Panel>
       </div>
 
-      {/* Two records behind two buttons, side by side: the agent's closing message and the
-          comment it drafted. Both ran long enough inline to crowd out everything under them,
-          and a reviewer who wants either opens it where a dialog bounds the length. */}
-      {status.finalSummary || (status.verdict && !status.awaitingVerdictId) ? (
+      {/* Long reads and findings download share one action row, so related reviewer controls stay
+          together instead of splitting across the page. */}
+      {status.finalSummary || findingsArtifactId || (status.verdict && !status.awaitingVerdictId) ? (
         <div className="flex flex-wrap gap-2">
           {status.finalSummary ? (
             <SummaryDialog summary={status.finalSummary} updatedAt={status.updatedAt} />
@@ -139,6 +140,9 @@ export function CaseView({
               payloadArtifactId={status.verdict.payloadArtifactId}
               findingsArtifactId={status.verdict.findingsArtifactId}
             />
+          ) : null}
+          {findingsArtifactId ? (
+            <ArtifactDownload artifactId={findingsArtifactId} label="Download findings" />
           ) : null}
         </div>
       ) : null}

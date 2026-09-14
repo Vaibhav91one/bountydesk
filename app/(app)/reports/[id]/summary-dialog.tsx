@@ -2,6 +2,7 @@
 
 import { ClipboardText } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -36,7 +37,7 @@ export function SummaryDialog({
       <DialogTrigger
         render={
           <Button size="sm" variant="outline">
-            <ClipboardText aria-hidden="true" className="size-4" />
+            <RollingIcon icon={ClipboardText} className="size-4" />
             Agent summary
           </Button>
         }

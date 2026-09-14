@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { DownloadSimple } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import { getArtifactDownloadUrl } from "./actions";
 
@@ -51,7 +52,7 @@ export function ArtifactDownload({
     <span className="flex items-center gap-2">
       {error ? <span className="text-meta text-destructive">{error}</span> : null}
       <Button size="sm" variant="outline" onClick={download} loading={busy}>
-        <DownloadSimple className="size-4" /> {label}
+        <RollingIcon icon={DownloadSimple} className="size-4" /> {label}
       </Button>
     </span>
   );
