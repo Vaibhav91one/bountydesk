@@ -64,8 +64,6 @@ export function CaseApproval({
       findings={status.verdict.findings}
       speaker="awaiting-approval"
       speakerScope="approval-speaker"
-      chatMascot="greeting"
-      chatMascotScope="approval-chat"
       events={status.steps.flatMap((step) => step.events)}
       details={details}
     />

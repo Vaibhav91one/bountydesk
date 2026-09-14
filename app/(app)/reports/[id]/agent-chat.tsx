@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowClockwise, ArrowUp, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
+import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
+
 import { requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,6 +86,25 @@ function latestReviewerMessage(status: ChatStatus | null): ChatMessage | null {
       .filter((message) => message.sender === "REVIEWER")
       .at(-1) ?? null
   );
+}
+
+function pendingReviewerMessage(status: ChatStatus | null): ChatMessage | null {
+  for (const thread of status?.threads ?? []) {
+    if (thread.status !== "OPEN" && thread.status !== "RUNNING") continue;
+    const message = [...thread.messages]
+      .reverse()
+      .find(
+        (candidate) =>
+          candidate.sender === "REVIEWER" &&
+          !thread.messages.some(
+            (response) =>
+              response.sender === "AGENT" &&
+              response.clientRequestId === responseRequestId(candidate.clientRequestId),
+          ),
+      );
+    if (message) return message;
+  }
+  return null;
 }
 
 function failedRequestFromStatus(status: ChatStatus | null): ChatRequest | null {
@@ -226,6 +247,7 @@ export function AgentChat({
   );
   const canSend = canSubmitReviewerMessage(draft, Boolean(sending), mode);
   const messages = allMessages(status);
+  const pendingMessage = pendingReviewerMessage(status);
 
   async function submit(request: ChatRequest) {
     setSending(request);
@@ -319,9 +341,24 @@ export function AgentChat({
                 Ask a question about the evidence or the exact comment before deciding.
               </p>
             ) : null}
-            {messages.map((message) => (
-              <DurableChatMessage key={message.id} message={message} />
-            ))}
+            {messages.map((message) =>
+              message.sender === "AGENT" ? (
+                <div key={message.id} className="flex flex-col gap-1.5">
+                  <span className="text-meta text-muted-foreground">
+                    <span className="text-foreground">Agent Bounty</span>
+                  </span>
+                  <StreamingText text={message.body} />
+                </div>
+              ) : (
+                <DurableChatMessage key={message.id} message={message} />
+              ),
+            )}
+            {pendingMessage ? (
+              <div className="flex items-center gap-2.5 py-1" role="status" aria-label="Agent Bounty is thinking">
+                <LoaderGrid />
+                <ShimmerLabel>Agent Bounty is thinking</ShimmerLabel>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex flex-wrap gap-2 border-t border-border/50 px-4 py-3">
