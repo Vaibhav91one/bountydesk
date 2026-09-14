@@ -139,11 +139,11 @@ export function ApprovalDialog({
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <div className="min-h-0 flex-1 overflow-hidden">
           <div
-            className={`flex h-full w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
+            className={`flex h-full min-h-0 w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
               chatting ? "-translate-x-1/2" : "translate-x-0"
             }`}
           >
-            <section className="min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={chatting} inert={chatting || undefined}>
+            <section className="min-h-0 min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={chatting} inert={chatting || undefined}>
               <DialogHeader className="border-b border-border/50 p-5">
                 <DialogTitle>Sign the verdict</DialogTitle>
                 <DialogDescription>
@@ -205,7 +205,7 @@ export function ApprovalDialog({
               </div>
             </section>
 
-            <section className="min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={!chatting} inert={!chatting || undefined}>
+            <section className="min-h-0 min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={!chatting} inert={!chatting || undefined}>
               <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border/50 bg-popover p-4">
                 <Button ref={chatBackRef} type="button" size="sm" variant="ghost" onClick={() => setChatting(false)}>
                   <ArrowLeft className="size-4" /> Back
