@@ -134,7 +134,7 @@ async function loadWork(lease: ChatLease): Promise<{
   if (!thread) throw new ChatInvariantError("chat thread is not bound to the claimed report");
 
   const [caseReport] = await db
-    .select({ body: report.body, targetProfileId: report.targetProfileId })
+    .select({ title: report.title, body: report.body, targetProfileId: report.targetProfileId })
     .from(report)
     .where(eq(report.id, lease.reportId));
   if (!caseReport) throw new ChatInvariantError("report does not exist");
@@ -201,6 +201,7 @@ async function loadWork(lease: ChatLease): Promise<{
   previous.reverse();
 
   const context = buildReviewerChatContext({
+    title: caseReport.title,
     reportBody: caseReport.body,
     summary: verdictSnapshot?.summary ?? "No verdict has been drafted yet.",
     findings: findingsFromEvidence(verdictSnapshot?.evidence),
@@ -221,6 +222,7 @@ async function loadWork(lease: ChatLease): Promise<{
 
   return {
     context: {
+      title: caseReport.title,
       reportBody: caseReport.body,
       summary: verdictSnapshot?.summary ?? "No verdict has been drafted yet.",
       findings: findingsFromEvidence(verdictSnapshot?.evidence),

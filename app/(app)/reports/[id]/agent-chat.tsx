@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, ArrowUp, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, ArrowUp, CircleNotch, Info, ListChecks, MagnifyingGlass, Warning, Wrench } from "@phosphor-icons/react/ssr";
 
 import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
 
 import { requestRecheckAction } from "@/app/review/actions";
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -40,10 +42,13 @@ type ChatResponse = {
   responseBody: string | null;
 };
 
-export const ADVISORY_LABEL = "Advisory conversation, not approval";
+export const ADVISORY_LABEL = "Agent Bounty is on this case";
 export const QUICK_PROMPTS = [
-  "Ask another angle",
-  "Ask for missing evidence",
+  { label: "Summarize issue", icon: ListChecks, prompt: "Summarize the reproduced issue, including steps and impact." },
+  { label: "Review steps", icon: MagnifyingGlass, prompt: "Review the reproduction steps and point out any missing details for triage." },
+  { label: "Suggest remediation", icon: Wrench, prompt: "Suggest remediation and secure coding guidance for this issue." },
+  { label: "Verify a fix", icon: ListChecks, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
+  { label: "Improve report", icon: MagnifyingGlass, prompt: "Suggest concise edits to the report text for clarity." },
 ] as const;
 
 export function canSubmitReviewerMessage(
@@ -156,14 +161,14 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
 export function AgentChat({
   reportId,
   verdictId,
-  revision,
-  contentHash,
+  reportTitle,
   onReasonChange,
 }: {
   reportId: string;
   verdictId: string;
   revision: number;
   contentHash: string;
+  reportTitle: string;
   onReasonChange: (reason: string | null) => void;
 }) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
@@ -303,15 +308,29 @@ export function AgentChat({
 
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
-      <div className="flex flex-col gap-1 border-b border-border/50 p-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="flex flex-col items-center gap-2 border-b border-border/50 px-4 py-5 text-center">
+        <AnimatedMascotSvg
+          state="greeting"
+          scope="chat-header"
+          className="size-12 [&>svg]:block [&>svg]:size-full"
+        />
+        <div className="flex items-center gap-1.5">
           <h2 className="text-body font-medium text-foreground">{ADVISORY_LABEL}</h2>
-          <span className="text-meta text-muted-foreground">Revision {revision}</span>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button size="icon-xs" variant="ghost" aria-label="About advisory chat">
+                  <Info className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              Agent Bounty can discuss this report but cannot change its verdict or approval.
+            </TooltipContent>
+          </Tooltip>
         </div>
-        <p className="break-all text-meta text-muted-foreground">Content hash: {contentHash}</p>
-        <p className="text-meta text-muted-foreground">
-          Ask questions about this exact draft. Nothing here changes the verdict or authorises a
-          tool.
+        <p className="max-w-lg truncate text-meta text-muted-foreground" title={reportTitle}>
+          I see you are working on {reportTitle}
         </p>
       </div>
 
@@ -362,15 +381,15 @@ export function AgentChat({
           </div>
 
           <div className="flex flex-wrap gap-2 border-t border-border/50 px-4 py-3">
-            {QUICK_PROMPTS.map((prompt) => (
+            {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
               <Button
-                key={prompt}
+                key={label}
                 size="xs"
                 variant="outline"
                 onClick={() => sendPrompt(prompt)}
                 disabled={Boolean(sending)}
               >
-                {prompt}
+                <Icon className="size-3.5" /> {label}
               </Button>
             ))}
             <Button

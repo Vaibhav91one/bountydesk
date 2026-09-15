@@ -159,7 +159,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             </p>
           </div>
 
-          <CaseApproval reportId={file.id} initial={initial} />
+          <CaseApproval reportId={file.id} reportTitle={file.title} initial={initial} />
         </div>
       </header>
 

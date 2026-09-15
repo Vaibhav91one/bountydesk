@@ -49,6 +49,7 @@ const contextFindingSchema = z.object({
  * rendered, so adding an accidental field at a call site cannot widen the prompt boundary.
  */
 export const reviewerChatContextSchema = z.object({
+  title: boundedText(CONTEXT_FIELD_MAX_LENGTH),
   reportBody: boundedText(CONTEXT_FIELD_MAX_LENGTH),
   summary: boundedText(CONTEXT_FIELD_MAX_LENGTH),
   findings: z.array(contextFindingSchema).max(REVIEWER_CHAT_FINDINGS_MAX),
