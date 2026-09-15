@@ -4,8 +4,13 @@ import test from "node:test";
 import {
   ADVISORY_LABEL,
   canSubmitReviewerMessage,
+  isFreshAgentMessage,
+  newlyObservedAgentIds,
+  QUICK_PROMPTS,
   responseRequestId,
   reviewerMessagePayload,
+  shouldFollowChat,
+  type ChatMessage,
   type ChatRequest,
 } from "./[id]/agent-chat";
 
@@ -22,9 +27,56 @@ test("the durable chat payload stays plain text and preserves its request ID", (
 
 test("the chat is advisory and cannot submit while a request is in flight", () => {
   assert.equal(ADVISORY_LABEL, "Agent Bounty is on this case");
+  assert.deepEqual(QUICK_PROMPTS.map(({ label }) => label), [
+    "Summarize issue",
+    "Review steps",
+    "Suggest remediation",
+    "Verify a fix",
+    "Improve report",
+  ]);
   assert.equal(canSubmitReviewerMessage("Question", false, "ready"), true);
   assert.equal(canSubmitReviewerMessage("Question", true, "ready"), false);
   assert.equal(canSubmitReviewerMessage("Question", false, "loading"), false);
+});
+
+test("only agent rows observed after hydration are presentation reveals", () => {
+  const history: ChatMessage[] = [
+    { id: "old", clientRequestId: "old", sender: "AGENT", body: "old", createdAt: "" },
+    { id: "reviewer", clientRequestId: "reviewer", sender: "REVIEWER", body: "question", createdAt: "" },
+  ];
+  const current: ChatMessage[] = [
+    ...history,
+    { id: "new", clientRequestId: "new", sender: "AGENT", body: "new", createdAt: "" },
+  ];
+
+  assert.deepEqual(newlyObservedAgentIds(history, new Set(["old"])), []);
+  assert.deepEqual(newlyObservedAgentIds(current, new Set(["old"])), ["new"]);
+  assert.deepEqual(newlyObservedAgentIds(current, new Set(["old", "new"])), []);
+});
+
+test("only agent rows created after mount earn the streaming reveal", () => {
+  const mountedAt = Date.parse("2026-09-15T12:00:00.000Z");
+  assert.equal(isFreshAgentMessage("2026-09-15T12:00:05.000Z", mountedAt), true);
+  assert.equal(isFreshAgentMessage("2026-09-15T11:00:00.000Z", mountedAt), false);
+  assert.equal(isFreshAgentMessage("", mountedAt), false);
+  assert.equal(isFreshAgentMessage("not-a-date", mountedAt), false);
+  assert.equal(
+    isFreshAgentMessage(new Date(mountedAt - 30_000).toISOString(), mountedAt),
+    true,
+    "30s grace covers server clock skew",
+  );
+  assert.equal(
+    isFreshAgentMessage(new Date(mountedAt - 30_001).toISOString(), mountedAt),
+    false,
+  );
+  assert.equal(isFreshAgentMessage(new Date(mountedAt + 5_000).toISOString(), mountedAt), true);
+});
+
+test("chat only follows updates for an active reviewer near the bottom or their own send", () => {
+  assert.equal(shouldFollowChat(true, true), true);
+  assert.equal(shouldFollowChat(true, false), false);
+  assert.equal(shouldFollowChat(false, true), false);
+  assert.equal(shouldFollowChat(true, false, true), true);
 });
 
 test("a retry can reuse the exact payload without changing the durable identity", () => {

@@ -1,25 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ArrowClockwise,
-  ArrowUp,
-  CircleNotch,
-  ListChecks,
-  MagnifyingGlass,
-  PencilSimple,
-  ShieldCheck,
-  Warning,
-  Wrench,
-} from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
 import { requestRecheckAction } from "@/app/review/actions";
-import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
+import { PromptBar, QUICK_PROMPTS } from "./prompt-bar";
+
+export { QUICK_PROMPTS };
 
 type ChatSender = "REVIEWER" | "AGENT" | "SYSTEM";
 
@@ -52,13 +43,6 @@ type ChatResponse = {
 };
 
 export const ADVISORY_LABEL = "Agent Bounty is on this case";
-export const QUICK_PROMPTS = [
-  { label: "Summarize issue", icon: ListChecks, prompt: "Summarize the reproduced issue, including steps and impact." },
-  { label: "Review steps", icon: MagnifyingGlass, prompt: "Review the reproduction steps and point out any missing details for triage." },
-  { label: "Suggest remediation", icon: Wrench, prompt: "Suggest remediation and secure coding guidance for this issue." },
-  { label: "Verify a fix", icon: ShieldCheck, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
-  { label: "Improve report", icon: PencilSimple, prompt: "Suggest concise edits to the report text for clarity." },
-] as const;
 
 export function canSubmitReviewerMessage(
   draft: string,
@@ -66,6 +50,30 @@ export function canSubmitReviewerMessage(
   mode: "loading" | "ready" | "disabled" | "error",
 ): boolean {
   return draft.trim().length > 0 && !sending && mode === "ready";
+}
+
+/** Agent rows present in the initial status snapshot are history, not new replies. */
+export function newlyObservedAgentIds(
+  messages: ChatMessage[],
+  seen: ReadonlySet<string>,
+): string[] {
+  return messages
+    .filter((message) => message.sender === "AGENT" && !seen.has(message.id))
+    .map((message) => message.id);
+}
+
+/** Only an active reviewer near the latest message should be moved by polling. */
+export function shouldFollowChat(active: boolean, nearBottom: boolean, ownChange = false): boolean {
+  return active && (nearBottom || ownChange);
+}
+
+/**
+ * History replays as static text. Only an agent row created after this mount
+ * (30s grace for server/browser clock skew) earns the word-by-word reveal.
+ */
+export function isFreshAgentMessage(createdAt: string, mountedAt: number): boolean {
+  const time = Date.parse(createdAt);
+  return Number.isFinite(time) && time >= mountedAt - 30_000;
 }
 
 /** The response row is bound to the reviewer row by this durable suffix. */
@@ -170,12 +178,14 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
 export function AgentChat({
   reportId,
   verdictId,
+  active,
   onReasonChange,
 }: {
   reportId: string;
   verdictId: string;
   revision: number;
   contentHash: string;
+  active: boolean;
   onReasonChange: (reason: string | null) => void;
 }) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
@@ -187,16 +197,32 @@ export function AgentChat({
   const [sendError, setSendError] = useState<string | null>(null);
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
+  const [revealingAgentIds, setRevealingAgentIds] = useState<Set<string>>(new Set());
+  const [hasNewBelow, setHasNewBelow] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+  // Set on mount, before the first status fetch resolves: effects run before the
+  // polling timer fires and long before the fetch returns, so this stamp is in
+  // place by the time any row is judged fresh.
+  const mountedAtRef = useRef(0);
+  const seenAgentIdsRef = useRef<Set<string>>(new Set());
+  const activeRef = useRef(active);
+  const prevActiveRef = useRef(active);
+  const statusRef = useRef<ChatStatus | null>(null);
+  const nearBottomRef = useRef(true);
+  const ownChangeRef = useRef(false);
+  const initialScrollRef = useRef(false);
   const scrollMessages = useCallback((behavior: ScrollBehavior = "smooth") => {
     const list = messagesRef.current;
     if (list) list.scrollTo({ top: list.scrollHeight, behavior });
   }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!active || mode !== "ready") return;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, mode]);
 
   const requestRecheck = useCallback(async () => {
     if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
@@ -219,6 +245,19 @@ export function AgentChat({
   }, [draft, reportId, verdictId]);
 
   const loadStatus = useCallback(async () => {
+    // Opening replays nothing: everything already fetched becomes seen history,
+    // and a reveal cut off by closing is dropped rather than resumed. Runs here,
+    // in the poll callback, so no effect body touches state directly.
+    if (activeRef.current !== prevActiveRef.current) {
+      prevActiveRef.current = activeRef.current;
+      if (activeRef.current) {
+        const known = allMessages(statusRef.current);
+        for (const message of known) {
+          if (message.sender === "AGENT") seenAgentIdsRef.current.add(message.id);
+        }
+      }
+      setRevealingAgentIds(new Set());
+    }
     try {
       const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/chat/status`, {
         cache: "no-store",
@@ -230,6 +269,28 @@ export function AgentChat({
       }
       if (!response.ok) throw new Error(`The advisory conversation returned ${response.status}.`);
       const next = (await response.json()) as ChatStatus;
+      const nextMessages = allMessages(next);
+      if (!hydratedRef.current) {
+        hydratedRef.current = true;
+        for (const message of nextMessages) {
+          if (message.sender === "AGENT") seenAgentIdsRef.current.add(message.id);
+        }
+      } else {
+        const newlyObserved = newlyObservedAgentIds(nextMessages, seenAgentIdsRef.current);
+        for (const id of newlyObserved) seenAgentIdsRef.current.add(id);
+        // History rows observed late (reopen, verdict switch) stay static, and rows
+        // that land while the pane is closed join them: only a reply arriving to an
+        // open chat reveals word by word.
+        if (activeRef.current) {
+          const fresh = newlyObserved.filter((id) => {
+            const message = nextMessages.find((candidate) => candidate.id === id);
+            return message ? isFreshAgentMessage(message.createdAt, mountedAtRef.current) : false;
+          });
+          if (fresh.length > 0) {
+            setRevealingAgentIds((current) => new Set([...current, ...fresh]));
+          }
+        }
+      }
       setStatus(next);
       onReasonChange(latestReviewerMessage(next)?.body ?? null);
       setMode("ready");
@@ -267,9 +328,58 @@ export function AgentChat({
   const pendingMessage = pendingReviewerMessage(status);
   const newestAgentId = [...messages].reverse().find((message) => message.sender === "AGENT")?.id;
 
+  const updateNearBottom = useCallback(() => {
+    const list = messagesRef.current;
+    if (!list) return;
+    nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= 48;
+    if (nearBottomRef.current) setHasNewBelow(false);
+  }, []);
+
   useEffect(() => {
-    if (mode === "ready") scrollMessages(messages.length <= 1 ? "auto" : "smooth");
-  }, [mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
+  }, []);
+
+  // The poll callback above owns the open/close transition, but it only runs on
+  // its interval: this kick makes the transition land with the slide instead of
+  // up to one interval later. Deferred through a timer because an effect body
+  // must not drive state updates itself.
+  useEffect(() => {
+    activeRef.current = active;
+    const kick = window.setTimeout(() => void loadStatus(), 0);
+    return () => window.clearTimeout(kick);
+  }, [active, loadStatus]);
+
+  useEffect(() => {
+    const list = messagesRef.current;
+    if (!list) return;
+    updateNearBottom();
+    list.addEventListener("scroll", updateNearBottom, { passive: true });
+    return () => list.removeEventListener("scroll", updateNearBottom);
+  }, [mode, updateNearBottom]);
+
+  useEffect(() => {
+    if (mode !== "ready" || !active) return;
+    if (!initialScrollRef.current) {
+      initialScrollRef.current = true;
+      requestAnimationFrame(() => scrollMessages("auto"));
+      return;
+    }
+
+    const ownChange = ownChangeRef.current;
+    // Scrolled up while polling: never yank. Flag it so the reviewer can jump down.
+    if (!shouldFollowChat(active, nearBottomRef.current, ownChange)) {
+      if (!ownChange) setHasNewBelow(true);
+      return;
+    }
+    setHasNewBelow(false);
+    const behavior = ownChange ? "smooth" : "auto";
+    ownChangeRef.current = false;
+    requestAnimationFrame(() => scrollMessages(behavior));
+  }, [active, mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
 
   async function submit(request: ChatRequest) {
     setSending(request);
@@ -294,6 +404,7 @@ export function AgentChat({
       setSending(null);
     } catch (error) {
       setSending(null);
+      ownChangeRef.current = false;
       setFailed(request);
       setSendError(errorText(error));
     }
@@ -303,11 +414,13 @@ export function AgentChat({
     const body = draft.trim();
     if (!body || !canSend) return;
     setDraft("");
+    ownChangeRef.current = true;
     void submit({ clientRequestId: newRequestId(), body });
   }
 
   function sendPrompt(prompt: string) {
     if (sending || mode !== "ready") return;
+    ownChangeRef.current = true;
     void submit({ clientRequestId: newRequestId(), body: prompt });
   }
 
@@ -324,7 +437,7 @@ export function AgentChat({
   }
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
 
       {mode === "loading" ? (
         <div className="flex items-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
@@ -346,7 +459,13 @@ export function AgentChat({
 
       {mode === "ready" ? (
         <>
-          <div ref={messagesRef} className="flex max-h-64 min-h-28 flex-col gap-3 overflow-y-auto px-4 py-4">
+          <div
+            ref={messagesRef}
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation with Agent Bounty"
+            className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto px-4 py-4"
+          >
             {messages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
                 Ask a question about the evidence or the exact comment before deciding.
@@ -358,10 +477,24 @@ export function AgentChat({
                   <span className="text-meta text-muted-foreground">
                     <span className="text-foreground">Agent Bounty</span>
                   </span>
-                  <StreamingText
-                    text={message.body}
-                    onDone={message.id === newestAgentId ? scrollMessages : undefined}
-                  />
+                  {revealingAgentIds.has(message.id) ? (
+                    <StreamingText
+                      text={message.body}
+                      onDone={() => {
+                        setRevealingAgentIds((current) => {
+                          if (!current.has(message.id)) return current;
+                          const next = new Set(current);
+                          next.delete(message.id);
+                          return next;
+                        });
+                        if (nearBottomRef.current && message.id === newestAgentId) scrollMessages();
+                      }}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-body leading-relaxed text-foreground">
+                      {message.body}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <DurableChatMessage key={message.id} message={message} />
@@ -373,29 +506,21 @@ export function AgentChat({
                 <ShimmerLabel>Agent Bounty is thinking</ShimmerLabel>
               </div>
             ) : null}
-          </div>
-
-          <div className="flex flex-wrap gap-2 border-t border-border/50 px-4 py-3">
-            {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
-              <Button
-                key={label}
-                size="xs"
-                variant="outline"
-                onClick={() => sendPrompt(prompt)}
-                disabled={Boolean(sending)}
-              >
-                <RollingIcon icon={Icon} className="size-3.5" /> {label}
-              </Button>
-            ))}
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void requestRecheck()}
-              disabled={Boolean(sending) || recheckState === "sending"}
-              title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
-            >
-              {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
-            </Button>
+            {hasNewBelow ? (
+              <div className="sticky bottom-0 flex justify-center pb-1">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => {
+                    setHasNewBelow(false);
+                    scrollMessages();
+                  }}
+                >
+                  New messages below
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           {recheckState === "error" ? (
@@ -413,42 +538,19 @@ export function AgentChat({
             </div>
           ) : null}
 
-          <div className="p-2">
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                send();
-              }}
-              onClick={() => inputRef.current?.focus()}
-              className="flex cursor-text flex-col gap-2 rounded-md border border-border/50 bg-background p-2.5 focus-within:border-ring"
-            >
-              <Input
-                ref={inputRef}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Ask about this verdict"
-                aria-label="Message to Agent Bounty"
-                disabled={Boolean(sending)}
-                className="h-9 border-0 bg-transparent px-0 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
-              />
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-meta text-muted-foreground/70">
-                  Plain text only. Approval and denial are separate.
-                </span>
-                <Button
-                  type="submit"
-                  size="icon-sm"
-                  variant="default"
-                  aria-label="Send advisory message"
-                  disabled={!canSend}
-                  loading={Boolean(sending)}
-                  className="size-8 rounded-md"
-                >
-                  {sending ? null : <ArrowUp weight="bold" className="size-4" />}
-                </Button>
-              </div>
-            </form>
-          </div>
+          {/* Bottom-only composer. Pills sit fixed above the rounded bar; the blank
+              message surface above scrolls while this footer stays put. */}
+          <PromptBar
+            draft={draft}
+            onDraftChange={setDraft}
+            onSend={send}
+            onQuickPrompt={sendPrompt}
+            onRecheck={() => void requestRecheck()}
+            sending={Boolean(sending)}
+            mode={mode}
+            recheckState={recheckState}
+            inputRef={inputRef}
+          />
 
           {failedRequest ? (
             <div className="flex items-center justify-between gap-3 border-t border-destructive/30 bg-destructive/5 px-4 py-3" role="alert">

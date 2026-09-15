@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CheckCircle, Info, Signature, Warning } from "@phosphor-icons/react/ssr";
 
+import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -19,12 +20,9 @@ import {
 import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
-import type { LifecycleEventView } from "@/lib/reports/case-view";
 import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
-import type { ToolCallView } from "@/lib/reports/tool-call-view";
 
 import { AgentChat } from "./agent-chat";
-import { AgentTrace } from "./agent-trace";
 import { VerdictCard } from "./verdict-card";
 
 /**
@@ -55,8 +53,6 @@ export function ApprovalDialog({
   findings,
   speaker,
   speakerScope,
-  events,
-  details,
 }: {
   reportId: string;
   verdictId: string;
@@ -75,8 +71,6 @@ export function ApprovalDialog({
   findings: Finding[];
   speaker: MascotKey;
   speakerScope: string;
-  events: LifecycleEventView[];
-  details?: Record<string, ToolCallView>;
 }) {
   const queryClient = useQueryClient();
   const [chatting, setChatting] = useState(false);
@@ -85,11 +79,6 @@ export function ApprovalDialog({
   const [result, setResult] = useState<ActionResult | null>(null);
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
   const [open, setOpen] = useState(false);
-  const chatBackRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (chatting) chatBackRef.current?.focus();
-  }, [chatting]);
 
   function onOpenChange(next: boolean) {
     setOpen(next);
@@ -154,8 +143,6 @@ export function ApprovalDialog({
               </DialogHeader>
 
               <div className="flex flex-col gap-5 p-5">
-                <AgentTrace rows={events} details={details} />
-
                 {decision ? (
                   <p
                     role="status"
@@ -206,36 +193,55 @@ export function ApprovalDialog({
               </div>
             </section>
 
-            <section className="min-h-0 min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={!chatting} inert={!chatting || undefined}>
-              <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4 pr-24">
-                <Button ref={chatBackRef} type="button" size="sm" variant="ghost" onClick={() => setChatting(false)}>
+            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden" aria-hidden={!chatting} inert={!chatting || undefined}>
+              <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setChatting(false)}
+                  className="relative z-10 justify-self-start"
+                >
                   <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                 </Button>
-                <h2 className="text-body font-medium text-foreground">Agent Bounty</h2>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label="About advisory chat"
-                        className="absolute top-4 right-14"
-                      />
-                    }
-                  >
-                    <Info className="size-4" />
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Agent Bounty can discuss this report but cannot change its verdict or approval.
-                  </TooltipContent>
-                </Tooltip>
+                <div className="flex items-center gap-2 text-body font-medium text-foreground">
+                  <AnimatedMascotSvg
+                    state="greeting"
+                    scope="approval-chat-header"
+                    className="size-9 [&>svg]:block [&>svg]:size-full"
+                  />
+                  <h2>Agent Bounty</h2>
+                </div>
+                {/* Info sits left of the dialog close button with the same button design. The
+                    trailing padding reserves the close slot owned by DialogContent. */}
+                <div className="flex justify-self-end pr-12">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="About advisory chat"
+                          className="bg-secondary"
+                        />
+                      }
+                    >
+                      <Info className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Agent Bounty can discuss this report but cannot change its verdict or approval.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
-              <div className="p-5">
+              <div className="flex min-h-0 flex-1 flex-col p-5">
                 <AgentChat
+                  key={`${reportId}:${verdictId}`}
                   reportId={reportId}
                   verdictId={verdictId}
                   revision={revision}
                   contentHash={contentHash}
+                  active={chatting}
                   onReasonChange={setReason}
                 />
               </div>

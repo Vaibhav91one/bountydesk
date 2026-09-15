@@ -6,10 +6,7 @@ import type { CaseLiveView } from "@/lib/reports/case-view";
 import {
   caseRefetchInterval,
   caseStatusQueryKey,
-  caseToolCallsQueryKey,
   fetchCaseStatus,
-  fetchCaseToolCalls,
-  toolCallsRefetchInterval,
 } from "@/lib/reports/status-query";
 
 import { ApprovalDialog } from "./approval-dialog";
@@ -39,13 +36,6 @@ export function CaseApproval({
     refetchInterval: (query) => caseRefetchInterval(query.state.data ?? initial),
   });
 
-  const { data: details } = useQuery({
-    queryKey: caseToolCallsQueryKey(reportId),
-    queryFn: () => fetchCaseToolCalls(reportId),
-    enabled: status.eventCount > 0,
-    refetchInterval: () => toolCallsRefetchInterval(status),
-  });
-
   if (!status.awaitingVerdictId || !status.verdict) return null;
 
   return (
@@ -64,8 +54,6 @@ export function CaseApproval({
       findings={status.verdict.findings}
       speaker="awaiting-approval"
       speakerScope="approval-speaker"
-      events={status.steps.flatMap((step) => step.events)}
-      details={details}
     />
   );
 }
