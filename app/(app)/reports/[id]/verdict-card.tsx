@@ -21,6 +21,17 @@ import { VerdictBody, VerdictDialog } from "./verdict-dialog";
  * reading of the record, not a confidence the model reported: there is no such number, and
  * inventing one to fill a meter would be the model grading its own work.
  */
+const SEVERITY_VARIANT: Record<
+  Finding["severity"],
+  "destructive" | "default" | "secondary" | "outline"
+> = {
+  critical: "destructive",
+  high: "destructive",
+  medium: "default",
+  low: "secondary",
+  info: "outline",
+};
+
 const EVIDENCE: Record<string, { bars: number; tone: string; label: string }> = {
   REPRODUCED: { bars: 3, tone: "bg-phase-delivered", label: "Agent's own investigation" },
   NOT_REPRODUCED: { bars: 2, tone: "bg-phase-analysis", label: "Ran, did not reproduce" },
@@ -38,6 +49,27 @@ function Meter({ bars, tone }: { bars: number; tone: string }) {
         />
       ))}
     </span>
+  );
+}
+
+function ApprovalPreview({ summary, findings }: { summary: string; findings: Finding[] }) {
+  const words = summary.trim().split(/\s+/);
+  const preview = words.slice(0, 34).join(" ");
+  const truncated = words.length > 34;
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p className="line-clamp-2 break-words text-body text-foreground">
+        {preview}
+        {truncated ? "…" : ""}
+      </p>
+      {findings[0] ? (
+        <span className="flex flex-wrap items-center gap-2 text-meta text-muted-foreground">
+          <span className="break-words text-foreground">{findings[0].title}</span>
+          <Badge variant={SEVERITY_VARIANT[findings[0].severity]}>{findings[0].severity}</Badge>
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -103,6 +135,7 @@ export function VerdictCard({
   superseded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const evidence = EVIDENCE[outcome] ?? EVIDENCE.INCONCLUSIVE;
 
   return (
@@ -151,15 +184,32 @@ export function VerdictCard({
                   <span className="text-meta text-muted-foreground">drafted this reply</span>
                 </span>
 
-                {/* Rendered from the structured summary and findings, not by parsing the
-                    markdown payload: the bytes the hash in the drawer binds are unchanged, and
-                    rendering the agent's fields as text is safe by construction where
-                    interpreting its markdown would not be. */}
-                <VerdictBody
-                  summary={summary}
-                  findings={findings}
-                  findingsArtifactId={findingsArtifactId}
-                />
+                {!previewOpen ? <ApprovalPreview summary={summary} findings={findings} /> : null}
+
+                <div
+                  className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
+                  style={{ gridTemplateRows: previewOpen ? "1fr" : "0fr", opacity: previewOpen ? 1 : 0 }}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    {/* Rendered from structured fields, never by parsing the markdown payload. */}
+                    <VerdictBody
+                      summary={summary}
+                      findings={findings}
+                      findingsArtifactId={findingsArtifactId}
+                    />
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  aria-expanded={previewOpen}
+                  onClick={() => setPreviewOpen((current) => !current)}
+                  className="w-fit px-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                >
+                  {previewOpen ? "Read less" : "Read more"}
+                </Button>
               </div>
             </div>
           </>

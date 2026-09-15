@@ -68,6 +68,21 @@ export function canSubmitReviewerMessage(
   return draft.trim().length > 0 && !sending && mode === "ready";
 }
 
+/** Agent rows present in the initial status snapshot are history, not new replies. */
+export function newlyObservedAgentIds(
+  messages: ChatMessage[],
+  seen: ReadonlySet<string>,
+): string[] {
+  return messages
+    .filter((message) => message.sender === "AGENT" && !seen.has(message.id))
+    .map((message) => message.id);
+}
+
+/** Only an active reviewer near the latest message should be moved by polling. */
+export function shouldFollowChat(active: boolean, nearBottom: boolean, ownChange = false): boolean {
+  return active && (nearBottom || ownChange);
+}
+
 /** The response row is bound to the reviewer row by this durable suffix. */
 export function responseRequestId(clientRequestId: string): string {
   return `${clientRequestId}:agent`;
@@ -170,12 +185,14 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
 export function AgentChat({
   reportId,
   verdictId,
+  active,
   onReasonChange,
 }: {
   reportId: string;
   verdictId: string;
   revision: number;
   contentHash: string;
+  active: boolean;
   onReasonChange: (reason: string | null) => void;
 }) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
@@ -187,16 +204,24 @@ export function AgentChat({
   const [sendError, setSendError] = useState<string | null>(null);
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
+  const [revealingAgentIds, setRevealingAgentIds] = useState<Set<string>>(new Set());
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+  const seenAgentIdsRef = useRef<Set<string>>(new Set());
+  const nearBottomRef = useRef(true);
+  const ownChangeRef = useRef(false);
+  const initialScrollRef = useRef(false);
   const scrollMessages = useCallback((behavior: ScrollBehavior = "smooth") => {
     const list = messagesRef.current;
     if (list) list.scrollTo({ top: list.scrollHeight, behavior });
   }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!active || mode !== "ready") return;
+    const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, mode]);
 
   const requestRecheck = useCallback(async () => {
     if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
@@ -230,6 +255,19 @@ export function AgentChat({
       }
       if (!response.ok) throw new Error(`The advisory conversation returned ${response.status}.`);
       const next = (await response.json()) as ChatStatus;
+      const nextMessages = allMessages(next);
+      if (!hydratedRef.current) {
+        hydratedRef.current = true;
+        for (const message of nextMessages) {
+          if (message.sender === "AGENT") seenAgentIdsRef.current.add(message.id);
+        }
+      } else {
+        const newlyObserved = newlyObservedAgentIds(nextMessages, seenAgentIdsRef.current);
+        for (const id of newlyObserved) seenAgentIdsRef.current.add(id);
+        if (newlyObserved.length > 0) {
+          setRevealingAgentIds((current) => new Set([...current, ...newlyObserved]));
+        }
+      }
       setStatus(next);
       onReasonChange(latestReviewerMessage(next)?.body ?? null);
       setMode("ready");
@@ -267,9 +305,34 @@ export function AgentChat({
   const pendingMessage = pendingReviewerMessage(status);
   const newestAgentId = [...messages].reverse().find((message) => message.sender === "AGENT")?.id;
 
+  const updateNearBottom = useCallback(() => {
+    const list = messagesRef.current;
+    if (!list) return;
+    nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= 48;
+  }, []);
+
   useEffect(() => {
-    if (mode === "ready") scrollMessages(messages.length <= 1 ? "auto" : "smooth");
-  }, [mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
+    const list = messagesRef.current;
+    if (!list) return;
+    updateNearBottom();
+    list.addEventListener("scroll", updateNearBottom, { passive: true });
+    return () => list.removeEventListener("scroll", updateNearBottom);
+  }, [mode, updateNearBottom]);
+
+  useEffect(() => {
+    if (mode !== "ready" || !active) return;
+    if (!initialScrollRef.current) {
+      initialScrollRef.current = true;
+      requestAnimationFrame(() => scrollMessages("auto"));
+      return;
+    }
+
+    const ownChange = ownChangeRef.current;
+    if (!shouldFollowChat(active, nearBottomRef.current, ownChange)) return;
+    const behavior = ownChange ? "smooth" : "auto";
+    ownChangeRef.current = false;
+    requestAnimationFrame(() => scrollMessages(behavior));
+  }, [active, mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
 
   async function submit(request: ChatRequest) {
     setSending(request);
@@ -294,6 +357,7 @@ export function AgentChat({
       setSending(null);
     } catch (error) {
       setSending(null);
+      ownChangeRef.current = false;
       setFailed(request);
       setSendError(errorText(error));
     }
@@ -303,11 +367,13 @@ export function AgentChat({
     const body = draft.trim();
     if (!body || !canSend) return;
     setDraft("");
+    ownChangeRef.current = true;
     void submit({ clientRequestId: newRequestId(), body });
   }
 
   function sendPrompt(prompt: string) {
     if (sending || mode !== "ready") return;
+    ownChangeRef.current = true;
     void submit({ clientRequestId: newRequestId(), body: prompt });
   }
 
@@ -324,7 +390,7 @@ export function AgentChat({
   }
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
 
       {mode === "loading" ? (
         <div className="flex items-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
@@ -346,7 +412,7 @@ export function AgentChat({
 
       {mode === "ready" ? (
         <>
-          <div ref={messagesRef} className="flex max-h-64 min-h-28 flex-col gap-3 overflow-y-auto px-4 py-4">
+          <div ref={messagesRef} className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto px-4 py-4">
             {messages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
                 Ask a question about the evidence or the exact comment before deciding.
@@ -358,10 +424,24 @@ export function AgentChat({
                   <span className="text-meta text-muted-foreground">
                     <span className="text-foreground">Agent Bounty</span>
                   </span>
-                  <StreamingText
-                    text={message.body}
-                    onDone={message.id === newestAgentId ? scrollMessages : undefined}
-                  />
+                  {revealingAgentIds.has(message.id) ? (
+                    <StreamingText
+                      text={message.body}
+                      onDone={() => {
+                        setRevealingAgentIds((current) => {
+                          if (!current.has(message.id)) return current;
+                          const next = new Set(current);
+                          next.delete(message.id);
+                          return next;
+                        });
+                        if (nearBottomRef.current && message.id === newestAgentId) scrollMessages();
+                      }}
+                    />
+                  ) : (
+                    <p className="whitespace-pre-wrap text-body leading-relaxed text-foreground">
+                      {message.body}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <DurableChatMessage key={message.id} message={message} />
@@ -373,29 +453,6 @@ export function AgentChat({
                 <ShimmerLabel>Agent Bounty is thinking</ShimmerLabel>
               </div>
             ) : null}
-          </div>
-
-          <div className="flex flex-wrap gap-2 border-t border-border/50 px-4 py-3">
-            {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
-              <Button
-                key={label}
-                size="xs"
-                variant="outline"
-                onClick={() => sendPrompt(prompt)}
-                disabled={Boolean(sending)}
-              >
-                <RollingIcon icon={Icon} className="size-3.5" /> {label}
-              </Button>
-            ))}
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void requestRecheck()}
-              disabled={Boolean(sending) || recheckState === "sending"}
-              title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
-            >
-              {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
-            </Button>
           </div>
 
           {recheckState === "error" ? (
@@ -413,14 +470,36 @@ export function AgentChat({
             </div>
           ) : null}
 
-          <div className="p-2">
+          <div className="border-t border-border/50 p-2">
+            <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
+              {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
+                <Button
+                  key={label}
+                  size="xs"
+                  variant="outline"
+                  onClick={() => sendPrompt(prompt)}
+                  disabled={Boolean(sending)}
+                >
+                  <RollingIcon icon={Icon} className="size-3.5" /> {label}
+                </Button>
+              ))}
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => void requestRecheck()}
+                disabled={Boolean(sending) || recheckState === "sending"}
+                title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
+              >
+                {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
+              </Button>
+            </div>
             <form
               onSubmit={(event) => {
                 event.preventDefault();
                 send();
               }}
               onClick={() => inputRef.current?.focus()}
-              className="flex cursor-text flex-col gap-2 rounded-md border border-border/50 bg-background p-2.5 focus-within:border-ring"
+              className="flex cursor-text items-center gap-2 rounded-full border border-border/50 bg-background px-3 py-1.5 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20 motion-reduce:transition-none"
             >
               <Input
                 ref={inputRef}
@@ -429,25 +508,23 @@ export function AgentChat({
                 placeholder="Ask about this verdict"
                 aria-label="Message to Agent Bounty"
                 disabled={Boolean(sending)}
-                className="h-9 border-0 bg-transparent px-0 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
+                className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
               />
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-meta text-muted-foreground/70">
-                  Plain text only. Approval and denial are separate.
-                </span>
-                <Button
-                  type="submit"
-                  size="icon-sm"
-                  variant="default"
-                  aria-label="Send advisory message"
-                  disabled={!canSend}
-                  loading={Boolean(sending)}
-                  className="size-8 rounded-md"
-                >
-                  {sending ? null : <ArrowUp weight="bold" className="size-4" />}
-                </Button>
-              </div>
+              <Button
+                type="submit"
+                size="icon-xs"
+                variant="default"
+                aria-label="Send advisory message"
+                disabled={!canSend}
+                loading={Boolean(sending)}
+                className="size-8 rounded-full"
+              >
+                {sending ? null : <ArrowUp weight="bold" className="size-4" />}
+              </Button>
             </form>
+            <p className="mt-1.5 px-2 text-meta text-muted-foreground/70">
+              Plain text only. Approval and denial are separate.
+            </p>
           </div>
 
           {failedRequest ? (
