@@ -194,7 +194,7 @@ export function ApprovalDialog({
             </section>
 
             <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden" aria-hidden={!chatting} inert={!chatting || undefined}>
-              <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4 pr-24">
+              <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4">
                 <Button
                   type="button"
                   size="sm"
@@ -212,26 +212,31 @@ export function ApprovalDialog({
                   />
                   <h2>Agent Bounty</h2>
                 </div>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        aria-label="About advisory chat"
-                        className="absolute top-4 right-14"
-                      />
-                    }
-                  >
-                    <Info className="size-4" />
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">
-                    Agent Bounty can discuss this report but cannot change its verdict or approval.
-                  </TooltipContent>
-                </Tooltip>
+                {/* Info sits left of the dialog close button with the same button design. The
+                    trailing padding reserves the close slot owned by DialogContent. */}
+                <div className="flex justify-self-end pr-12">
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          size="icon-sm"
+                          variant="ghost"
+                          aria-label="About advisory chat"
+                          className="bg-secondary"
+                        />
+                      }
+                    >
+                      <Info className="size-4" />
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      Agent Bounty can discuss this report but cannot change its verdict or approval.
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
               </div>
               <div className="flex min-h-0 flex-1 flex-col p-5">
                 <AgentChat
+                  key={`${reportId}:${verdictId}`}
                   reportId={reportId}
                   verdictId={verdictId}
                   revision={revision}

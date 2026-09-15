@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ADVISORY_LABEL,
   canSubmitReviewerMessage,
+  isFreshAgentMessage,
   newlyObservedAgentIds,
   QUICK_PROMPTS,
   responseRequestId,
@@ -51,6 +52,13 @@ test("only agent rows observed after hydration are presentation reveals", () => 
   assert.deepEqual(newlyObservedAgentIds(history, new Set(["old"])), []);
   assert.deepEqual(newlyObservedAgentIds(current, new Set(["old"])), ["new"]);
   assert.deepEqual(newlyObservedAgentIds(current, new Set(["old", "new"])), []);
+});
+
+test("only agent rows created after mount earn the streaming reveal", () => {
+  const mountedAt = Date.parse("2026-09-15T12:00:00.000Z");
+  assert.equal(isFreshAgentMessage("2026-09-15T12:00:05.000Z", mountedAt), true);
+  assert.equal(isFreshAgentMessage("2026-09-15T11:00:00.000Z", mountedAt), false);
+  assert.equal(isFreshAgentMessage("", mountedAt), false);
 });
 
 test("chat only follows updates for an active reviewer near the bottom or their own send", () => {

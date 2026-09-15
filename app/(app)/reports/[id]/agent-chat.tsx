@@ -1,25 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  ArrowClockwise,
-  ArrowUp,
-  CircleNotch,
-  ListChecks,
-  MagnifyingGlass,
-  PencilSimple,
-  ShieldCheck,
-  Warning,
-  Wrench,
-} from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
 import { requestRecheckAction } from "@/app/review/actions";
-import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
+import { PromptBar, QUICK_PROMPTS } from "./prompt-bar";
+
+export { QUICK_PROMPTS };
 
 type ChatSender = "REVIEWER" | "AGENT" | "SYSTEM";
 
@@ -52,13 +43,6 @@ type ChatResponse = {
 };
 
 export const ADVISORY_LABEL = "Agent Bounty is on this case";
-export const QUICK_PROMPTS = [
-  { label: "Summarize issue", icon: ListChecks, prompt: "Summarize the reproduced issue, including steps and impact." },
-  { label: "Review steps", icon: MagnifyingGlass, prompt: "Review the reproduction steps and point out any missing details for triage." },
-  { label: "Suggest remediation", icon: Wrench, prompt: "Suggest remediation and secure coding guidance for this issue." },
-  { label: "Verify a fix", icon: ShieldCheck, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
-  { label: "Improve report", icon: PencilSimple, prompt: "Suggest concise edits to the report text for clarity." },
-] as const;
 
 export function canSubmitReviewerMessage(
   draft: string,
@@ -81,6 +65,15 @@ export function newlyObservedAgentIds(
 /** Only an active reviewer near the latest message should be moved by polling. */
 export function shouldFollowChat(active: boolean, nearBottom: boolean, ownChange = false): boolean {
   return active && (nearBottom || ownChange);
+}
+
+/**
+ * History replays as static text. Only an agent row created after this mount
+ * (30s grace for server/browser clock skew) earns the word-by-word reveal.
+ */
+export function isFreshAgentMessage(createdAt: string, mountedAt: number): boolean {
+  const time = Date.parse(createdAt);
+  return Number.isFinite(time) && time >= mountedAt - 30_000;
 }
 
 /** The response row is bound to the reviewer row by this durable suffix. */
@@ -205,9 +198,13 @@ export function AgentChat({
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const [revealingAgentIds, setRevealingAgentIds] = useState<Set<string>>(new Set());
+  const [hasNewBelow, setHasNewBelow] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
+  // Set on mount, before the first status fetch resolves. Keyed by report and
+  // verdict in the parent, so a new conversation always remounts fresh.
+  const mountedAtRef = useRef(0);
   const seenAgentIdsRef = useRef<Set<string>>(new Set());
   const nearBottomRef = useRef(true);
   const ownChangeRef = useRef(false);
@@ -264,8 +261,14 @@ export function AgentChat({
       } else {
         const newlyObserved = newlyObservedAgentIds(nextMessages, seenAgentIdsRef.current);
         for (const id of newlyObserved) seenAgentIdsRef.current.add(id);
-        if (newlyObserved.length > 0) {
-          setRevealingAgentIds((current) => new Set([...current, ...newlyObserved]));
+        // History rows observed late (reopen, verdict switch) stay static. Only rows
+        // created after this mount reveal word by word.
+        const fresh = newlyObserved.filter((id) => {
+          const message = nextMessages.find((candidate) => candidate.id === id);
+          return message ? isFreshAgentMessage(message.createdAt, mountedAtRef.current) : false;
+        });
+        if (fresh.length > 0) {
+          setRevealingAgentIds((current) => new Set([...current, ...fresh]));
         }
       }
       setStatus(next);
@@ -309,6 +312,11 @@ export function AgentChat({
     const list = messagesRef.current;
     if (!list) return;
     nearBottomRef.current = list.scrollHeight - list.scrollTop - list.clientHeight <= 48;
+    if (nearBottomRef.current) setHasNewBelow(false);
+  }, []);
+
+  useEffect(() => {
+    mountedAtRef.current = Date.now();
   }, []);
 
   useEffect(() => {
@@ -328,7 +336,12 @@ export function AgentChat({
     }
 
     const ownChange = ownChangeRef.current;
-    if (!shouldFollowChat(active, nearBottomRef.current, ownChange)) return;
+    // Scrolled up while polling: never yank. Flag it so the reviewer can jump down.
+    if (!shouldFollowChat(active, nearBottomRef.current, ownChange)) {
+      if (!ownChange) setHasNewBelow(true);
+      return;
+    }
+    setHasNewBelow(false);
     const behavior = ownChange ? "smooth" : "auto";
     ownChangeRef.current = false;
     requestAnimationFrame(() => scrollMessages(behavior));
@@ -412,7 +425,13 @@ export function AgentChat({
 
       {mode === "ready" ? (
         <>
-          <div ref={messagesRef} className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto px-4 py-4">
+          <div
+            ref={messagesRef}
+            role="log"
+            aria-live="polite"
+            aria-label="Conversation with Agent Bounty"
+            className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto px-4 py-4"
+          >
             {messages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
                 Ask a question about the evidence or the exact comment before deciding.
@@ -453,6 +472,21 @@ export function AgentChat({
                 <ShimmerLabel>Agent Bounty is thinking</ShimmerLabel>
               </div>
             ) : null}
+            {hasNewBelow ? (
+              <div className="sticky bottom-0 flex justify-center pb-1">
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="secondary"
+                  onClick={() => {
+                    setHasNewBelow(false);
+                    scrollMessages();
+                  }}
+                >
+                  New messages below
+                </Button>
+              </div>
+            ) : null}
           </div>
 
           {recheckState === "error" ? (
@@ -470,62 +504,19 @@ export function AgentChat({
             </div>
           ) : null}
 
-          <div className="border-t border-border/50 p-2">
-            <div className="mb-2 flex gap-2 overflow-x-auto pb-1">
-              {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
-                <Button
-                  key={label}
-                  size="xs"
-                  variant="outline"
-                  onClick={() => sendPrompt(prompt)}
-                  disabled={Boolean(sending)}
-                >
-                  <RollingIcon icon={Icon} className="size-3.5" /> {label}
-                </Button>
-              ))}
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() => void requestRecheck()}
-                disabled={Boolean(sending) || recheckState === "sending"}
-                title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
-              >
-                {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
-              </Button>
-            </div>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                send();
-              }}
-              onClick={() => inputRef.current?.focus()}
-              className="flex cursor-text items-center gap-2 rounded-full border border-border/50 bg-background px-3 py-1.5 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20 motion-reduce:transition-none"
-            >
-              <Input
-                ref={inputRef}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Ask about this verdict"
-                aria-label="Message to Agent Bounty"
-                disabled={Boolean(sending)}
-                className="h-9 min-w-0 flex-1 border-0 bg-transparent px-0 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
-              />
-              <Button
-                type="submit"
-                size="icon-xs"
-                variant="default"
-                aria-label="Send advisory message"
-                disabled={!canSend}
-                loading={Boolean(sending)}
-                className="size-8 rounded-full"
-              >
-                {sending ? null : <ArrowUp weight="bold" className="size-4" />}
-              </Button>
-            </form>
-            <p className="mt-1.5 px-2 text-meta text-muted-foreground/70">
-              Plain text only. Approval and denial are separate.
-            </p>
-          </div>
+          {/* Bottom-only composer. Pills sit fixed above the rounded bar; the blank
+              message surface above scrolls while this footer stays put. */}
+          <PromptBar
+            draft={draft}
+            onDraftChange={setDraft}
+            onSend={send}
+            onQuickPrompt={sendPrompt}
+            onRecheck={() => void requestRecheck()}
+            sending={Boolean(sending)}
+            mode={mode}
+            recheckState={recheckState}
+            inputRef={inputRef}
+          />
 
           {failedRequest ? (
             <div className="flex items-center justify-between gap-3 border-t border-destructive/30 bg-destructive/5 px-4 py-3" role="alert">
