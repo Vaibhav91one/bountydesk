@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, CheckCircle, Info, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -43,7 +44,6 @@ export function ApprovalDialog({
   reportId,
   verdictId,
   contentHash,
-  reportTitle,
   payload,
   payloadArtifactId,
   findingsArtifactId,
@@ -61,7 +61,6 @@ export function ApprovalDialog({
   reportId: string;
   verdictId: string;
   contentHash: string;
-  reportTitle: string;
   payload: string;
   /** The stored verdict-payload artifact, when one exists. Threaded to the card's download. */
   payloadArtifactId: string | null;
@@ -208,11 +207,28 @@ export function ApprovalDialog({
             </section>
 
             <section className="min-h-0 min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={!chatting} inert={!chatting || undefined}>
-              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-border/50 bg-popover p-4">
+              <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4 pr-24">
                 <Button ref={chatBackRef} type="button" size="sm" variant="ghost" onClick={() => setChatting(false)}>
-                  <ArrowLeft className="size-4" /> Back
+                  <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                 </Button>
-                <h2 className="text-body font-medium text-foreground">Chat with Agent Bounty</h2>
+                <h2 className="text-body font-medium text-foreground">Agent Bounty</h2>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-xs"
+                        variant="ghost"
+                        aria-label="About advisory chat"
+                        className="absolute top-4 right-14"
+                      />
+                    }
+                  >
+                    <Info className="size-4" />
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    Agent Bounty can discuss this report but cannot change its verdict or approval.
+                  </TooltipContent>
+                </Tooltip>
               </div>
               <div className="p-5">
                 <AgentChat
@@ -220,7 +236,6 @@ export function ApprovalDialog({
                   verdictId={verdictId}
                   revision={revision}
                   contentHash={contentHash}
-                  reportTitle={reportTitle}
                   onReasonChange={setReason}
                 />
               </div>

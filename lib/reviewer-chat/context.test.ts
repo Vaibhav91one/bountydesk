@@ -74,4 +74,6 @@ test("chat manifest has no tools, connectors, sandbox, or approval gate", () => 
   assert.deepEqual(chatAgentDefinition.manifest.requireApprovalForTools, []);
   assert.equal(chatAgentDefinition.manifest.config.sandbox.enabled, false);
   assert.equal(chatAgentDefinition.manifest.config.dynamic_sub_agents.enabled, false);
+  assert.match(chatAgentDefinition.manifest.instructions, /1 to 3 short sentences/);
+  assert.match(chatAgentDefinition.manifest.instructions, /first reply only/);
 });

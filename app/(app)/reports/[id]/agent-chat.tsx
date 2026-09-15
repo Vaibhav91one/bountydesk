@@ -1,16 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, ArrowUp, CircleNotch, Info, ListChecks, MagnifyingGlass, Warning, Wrench } from "@phosphor-icons/react/ssr";
-
-import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
+import { ArrowClockwise, ArrowUp, CircleNotch, ListChecks, MagnifyingGlass, Warning, Wrench } from "@phosphor-icons/react/ssr";
 
 import { requestRecheckAction } from "@/app/review/actions";
-import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+
+import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
 
 type ChatSender = "REVIEWER" | "AGENT" | "SYSTEM";
 
@@ -161,14 +160,12 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
 export function AgentChat({
   reportId,
   verdictId,
-  reportTitle,
   onReasonChange,
 }: {
   reportId: string;
   verdictId: string;
   revision: number;
   contentHash: string;
-  reportTitle: string;
   onReasonChange: (reason: string | null) => void;
 }) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
@@ -181,6 +178,7 @@ export function AgentChat({
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -254,6 +252,10 @@ export function AgentChat({
   const messages = allMessages(status);
   const pendingMessage = pendingReviewerMessage(status);
 
+  useEffect(() => {
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages.length, pendingMessage?.clientRequestId]);
+
   async function submit(request: ChatRequest) {
     setSending(request);
     setFailed(null);
@@ -271,10 +273,10 @@ export function AgentChat({
       if (!response.ok) {
         throw new Error(payload?.error ?? `The advisory conversation returned ${response.status}.`);
       }
-      setSending(null);
       setFailed(null);
       onReasonChange(request.body);
       await loadStatus();
+      setSending(null);
     } catch (error) {
       setSending(null);
       setFailed(request);
@@ -308,31 +310,6 @@ export function AgentChat({
 
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
-      <div className="flex flex-col items-center gap-2 border-b border-border/50 px-4 py-5 text-center">
-        <AnimatedMascotSvg
-          state="greeting"
-          scope="chat-header"
-          className="size-12 [&>svg]:block [&>svg]:size-full"
-        />
-        <div className="flex items-center gap-1.5">
-          <h2 className="text-body font-medium text-foreground">{ADVISORY_LABEL}</h2>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button size="icon-xs" variant="ghost" aria-label="About advisory chat">
-                  <Info className="size-4" />
-                </Button>
-              }
-            />
-            <TooltipContent side="bottom">
-              Agent Bounty can discuss this report but cannot change its verdict or approval.
-            </TooltipContent>
-          </Tooltip>
-        </div>
-        <p className="max-w-lg truncate text-meta text-muted-foreground" title={reportTitle}>
-          I see you are working on {reportTitle}
-        </p>
-      </div>
 
       {mode === "loading" ? (
         <div className="flex items-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
@@ -354,7 +331,7 @@ export function AgentChat({
 
       {mode === "ready" ? (
         <>
-          <div className="flex max-h-64 min-h-28 flex-col gap-3 overflow-y-auto px-4 py-4">
+          <div ref={messagesRef} className="flex max-h-64 min-h-28 flex-col gap-3 overflow-y-auto px-4 py-4">
             {messages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
                 Ask a question about the evidence or the exact comment before deciding.
@@ -366,7 +343,7 @@ export function AgentChat({
                   <span className="text-meta text-muted-foreground">
                     <span className="text-foreground">Agent Bounty</span>
                   </span>
-                  <StreamingText text={message.body} />
+                  <StreamingText text={message.body} onDone={() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" })} />
                 </div>
               ) : (
                 <DurableChatMessage key={message.id} message={message} />
@@ -389,7 +366,7 @@ export function AgentChat({
                 onClick={() => sendPrompt(prompt)}
                 disabled={Boolean(sending)}
               >
-                <Icon className="size-3.5" /> {label}
+                <RollingIcon icon={Icon} className="size-3.5" /> {label}
               </Button>
             ))}
             <Button
@@ -449,7 +426,7 @@ export function AgentChat({
                   loading={Boolean(sending)}
                   className="size-8 rounded-md"
                 >
-                  <ArrowUp weight="bold" className="size-4" />
+                  {sending ? null : <ArrowUp weight="bold" className="size-4" />}
                 </Button>
               </div>
             </form>
