@@ -59,6 +59,17 @@ test("only agent rows created after mount earn the streaming reveal", () => {
   assert.equal(isFreshAgentMessage("2026-09-15T12:00:05.000Z", mountedAt), true);
   assert.equal(isFreshAgentMessage("2026-09-15T11:00:00.000Z", mountedAt), false);
   assert.equal(isFreshAgentMessage("", mountedAt), false);
+  assert.equal(isFreshAgentMessage("not-a-date", mountedAt), false);
+  assert.equal(
+    isFreshAgentMessage(new Date(mountedAt - 30_000).toISOString(), mountedAt),
+    true,
+    "30s grace covers server clock skew",
+  );
+  assert.equal(
+    isFreshAgentMessage(new Date(mountedAt - 30_001).toISOString(), mountedAt),
+    false,
+  );
+  assert.equal(isFreshAgentMessage(new Date(mountedAt + 5_000).toISOString(), mountedAt), true);
 });
 
 test("chat only follows updates for an active reviewer near the bottom or their own send", () => {

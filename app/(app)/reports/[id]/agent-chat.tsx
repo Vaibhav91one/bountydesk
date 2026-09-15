@@ -202,10 +202,14 @@ export function AgentChat({
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const hydratedRef = useRef(false);
-  // Set on mount, before the first status fetch resolves. Keyed by report and
-  // verdict in the parent, so a new conversation always remounts fresh.
+  // Set on mount, before the first status fetch resolves: effects run before the
+  // polling timer fires and long before the fetch returns, so this stamp is in
+  // place by the time any row is judged fresh.
   const mountedAtRef = useRef(0);
   const seenAgentIdsRef = useRef<Set<string>>(new Set());
+  const activeRef = useRef(active);
+  const prevActiveRef = useRef(active);
+  const statusRef = useRef<ChatStatus | null>(null);
   const nearBottomRef = useRef(true);
   const ownChangeRef = useRef(false);
   const initialScrollRef = useRef(false);
@@ -241,6 +245,19 @@ export function AgentChat({
   }, [draft, reportId, verdictId]);
 
   const loadStatus = useCallback(async () => {
+    // Opening replays nothing: everything already fetched becomes seen history,
+    // and a reveal cut off by closing is dropped rather than resumed. Runs here,
+    // in the poll callback, so no effect body touches state directly.
+    if (activeRef.current !== prevActiveRef.current) {
+      prevActiveRef.current = activeRef.current;
+      if (activeRef.current) {
+        const known = allMessages(statusRef.current);
+        for (const message of known) {
+          if (message.sender === "AGENT") seenAgentIdsRef.current.add(message.id);
+        }
+      }
+      setRevealingAgentIds(new Set());
+    }
     try {
       const response = await fetch(`/api/reports/${encodeURIComponent(reportId)}/chat/status`, {
         cache: "no-store",
@@ -261,14 +278,17 @@ export function AgentChat({
       } else {
         const newlyObserved = newlyObservedAgentIds(nextMessages, seenAgentIdsRef.current);
         for (const id of newlyObserved) seenAgentIdsRef.current.add(id);
-        // History rows observed late (reopen, verdict switch) stay static. Only rows
-        // created after this mount reveal word by word.
-        const fresh = newlyObserved.filter((id) => {
-          const message = nextMessages.find((candidate) => candidate.id === id);
-          return message ? isFreshAgentMessage(message.createdAt, mountedAtRef.current) : false;
-        });
-        if (fresh.length > 0) {
-          setRevealingAgentIds((current) => new Set([...current, ...fresh]));
+        // History rows observed late (reopen, verdict switch) stay static, and rows
+        // that land while the pane is closed join them: only a reply arriving to an
+        // open chat reveals word by word.
+        if (activeRef.current) {
+          const fresh = newlyObserved.filter((id) => {
+            const message = nextMessages.find((candidate) => candidate.id === id);
+            return message ? isFreshAgentMessage(message.createdAt, mountedAtRef.current) : false;
+          });
+          if (fresh.length > 0) {
+            setRevealingAgentIds((current) => new Set([...current, ...fresh]));
+          }
         }
       }
       setStatus(next);
@@ -316,8 +336,22 @@ export function AgentChat({
   }, []);
 
   useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
     mountedAtRef.current = Date.now();
   }, []);
+
+  // The poll callback above owns the open/close transition, but it only runs on
+  // its interval: this kick makes the transition land with the slide instead of
+  // up to one interval later. Deferred through a timer because an effect body
+  // must not drive state updates itself.
+  useEffect(() => {
+    activeRef.current = active;
+    const kick = window.setTimeout(() => void loadStatus(), 0);
+    return () => window.clearTimeout(kick);
+  }, [active, loadStatus]);
 
   useEffect(() => {
     const list = messagesRef.current;

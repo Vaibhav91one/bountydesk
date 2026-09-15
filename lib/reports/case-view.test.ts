@@ -175,6 +175,20 @@ test("a denial marks the approval row denied and draws the denied mascot", () =>
   assert.equal(step(view, "delivery").state, "skipped");
 });
 
+test("a denial with the harness relay still in flight never reads as delivering", () => {
+  const view = caseLiveView(
+    caseFile({
+      state: "DENIED",
+      verdict: verdict(),
+      approval: { decision: "DENIED", reviewer: "vaibhav", note: "wrong file", decidedAt: AT },
+      handoff: handoff(),
+    }),
+  );
+
+  assert.equal(step(view, "delivery").state, "skipped");
+  assert.equal(step(view, "delivery").note, "Denied, nothing posted");
+});
+
 test("a delivery still retrying counts its attempts, and one that gave up says so", () => {
   const retrying = caseLiveView(
     caseFile({

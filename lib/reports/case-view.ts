@@ -277,6 +277,10 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
 
   const handoff = file.handoff;
   const handoffDead = handoffExhausted(file);
+  // A denial posts nothing, so the delivery row must never read as in flight for
+  // one: the deny relay to the harness is a handoff, not an outbound comment, and
+  // while it is pending the row below would otherwise say "Handing off".
+  const denied = file.approval?.decision === "DENIED";
 
   return [
     {
@@ -336,18 +340,20 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
       // is. Reading "failed" beside a counter that has stopped is the difference between a
       // report that is still working and one that is waiting on somebody.
       label: "Delivery",
-      note: deliveryExhausted
-        ? `failed after ${file.delivery?.attempts} attempts`
-        : deliveryFailed
-          ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
-          : file.delivery
-            ? file.delivery.state.toLowerCase()
-            : // No delivery row yet. On the harness-backed path that is not necessarily "not
-              // started": the handoff has to reach TrueForge and come back through
-              // publish_verdict before an outbox row exists at all, so a handoff that died
-              // leaves this step honestly reporting "Not enqueued" forever.
-              handoffNote(handoff) ?? "Not enqueued",
-      state: deliveryFailed || handoffDead
+      note: denied
+        ? "Denied, nothing posted"
+        : deliveryExhausted
+          ? `failed after ${file.delivery?.attempts} attempts`
+          : deliveryFailed
+            ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
+            : file.delivery
+              ? file.delivery.state.toLowerCase()
+              : // No delivery row yet. On the harness-backed path that is not necessarily "not
+                // started": the handoff has to reach TrueForge and come back through
+                // publish_verdict before an outbox row exists at all, so a handoff that died
+                // leaves this step honestly reporting "Not enqueued" forever.
+                handoffNote(handoff) ?? "Not enqueued",
+      state: denied || deliveryFailed || handoffDead
         ? ("skipped" as const)
         : // A handoff still in flight, including one that failed but has attempts left. Once a
           // delivery row exists the handoff has done its job and the outbox is the story.
