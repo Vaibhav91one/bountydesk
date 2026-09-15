@@ -21,7 +21,7 @@ test("the durable chat payload stays plain text and preserves its request ID", (
 });
 
 test("the chat is advisory and cannot submit while a request is in flight", () => {
-  assert.equal(ADVISORY_LABEL, "Advisory conversation, not approval");
+  assert.equal(ADVISORY_LABEL, "Agent Bounty is on this case");
   assert.equal(canSubmitReviewerMessage("Question", false, "ready"), true);
   assert.equal(canSubmitReviewerMessage("Question", true, "ready"), false);
   assert.equal(canSubmitReviewerMessage("Question", false, "loading"), false);

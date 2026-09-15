@@ -27,9 +27,11 @@ import { ApprovalDialog } from "./approval-dialog";
  */
 export function CaseApproval({
   reportId,
+  reportTitle,
   initial,
 }: {
   reportId: string;
+  reportTitle: string;
   initial: CaseLiveView;
 }) {
   const { data: status = initial } = useQuery({
@@ -53,6 +55,7 @@ export function CaseApproval({
       reportId={reportId}
       verdictId={status.awaitingVerdictId}
       contentHash={status.verdict.contentHash}
+      reportTitle={reportTitle}
       payload={status.verdict.payload}
       payloadArtifactId={status.verdict.payloadArtifactId}
       findingsArtifactId={status.verdict.findingsArtifactId}
