@@ -199,7 +199,13 @@ export function ApprovalDialog({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  onClick={() => setChatting(false)}
+                  // Focus stays on this button after the click, and the slide marks
+                  // this pane aria-hidden: a focused descendant under aria-hidden
+                  // is blocked by the browser, so release focus first.
+                  onClick={(event) => {
+                    event.currentTarget.blur();
+                    setChatting(false);
+                  }}
                   className="relative z-10 justify-self-start"
                 >
                   <RollingIcon icon={ArrowLeft} className="size-4" /> Back
