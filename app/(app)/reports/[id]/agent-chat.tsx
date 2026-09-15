@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowClockwise, ArrowUp, CircleNotch, ListChecks, MagnifyingGlass, Warning, Wrench } from "@phosphor-icons/react/ssr";
+import {
+  ArrowClockwise,
+  ArrowUp,
+  CircleNotch,
+  ListChecks,
+  MagnifyingGlass,
+  PencilSimple,
+  ShieldCheck,
+  Warning,
+  Wrench,
+} from "@phosphor-icons/react/ssr";
 
 import { requestRecheckAction } from "@/app/review/actions";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -46,8 +56,8 @@ export const QUICK_PROMPTS = [
   { label: "Summarize issue", icon: ListChecks, prompt: "Summarize the reproduced issue, including steps and impact." },
   { label: "Review steps", icon: MagnifyingGlass, prompt: "Review the reproduction steps and point out any missing details for triage." },
   { label: "Suggest remediation", icon: Wrench, prompt: "Suggest remediation and secure coding guidance for this issue." },
-  { label: "Verify a fix", icon: ListChecks, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
-  { label: "Improve report", icon: MagnifyingGlass, prompt: "Suggest concise edits to the report text for clarity." },
+  { label: "Verify a fix", icon: ShieldCheck, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
+  { label: "Improve report", icon: PencilSimple, prompt: "Suggest concise edits to the report text for clarity." },
 ] as const;
 
 export function canSubmitReviewerMessage(
@@ -179,6 +189,10 @@ export function AgentChat({
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
+  const scrollMessages = useCallback((behavior: ScrollBehavior = "smooth") => {
+    const list = messagesRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior });
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -251,10 +265,11 @@ export function AgentChat({
   const canSend = canSubmitReviewerMessage(draft, Boolean(sending), mode);
   const messages = allMessages(status);
   const pendingMessage = pendingReviewerMessage(status);
+  const newestAgentId = [...messages].reverse().find((message) => message.sender === "AGENT")?.id;
 
   useEffect(() => {
-    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages.length, pendingMessage?.clientRequestId]);
+    if (mode === "ready") scrollMessages(messages.length <= 1 ? "auto" : "smooth");
+  }, [mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
 
   async function submit(request: ChatRequest) {
     setSending(request);
@@ -343,7 +358,10 @@ export function AgentChat({
                   <span className="text-meta text-muted-foreground">
                     <span className="text-foreground">Agent Bounty</span>
                   </span>
-                  <StreamingText text={message.body} onDone={() => messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" })} />
+                  <StreamingText
+                    text={message.body}
+                    onDone={message.id === newestAgentId ? scrollMessages : undefined}
+                  />
                 </div>
               ) : (
                 <DurableChatMessage key={message.id} message={message} />
