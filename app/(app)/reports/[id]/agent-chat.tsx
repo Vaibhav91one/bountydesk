@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowClockwise, CircleNotch, Warning } from "@phosphor-icons/react/ssr";
 
-import { requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -154,11 +153,6 @@ function failedRequestFromStatus(status: ChatStatus | null): ChatRequest | null 
 export function DurableChatMessage({ message }: { message: ChatMessage }) {
   return (
     <div className={cn("flex flex-col gap-1.5", message.sender === "REVIEWER" && "items-end pl-10")}>
-      {message.sender === "AGENT" ? (
-        <span className="text-meta text-muted-foreground">
-          <span className="text-foreground">Agent Bounty</span>
-        </span>
-      ) : null}
       <p
         className={cn(
           "whitespace-pre-wrap text-body text-foreground",
@@ -177,9 +171,10 @@ export function DurableChatMessage({ message }: { message: ChatMessage }) {
  */
 export function AgentChat({
   reportId,
-  verdictId,
   active,
   onReasonChange,
+  recheckState,
+  recheckError,
 }: {
   reportId: string;
   verdictId: string;
@@ -187,6 +182,8 @@ export function AgentChat({
   contentHash: string;
   active: boolean;
   onReasonChange: (reason: string | null) => void;
+  recheckState: "idle" | "sending" | "sent" | "error";
+  recheckError: string | null;
 }) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
   const [mode, setMode] = useState<"loading" | "ready" | "disabled" | "error">("loading");
@@ -195,8 +192,6 @@ export function AgentChat({
   const [sending, setSending] = useState<ChatRequest | null>(null);
   const [failed, setFailed] = useState<ChatRequest | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [recheckError, setRecheckError] = useState<string | null>(null);
   const [revealingAgentIds, setRevealingAgentIds] = useState<Set<string>>(new Set());
   const [hasNewBelow, setHasNewBelow] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -223,26 +218,6 @@ export function AgentChat({
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
   }, [active, mode]);
-
-  const requestRecheck = useCallback(async () => {
-    if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
-    // The guidance is the reviewer's typed question, or a neutral default when they never
-    // typed one. The server re-validates everything: this string is a suggestion, never
-    // authority over target, tools, or approval.
-    const guidance =
-      draft.trim() ||
-      "The reviewer asked for a fresh look at this report. Investigate it from scratch and draft your own conclusion.";
-    setRecheckState("sending");
-    setRecheckError(null);
-    try {
-      const result = await requestRecheckAction(reportId, verdictId, guidance);
-      if (!result.ok) throw new Error(result.error ?? "The re-check could not be started.");
-      setRecheckState("sent");
-    } catch (error) {
-      setRecheckState("error");
-      setRecheckError(error instanceof Error ? error.message : "The re-check could not be started.");
-    }
-  }, [draft, reportId, verdictId]);
 
   const loadStatus = useCallback(async () => {
     // Opening replays nothing: everything already fetched becomes seen history,
@@ -440,7 +415,7 @@ export function AgentChat({
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
 
       {mode === "loading" ? (
-        <div className="flex items-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
+        <div className="flex flex-1 items-center justify-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
           <CircleNotch className="size-4 animate-spin" /> Loading conversation
         </div>
       ) : null}
@@ -474,9 +449,6 @@ export function AgentChat({
             {messages.map((message) =>
               message.sender === "AGENT" ? (
                 <div key={message.id} className="flex flex-col gap-1.5">
-                  <span className="text-meta text-muted-foreground">
-                    <span className="text-foreground">Agent Bounty</span>
-                  </span>
                   {revealingAgentIds.has(message.id) ? (
                     <StreamingText
                       text={message.body}
@@ -545,10 +517,8 @@ export function AgentChat({
             onDraftChange={setDraft}
             onSend={send}
             onQuickPrompt={sendPrompt}
-            onRecheck={() => void requestRecheck()}
             sending={Boolean(sending)}
             mode={mode}
-            recheckState={recheckState}
             inputRef={inputRef}
           />
 

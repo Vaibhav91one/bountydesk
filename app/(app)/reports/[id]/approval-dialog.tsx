@@ -17,7 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-import { allowVerdict, denyVerdict, type ActionResult } from "@/app/review/actions";
+import { allowVerdict, denyVerdict, requestRecheckAction, type ActionResult } from "@/app/review/actions";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
@@ -78,6 +78,8 @@ export function ApprovalDialog({
   const [acting, setActing] = useState<"allow" | "deny" | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
+  const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const [recheckError, setRecheckError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
   function onOpenChange(next: boolean) {
@@ -86,6 +88,28 @@ export function ApprovalDialog({
     if (next) {
       setResult(null);
       setDecision(null);
+    }
+  }
+
+  async function requestRecheck() {
+    if (recheckState === "sending") return;
+    if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
+    // The guidance is a neutral default: the dialog cannot see the chat draft, and the
+    // server re-validates everything. This string is a suggestion, never authority over
+    // target, tools, or approval.
+    setRecheckState("sending");
+    setRecheckError(null);
+    try {
+      const answer = await requestRecheckAction(
+        reportId,
+        verdictId,
+        "The reviewer asked for a fresh look at this report. Investigate it from scratch and draft your own conclusion.",
+      );
+      if (!answer.ok) throw new Error(answer.error ?? "The re-check could not be started.");
+      setRecheckState("sent");
+    } catch (error) {
+      setRecheckState("error");
+      setRecheckError(error instanceof Error ? error.message : "The re-check could not be started.");
     }
   }
 
@@ -187,6 +211,8 @@ export function ApprovalDialog({
                       deny={() => decide("deny")}
                       denying={acting === "deny"}
                       disabled={acting !== null}
+                      onRecheck={() => void requestRecheck()}
+                      rechecking={recheckState === "sending"}
                     />
                   </>
                 )}
@@ -219,7 +245,7 @@ export function ApprovalDialog({
                     <TooltipTrigger
                       render={
                         <Button
-                          size="icon-sm"
+                          size="icon-xs"
                           variant="ghost"
                           aria-label="About advisory chat"
                           className="bg-secondary"
@@ -243,6 +269,8 @@ export function ApprovalDialog({
                   contentHash={contentHash}
                   active={chatting}
                   onReasonChange={setReason}
+                  recheckState={recheckState}
+                  recheckError={recheckError}
                 />
               </div>
             </section>
