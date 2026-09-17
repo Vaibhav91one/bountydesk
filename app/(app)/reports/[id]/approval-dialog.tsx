@@ -264,9 +264,6 @@ export function ApprovalDialog({
                 <AgentChat
                   key={`${reportId}:${verdictId}`}
                   reportId={reportId}
-                  verdictId={verdictId}
-                  revision={revision}
-                  contentHash={contentHash}
                   active={chatting}
                   onReasonChange={setReason}
                   recheckState={recheckState}

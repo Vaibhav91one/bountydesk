@@ -177,9 +177,6 @@ export function AgentChat({
   recheckError,
 }: {
   reportId: string;
-  verdictId: string;
-  revision: number;
-  contentHash: string;
   active: boolean;
   onReasonChange: (reason: string | null) => void;
   recheckState: "idle" | "sending" | "sent" | "error";
