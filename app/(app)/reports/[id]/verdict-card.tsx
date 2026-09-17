@@ -1,12 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { CaretDown, ChatCircleDots, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, CaretDown, ChatCircleDots, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import { cn } from "@/lib/utils";
@@ -100,6 +106,8 @@ export function VerdictCard({
   deny,
   denying,
   disabled,
+  onRecheck,
+  rechecking,
   decision,
   superseded,
 }: {
@@ -126,6 +134,9 @@ export function VerdictCard({
   deny?: () => void;
   denying?: boolean;
   disabled?: boolean;
+  /** Starts a fresh guided investigation that supersedes this verdict. Lives beside Approve. */
+  onRecheck?: () => void;
+  rechecking?: boolean;
   /**
    * Who signed, once somebody has. Only read when the card is read-only, which is when no
    * approve handler is passed: null then means a verdict exists that nobody has answered.
@@ -324,6 +335,32 @@ export function VerdictCard({
           <Button size="sm" onClick={approve} loading={approving} disabled={disabled}>
             <RollingIcon icon={CheckCircle} className="size-4" /> Approve
           </Button>
+          {onRecheck ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-label="More verdict actions"
+                    disabled={disabled}
+                    className="px-2"
+                  />
+                }
+              >
+                <CaretDown className="size-4" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" side="top">
+                <DropdownMenuItem
+                  onSelect={() => onRecheck()}
+                  disabled={disabled || rechecking}
+                >
+                  <RollingIcon icon={ArrowClockwise} className="size-4" />
+                  {rechecking ? "Starting re-check…" : "Ask to re-check"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
         </span>
         )}
       </div>

@@ -26,8 +26,6 @@ export const QUICK_PROMPTS = [
   { label: "Improve report", icon: PencilSimple, prompt: "Suggest concise edits to the report text for clarity." },
 ] as const;
 
-export type RecheckState = "idle" | "sending" | "sent" | "error";
-
 /**
  * Bottom-only composer for the advisory chat. Blank message surface lives
  * above it; this footer never scrolls away.
@@ -41,20 +39,16 @@ export function PromptBar({
   onDraftChange,
   onSend,
   onQuickPrompt,
-  onRecheck,
   sending,
   mode,
-  recheckState,
   inputRef,
 }: {
   draft: string;
   onDraftChange: (next: string) => void;
   onSend: () => void;
   onQuickPrompt: (prompt: string) => void;
-  onRecheck: () => void;
   sending: boolean;
   mode: "loading" | "ready" | "disabled" | "error";
-  recheckState: RecheckState;
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
   const canSend = draft.trim().length > 0 && !sending && mode === "ready";
@@ -75,17 +69,6 @@ export function PromptBar({
             <RollingIcon icon={Icon} className="size-3.5" /> {label}
           </Button>
         ))}
-        <Button
-          type="button"
-          size="xs"
-          variant="outline"
-          onClick={onRecheck}
-          disabled={sending || mode !== "ready" || recheckState === "sending"}
-          title="Supersedes this verdict and starts a fresh guided investigation. The old verdict stays as history; the new draft needs its own approval."
-          className="shrink-0"
-        >
-          {recheckState === "sending" ? "Starting re-check…" : "Ask to re-check"}
-        </Button>
       </div>
       <form
         onSubmit={(event) => {
