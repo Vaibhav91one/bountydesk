@@ -92,7 +92,7 @@ export function ApprovalDialog({
   }
 
   async function requestRecheck() {
-    if (recheckState === "sending") return;
+    if (recheckState === "sending" || recheckState === "sent") return;
     if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
     // The guidance is a neutral default: the dialog cannot see the chat draft, and the
     // server re-validates everything. This string is a suggestion, never authority over
@@ -212,7 +212,7 @@ export function ApprovalDialog({
                       denying={acting === "deny"}
                       disabled={acting !== null}
                       onRecheck={() => void requestRecheck()}
-                      rechecking={recheckState === "sending"}
+                      rechecking={recheckState === "sending" || recheckState === "sent"}
                     />
                   </>
                 )}
