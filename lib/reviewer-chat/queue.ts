@@ -79,6 +79,7 @@ type ExistingMessage = {
   messageId: string;
   clientRequestId: string;
   body: string;
+  threadStatus: ChatThreadStatus;
 };
 
 async function responseFor(
@@ -111,6 +112,7 @@ async function findExistingMessage(
       messageId: reviewerChatMessage.id,
       clientRequestId: reviewerChatMessage.clientRequestId,
       body: reviewerChatMessage.body,
+      threadStatus: reviewerChatThread.status,
     })
     .from(reviewerChatMessage)
     .innerJoin(reviewerChatThread, eq(reviewerChatMessage.threadId, reviewerChatThread.id))
@@ -148,6 +150,27 @@ async function enqueueMessageInTx(
 
   const duplicate = await findExistingMessage(tx, input.reportId, parsed.clientRequestId);
   if (duplicate) {
+    // A duplicate normally short-circuits with no side effect. The one exception is a thread
+    // stuck in ERROR: the daemon only re-claims ERROR threads below MAX_ATTEMPTS (queue.claim),
+    // so once a permanently broken provider run exhausts its attempts, resubmitting the same
+    // clientRequestId is the reviewer's only way to try again. Resetting on that explicit click
+    // is the button's whole purpose, so it is fine to clear attempts here rather than requeue
+    // behind the same cap that just got exhausted.
+    if (duplicate.threadStatus === "ERROR") {
+      await tx
+        .update(reviewerChatThread)
+        .set({ status: "OPEN", attempts: 0, leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() })
+        .where(and(eq(reviewerChatThread.id, duplicate.threadId), eq(reviewerChatThread.status, "ERROR")));
+      return {
+        threadId: duplicate.threadId,
+        messageId: duplicate.messageId,
+        clientRequestId: duplicate.clientRequestId,
+        disposition: "DUPLICATE",
+        status: "PENDING",
+        responseBody: null,
+      };
+    }
+
     const response = await responseFor(tx, duplicate.threadId, parsed.clientRequestId);
     return {
       threadId: duplicate.threadId,

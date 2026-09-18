@@ -65,6 +65,30 @@ test("duplicate clientRequestId returns the original message and does not enqueu
   assert.equal(messages[0].body, "Check auth");
 });
 
+test("resubmitting a duplicate resets a thread stuck in ERROR so the daemon re-claims it", async () => {
+  await drainThreads();
+  const { reportId } = await seedReport();
+  const first = await queue.enqueueMessage({ reportId, reviewerId: "42", clientRequestId: "req-1", body: "Check auth" });
+  await dbm.db
+    .update(dbm.reviewerChatThread)
+    .set({ status: "ERROR", attempts: 8, leaseOwner: null, leaseExpiresAt: null })
+    .where(dbm.eq(dbm.reviewerChatThread.id, first.threadId));
+
+  const retry = await queue.enqueueMessage({ reportId, reviewerId: "42", clientRequestId: "req-1", body: "Check auth" });
+  assert.equal(retry.disposition, "DUPLICATE");
+  assert.equal(retry.status, "PENDING");
+
+  const [thread] = await dbm.db
+    .select({ status: dbm.reviewerChatThread.status, attempts: dbm.reviewerChatThread.attempts })
+    .from(dbm.reviewerChatThread)
+    .where(dbm.eq(dbm.reviewerChatThread.id, first.threadId));
+  assert.equal(thread.status, "OPEN", "a retry click must clear ERROR, or claim() can never re-pick it up");
+  assert.equal(thread.attempts, 0, "the cap that just got exhausted must not still apply to the retry");
+
+  const lease = await queue.claim("worker-a");
+  assert.equal(lease?.threadId, first.threadId, "the reset thread is immediately claimable again");
+});
+
 test("claim, expired lease reclaim, and stale fence are enforced", async () => {
   await drainThreads();
   const { reportId } = await seedReport();
