@@ -118,7 +118,9 @@ merge.
 PR-Agent is an advisory reviewer, not a merge gate or security boundary. Its findings are
 model-generated suggestions. A human owns the merge decision and must fix a finding or explain
 why it does not apply. `build` remains the required automated check; no AI review result
-authorizes a verdict, target, approval, delivery, or merge.
+authorizes a verdict, target, approval, delivery, or merge. A green PR Agent action is not
+proof of a published review on the current head. Treat a PR as reviewed only after the
+publication check in `docs/pr-agent-review.md` passes.
 
 The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
 change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.

@@ -1,7 +1,10 @@
 name: PR Agent review
 
+# pull_request_target runs this workflow from the base branch, so a PR cannot
+# change its own review policy. There is no checkout step on purpose: the
+# action reads the PR through the API only and never executes PR code.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened]
 
 permissions:
@@ -25,10 +28,24 @@ jobs:
         env:
           OPENAI_KEY: ${{ secrets.PR_AGENT_OPENAI_KEY }}
           OPENAI.API_BASE: https://vyceai.com/v1
+          config.repo_context_files: '["AGENTS.md"]'
+          config.repo_context_from_default_branch: 'true'
+          config.repo_context_max_lines: '500'
           config.model: openai/deepseek-v4.1
           config.fallback_models: '[]'
           config.custom_model_max_tokens: '32000'
           config.propagate_tool_errors: 'true'
+          config.duplicate_prompt_examples: 'true'
+          config.temperature: '0'
+          config.publish_output: 'true'
+          config.enable_auto_approval: 'false'
+          pr_reviewer.enable_help_text: 'false'
+          pr_description.enable_pr_description: 'false'
+          pr_description.enable_pr_diagram: 'false'
+          pr_questions.enable_help_text: 'false'
+          pr_code_suggestions.enable_help_text: 'false'
+          pr_help_docs.enable_help_text: 'false'
+          skills.enabled: 'false'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           github_action_config.pr_actions: '["opened", "reopened"]'
           github_action_config.auto_review: 'true'

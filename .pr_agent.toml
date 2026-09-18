@@ -6,6 +6,8 @@ model = "openai/deepseek-v4.1"
 fallback_models = []
 custom_model_max_tokens = 32000
 propagate_tool_errors = true
+duplicate_prompt_examples = true
+temperature = 0
 publish_output = true
 enable_auto_approval = false
 

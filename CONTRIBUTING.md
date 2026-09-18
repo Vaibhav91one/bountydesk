@@ -21,4 +21,4 @@ gh pr create                                 # review the diff, then merge
 `.github/workflows/ci.yml` runs install, lint, tests when a test script exists, and build on every PR.
 Keep the `build` check green; it is required by `main` branch protection.
 
-PR-Agent may add advisory findings to a PR. It is not a required check and does not replace human review. Address its findings or explain why they do not apply. The `build` check remains the required automated merge check.
+PR-Agent may add advisory findings to a PR. It is not a required check and does not replace human review. Address its findings or explain why they do not apply. The `build` check remains the required automated merge check. A green PR Agent run is not proof that a review was published on the current head; confirm publication with the check in `docs/pr-agent-review.md` before treating the PR as reviewed.
