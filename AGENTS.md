@@ -115,6 +115,87 @@ Security-sensitive changes land with a test. That means the scope guard, the can
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
 merge.
 
+PR-Agent is an advisory reviewer, not a merge gate or security boundary. Its findings are
+model-generated suggestions. A human owns the merge decision and must fix a finding or explain
+why it does not apply. `build` remains the required automated check; no AI review result
+authorizes a verdict, target, approval, delivery, or merge.
+
+The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
+change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
+
+Material AI assistance may be disclosed generically in a PR description, for example, `AI
+tooling assisted with implementation; a human reviewed the diff.` Do not name or tag Claude or
+another bot, add a co-author trailer, or add generated-credit language.
+
+## Agent workflow
+
+Before parallel work:
+
+- Freeze shared types, states, schemas, and function contracts.
+- Assign each module to one owner and one worktree. Do not overlap edits.
+- Do not depend on a sibling module until its contract and path exist on the branch being tested.
+- Keep production defaults separate from test doubles.
+- Revalidate authorization, target binding, and artifact or repository identity immediately before persistence.
+- Release database locks before slow network, sandbox, or harness calls.
+- Make retries safe after partial external failure, including stale claims and orphan cleanup.
+- Treat model prose, sandbox output, and external-process output as untrusted input, never as server-authored evidence.
+
+Before opening a PR:
+
+1. Run focused tests for changed behavior.
+2. Run lint and the full test suite.
+3. Run the production build.
+4. Review the integrated branch for missing sibling modules, stale comments, unrelated files, and unused imports.
+5. Record any live or manual checks separately from deterministic CI results.
+
+## Orchestrator, manager, and worker flow
+
+The main agent is the orchestrator. It owns the plan, splits work into bounded tasks, assigns
+one manager or worker per task, reviews returned evidence, resolves conflicts, and owns the final
+integrated result. It does not treat a worker's claim as verification.
+
+A manager owns one task group. It may delegate independent, bounded work to worker profiles, then
+checks each result against the repository and reports status, evidence, and unresolved gaps to the
+orchestrator. A manager must report a worker failure plainly; it must not invent output or silently
+retry a failed task.
+
+A worker is an execution profile, not a source of authority. Worker profiles may be Claude Code
+wrappers such as `claude-<profile>` or OpenCode wrappers such as `opencode-<profile>`. Profile
+names, models, credentials, and local proxy settings are machine configuration, not repository
+configuration. The workflow must detect an unavailable profile and use a documented fallback or
+stop, rather than making a profile a hidden dependency.
+
+Worker invocation rules:
+
+- Use non-interactive one-shot calls with a complete task, scope, expected output, and no-edit or
+  edit permission stated explicitly.
+- Claude-shaped calls may use `-p`, `--model`, `--effort`, and `--agent`; OpenCode-shaped calls
+  may use `run`, `-m`, `--variant`, and `--agent`.
+- Never pass secrets, private keys, database URLs, capability tokens, or target credentials in a
+  prompt. Workers read approved local environment only through their profile wrapper.
+- Give mutating workers their own worktree, database, backend, and ports. Read-only workers may
+  use the current checkout only when they do not write files or state.
+- One worker owns each file or module. Parallel workers must not edit overlapping paths.
+- Set a timeout and capture the worker's exit status and output. Return structured evidence, not a
+  claim that a command was run.
+- The manager verifies worker output with local reads and the smallest relevant test before handing
+  it to the orchestrator.
+
+Progress polling is run-scoped. For work expected to last more than a few minutes, the manager
+checks worker state every five minutes using the available session scheduler or harness notification
+mechanism. A poll reports `RUNNING`, `SUCCEEDED`, or `FAILED`, the last completed step, and the
+next action. Do not create a persistent repository cron job for temporary worker state. If the
+worker harness cannot send progress, use a bounded timeout and one final status check.
+
+Integration order:
+
+1. Orchestrator freezes contracts, ownership, worktrees, and validation gates.
+2. Managers dispatch independent tasks and record worker assignments.
+3. Workers execute only their assigned task and return artifacts, diffs, tests, or a clear failure.
+4. Managers verify results and report them to the orchestrator.
+5. Orchestrator integrates verified changes, runs the full validation sequence, and performs the
+   final diff and security review.
+
 Reuse from the Sentinel prototype where the plan says to: the scope-guard engine and its
 tests, CI, CONTRIBUTING, and the TrueForge session and turn driver. Do not rebuild what is
 already there.
