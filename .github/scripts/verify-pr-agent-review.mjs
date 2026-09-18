@@ -47,9 +47,7 @@ const PUBLICATION_FAILURE_RES = [
   /could not publish/i,
   /could not safely update/i,
   /standalone pr review/i,
-  /failed to generate/i,
-  /pr-agent[\s\S]{0,30}fail/i,
-  /review[\s\S]{0,30}fail(?:ed|ure)/i,
+  /failed to generate code suggestions for pr/i,
 ];
 
 const PARSE_FAILURE_RES = [/failed to parse/i, /parse (?:error|failure|failed)/i];
@@ -291,6 +289,20 @@ export async function verifyPrAgentReview({
   const headSha = pull?.head?.sha;
   if (!isFullSha(headSha)) {
     return unverified(repository, prNumber, null, null, "PULL_FETCH_FAILED", "pull request head SHA is missing or malformed");
+  }
+  const headRepository = pull.head?.repo?.full_name;
+  if (headRepository && headRepository.toLowerCase() !== repository.toLowerCase()) {
+    return {
+      status: "SKIPPED",
+      reason: "FORK_UNSUPPORTED",
+      detail: "fork pull requests do not receive the provider secret-backed review",
+      repository,
+      prNumber,
+      headSha,
+      runId: null,
+      runName: null,
+      evidence: { formalReviewIds: [], persistentCommentIds: [] },
+    };
   }
 
   let run;

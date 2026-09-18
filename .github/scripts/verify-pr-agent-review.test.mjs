@@ -93,6 +93,19 @@ test("a review declaring no findings is NO_FINDINGS, not UNVERIFIED", async () =
   assert.equal(verdict.reason, "NO_FINDINGS_DECLARED");
 });
 
+test("fork pull requests are explicitly skipped before review evidence is accepted", async () => {
+  const fixture = await loadFixture("success");
+  fixture.pull.head.repo = { full_name: "contributor/example" };
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "SKIPPED");
+  assert.equal(verdict.reason, "FORK_UNSUPPORTED");
+});
+
 test("stale head fixture rejects a formal review bound to an older commit", async () => {
   const { verdict } = await verifyFixture("stale-head");
   assert.equal(verdict.status, "UNVERIFIED");
