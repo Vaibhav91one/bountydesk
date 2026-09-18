@@ -150,8 +150,13 @@ export function VerdictCard({
   const evidence = EVIDENCE[outcome] ?? EVIDENCE.INCONCLUSIVE;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border/50 bg-card">
-      <div className="flex flex-col gap-3 p-4">
+    <div
+      className={cn(
+        "overflow-hidden rounded-xl border border-border/50 bg-card",
+        approve && "flex min-h-0 flex-1 flex-col",
+      )}
+    >
+      <div className={cn("flex flex-col gap-3 p-4", approve && "shrink-0 pb-3")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-body font-medium text-foreground">
@@ -177,11 +182,15 @@ export function VerdictCard({
             />
           ) : null}
         </div>
+      </div>
 
-        {approve ? (
-          <>
-            {/* Attributed, because a reviewer approving a comment should be able to see at a
-                glance whose words they are. Agent Bounty drafted it; the reviewer signs it. */}
+      {approve ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          {/* Attributed, because a reviewer approving a comment should be able to see at a
+              glance whose words they are. Agent Bounty drafted it; the reviewer signs it. This
+              region fills the dialog and scrolls on its own, so the action row below never moves
+              off screen while a long comment does. */}
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
             <div className="flex gap-3">
               <AnimatedMascotSvg
                 state={speaker}
@@ -195,39 +204,34 @@ export function VerdictCard({
                   <span className="text-meta text-muted-foreground">drafted this reply</span>
                 </span>
 
-                {!previewOpen ? <ApprovalPreview summary={summary} findings={findings} /> : null}
-
-                <div
-                  className="grid transition-[grid-template-rows,opacity] duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none"
-                  style={{ gridTemplateRows: previewOpen ? "1fr" : "0fr", opacity: previewOpen ? 1 : 0 }}
-                >
-                  <div className="min-h-0 overflow-hidden">
-                    {/* Rendered from structured fields, never by parsing the markdown payload. */}
-                    <VerdictBody
-                      summary={summary}
-                      findings={findings}
-                      findingsArtifactId={findingsArtifactId}
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  aria-expanded={previewOpen}
-                  onClick={() => setPreviewOpen((current) => !current)}
-                  className="w-fit px-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
-                >
-                  {previewOpen ? "Read less" : "Read more"}
-                </Button>
+                {previewOpen ? (
+                  /* Rendered from structured fields, never by parsing the markdown payload. */
+                  <VerdictBody
+                    summary={summary}
+                    findings={findings}
+                    findingsArtifactId={findingsArtifactId}
+                  />
+                ) : (
+                  <ApprovalPreview summary={summary} findings={findings} />
+                )}
               </div>
             </div>
-          </>
-        ) : null}
-      </div>
+          </div>
 
-      <div className="border-t border-border/50">
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            aria-expanded={previewOpen}
+            onClick={() => setPreviewOpen((current) => !current)}
+            className="w-fit shrink-0 px-4 text-muted-foreground hover:bg-transparent hover:text-foreground"
+          >
+            {previewOpen ? "Read less" : "Read more"}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className={cn("border-t border-border/50", approve && "shrink-0")}>
         <button
           type="button"
           aria-expanded={open}
@@ -271,15 +275,20 @@ export function VerdictCard({
         </div>
       </div>
 
-      {/* Pinned: the comment can be long enough to scroll the decision off the screen, and a
-          reviewer should never have to hunt for the button they came here to press.
-
-          The reading sits left and the decision right, and they hold those sides. An earlier
+      {/* The reading sits left and the decision right, and they hold those sides. An earlier
           flex-wrap here let the button group wrap under the meter the moment a label grew (a
           button entering its loading state is enough), which moved the buttons mid-click. The
           row keeps its axis and the meter gives up width instead: it truncates, the buttons do
-          not move. Below sm the two stack deliberately, in that order. */}
-      <div className="sticky bottom-0 z-10 flex flex-col gap-3 border-t border-border/50 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          not move. Below sm the two stack deliberately, in that order.
+
+          In approve mode this is the last child of a full-height column (the card fills the
+          dialog pane), so it sits flush at the bottom without needing to stick to anything. */}
+      <div
+        className={cn(
+          "flex flex-col gap-3 border-t border-border/50 bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between",
+          approve && "shrink-0",
+        )}
+      >
         <span className="flex min-w-0 items-center gap-2">
           <Meter bars={evidence.bars} tone={evidence.tone} />
           <span className="truncate text-meta text-muted-foreground">{evidence.label}</span>

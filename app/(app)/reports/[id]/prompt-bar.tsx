@@ -54,8 +54,8 @@ export function PromptBar({
   const canSend = draft.trim().length > 0 && !sending && mode === "ready";
 
   return (
-    <div className="border-t border-border/50 bg-card p-2">
-      <div className="mb-2 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Suggested prompts">
+    <div className="flex flex-col">
+      <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto" role="group" aria-label="Suggested prompts">
         {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
           <Button
             key={label}

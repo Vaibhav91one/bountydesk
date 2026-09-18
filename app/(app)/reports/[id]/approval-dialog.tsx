@@ -157,8 +157,8 @@ export function ApprovalDialog({
               chatting ? "-translate-x-1/2" : "translate-x-0"
             }`}
           >
-            <section className="min-h-0 min-w-0 w-1/2 shrink-0 overflow-y-auto" aria-hidden={chatting} inert={chatting || undefined}>
-              <DialogHeader className="border-b border-border/50 p-5">
+            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden" aria-hidden={chatting} inert={chatting || undefined}>
+              <DialogHeader className="shrink-0 border-b border-border/50 p-5 pr-14">
                 <DialogTitle>Sign the verdict</DialogTitle>
                 <DialogDescription>
                   The run has stopped here. Approve the exact words below, or say what is wrong with
@@ -166,11 +166,11 @@ export function ApprovalDialog({
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="flex flex-col gap-5 p-5">
+              <div className="flex min-h-0 flex-1 flex-col gap-5 p-5">
                 {decision ? (
                   <p
                     role="status"
-                    className="flex items-start gap-2.5 rounded-md bg-emerald-500/10 px-4 py-3 text-body text-emerald-400"
+                    className="flex shrink-0 items-start gap-2.5 rounded-md bg-emerald-500/10 px-4 py-3 text-body text-emerald-400"
                   >
                     <CheckCircle className="mt-0.5 size-4 shrink-0" />
                     {decision === "ALLOWED"
@@ -182,7 +182,7 @@ export function ApprovalDialog({
                     {result && !result.ok ? (
                       <p
                         role="alert"
-                        className="flex items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-body text-destructive"
+                        className="flex shrink-0 items-start gap-2.5 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-body text-destructive"
                       >
                         <Warning className="mt-0.5 size-4 shrink-0" />
                         <span>
@@ -266,7 +266,7 @@ export function ApprovalDialog({
                   </Tooltip>
                 </div>
               </div>
-              <div className="flex min-h-0 flex-1 flex-col p-5">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <AgentChat
                   key={`${reportId}:${verdictId}`}
                   reportId={reportId}
