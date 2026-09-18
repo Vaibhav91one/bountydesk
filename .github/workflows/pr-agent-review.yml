@@ -30,4 +30,9 @@ jobs:
           config.custom_model_max_tokens: '32000'
           config.propagate_tool_errors: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          github_action_config.pr_actions: '["opened", "synchronize", "reopened"]'
+          github_action_config.pr_actions: '["opened", "reopened"]'
+          github_action_config.auto_review: 'true'
+          github_action_config.auto_describe: 'false'
+          github_action_config.auto_improve: 'false'
+          github_action_config.handle_push_trigger: 'true'
+          github_action_config.push_commands: '["/review"]'

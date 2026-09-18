@@ -13,6 +13,8 @@ enable_auto_approval = false
 enable_help_text = false
 
 [pr_description]
+enable_pr_description = false
+enable_pr_diagram = false
 enable_help_text = false
 
 [pr_questions]
