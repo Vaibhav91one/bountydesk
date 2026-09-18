@@ -2,7 +2,9 @@
 repo_context_files = ["AGENTS.md"]
 repo_context_from_default_branch = true
 repo_context_max_lines = 500
-model = "deepseek-v4.1"
+model = "openai/deepseek-v4.1"
+fallback_models = []
+propagate_tool_errors = true
 publish_output = true
 enable_auto_approval = false
 

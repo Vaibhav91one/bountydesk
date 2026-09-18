@@ -25,5 +25,8 @@ jobs:
         env:
           OPENAI_KEY: ${{ secrets.PR_AGENT_OPENAI_KEY }}
           OPENAI.API_BASE: https://vyceai.com/v1
+          config.model: openai/deepseek-v4.1
+          config.fallback_models: '[]'
+          config.propagate_tool_errors: 'true'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           github_action_config.pr_actions: '["opened", "synchronize", "reopened"]'
