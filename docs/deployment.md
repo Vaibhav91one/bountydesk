@@ -111,14 +111,16 @@ and allowance can change without changing this architecture.
 
 ## Agent model provider
 
-Both agent manifests pin `openai/gpt-5-4-mini`, so the harness needs an `openai` provider carrying
-that model before `scripts/apply-agent.ts` can push them. In the harness settings, connect the
-openai provider with a funded key and add the `gpt-5-4-mini` model to it (the harness strips dots
-from a model name, so the id `gpt-5.4-mini` shows as `gpt-5-4-mini`, which is what the manifest
-references). The key lives in the harness, not in the repo or the worker env. Any OpenAI-compatible
-gateway works the same way: connect it as a custom provider with its base URL and key, add the
-model, and change the pin in `agent/bountydesk.agent.json` and `agent/target-onboarding.agent.json`
-to `<provider>/<model-name>`.
+All four agent manifests (`agent/bountydesk.agent.json`, `agent/bountydesk-chat.agent.json`,
+`agent/sandboxability-review.agent.json`, `agent/target-onboarding.agent.json`) pin
+`openai/gpt-5-mini`, so the harness needs an `openai` provider carrying a model registered under
+that exact name before `scripts/apply-agent.ts` can push them. In the harness settings, connect the
+openai provider with a funded key and add a model whose name is `gpt-5-mini`. Watch for the harness's
+dot-stripping trap when the pin ever changes to a dotted release like `gpt-5.4-mini`: the harness
+strips dots from a model name, so `gpt-5.4-mini` is registered but shows up, and must be referenced
+in the manifest, as `gpt-5-4-mini`. The key lives in the harness, not in the repo or the worker env.
+Any OpenAI-compatible gateway works the same way: connect it as a custom provider with its base URL
+and key, add the model, and change the pin in all four manifests to `<provider>/<model-name>`.
 
 ## Target onboarding
 

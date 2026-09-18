@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ADVISORY_LABEL,
   canSubmitReviewerMessage,
+  failedRequestFromStatus,
   isFreshAgentMessage,
   newlyObservedAgentIds,
   QUICK_PROMPTS,
@@ -12,6 +13,7 @@ import {
   shouldFollowChat,
   type ChatMessage,
   type ChatRequest,
+  type ChatStatus,
 } from "./[id]/agent-chat";
 
 test("the durable chat payload stays plain text and preserves its request ID", () => {
@@ -89,4 +91,56 @@ test("a retry can reuse the exact payload without changing the durable identity"
   assert.notEqual(retry, request);
   assert.deepEqual(retry, request);
   assert.equal(retry.clientRequestId, request.clientRequestId);
+});
+
+function statusWithThread(
+  status: ChatStatus["threads"][number]["status"],
+  message: ChatMessage,
+): ChatStatus {
+  return {
+    reportId: "report-1",
+    threads: [{ id: "thread-1", status, messages: [message] }],
+  };
+}
+
+test("an ERROR thread yields a retryable failed request, a CANCELLED one does not", () => {
+  const reviewerMessage: ChatMessage = {
+    id: "m1",
+    clientRequestId: "req-1",
+    sender: "REVIEWER",
+    body: "Any update?",
+    createdAt: "",
+  };
+
+  const errored = failedRequestFromStatus(statusWithThread("ERROR", reviewerMessage));
+  assert.equal(errored?.terminalStatus, "ERROR");
+
+  const cancelled = failedRequestFromStatus(statusWithThread("CANCELLED", reviewerMessage));
+  assert.equal(cancelled?.terminalStatus, "CANCELLED");
+
+  const open = failedRequestFromStatus(statusWithThread("OPEN", reviewerMessage));
+  assert.equal(open, null, "a thread still in flight has no failed request");
+});
+
+test("a failed request is only reported when the reviewer's own row has no reply", () => {
+  const reviewerMessage: ChatMessage = {
+    id: "m1",
+    clientRequestId: "req-1",
+    sender: "REVIEWER",
+    body: "Any update?",
+    createdAt: "",
+  };
+  const reply: ChatMessage = {
+    id: "m2",
+    clientRequestId: responseRequestId("req-1"),
+    sender: "AGENT",
+    body: "Here you go",
+    createdAt: "",
+  };
+  const status: ChatStatus = {
+    reportId: "report-1",
+    threads: [{ id: "thread-1", status: "ERROR", messages: [reviewerMessage, reply] }],
+  };
+
+  assert.equal(failedRequestFromStatus(status), null);
 });

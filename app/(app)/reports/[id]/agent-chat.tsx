@@ -128,9 +128,20 @@ function pendingReviewerMessage(status: ChatStatus | null): ChatMessage | null {
   return null;
 }
 
-function failedRequestFromStatus(status: ChatStatus | null): ChatRequest | null {
+/**
+ * A reviewer message whose thread ended without a reply. `terminalStatus` is `"ERROR"` for a
+ * retryable failure (provider, transport, timeout) and `"CANCELLED"` for a reply the harness
+ * rejected outright (empty, a refusal, a tool-call-only turn) — that one is permanent, so the UI
+ * must not offer to retry it.
+ */
+type FailedChatRequest = ChatRequest & {
+  /** `null` means the failure is local only (the request never reached a persisted thread). */
+  terminalStatus: "ERROR" | "CANCELLED" | null;
+};
+
+export function failedRequestFromStatus(status: ChatStatus | null): FailedChatRequest | null {
   for (const thread of status?.threads ?? []) {
-    if (thread.status !== "ERROR") continue;
+    if (thread.status !== "ERROR" && thread.status !== "CANCELLED") continue;
     const reviewerMessage = [...thread.messages]
       .reverse()
       .find(
@@ -143,7 +154,25 @@ function failedRequestFromStatus(status: ChatStatus | null): ChatRequest | null 
           ),
       );
     if (reviewerMessage) {
-      return { clientRequestId: reviewerMessage.clientRequestId, body: reviewerMessage.body };
+      return {
+        clientRequestId: reviewerMessage.clientRequestId,
+        body: reviewerMessage.body,
+        terminalStatus: thread.status,
+      };
+    }
+  }
+  return null;
+}
+
+/** The terminal status of whichever thread carries this request, if any has settled. */
+function terminalStatusFor(
+  status: ChatStatus | null,
+  clientRequestId: string,
+): "ERROR" | "CANCELLED" | null {
+  for (const thread of status?.threads ?? []) {
+    if (thread.status !== "ERROR" && thread.status !== "CANCELLED") continue;
+    if (thread.messages.some((message) => message.clientRequestId === clientRequestId)) {
+      return thread.status;
     }
   }
   return null;
@@ -282,19 +311,9 @@ export function AgentChat({
     };
   }, [loadStatus]);
 
-  const failedRequest = failed ?? failedRequestFromStatus(status);
-  const failedOnServer = Boolean(
-    failedRequest &&
-      status?.threads.some(
-        (thread) =>
-          (thread.status === "ERROR" || thread.status === "CANCELLED") &&
-          thread.messages.some(
-            (message) =>
-              message.sender === "REVIEWER" &&
-              message.clientRequestId === failedRequest.clientRequestId,
-          ),
-      ),
-  );
+  const failedRequest: FailedChatRequest | null = failed
+    ? { ...failed, terminalStatus: terminalStatusFor(status, failed.clientRequestId) }
+    : failedRequestFromStatus(status);
   const canSend = canSubmitReviewerMessage(draft, Boolean(sending), mode);
   const messages = allMessages(status);
   const pendingMessage = pendingReviewerMessage(status);
@@ -398,7 +417,7 @@ export function AgentChat({
 
   if (mode === "disabled") {
     return (
-      <section className="rounded-xl border border-border/50 bg-card p-4" aria-label="Reviewer advisory chat">
+      <section className="px-5 py-4" aria-label="Reviewer advisory chat">
         <p className="text-body font-medium text-foreground">{ADVISORY_LABEL}</p>
         <p className="mt-1 text-meta text-muted-foreground">
           Reviewer chat is not enabled for this environment. Approval and denial remain available
@@ -409,16 +428,16 @@ export function AgentChat({
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card" aria-label="Reviewer advisory chat">
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden" aria-label="Reviewer advisory chat">
 
       {mode === "loading" ? (
-        <div className="flex flex-1 items-center justify-center gap-2.5 px-4 py-6 text-meta text-muted-foreground" role="status">
+        <div className="flex flex-1 items-center justify-center gap-2.5 px-5 py-6 text-meta text-muted-foreground" role="status">
           <CircleNotch className="size-4 animate-spin" /> Loading conversation
         </div>
       ) : null}
 
       {mode === "error" ? (
-        <div className="flex flex-col gap-3 p-4" role="alert">
+        <div className="flex flex-col gap-3 px-5 py-4" role="alert">
           <p className="flex items-start gap-2 text-body text-destructive">
             <Warning className="mt-0.5 size-4 shrink-0" />
             {loadError ?? "The advisory conversation could not be loaded."}
@@ -430,13 +449,15 @@ export function AgentChat({
       ) : null}
 
       {mode === "ready" ? (
-        <>
+        <div
+          ref={messagesRef}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-4"
+        >
           <div
-            ref={messagesRef}
             role="log"
             aria-live="polite"
             aria-label="Conversation with Agent Bounty"
-            className="min-h-0 flex-1 flex flex-col gap-3 overflow-y-auto px-4 py-4"
+            className="flex flex-col gap-3"
           >
             {messages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
@@ -475,66 +496,97 @@ export function AgentChat({
                 <ShimmerLabel>Agent Bounty is thinking</ShimmerLabel>
               </div>
             ) : null}
-            {hasNewBelow ? (
-              <div className="sticky bottom-0 flex justify-center pb-1">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="secondary"
-                  onClick={() => {
-                    setHasNewBelow(false);
-                    scrollMessages();
-                  }}
-                >
-                  New messages below
-                </Button>
-              </div>
-            ) : null}
           </div>
 
-          {recheckState === "error" ? (
-            <div className="border-t border-destructive/30 bg-destructive/5 px-4 py-3" role="alert">
-              <span className="text-meta text-destructive">{recheckError}</span>
-            </div>
-          ) : null}
+          {/* Sticky last child of the scroller: it reserves its own height in flow, so
+              the last message clears it with no bottom-padding number to keep in sync,
+              and `mt-auto` holds it at the pane bottom when the conversation is short. */}
+          <div className="sticky bottom-0 z-20 -mx-5 mt-auto flex flex-col">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none h-8 shrink-0 bg-gradient-to-t from-popover to-transparent [mask-image:linear-gradient(to_bottom,transparent,black)]"
+            />
+            <div className="flex flex-col gap-2 bg-popover/95 px-5 pb-3 supports-backdrop-filter:bg-popover/70 supports-backdrop-filter:backdrop-blur-md">
+              {hasNewBelow ? (
+                <div className="flex justify-center">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="secondary"
+                    onClick={() => {
+                      setHasNewBelow(false);
+                      scrollMessages();
+                    }}
+                  >
+                    New messages below
+                  </Button>
+                </div>
+              ) : null}
 
-          {recheckState === "sent" ? (
-            <div className="border-t border-border/50 bg-muted/40 px-4 py-3">
-              <span className="text-meta text-muted-foreground">
-                Re-check started. This verdict is superseded and can no longer be approved; the
-                fresh investigation will produce a new revision for review.
-              </span>
-            </div>
-          ) : null}
+              {recheckState === "error" ? (
+                <div
+                  className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-meta text-destructive"
+                  role="alert"
+                >
+                  {recheckError}
+                </div>
+              ) : null}
 
-          {/* Bottom-only composer. Pills sit fixed above the rounded bar; the blank
-              message surface above scrolls while this footer stays put. */}
-          <PromptBar
-            draft={draft}
-            onDraftChange={setDraft}
-            onSend={send}
-            onQuickPrompt={sendPrompt}
-            sending={Boolean(sending)}
-            mode={mode}
-            inputRef={inputRef}
-          />
+              {recheckState === "sent" ? (
+                <div
+                  className="rounded-md bg-muted/60 px-2.5 py-1.5 text-meta text-muted-foreground"
+                  role="status"
+                >
+                  Re-check started. This verdict is superseded and can no longer be approved; the
+                  fresh investigation will produce a new revision for review.
+                </div>
+              ) : null}
 
-          {failedRequest ? (
-            <div className="flex items-center justify-between gap-3 border-t border-destructive/30 bg-destructive/5 px-4 py-3" role="alert">
-              <span className="text-meta text-destructive">
-                {failedOnServer
-                  ? "The provider did not complete this advisory turn. Retry the same request."
-                  : sendError ?? "The message was not sent."}
-              </span>
-              <Button size="xs" variant="outline" onClick={() => void submit(failedRequest)}>
-                <ArrowClockwise className="size-3" /> Retry
-              </Button>
+              {failedRequest ? (
+                failedRequest.terminalStatus === "CANCELLED" ? (
+                  <div
+                    className="rounded-md bg-muted/60 px-2.5 py-1.5 text-meta text-muted-foreground"
+                    role="status"
+                  >
+                    Agent Bounty could not answer this one. Try asking again.
+                  </div>
+                ) : (
+                  <div
+                    className="flex items-center justify-between gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5"
+                    role="alert"
+                  >
+                    <span className="min-w-0 text-meta text-destructive">
+                      {failedRequest.terminalStatus === "ERROR"
+                        ? "The provider did not complete this advisory turn. Retry the same request."
+                        : sendError ?? "The message was not sent."}
+                    </span>
+                    <Button
+                      size="xs"
+                      variant="ghost"
+                      className="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => void submit(failedRequest)}
+                    >
+                      <ArrowClockwise className="size-3" /> Retry
+                    </Button>
+                  </div>
+                )
+              ) : null}
+
+              <PromptBar
+                draft={draft}
+                onDraftChange={setDraft}
+                onSend={send}
+                onQuickPrompt={sendPrompt}
+                sending={Boolean(sending)}
+                mode={mode}
+                inputRef={inputRef}
+              />
             </div>
-          ) : null}
-        </>
+          </div>
+        </div>
       ) : null}
     </section>
   );
 }
 
-export type { ChatMessage, ChatStatus, ChatRequest };
+export type { ChatMessage, ChatStatus, ChatRequest, FailedChatRequest };
