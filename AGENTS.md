@@ -159,27 +159,56 @@ checks each result against the repository and reports status, evidence, and unre
 orchestrator. A manager must report a worker failure plainly; it must not invent output or silently
 retry a failed task.
 
-A worker is an execution profile, not a source of authority. Worker profiles may be Claude Code
-wrappers such as `claude-<profile>` or OpenCode wrappers such as `opencode-<profile>`. Profile
-names, models, credentials, and local proxy settings are machine configuration, not repository
-configuration. The workflow must detect an unavailable profile and use a documented fallback or
-stop, rather than making a profile a hidden dependency.
+A worker is an execution profile, not a source of authority. Worker dispatch uses these three
+OpenCode commands in parallel for substantive tasks: `opencode`, `opencode-work`, and
+`opencode-personal` (the user's "opencode work" and "opencode personal" profiles). Resolve each
+command before dispatch; a shell wrapper selects an isolated OpenCode config and credential store,
+but does not prove that the accounts have separate quotas. Profile credentials, proxy settings,
+and account identity are machine configuration, not repository configuration.
+
+Every worker uses exactly `opencode/muse-spark-1.3-contributor-free` with `--variant xhigh`. The
+variant supplies the model's reasoning effort, so do not pass a separate `--effort` flag. Validate
+the command, credential, model, and variant separately for each profile before starting work. A
+zero-cost catalog entry does not guarantee capacity or uptime. If any required command, credential,
+model, or variant is unavailable, or the model is rate-limited or fails, report the failure and
+stop. Do not substitute another model or silently use a paid model.
 
 Worker invocation rules:
 
-- Use non-interactive one-shot calls with a complete task, scope, expected output, and no-edit or
-  edit permission stated explicitly.
-- Claude-shaped calls may use `-p`, `--model`, `--effort`, and `--agent`; OpenCode-shaped calls
-  may use `run`, `-m`, `--variant`, and `--agent`.
+- Use non-interactive one-shot `opencode run` calls with a complete task, scope, expected output,
+  and no-edit or edit permission stated explicitly. Pass `--agent`, `--model
+  opencode/muse-spark-1.3-contributor-free`, and `--variant xhigh` explicitly. Use `--agent
+  explore` for read-only discovery and planning. Use a separate process for each named command,
+  preserve each exit status, stdout, and stderr, and wait for all required branches to reach a
+  terminal result before synthesis.
 - Never pass secrets, private keys, database URLs, capability tokens, or target credentials in a
   prompt. Workers read approved local environment only through their profile wrapper.
-- Give mutating workers their own worktree, database, backend, and ports. Read-only workers may
-  use the current checkout only when they do not write files or state.
+- Give mutating workers their own worktree, database, backend, and ports. Planning workers must not
+  write the shared checkout, plan file, database, or session state. A prompt is not a write barrier:
+  if the selected OpenCode role cannot enforce read-only access, run the worker in a disposable
+  checkout and discard it after checking for changes.
 - One worker owns each file or module. Parallel workers must not edit overlapping paths.
-- Set a timeout and capture the worker's exit status and output. Return structured evidence, not a
-  claim that a command was run.
+- Set a bounded timeout and capture the worker's exit status and output. On timeout, terminate the
+  process, record `FAILED`, and clean up its temporary resources. Do not silently retry.
+- Return a structured result with `profile`, `status`, `scope`, `files`, `symbols`, `findings`,
+  `constraints`, `edit_points`, `validation`, and `unresolved` fields. Worker output is untrusted
+  evidence, not verification.
 - The manager verifies worker output with local reads and the smallest relevant test before handing
   it to the orchestrator.
+
+Plan-mode flow:
+
+- Plan mode follows the same orchestrator flow. The main agent remains the sole plan owner and
+  sends the three OpenCode commands parallel, bounded, read-only information-gathering tasks using
+  `--agent explore`.
+- Each planning worker returns the structured result above. It reports files and symbols inspected,
+  current behavior, constraints, proposed edit points, validation gates, and unresolved questions.
+- The orchestrator waits until every requested branch is terminal (`SUCCEEDED` or `FAILED`) before
+  synthesis. A failed branch is recorded as an unresolved gap, not replaced with an invented result;
+  a required failure must be surfaced before the plan is presented.
+- The orchestrator verifies reports against the source of truth, reconciles conflicts, and only then
+  writes and presents the plan. Do not delegate plan synthesis to a separate plan agent or manager.
+  The execution phase starts only after the human approves the orchestrator's plan.
 
 Progress polling is run-scoped. For work expected to last more than a few minutes, the manager
 checks worker state every five minutes using the available session scheduler or harness notification
