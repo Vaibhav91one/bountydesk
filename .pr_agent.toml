@@ -27,6 +27,10 @@ require_tests_review = false
 require_security_review = false
 require_ticket_analysis_review = false
 enable_help_text = true
+# Catch security and best-practice patterns beyond surface style.
+enable_relevant_theory = true
+# Inline comment style: one sentence finding per suggestion.
+suggestion_preference = "diff"
 
 [pr_description]
 enable_pr_description = false

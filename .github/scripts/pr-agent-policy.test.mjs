@@ -68,3 +68,26 @@ test("provider policy stays pinned and advisory", async () => {
   assert.match(config, /review_heading = "Code Review"/);
   assert.doesNotMatch(config, /review_heading = "PR Reviewer Guide"/);
 });
+
+// CRITICAL: the workflow inlines config as env vars that override .pr_agent.toml.
+// These assertions close the drift gap by checking that inlined values match the toml
+// so a policy edit in one place surfaces as a test failure in the other.
+test("workflow inlined config matches .pr_agent.toml", async () => {
+  const workflow = await read(".github/workflows/pr-agent-review.yml");
+  const toml = await read(".pr_agent.toml");
+  const pairs = [
+    ["persistent_comment", /pr_reviewer.persistent_comment: 'false'/, /persistent_comment\s*=\s*false/],
+    ["num_max_findings", /num_max_findings: '10'/, /num_max_findings\s*=\s*10/],
+    ["review_heading", /review_heading: 'Code Review'/, /review_heading\s*=\s*"Code Review"/],
+    ["publish_output_no_suggestions", /publish_output_no_suggestions: 'true'/, /publish_output_no_suggestions\s*=\s*true/],
+    ["enable_relevant_theory", /enable_relevant_theory: 'true'/, /enable_relevant_theory\s*=\s*true/],
+    ["suggestion_preference", /suggestion_preference: 'diff'/, /suggestion_preference\s*=\s*"diff"/],
+  ];
+  for (const [label, wfRe, tomlRe] of pairs) {
+    assert.match(workflow, wfRe, `workflow inlined ${label} should match`);
+    assert.match(toml, tomlRe, `toml ${label} should match`);
+  }
+  assert.doesNotMatch(workflow, /review_heading: 'PR Reviewer Guide'/, "workflow must not carry old heading");
+  assert.doesNotMatch(workflow, /persistent_comment: 'true'/, "workflow must not carry old persistent_comment value");
+  assert.doesNotMatch(workflow, /num_max_findings: '3'/, "workflow must not carry old num_max_findings value");
+});
