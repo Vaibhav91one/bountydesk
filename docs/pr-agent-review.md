@@ -137,3 +137,5 @@ Confirm this runbook is the only docs change under review when that is the inten
 git status --porcelain
 git diff --check
 ```
+
+Canary documentation change for PR-Agent publication verification.
