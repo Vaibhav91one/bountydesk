@@ -182,3 +182,7 @@ Confirm this runbook is the only docs change under review when that is the inten
 git status --porcelain
 git diff --check
 ```
+
+## PR Agent Vyce canary
+
+Exercise Vyce DeepSeek v4.1 route with review, improve, and diagram defaults.
