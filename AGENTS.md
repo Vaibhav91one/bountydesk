@@ -122,6 +122,22 @@ authorizes a verdict, target, approval, delivery, or merge. A green PR Agent act
 proof of a published review on the current head. Treat a PR as reviewed only after the
 publication check in `docs/pr-agent-review.md` passes.
 
+Production completion has two separate outcomes. Merge acceptance requires a pull request, a
+green `build` check, and resolved conversations. The `PR Agent review` and `Verify PR Agent review`
+workflows are advisory and are not required status checks. A same-repository PR is PR-Agent
+reviewed only when the current-head publication check passes with `VERIFIED` or `NO_FINDINGS`.
+Fork PRs intentionally skip the provider-backed workflow and are not reviewed by PR-Agent; that is
+expected, not a CI failure. A provider, model, or publication failure is not review evidence. After
+the two documented attempts for a head SHA, a human may merge with the required `build` check and
+human review, but must not call the PR-Agent review verified. These checks do not replace a live
+provider or canary run when one is called for.
+
+The verifier accepts a formal review bound to the head commit or the canonical persistent marker
+published after the run started. Fixture tests prove the parser in CI; only a live run with its
+canary evidence proves a PR. Live review needs the approved provider and data binding in
+`docs/pr-agent-review.md`, stays within the two attempts per head SHA plus the verifier's bounded
+API retries, and keeps the current limitations there.
+
 The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
 change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
 
@@ -197,6 +213,11 @@ Worker invocation rules:
   evidence, not verification.
 - The manager verifies worker output with local reads and the smallest relevant test before handing
   it to the orchestrator.
+- A manager may dispatch multiple independent workers in parallel when task boundaries, file
+  ownership, and validation contracts are already frozen. Each worker still gets its own process,
+  bounded timeout, captured result, and isolated worktree and state when it mutates anything.
+  Parallel dispatch does not permit overlapping edits or shared databases, services, ports, or
+  credentials.
 
 Plan-mode flow:
 
