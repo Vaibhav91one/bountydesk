@@ -21,11 +21,14 @@ test("review workflow runs trusted, same-repository API-only review", async () =
   assert.match(workflow, /repo_context_from_default_branch: ['"]true['"]/);
   assert.match(workflow, /skills\.enabled: ['"]false['"]/);
   assert.match(workflow, /enable_auto_approval: ['"]false['"]/);
-  assert.match(workflow, /auto_describe: ['"]false['"]/);
-  assert.match(workflow, /auto_improve: ['"]false['"]/);
   assert.match(workflow, /persistent_finding_state: ['"]false['"]/);
   assert.match(workflow, /require_estimate_effort_to_review: ['"]false['"]/);
   assert.match(workflow, /GITHUB_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  assert.match(workflow, /auto_describe: ['"]true['"]/);
+  assert.match(workflow, /auto_improve: ['"]true['"]/);
+  assert.match(workflow, /push_commands: ['"]\[\"\/review\", \"\/describe\", \"\/improve\"\]['"]/);
+  assert.match(workflow, /enable_pr_diagram: ['"]true['"]/);
+  assert.match(workflow, /commitable_code_suggestions: ['"]true['"]/);
   assert.match(workflow, /OPENAI_KEY:\s*\$\{\{\s*secrets\.PR_AGENT_OPENAI_KEY\s*\}\}/);
   assert.match(workflow, /OPENAI\.API_BASE:\s*https:\/\/vyceai\.com\/v1/);
 });

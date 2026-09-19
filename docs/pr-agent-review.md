@@ -15,6 +15,8 @@ What stays true while this action exists:
 - No AI review result authorizes a verdict, target, approval, delivery, or merge.
 - The action runs only on same-repo PRs. The workflow skips fork PRs through its head-repo guard, so a fork PR with no run is expected, not broken.
 - The review policy loads from the default branch. A PR cannot change its own review policy through `AGENTS.md` edits on the branch.
+- Defaults per open/push: review, code suggestions (`/improve`), and a diagram-only describe. Other tools (`/ask`, `/add_docs`, `/generate_labels`, `/update_changelog`, `/describe` full) stay manual via `/help`.
+- No markdown tables in output. Lists only, enforced through `extra_instructions` and committable suggestions.
 
 ## Current-head publication check
 
