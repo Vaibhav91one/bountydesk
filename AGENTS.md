@@ -197,6 +197,11 @@ Worker invocation rules:
   evidence, not verification.
 - The manager verifies worker output with local reads and the smallest relevant test before handing
   it to the orchestrator.
+- A manager may dispatch multiple independent workers in parallel when task boundaries, file
+  ownership, and validation contracts are already frozen. Each worker still gets its own process,
+  bounded timeout, captured result, and isolated worktree and state when it mutates anything.
+  Parallel dispatch does not permit overlapping edits or shared databases, services, ports, or
+  credentials.
 
 Plan-mode flow:
 
