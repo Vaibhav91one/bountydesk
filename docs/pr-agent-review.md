@@ -52,8 +52,8 @@ The verifier accepts two forms, and nothing else counts.
 
 Match the symptom to a category before retrying. Retrying the wrong category wastes the retry budget.
 
-- F1, secret or auth: missing or expired `PR_AGENT_OPENAI_KEY`, rejected key at the configured base URL (`https://vyceai.com/v1`), or `GITHUB_TOKEN` without permission to post. Logs point at 401, 403, or an auth error from the provider.
-- F2, model or routing: unknown model name, token limit rejection, or tool error propagation halting the run. The pinned model is `openai/deepseek-v4.1` with `custom_model_max_tokens = 32000`. Logs point at model resolution, context length, or provider routing.
+- F1, secret or auth: missing or expired `PR_AGENT_OPENAI_KEY`, key sent to wrong base URL, or `GITHUB_TOKEN` without permission to post. Logs point at 401, 403, or an auth error from the provider. Key type must match base URL: OpenAI key uses default `https://api.openai.com/v1` with no `OPENAI.API_BASE` override. A gateway key sent to the wrong host fails even when local curl passes.
+- F2, model or routing: unknown model name, token limit rejection, or tool error propagation halting the run. The pinned model is `gpt-4o-mini` with `custom_model_max_tokens = 32000`. Logs point at model resolution, context length, or provider routing. LiteLLM routes by model prefix: `openai/` reads `OPENAI_KEY`, `deepseek/` reads `DEEPSEEK_API_KEY`. Prefix must match key slot, else LiteLLM sends dummy key -> 401.
 - F3, permissions or fork guard: the run never starts on a fork PR because the same-repo condition skips it, or posting fails on restricted permissions (`contents: read`, `issues: write`, `pull-requests: write`). No run for a fork PR is correct behavior.
 - F4, trigger or concurrency: a push did not start a `/review` follow-up, an older run was cancelled in favor of a newer push, or the 10 minute job timeout fired. Logs show cancellation, supersede, or timeout.
 - F5, unpublished output: the run is green but no review appears on the PR. Causes include `publish_output` disabled, a posting API failure, or the run reviewing a SHA that is no longer current.
@@ -88,6 +88,9 @@ Rotation steps:
 
 Notes that prevent common mistakes:
 
+- `pull_request_target` runs workflow from base branch. Merge config first, then open fresh canary. Branch-only config never runs.
+- Paste secret via GitHub UI. CLI pipe can append newline -> 401 despite valid key. Verify with length check, never print value.
+- Pasted keys in chat are burned. Rotate at provider first, then update secret.
 - `GITHUB_TOKEN` is ephemeral and needs no rotation. Keep its permissions at the least privilege set in the workflow.
 - The GitHub App webhook secret is platform-owned and unrelated to this action. Do not rotate it from this runbook.
 - Never print a key in an issue, PR comment, log, or script. If a secret leaks, revoke it at the provider first, then rotate.
@@ -114,7 +117,7 @@ These are the production boundaries, not a second merge gate:
 
 Deterministic checks and live reviews answer different questions. The offline verifier tests (`node --test .github/scripts/verify-pr-agent-review.test.mjs`, run as an explicit step in `.github/workflows/ci.yml`) prove parser and publication decisions against fixtures. They pass without network, credentials, or a live model run. They do not prove that the external provider is reachable or that a live PR-Agent run has published a review. A live review needs a successful `PR Agent review` run on the current head SHA plus a publication that passes C0 to C5. Record the deterministic CI result separately from the live provider, workflow, and canary evidence for the head under review.
 
-Live review has a provider and data approval prerequisite. The approved provider binding is the pinned action (`The-PR-Agent/pr-agent` at `v0.45.0`), the base URL (`https://vyceai.com/v1`), the model (`openai/deepseek-v4.1`), and the token limit (`custom_model_max_tokens = 32000`). The approved data binding is `AGENTS.md` from the default branch (`repo_context_from_default_branch = true`, 500 lines max) with repository-controlled skills off and no branch-supplied credentials. A run on a different provider, model, base URL, or data source does not count as reviewed until a human approves that binding and records it. The key itself stays a repo secret and never enters the tree.
+Live review has a provider and data approval prerequisite. The approved provider binding is the pinned action (`The-PR-Agent/pr-agent` at `v0.45.0`), the default OpenAI base URL (no `OPENAI.API_BASE` override), the model (`gpt-4o-mini`), and the token limit (`custom_model_max_tokens = 32000`). The approved data binding is `AGENTS.md` from the default branch (`repo_context_from_default_branch = true`, 500 lines max) with repository-controlled skills off and no branch-supplied credentials. A run on a different provider, model, base URL, or data source does not count as reviewed until a human approves that binding and records it. The key itself stays a repo secret and never enters the tree.
 
 ## Current limitations
 
