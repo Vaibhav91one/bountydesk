@@ -177,3 +177,7 @@ Confirm this runbook is the only docs change under review when that is the inten
 git status --porcelain
 git diff --check
 ```
+
+## PR Agent Luna canary
+
+Exercise Luna provider configuration after merge.
