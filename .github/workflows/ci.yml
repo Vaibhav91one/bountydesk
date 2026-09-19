@@ -60,6 +60,8 @@ jobs:
       - name: Check for schema drift
         run: npm run db:drift
 
+      - name: Verify PR Agent verifier tests
+        run: node --test .github/scripts/verify-pr-agent-review.test.mjs
       - name: Test
         run: npm run test --if-present
       - name: Build

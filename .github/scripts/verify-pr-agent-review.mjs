@@ -7,12 +7,12 @@
 // run identity and conclusion, and a review publication bound to that head.
 //
 // What counts as publication: a formal pull request review whose commit_id equals
-// the current head SHA, or a persistent issue comment carrying a head marker
-// (`pr-agent-review head=<40-hex-sha>`). Inline diff comments alone are not
-// enough because they carry no head binding, which is why they are rejected as
-// standalone. Anything stale, malformed, or carrying a failure marker is
-// UNVERIFIED, and an explicit clean bill of health is reported as NO_FINDINGS
-// rather than lumped in with UNVERIFIED.
+// the current head SHA, or PR-Agent's canonical persistent comment marker published
+// after the verified run started. Legacy head markers remain diagnostic only.
+// Inline diff comments alone are not enough because they carry no head binding,
+// which is why they are rejected as standalone. Anything stale, malformed, or
+// carrying a failure marker is UNVERIFIED, and an explicit clean bill of health is
+// reported as NO_FINDINGS rather than lumped in with UNVERIFIED.
 //
 // Only Node built-ins are used. `fetch` is injectable so the offline tests can
 // run on fixtures without network or credentials. Secrets never reach logs:
@@ -24,6 +24,7 @@ import { pathToFileURL } from "node:url";
 
 const API_VERSION = "2022-11-28";
 const DEFAULT_API_BASE_URL = "https://api.github.com";
+const PR_AGENT_WORKFLOW_NAME = "PR Agent review";
 const MAX_ATTEMPTS = 3;
 const RETRY_BASE_DELAY_MS = 250;
 
@@ -31,6 +32,7 @@ const RETRY_BASE_DELAY_MS = 250;
 // familiar review guide heading. The publisher allowlist prevents arbitrary PR
 // commenters from manufacturing review evidence.
 const PR_AGENT_BODY_RE = /pr-agent|PR Reviewer Guide/i;
+const CANONICAL_REVIEW_RE = /<!--\s*pr-agent:review:full\s*-->/i;
 const TRUSTED_PUBLISHERS = new Set(["github-actions[bot]", "pr-agent[bot]", "pr-agent"]);
 
 // Persistent comments are not commit-bound by the API, so they carry their own
@@ -128,6 +130,24 @@ function matchesAny(patterns, body) {
   return patterns.some((pattern) => pattern.test(body));
 }
 
+function hasCanonicalReviewMarker(body) {
+  return typeof body === "string" && CANONICAL_REVIEW_RE.test(body);
+}
+
+function isPublishedAfterRun(candidate, run) {
+  const runStartedAt = Date.parse(run?.created_at ?? run?.run_started_at ?? "");
+  const publishedAt = Date.parse(candidate.updatedAt ?? candidate.createdAt ?? "");
+  return Number.isFinite(runStartedAt)
+    && Number.isFinite(publishedAt)
+    && publishedAt >= runStartedAt;
+}
+
+function isExactRunLink(run, prNumber) {
+  return Array.isArray(run?.pull_requests)
+    && run.pull_requests.length === 1
+    && run.pull_requests[0]?.number === prNumber;
+}
+
 function shortSha(sha) {
   return typeof sha === "string" && sha.length >= 12 ? sha.slice(0, 12) : String(sha ?? "unknown");
 }
@@ -156,13 +176,16 @@ async function discoverPrAgentRun(fetchImpl, baseUrl, repository, prNumber, toke
     `/repos/${repository}/actions/runs?per_page=20`,
     token,
   );
-  const runs = (data?.workflow_runs ?? []).filter((run) => /pr.agent/i.test(run?.name ?? ""));
-  const linked = runs.filter((run) => (run?.pull_requests ?? []).some((pr) => pr?.number === prNumber));
-  const pool = linked.length > 0
-    ? linked
-    : runs.filter((run) => (run?.head_sha ?? "").toLowerCase() === headSha.toLowerCase());
-  if (pool.length === 0) return null;
-  return pool.reduce((newest, run) => (run.id > newest.id ? run : newest));
+  const runs = (data?.workflow_runs ?? []).filter((run) => (
+    String(run?.name ?? "").toLowerCase() === PR_AGENT_WORKFLOW_NAME.toLowerCase()
+    && typeof run?.head_sha === "string"
+    && run.head_sha.toLowerCase() === headSha.toLowerCase()
+  ));
+  // A run linked to several PRs is ambiguous. Do not infer which review it
+  // published, even when one of those PRs currently has the same head SHA.
+  const linked = runs.filter((run) => isExactRunLink(run, prNumber));
+  if (linked.length === 0) return null;
+  return linked.reduce((newest, run) => (run.id > newest.id ? run : newest));
 }
 
 function unverified(repository, prNumber, headSha, run, reason, detail) {
@@ -179,9 +202,8 @@ function unverified(repository, prNumber, headSha, run, reason, detail) {
   };
 }
 
-function collectCandidates(headSha, run, reviews, comments) {
+function collectCandidates(headSha, reviews, comments) {
   const candidates = [];
-  const runStartedAt = Date.parse(run?.created_at ?? run?.run_started_at ?? "");
   for (const review of reviews ?? []) {
     if (!review || typeof review !== "object") continue;
     const body = typeof review.body === "string" ? review.body : "";
@@ -196,7 +218,14 @@ function collectCandidates(headSha, run, reviews, comments) {
       : commitId.toLowerCase() === headSha.toLowerCase()
         ? "head"
         : "stale";
-    candidates.push({ kind: "formal-review", binding, id: review.id ?? null, body });
+    candidates.push({
+      kind: "formal-review",
+      binding,
+      id: review.id ?? null,
+      body,
+      createdAt: review.submitted_at ?? review.submittedAt ?? null,
+      updatedAt: review.submitted_at ?? review.submittedAt ?? null,
+    });
   }
   for (const comment of comments ?? []) {
     if (!comment || typeof comment !== "object") continue;
@@ -205,36 +234,52 @@ function collectCandidates(headSha, run, reviews, comments) {
     const publisher = comment.user?.login;
     if (publisher && !TRUSTED_PUBLISHERS.has(publisher)) continue;
     const marker = extractMarkerHead(body);
-    const commentTime = Date.parse(comment.updated_at ?? comment.updatedAt ?? comment.created_at ?? "");
-    const timeBound = Number.isFinite(runStartedAt) && Number.isFinite(commentTime) && commentTime >= runStartedAt;
     const binding = marker.malformed
       ? "malformed"
-      : !marker.present
-        ? timeBound ? "time-bound" : "unbound"
-        : marker.head === headSha.toLowerCase()
-          ? "head"
-          : "stale";
-    candidates.push({ kind: "persistent-comment", binding, id: comment.id ?? null, body });
+      : hasCanonicalReviewMarker(body)
+        ? "canonical"
+        : marker.present
+          ? marker.head === headSha.toLowerCase() ? "legacy-head" : "stale"
+          : "unbound";
+    candidates.push({
+      kind: "persistent-comment",
+      binding,
+      id: comment.id ?? null,
+      body,
+      createdAt: comment.created_at ?? comment.createdAt ?? null,
+      updatedAt: comment.updated_at ?? comment.updatedAt ?? null,
+    });
   }
   return candidates;
 }
 
 function classifyPublication({ repository, prNumber, headSha, run, reviews, comments }) {
-  const candidates = collectCandidates(headSha, run, reviews, comments);
-  const headBound = candidates.filter((candidate) => candidate.binding === "head");
-  const timeBound = candidates.filter((candidate) => candidate.binding === "time-bound");
-  const bound = [...headBound, ...timeBound];
+  const candidates = collectCandidates(headSha, reviews, comments);
+  const formalHead = candidates.filter((candidate) => (
+    candidate.kind === "formal-review" && candidate.binding === "head"
+  ));
+  const canonicalComments = candidates.filter((candidate) => (
+    candidate.kind === "persistent-comment"
+      && candidate.binding === "canonical"
+      && isPublishedAfterRun(candidate, run)
+  ));
+  const bound = [...formalHead, ...canonicalComments];
   const evidence = {
-    formalReviewIds: bound
-      .filter((candidate) => candidate.kind === "formal-review")
-      .map((candidate) => candidate.id),
-    persistentCommentIds: bound
-      .filter((candidate) => candidate.kind === "persistent-comment")
-      .map((candidate) => candidate.id),
+    formalReviewIds: formalHead.map((candidate) => candidate.id),
+    persistentCommentIds: canonicalComments.map((candidate) => candidate.id),
   };
   const base = { repository, prNumber, headSha, runId: run?.id ?? null, runName: run?.name ?? null, evidence };
 
-  if (headBound.length === 0 && timeBound.length === 0) {
+  // Failure output is never evidence, even when its canonical identity marker
+  // is present or its publication timestamp is unavailable.
+  if (candidates.some((candidate) => matchesAny(PARSE_FAILURE_RES, candidate.body))) {
+    return { ...base, status: "UNVERIFIED", reason: "PARSE_FAILURE", detail: "publication reports a parse failure" };
+  }
+  if (candidates.some((candidate) => matchesAny(PUBLICATION_FAILURE_RES, candidate.body))) {
+    return { ...base, status: "UNVERIFIED", reason: "PUBLICATION_FAILURE", detail: "publication reports a publishing failure" };
+  }
+
+  if (bound.length === 0) {
     if (candidates.some((candidate) => candidate.binding === "malformed")) {
       return { ...base, status: "UNVERIFIED", reason: "MALFORMED_MARKER", detail: "pr-agent head marker is not a 40-hex SHA" };
     }
@@ -242,21 +287,13 @@ function classifyPublication({ repository, prNumber, headSha, run, reviews, comm
       return { ...base, status: "UNVERIFIED", reason: "STALE_HEAD", detail: `publication is bound to an older head, not ${shortSha(headSha)}` };
     }
     if (candidates.length > 0) {
-      return { ...base, status: "UNVERIFIED", reason: "STANDALONE_ONLY", detail: "pr-agent text found without a current-head binding" };
+      return { ...base, status: "UNVERIFIED", reason: "STANDALONE_ONLY", detail: "pr-agent text found without a formal commit binding or canonical publication marker" };
     }
-    return { ...base, status: "UNVERIFIED", reason: "MISSING_PUBLICATION", detail: "no pr-agent formal review or persistent comment found" };
+    return { ...base, status: "UNVERIFIED", reason: "MISSING_PUBLICATION", detail: "no pr-agent formal review or canonical persistent comment found" };
   }
-  // Parse is checked first because it is upstream of publishing: a review that
-  // was never parsed has no publishable content, so its parse failure is the
-  // root cause even when the body also mentions a failed review.
-  if (bound.some((candidate) => matchesAny(PARSE_FAILURE_RES, candidate.body))) {
-    return { ...base, status: "UNVERIFIED", reason: "PARSE_FAILURE", detail: "current-head publication reports a parse failure" };
-  }
-  if (bound.some((candidate) => matchesAny(PUBLICATION_FAILURE_RES, candidate.body))) {
-    return { ...base, status: "UNVERIFIED", reason: "PUBLICATION_FAILURE", detail: "current-head publication reports a publishing failure" };
-  }
+  // Failure output was rejected above, before publication binding.
   if (bound.some((candidate) => extractMarkerHead(candidate.body).malformed)) {
-    return { ...base, status: "UNVERIFIED", reason: "MALFORMED_MARKER", detail: "current-head publication carries a malformed head marker" };
+    return { ...base, status: "UNVERIFIED", reason: "MALFORMED_MARKER", detail: "publication carries a malformed head marker" };
   }
   if (bound.every((candidate) => matchesAny(NO_FINDINGS_RES, candidate.body))) {
     return { ...base, status: "NO_FINDINGS", reason: "NO_FINDINGS_DECLARED", detail: "review bound to current head declares no findings" };
@@ -317,6 +354,9 @@ export async function verifyPrAgentReview({
   if (!run) {
     return unverified(repository, prNumber, headSha, null, "RUN_NOT_FOUND", "no pr-agent workflow run found");
   }
+  if (String(run.name ?? "").toLowerCase() !== PR_AGENT_WORKFLOW_NAME.toLowerCase()) {
+    return unverified(repository, prNumber, headSha, run, "RUN_MISMATCH", "workflow run is not the configured PR Agent review");
+  }
   if (run.status !== "completed" || run.conclusion !== "success") {
     return unverified(repository, prNumber, headSha, run, "RUN_NOT_SUCCESS", `run ${run.id} is ${run.status}/${run.conclusion}`);
   }
@@ -324,9 +364,16 @@ export async function verifyPrAgentReview({
   if (runHead !== headSha.toLowerCase()) {
     return unverified(repository, prNumber, headSha, run, "STALE_RUN", `run head ${shortSha(run.head_sha)} does not match PR head ${shortSha(headSha)}`);
   }
-  if (Array.isArray(run.pull_requests) && run.pull_requests.length > 0
-    && !run.pull_requests.some((pr) => pr?.number === prNumber)) {
-    return unverified(repository, prNumber, headSha, run, "RUN_MISMATCH", `run ${run.id} is not linked to PR ${prNumber}`);
+  // workflow_run.pull_requests is ephemeral and may be empty after a PR closes.
+  // The caller already resolved this run through the exact head SHA and PR.
+  if (Array.isArray(run.pull_requests)
+    && run.pull_requests.length > 0
+    && !run.pull_requests.every((pr) => pr?.number === prNumber)) {
+    return unverified(repository, prNumber, headSha, run, "RUN_MISMATCH", `run ${run.id} is linked to a different pull request`);
+  }
+  const runRepository = run.head_repository?.full_name ?? run.repository?.full_name;
+  if (runRepository && runRepository.toLowerCase() !== repository.toLowerCase()) {
+    return unverified(repository, prNumber, headSha, run, "RUN_MISMATCH", `run ${run.id} belongs to a different repository`);
   }
 
   let reviews;

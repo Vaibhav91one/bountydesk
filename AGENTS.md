@@ -122,6 +122,16 @@ authorizes a verdict, target, approval, delivery, or merge. A green PR Agent act
 proof of a published review on the current head. Treat a PR as reviewed only after the
 publication check in `docs/pr-agent-review.md` passes.
 
+Production completion has two separate outcomes. Merge acceptance requires a pull request, a
+green `build` check, and resolved conversations. The `PR Agent review` and `Verify PR Agent review`
+workflows are advisory and are not required status checks. A same-repository PR is PR-Agent
+reviewed only when the current-head publication check passes with `VERIFIED` or `NO_FINDINGS`.
+Fork PRs intentionally skip the provider-backed workflow and are not reviewed by PR-Agent; that is
+expected, not a CI failure. A provider, model, or publication failure is not review evidence. After
+the two documented attempts for a head SHA, a human may merge with the required `build` check and
+human review, but must not call the PR-Agent review verified. These checks do not replace a live
+provider or canary run when one is called for.
+
 The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
 change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
 

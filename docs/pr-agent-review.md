@@ -2,7 +2,7 @@
 
 This runbook tells an operator how to confirm that PR Agent actually reviewed the current head of a pull request. A green action run is not proof. Only a published review on the current commit counts, and even then it stays advisory.
 
-Source files: `.github/workflows/pr-agent-review.yml`, `.pr_agent.toml`, `AGENTS.md`, `CONTRIBUTING.md`. Policy context comes from `AGENTS.md` and the Qodo history in `README.md`.
+Source files: `.github/workflows/pr-agent-review.yml`, `.github/workflows/pr-agent-review-verify.yml`, `.github/scripts/verify-pr-agent-review.mjs`, `.github/scripts/verify-pr-agent-review.test.mjs`, `.pr_agent.toml`, `AGENTS.md`, `CONTRIBUTING.md`. Policy context comes from `AGENTS.md` and the Qodo history in `README.md`.
 
 ## What PR Agent is
 
@@ -87,6 +87,18 @@ Qodo and PR Agent share a shape (model comments on a PR) but not a role. Keep th
 - The Qodo-reviewed PR trail in `README.md` is history. Do not rewrite it, extend it with PR Agent results, or present PR Agent as its successor gate.
 - Do not cite a PR Agent review as a security boundary for scope enforcement, intake authentication, delivery idempotency, or the approval gate. Those changes still land with tests and a threat note per `CONTRIBUTING.md`.
 - When a PR description mentions review tooling, keep it factual and minimal, and name it only when a finding materially explains a code change.
+
+## Acceptance criteria
+
+These are the production boundaries, not a second merge gate:
+
+- Merge acceptance is a pull request, a green `build` check, and resolved conversations. The `PR Agent review` and `Verify PR Agent review` workflows are never required status checks.
+- A same-repository PR is PR-Agent reviewed only when the current-head check returns `VERIFIED` or `NO_FINDINGS`. A green action without a published, current-head review is not enough.
+- Fork PRs intentionally skip the provider-backed workflow. Treat `SKIPPED/FORK_UNSUPPORTED` as expected, not as failed review evidence.
+- A provider, model, parse, or publication failure remains unverified. After the two attempts allowed for one head SHA, human review plus the green `build` check can complete a merge, but the PR must not be called PR-Agent verified.
+- Qodo's `qodo-reviewed` check was the required hackathon gate until the trial expired in September 2026. PR Agent did not replace that gate. The Qodo table in `README.md` is frozen history and must not be extended with PR-Agent results.
+
+The offline verifier tests run as an explicit step in `.github/workflows/ci.yml`. They prove parser and publication decisions against fixtures, not that the external provider is available or that a live PR-Agent run has published a review. Record live provider, workflow, and canary checks separately from deterministic CI.
 
 ## Operator commands
 

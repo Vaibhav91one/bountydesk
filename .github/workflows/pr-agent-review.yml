@@ -39,12 +39,23 @@ jobs:
           config.temperature: '0'
           config.publish_output: 'true'
           config.enable_auto_approval: 'false'
+          pr_reviewer.persistent_comment: 'true'
+          # Keep state reconciliation off until provider output is proven stable.
+          # A malformed model response must not block the canonical comment path.
+          pr_reviewer.persistent_finding_state: 'false'
+          pr_reviewer.review_heading: 'PR Reviewer Guide'
+          pr_reviewer.final_update_message: 'true'
+          pr_reviewer.publish_output_no_suggestions: 'true'
+          pr_reviewer.num_max_findings: '3'
+          # Avoid bracketed YAML field name rejected by current provider.
+          pr_reviewer.require_estimate_effort_to_review: 'false'
           pr_reviewer.enable_help_text: 'false'
           pr_description.enable_pr_description: 'false'
           pr_description.enable_pr_diagram: 'false'
           pr_questions.enable_help_text: 'false'
           pr_code_suggestions.enable_help_text: 'false'
           pr_help_docs.enable_help_text: 'false'
+          github.publish_as_check_run: 'false'
           skills.enabled: 'false'
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           github_action_config.pr_actions: '["opened", "reopened"]'

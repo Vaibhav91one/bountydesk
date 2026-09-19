@@ -72,6 +72,64 @@ test("success fixture verifies a formal review bound to the current head", async
   assert.deepEqual(verdict.evidence.formalReviewIds, [9001]);
 });
 
+test("the canonical PR-Agent persistent marker verifies a current-head comment", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews = [];
+  fixture.run.created_at = "2026-09-19T00:00:00Z";
+  fixture.comments = [{
+    id: 9011,
+    user: { login: "github-actions[bot]" },
+    created_at: "2026-09-19T00:01:00Z",
+    body: "<!-- pr-agent:review:full -->\n## PR Reviewer Guide\nNo major issues found.",
+  }];
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "NO_FINDINGS");
+  assert.deepEqual(verdict.evidence.persistentCommentIds, [9011]);
+});
+
+test("a canonical comment from before the run is not current publication", async () => {
+  const fixture = await loadFixture("success");
+  fixture.run.created_at = "2026-09-19T00:01:00Z";
+  fixture.reviews = [];
+  fixture.comments = [{
+    id: 9013,
+    user: { login: "github-actions[bot]" },
+    created_at: "2026-09-19T00:00:00Z",
+    body: "<!-- pr-agent:review:full -->\n## PR Reviewer Guide\nNo major issues found.",
+  }];
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("a canonical standalone publication still fails verification", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews = [];
+  fixture.comments = [{
+    id: 9012,
+    user: { login: "github-actions[bot]" },
+    body: "<!-- pr-agent:review:full -->\n## Standalone PR Review\nPR-Agent could not safely update the persistent review.",
+  }];
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "PUBLICATION_FAILURE");
+});
+
 test("a review declaring no findings is NO_FINDINGS, not UNVERIFIED", async () => {
   const fixture = await loadFixture("success");
   fixture.reviews = [
