@@ -44,7 +44,7 @@ test("verifier workflow resolves one exact head and uses read-only API access", 
 
 test("provider policy stays pinned and advisory", async () => {
   const config = await read(".pr_agent.toml");
-  assert.match(config, /model\s*=\s*"openai\/gpt-5\.6-luna"/);
+  assert.match(config, /model\s*=\s*"openai\/deepseek-chat"/);
   assert.match(config, /fallback_models\s*=\s*\[\]/);
   assert.match(config, /custom_model_max_tokens\s*=\s*32000/);
   assert.match(config, /enable_auto_approval\s*=\s*false/);
