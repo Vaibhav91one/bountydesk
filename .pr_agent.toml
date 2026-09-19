@@ -20,6 +20,10 @@ publish_output_no_suggestions = true
 num_max_findings = 3
 # Bracketed field name triggered malformed YAML from the configured provider.
 require_estimate_effort_to_review = false
+extra_instructions = "Return only valid YAML. Preserve exact indentation from the example: nested keys under review use two spaces, block scalar values are indented four spaces, list item keys are indented six spaces. Never place a scalar at the same indentation as its key."
+require_tests_review = false
+require_security_review = false
+require_ticket_analysis_review = false
 enable_help_text = false
 
 [pr_description]

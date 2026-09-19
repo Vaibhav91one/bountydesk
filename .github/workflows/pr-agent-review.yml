@@ -49,6 +49,10 @@ jobs:
           pr_reviewer.num_max_findings: '3'
           # Avoid bracketed YAML field name rejected by current provider.
           pr_reviewer.require_estimate_effort_to_review: 'false'
+          pr_reviewer.extra_instructions: 'Return only valid YAML. Preserve exact indentation from the example: nested keys under review use two spaces, block scalar values are indented four spaces, list item keys are indented six spaces. Never place a scalar at the same indentation as its key.'
+          pr_reviewer.require_tests_review: 'false'
+          pr_reviewer.require_security_review: 'false'
+          pr_reviewer.require_ticket_analysis_review: 'false'
           pr_reviewer.enable_help_text: 'false'
           pr_description.enable_pr_description: 'false'
           pr_description.enable_pr_diagram: 'false'
