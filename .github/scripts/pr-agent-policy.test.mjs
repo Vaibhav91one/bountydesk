@@ -64,4 +64,7 @@ test("provider policy stays pinned and advisory", async () => {
   assert.match(config, /severity tag/);
   assert.match(config, /Professional tone/);
   assert.match(config, /No emoji/);
+  assert.match(config, /Match Qodo style/);
+  assert.match(config, /review_heading = "Code Review"/);
+  assert.doesNotMatch(config, /review_heading = "PR Reviewer Guide"/);
 });
