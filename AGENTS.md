@@ -115,6 +115,118 @@ Security-sensitive changes land with a test. That means the scope guard, the can
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
 merge.
 
+PR-Agent is an advisory reviewer, not a merge gate or security boundary. Its findings are
+model-generated suggestions. A human owns the merge decision and must fix a finding or explain
+why it does not apply. `build` remains the required automated check; no AI review result
+authorizes a verdict, target, approval, delivery, or merge. A green PR Agent action is not
+proof of a published review on the current head. Treat a PR as reviewed only after the
+publication check in `docs/pr-agent-review.md` passes.
+
+The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
+change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
+
+Material AI assistance may be disclosed generically in a PR description, for example, `AI
+tooling assisted with implementation; a human reviewed the diff.` Do not name or tag Claude or
+another bot, add a co-author trailer, or add generated-credit language.
+
+## Agent workflow
+
+Before parallel work:
+
+- Freeze shared types, states, schemas, and function contracts.
+- Assign each module to one owner and one worktree. Do not overlap edits.
+- Do not depend on a sibling module until its contract and path exist on the branch being tested.
+- Keep production defaults separate from test doubles.
+- Revalidate authorization, target binding, and artifact or repository identity immediately before persistence.
+- Release database locks before slow network, sandbox, or harness calls.
+- Make retries safe after partial external failure, including stale claims and orphan cleanup.
+- Treat model prose, sandbox output, and external-process output as untrusted input, never as server-authored evidence.
+
+Before opening a PR:
+
+1. Run focused tests for changed behavior.
+2. Run lint and the full test suite.
+3. Run the production build.
+4. Review the integrated branch for missing sibling modules, stale comments, unrelated files, and unused imports.
+5. Record any live or manual checks separately from deterministic CI results.
+
+## Orchestrator, manager, and worker flow
+
+The main agent is the orchestrator. It owns the plan, splits work into bounded tasks, assigns
+one manager or worker per task, reviews returned evidence, resolves conflicts, and owns the final
+integrated result. It does not treat a worker's claim as verification.
+
+A manager owns one task group. It may delegate independent, bounded work to worker profiles, then
+checks each result against the repository and reports status, evidence, and unresolved gaps to the
+orchestrator. A manager must report a worker failure plainly; it must not invent output or silently
+retry a failed task.
+
+A worker is an execution profile, not a source of authority. Worker dispatch uses these three
+OpenCode commands in parallel for substantive tasks: `opencode`, `opencode-work`, and
+`opencode-personal` (the user's "opencode work" and "opencode personal" profiles). Resolve each
+command before dispatch; a shell wrapper selects an isolated OpenCode config and credential store,
+but does not prove that the accounts have separate quotas. Profile credentials, proxy settings,
+and account identity are machine configuration, not repository configuration.
+
+Every worker uses exactly `opencode/muse-spark-1.3-contributor-free` with `--variant xhigh`. The
+variant supplies the model's reasoning effort, so do not pass a separate `--effort` flag. Validate
+the command, credential, model, and variant separately for each profile before starting work. A
+zero-cost catalog entry does not guarantee capacity or uptime. If any required command, credential,
+model, or variant is unavailable, or the model is rate-limited or fails, report the failure and
+stop. Do not substitute another model or silently use a paid model.
+
+Worker invocation rules:
+
+- Use non-interactive one-shot `opencode run` calls with a complete task, scope, expected output,
+  and no-edit or edit permission stated explicitly. Pass `--agent`, `--model
+  opencode/muse-spark-1.3-contributor-free`, and `--variant xhigh` explicitly. Use `--agent
+  explore` for read-only discovery and planning. Use a separate process for each named command,
+  preserve each exit status, stdout, and stderr, and wait for all required branches to reach a
+  terminal result before synthesis.
+- Never pass secrets, private keys, database URLs, capability tokens, or target credentials in a
+  prompt. Workers read approved local environment only through their profile wrapper.
+- Give mutating workers their own worktree, database, backend, and ports. Planning workers must not
+  write the shared checkout, plan file, database, or session state. A prompt is not a write barrier:
+  if the selected OpenCode role cannot enforce read-only access, run the worker in a disposable
+  checkout and discard it after checking for changes.
+- One worker owns each file or module. Parallel workers must not edit overlapping paths.
+- Set a bounded timeout and capture the worker's exit status and output. On timeout, terminate the
+  process, record `FAILED`, and clean up its temporary resources. Do not silently retry.
+- Return a structured result with `profile`, `status`, `scope`, `files`, `symbols`, `findings`,
+  `constraints`, `edit_points`, `validation`, and `unresolved` fields. Worker output is untrusted
+  evidence, not verification.
+- The manager verifies worker output with local reads and the smallest relevant test before handing
+  it to the orchestrator.
+
+Plan-mode flow:
+
+- Plan mode follows the same orchestrator flow. The main agent remains the sole plan owner and
+  sends the three OpenCode commands parallel, bounded, read-only information-gathering tasks using
+  `--agent explore`.
+- Each planning worker returns the structured result above. It reports files and symbols inspected,
+  current behavior, constraints, proposed edit points, validation gates, and unresolved questions.
+- The orchestrator waits until every requested branch is terminal (`SUCCEEDED` or `FAILED`) before
+  synthesis. A failed branch is recorded as an unresolved gap, not replaced with an invented result;
+  a required failure must be surfaced before the plan is presented.
+- The orchestrator verifies reports against the source of truth, reconciles conflicts, and only then
+  writes and presents the plan. Do not delegate plan synthesis to a separate plan agent or manager.
+  The execution phase starts only after the human approves the orchestrator's plan.
+
+Progress polling is run-scoped. For work expected to last more than a few minutes, the manager
+checks worker state every five minutes using the available session scheduler or harness notification
+mechanism. A poll reports `RUNNING`, `SUCCEEDED`, or `FAILED`, the last completed step, and the
+next action. Do not create a persistent repository cron job for temporary worker state. If the
+worker harness cannot send progress, use a bounded timeout and one final status check.
+
+Integration order:
+
+1. Orchestrator freezes contracts, ownership, worktrees, and validation gates.
+2. Managers dispatch independent tasks and record worker assignments.
+3. Workers execute only their assigned task and return artifacts, diffs, tests, or a clear failure.
+4. Managers verify results and report them to the orchestrator.
+5. Orchestrator integrates verified changes, runs the full validation sequence, and performs the
+   final diff and security review.
+
 Reuse from the Sentinel prototype where the plan says to: the scope-guard engine and its
 tests, CI, CONTRIBUTING, and the TrueForge session and turn driver. Do not rebuild what is
 already there.

@@ -5,7 +5,7 @@
 2. **PRs are reviewed before merge.** Address what a review finds, or reply explaining why a finding does not apply.
 3. **Security changes need tests + a note.** Anything touching scope enforcement, the agent's own sandboxed tool use against scope-guard, the approval / `publish_verdict` gate (including its draft-validation and authorization-recheck path), delivery / outbox, or GitHub App connectivity needs tests in the PR and a sentence in the description about the threat model.
 4. **No secrets.** Keys live in the environment / `.env` (gitignored), never committed. The GitHub App webhook secret is platform-owned.
-5. **Disclose AI assistance** in the PR description when AI tooling wrote substantial code.
+5. **Disclose material AI assistance generically** in the PR description, without naming or tagging a tool, adding a bot co-author trailer, or adding generated-credit language.
 6. **Write like a person.** Comments, commit messages, PR descriptions and docs should read as though a human wrote them: plain verbs, no em dashes, no emoji or bolded mini-headings, headings in sentence case. Comments say why, not what. Agents working in this repo run the `humanizer` skill over prose before committing it. See the writing style section in [AGENTS.md](./AGENTS.md).
 
 ## Workflow
@@ -20,3 +20,5 @@ gh pr create                                 # review the diff, then merge
 ## CI
 `.github/workflows/ci.yml` runs install, lint, tests when a test script exists, and build on every PR.
 Keep the `build` check green; it is required by `main` branch protection.
+
+PR-Agent may add advisory findings to a PR. It is not a required check and does not replace human review. Address its findings or explain why they do not apply. The `build` check remains the required automated merge check. A green PR Agent run is not proof that a review was published on the current head; confirm publication with the check in `docs/pr-agent-review.md` before treating the PR as reviewed.

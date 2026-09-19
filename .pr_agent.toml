@@ -1,0 +1,32 @@
+[config]
+repo_context_files = ["AGENTS.md"]
+repo_context_from_default_branch = true
+repo_context_max_lines = 500
+model = "openai/deepseek-v4.1"
+fallback_models = []
+custom_model_max_tokens = 32000
+propagate_tool_errors = true
+duplicate_prompt_examples = true
+temperature = 0
+publish_output = true
+enable_auto_approval = false
+
+[pr_reviewer]
+enable_help_text = false
+
+[pr_description]
+enable_pr_description = false
+enable_pr_diagram = false
+enable_help_text = false
+
+[pr_questions]
+enable_help_text = false
+
+[pr_code_suggestions]
+enable_help_text = false
+
+[pr_help_docs]
+enable_help_text = false
+
+[skills]
+enabled = false
