@@ -61,4 +61,7 @@ test("provider policy stays pinned and advisory", async () => {
   assert.match(config, /Post inline review comments on every file touched/);
   assert.match(config, /Do not produce a summary section; findings live only as inline comments/);
   assert.match(config, /Never use markdown tables in review output/);
+  assert.match(config, /severity tag/);
+  assert.match(config, /Professional tone/);
+  assert.match(config, /No emoji/);
 });
