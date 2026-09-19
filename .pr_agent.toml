@@ -2,7 +2,7 @@
 repo_context_files = ["AGENTS.md"]
 repo_context_from_default_branch = true
 repo_context_max_lines = 500
-model = "openai/deepseek-v4.1"
+model = "gpt-4o-mini"
 fallback_models = []
 custom_model_max_tokens = 32000
 propagate_tool_errors = true

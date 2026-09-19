@@ -30,7 +30,7 @@ test("review workflow runs trusted, same-repository API-only review", async () =
   assert.match(workflow, /enable_pr_diagram: ['"]true['"]/);
   assert.match(workflow, /commitable_code_suggestions: ['"]true['"]/);
   assert.match(workflow, /OPENAI_KEY:\s*\$\{\{\s*secrets\.PR_AGENT_OPENAI_KEY\s*\}\}/);
-  assert.match(workflow, /OPENAI\.API_BASE:\s*https:\/\/vyceai\.com\/v1/);
+  assert.doesNotMatch(workflow, /^\s+OPENAI\.API_BASE:/m);
 });
 
 test("verifier workflow resolves one exact head and uses read-only API access", async () => {
@@ -48,7 +48,7 @@ test("verifier workflow resolves one exact head and uses read-only API access", 
 
 test("provider policy stays pinned and advisory", async () => {
   const config = await read(".pr_agent.toml");
-  assert.match(config, /model\s*=\s*"openai\/deepseek-v4\.1"/);
+  assert.match(config, /model\s*=\s*"gpt-4o-mini"/);
   assert.match(config, /fallback_models\s*=\s*\[\]/);
   assert.match(config, /custom_model_max_tokens\s*=\s*32000/);
   assert.match(config, /enable_auto_approval\s*=\s*false/);
