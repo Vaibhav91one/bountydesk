@@ -167,8 +167,8 @@ async function apiGet(fetchImpl, baseUrl, path, token) {
 }
 
 // Fallback when the caller does not pin a run id: take the newest PR-Agent run
-// linked to this PR number, or else the newest one on the same head SHA. Runs
-// are ordered by id, which is monotonic, so "newest" is deterministic.
+// with an exact link to this PR number on the same head SHA. Runs are ordered
+// by id, which is monotonic, so "newest" is deterministic.
 async function discoverPrAgentRun(fetchImpl, baseUrl, repository, prNumber, token, headSha) {
   const data = await apiGet(
     fetchImpl,
@@ -209,7 +209,7 @@ function collectCandidates(headSha, reviews, comments) {
     const body = typeof review.body === "string" ? review.body : "";
     if (!isPrAgentBody(body)) continue;
     const publisher = review.user?.login;
-    if (publisher && !TRUSTED_PUBLISHERS.has(publisher)) continue;
+    if (!TRUSTED_PUBLISHERS.has(publisher)) continue;
     // A dismissed formal review is retracted content, so it must not verify.
     if (String(review.state ?? "").toUpperCase() === "DISMISSED") continue;
     const commitId = typeof review.commit_id === "string" ? review.commit_id : null;
@@ -232,7 +232,7 @@ function collectCandidates(headSha, reviews, comments) {
     const body = typeof comment.body === "string" ? comment.body : "";
     if (!isPrAgentBody(body)) continue;
     const publisher = comment.user?.login;
-    if (publisher && !TRUSTED_PUBLISHERS.has(publisher)) continue;
+    if (!TRUSTED_PUBLISHERS.has(publisher)) continue;
     const marker = extractMarkerHead(body);
     const binding = marker.malformed
       ? "malformed"
@@ -368,7 +368,7 @@ export async function verifyPrAgentReview({
   // The caller already resolved this run through the exact head SHA and PR.
   if (Array.isArray(run.pull_requests)
     && run.pull_requests.length > 0
-    && !run.pull_requests.every((pr) => pr?.number === prNumber)) {
+    && (run.pull_requests.length !== 1 || run.pull_requests[0]?.number !== prNumber)) {
     return unverified(repository, prNumber, headSha, run, "RUN_MISMATCH", `run ${run.id} is linked to a different pull request`);
   }
   const runRepository = run.head_repository?.full_name ?? run.repository?.full_name;

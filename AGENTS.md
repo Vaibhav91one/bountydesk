@@ -132,6 +132,12 @@ the two documented attempts for a head SHA, a human may merge with the required 
 human review, but must not call the PR-Agent review verified. These checks do not replace a live
 provider or canary run when one is called for.
 
+The verifier accepts a formal review bound to the head commit or the canonical persistent marker
+published after the run started. Fixture tests prove the parser in CI; only a live run with its
+canary evidence proves a PR. Live review needs the approved provider and data binding in
+`docs/pr-agent-review.md`, stays within the two attempts per head SHA plus the verifier's bounded
+API retries, and keeps the current limitations there.
+
 The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
 change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
 

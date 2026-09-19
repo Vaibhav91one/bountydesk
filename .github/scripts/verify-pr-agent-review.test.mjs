@@ -276,6 +276,277 @@ test("run discovery finds the newest linked run when no id is pinned", async () 
   assert.equal(verdict.runId, fixture.run.id);
 });
 
+test("an empty pull_requests linkage is tolerated when the run is pinned", async () => {
+  const { verdict, fixture } = await verifyFixture("run-link-empty");
+  assert.deepEqual(fixture.run.pull_requests, []);
+  assert.equal(verdict.status, "VERIFIED");
+  assert.equal(verdict.reason, "REVIEW_BOUND_TO_HEAD");
+});
+
+test("empty linkage is not discoverable without a pinned run id", async () => {
+  const fixture = await loadFixture("run-link-empty");
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: null,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_NOT_FOUND");
+});
+
+test("a missing pull_requests linkage is tolerated when the run is pinned", async () => {
+  const { verdict, fixture } = await verifyFixture("run-link-missing");
+  assert.ok(!("pull_requests" in fixture.run));
+  assert.equal(verdict.status, "VERIFIED");
+  assert.equal(verdict.reason, "REVIEW_BOUND_TO_HEAD");
+});
+
+test("a run linked to several pull requests is ambiguous", async () => {
+  const { verdict } = await verifyFixture("run-link-multi");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_MISMATCH");
+});
+
+test("a run linked to a different pull request is rejected", async () => {
+  const { verdict } = await verifyFixture("run-link-wrong-pr");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_MISMATCH");
+});
+
+test("discovery ignores runs linked to a different pull request", async () => {
+  const fixture = await loadFixture("run-link-wrong-pr");
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: null,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_NOT_FOUND");
+});
+
+test("a run from the wrong workflow is rejected", async () => {
+  const { verdict } = await verifyFixture("wrong-workflow");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_MISMATCH");
+});
+
+test("discovery ignores runs from the wrong workflow", async () => {
+  const fixture = await loadFixture("wrong-workflow");
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: null,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_NOT_FOUND");
+});
+
+test("a run from a different repository is rejected", async () => {
+  const { verdict } = await verifyFixture("wrong-repository");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_MISMATCH");
+});
+
+test("a run from a different repository is rejected through the fallback field", async () => {
+  const { verdict } = await verifyFixture("wrong-repository-fallback");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "RUN_MISMATCH");
+});
+
+test("a run without repository fields still verifies on exact head and link", async () => {
+  const { verdict, fixture } = await verifyFixture("success");
+  assert.ok(!("head_repository" in fixture.run));
+  assert.ok(!("repository" in fixture.run));
+  assert.equal(verdict.status, "VERIFIED");
+});
+
+test("a review with a missing publisher is not trusted", async () => {
+  const fixture = await loadFixture("success");
+  delete fixture.reviews[0].user;
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "MISSING_PUBLICATION");
+});
+
+test("a stale canonical comment is standalone, not a stale head binding", async () => {
+  const { verdict } = await verifyFixture("stale-canonical");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("a canonical comment without timestamps is not current publication", async () => {
+  const { verdict } = await verifyFixture("canonical-missing-timestamps");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("a canonical comment with unparsable timestamps is not current publication", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews = [];
+  fixture.run.created_at = "2026-09-19T00:00:00Z";
+  fixture.comments = [{
+    id: 9027,
+    user: { login: "github-actions[bot]" },
+    created_at: "not-a-timestamp",
+    updated_at: "also-not-a-timestamp",
+    body: "<!-- pr-agent:review:full -->\n## PR Reviewer Guide\nPR-Agent review found 2 issues worth a look.",
+  }];
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("a canonical comment verifies on updated_at even when created_at predates the run", async () => {
+  const { verdict } = await verifyFixture("canonical-updated-after");
+  assert.equal(verdict.status, "VERIFIED");
+  assert.equal(verdict.reason, "REVIEW_BOUND_TO_HEAD");
+  assert.deepEqual(verdict.evidence.persistentCommentIds, [9023]);
+});
+
+test("a canonical comment verifies through the run_started_at fallback", async () => {
+  const { verdict, fixture } = await verifyFixture("canonical-run-started-fallback");
+  assert.ok(!("created_at" in fixture.run));
+  assert.equal(verdict.status, "NO_FINDINGS");
+  assert.deepEqual(verdict.evidence.persistentCommentIds, [9024]);
+});
+
+test("a run without any timestamps cannot anchor a canonical comment", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews = [];
+  fixture.run.created_at = undefined;
+  delete fixture.run.created_at;
+  delete fixture.run.run_started_at;
+  fixture.comments = [{
+    id: 9028,
+    user: { login: "github-actions[bot]" },
+    created_at: "2026-09-19T00:01:00Z",
+    body: "<!-- pr-agent:review:full -->\n## PR Reviewer Guide\nPR-Agent review found 2 issues worth a look.",
+  }];
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("a formal review carries no timestamp binding beyond its head SHA", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews[0].submitted_at = "2020-01-01T00:00:00Z";
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "VERIFIED");
+  assert.equal(verdict.reason, "REVIEW_BOUND_TO_HEAD");
+});
+
+test("an unbound parse failure poisons an otherwise bound publication", async () => {
+  const { verdict } = await verifyFixture("failure-precedence");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "PARSE_FAILURE");
+});
+
+test("a parse failure wins over a publication failure in the same body", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews[0].body = "## PR Reviewer Guide\n\nPR-Agent failed to parse the output and failed to publish the review.";
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "PARSE_FAILURE");
+});
+
+test("a failure marker beats a clean-bill-of-health sentence in bound output", async () => {
+  const fixture = await loadFixture("success");
+  fixture.reviews[0].body = "## PR Reviewer Guide\n\nPR-Agent review: no major issues found, but publication failed for this run.";
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: fixture.run.id,
+    fetchImpl: stubFetchFor(fixture),
+  });
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "PUBLICATION_FAILURE");
+});
+
+test("a formal commit_id matches the head case-insensitively but must be exact", async () => {
+  const upper = await loadFixture("success");
+  upper.reviews[0].commit_id = HEAD.toUpperCase();
+  const upperVerdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: upper.run.id,
+    fetchImpl: stubFetchFor(upper),
+  });
+  assert.equal(upperVerdict.status, "VERIFIED");
+
+  const prefix = await loadFixture("success");
+  prefix.reviews[0].commit_id = HEAD.slice(0, 12);
+  const prefixVerdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: prefix.run.id,
+    fetchImpl: stubFetchFor(prefix),
+  });
+  assert.equal(prefixVerdict.status, "UNVERIFIED");
+  assert.equal(prefixVerdict.reason, "STANDALONE_ONLY");
+});
+
+test("a legacy head marker alone never verifies, even on the current head", async () => {
+  const { verdict } = await verifyFixture("legacy-current-head");
+  assert.equal(verdict.status, "UNVERIFIED");
+  assert.equal(verdict.reason, "STANDALONE_ONLY");
+});
+
+test("discovery picks the newest run with an exact current-head link", async () => {
+  const fixture = await loadFixture("success");
+  const older = { ...fixture.run, id: 201 };
+  const newer = { ...fixture.run, id: 202 };
+  const otherPr = { ...fixture.run, id: 203, pull_requests: [{ number: 8 }] };
+  const multiPr = { ...fixture.run, id: 204, pull_requests: [{ number: 7 }, { number: 8 }] };
+  const wrongName = { ...fixture.run, id: 205, name: "Build" };
+  const fetchImpl = async (url, options) => {
+    void options;
+    const target = String(url);
+    if (target.includes(`/pulls/${PR_NUMBER}/reviews`)) return ok(fixture.reviews ?? []);
+    if (target.includes(`/issues/${PR_NUMBER}/comments`)) return ok(fixture.comments ?? []);
+    if (target.includes("/actions/runs?")) {
+      return ok({ workflow_runs: [older, newer, otherPr, multiPr, wrongName] });
+    }
+    if (target.includes(`/pulls/${PR_NUMBER}`)) return ok(fixture.pull);
+    throw new Error(`unexpected request: ${target}`);
+  };
+  const verdict = await verifyPrAgentReview({
+    repository: REPOSITORY,
+    prNumber: PR_NUMBER,
+    runId: null,
+    fetchImpl,
+  });
+  assert.equal(verdict.status, "VERIFIED");
+  assert.equal(verdict.runId, 202);
+});
+
 test("retry helper recovers from transient failures within its bound", async () => {
   let calls = 0;
   const result = await withRetry(
