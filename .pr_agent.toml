@@ -12,6 +12,14 @@ publish_output = true
 enable_auto_approval = false
 
 [pr_reviewer]
+persistent_comment = true
+persistent_finding_state = false
+review_heading = "PR Reviewer Guide"
+final_update_message = true
+publish_output_no_suggestions = true
+num_max_findings = 3
+# Bracketed field name triggered malformed YAML from the configured provider.
+require_estimate_effort_to_review = false
 enable_help_text = false
 
 [pr_description]
@@ -27,6 +35,9 @@ enable_help_text = false
 
 [pr_help_docs]
 enable_help_text = false
+
+[github]
+publish_as_check_run = false
 
 [skills]
 enabled = false
