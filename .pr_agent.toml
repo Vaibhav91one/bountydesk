@@ -12,15 +12,16 @@ publish_output = true
 enable_auto_approval = false
 
 [pr_reviewer]
-persistent_comment = true
+# Inline-only: every finding links to a code line. No summary block, no tables.
+persistent_comment = false
 persistent_finding_state = false
 review_heading = "PR Reviewer Guide"
 final_update_message = true
 publish_output_no_suggestions = true
-num_max_findings = 3
+num_max_findings = 10
 # Bracketed field name triggered malformed YAML from the configured provider.
 require_estimate_effort_to_review = false
-extra_instructions = "Return only valid YAML. Preserve exact indentation from the example: nested keys under review use two spaces, block scalar values are indented four spaces, list item keys are indented six spaces. Never place a scalar at the same indentation as its key. Never use markdown tables in review output. Use bullet lists instead."
+extra_instructions = "Return only valid YAML. Preserve exact indentation from the example: nested keys under review use two spaces, block scalar values are indented four spaces, list item keys are indented six spaces. Never place a scalar at the same indentation as its key. Never use markdown tables in review output. Use bullet lists only. Post inline review comments on every file touched, even when no code suggestions exist: flag formatting, naming, and style issues inline. If a file is clean, post a single inline comment saying 'Looks good' on the last changed line. Do not produce a summary section; findings live only as inline comments."
 require_tests_review = false
 require_security_review = false
 require_ticket_analysis_review = false

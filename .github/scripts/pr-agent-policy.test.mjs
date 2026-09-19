@@ -55,4 +55,10 @@ test("provider policy stays pinned and advisory", async () => {
   assert.match(config, /repo_context_from_default_branch\s*=\s*true/);
   assert.match(config, /persistent_finding_state\s*=\s*false/);
   assert.match(config, /require_estimate_effort_to_review\s*=\s*false/);
+  assert.match(config, /publish_output_no_suggestions\s*=\s*true/);
+  assert.match(config, /persistent_comment\s*=\s*false/);
+  assert.match(config, /num_max_findings\s*=\s*10/);
+  assert.match(config, /Post inline review comments on every file touched/);
+  assert.match(config, /Do not produce a summary section; findings live only as inline comments/);
+  assert.match(config, /Never use markdown tables in review output/);
 });
