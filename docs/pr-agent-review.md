@@ -23,7 +23,7 @@ Run this check before treating any PR as reviewed. It takes about two minutes.
 1. Record the current head SHA. Use `gh pr view <n> --json headRefOid --jq .headRefOid`.
 2. List the action runs for the PR. Use `gh run list --workflow "PR Agent review" --limit 10`. Pick the run for the current head SHA. The workflow uses `pull_request_target`, so do not filter for `pull_request`.
 3. Confirm that run concluded with success on the current SHA. A success on an older SHA does not count once new commits land, because the concurrency group cancels the older run in favor of the newer one.
-4. Confirm publication on the PR itself. Open the PR conversation and look for the posted review or inline comments from the run. Logs without a posted review fail this step.
+4. Confirm publication on the PR itself. Open the PR conversation and look for the posted review or inline comments from the run. Logs without a posted review fail this step. The companion `Verify PR Agent review` workflow performs this check automatically after the review run completes.
 5. Confirm the posted review matches the current diff. Check that the review references the current head SHA or comments on lines that still exist in the current diff. A review that predates the latest push fails this step even when the action shows green.
 6. If any step fails, the PR is not reviewed. Fix or retrigger within the retry limits below, then repeat the check from step 1.
 
