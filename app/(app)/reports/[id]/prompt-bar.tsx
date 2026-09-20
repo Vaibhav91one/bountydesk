@@ -76,7 +76,7 @@ export function PromptBar({
           onSend();
         }}
         onClick={() => inputRef.current?.focus()}
-        className="flex cursor-text items-center gap-3 rounded-full border border-border/50 bg-background px-5 py-2.5 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20 motion-reduce:transition-none"
+        className="flex cursor-text items-center gap-3 rounded-full border border-border/50 bg-background px-6 py-3 transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20 motion-reduce:transition-none"
       >
         <Input
           ref={inputRef}
@@ -85,7 +85,7 @@ export function PromptBar({
           placeholder="Ask about this verdict"
           aria-label="Message to Agent Bounty"
           disabled={sending || mode !== "ready"}
-          className="h-10 min-w-0 flex-1 border-0 bg-transparent px-1 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
+          className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
         />
         <Button
           type="submit"

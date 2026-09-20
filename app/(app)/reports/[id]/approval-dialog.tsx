@@ -83,6 +83,9 @@ export function ApprovalDialog({
   // Which irreversible decision the reviewer just clicked, if any. null means no
   // confirmation dialog is showing.
   const [confirming, setConfirming] = useState<"allow" | "deny" | null>(null);
+  // Recheck also supersedes the verdict, so it waits behind its own
+  // confirmation instead of the browser prompt.
+  const [confirmingRecheck, setConfirmingRecheck] = useState(false);
 
   function onOpenChange(next: boolean) {
     setOpen(next);
@@ -95,7 +98,6 @@ export function ApprovalDialog({
 
   async function requestRecheck() {
     if (recheckState === "sending" || recheckState === "sent") return;
-    if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
     // The guidance is a neutral default: the dialog cannot see the chat draft, and the
     // server re-validates everything. This string is a suggestion, never authority over
     // target, tools, or approval.
@@ -229,7 +231,7 @@ export function ApprovalDialog({
                       approve={() => requestDecision("allow")}
                       deny={() => requestDecision("deny")}
                       disabled={acting !== null}
-                      onRecheck={() => void requestRecheck()}
+                      onRecheck={() => setConfirmingRecheck(true)}
                       rechecking={recheckState === "sending" || recheckState === "sent"}
                     />
                   </>
@@ -309,6 +311,33 @@ export function ApprovalDialog({
             disabled={acting !== null}
           >
             {confirming === "allow" ? "Approve" : "Deny"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Recheck confirmation uses the same in app pattern as approve and deny
+        so the reviewer stays in context instead of answering a browser prompt. */}
+    <Dialog open={confirmingRecheck} onOpenChange={(next) => !next && setConfirmingRecheck(false)}>
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Start a fresh investigation?</DialogTitle>
+          <DialogDescription>
+            This supersedes the current verdict and requires a new approval.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={() => setConfirmingRecheck(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              setConfirmingRecheck(false);
+              void requestRecheck();
+            }}
+            disabled={recheckState === "sending"}
+          >
+            Start re-check
           </Button>
         </div>
       </DialogContent>
