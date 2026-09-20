@@ -478,7 +478,7 @@ export function AgentChat({
       {mode === "ready" ? (
         <div
           ref={messagesRef}
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pt-4"
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-4"
         >
           <div
             role="log"
@@ -528,12 +528,12 @@ export function AgentChat({
           {/* Sticky last child of the scroller: it reserves its own height in flow, so
               the last message clears it with no bottom-padding number to keep in sync,
               and `mt-auto` holds it at the pane bottom when the conversation is short. */}
-          <div className="sticky bottom-0 z-20 -mx-5 mt-auto flex flex-col">
+          <div className="sticky bottom-0 z-20 -mx-6 mt-auto flex flex-col">
             <div
               aria-hidden="true"
               className="pointer-events-none h-8 shrink-0 bg-gradient-to-t from-popover to-transparent [mask-image:linear-gradient(to_bottom,transparent,black)]"
             />
-            <div className="flex flex-col gap-2 bg-popover/95 px-5 pb-3 supports-backdrop-filter:bg-popover/70 supports-backdrop-filter:backdrop-blur-md">
+            <div className="flex flex-col gap-2 bg-popover/95 px-6 pt-3 pb-5 supports-backdrop-filter:bg-popover/70 supports-backdrop-filter:backdrop-blur-md">
               {hasNewBelow ? (
                 <div className="flex justify-center">
                   <Button

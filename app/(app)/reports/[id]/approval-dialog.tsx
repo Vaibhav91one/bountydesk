@@ -83,19 +83,26 @@ export function ApprovalDialog({
   // Which irreversible decision the reviewer just clicked, if any. null means no
   // confirmation dialog is showing.
   const [confirming, setConfirming] = useState<"allow" | "deny" | null>(null);
+  // Recheck also supersedes the verdict, so it waits behind its own
+  // confirmation instead of the browser prompt.
+  const [confirmingRecheck, setConfirmingRecheck] = useState(false);
 
   function onOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) setChatting(false);
+    if (!next) {
+      setChatting(false);
+      // The confirmations are sibling dialogs, so closing the parent does not close them.
+      setConfirming(null);
+      setConfirmingRecheck(false);
+    }
     if (next) {
       setResult(null);
       setDecision(null);
     }
   }
 
-  async function requestRecheck() {
-    if (recheckState === "sending" || recheckState === "sent") return;
-    if (!window.confirm("Start a fresh investigation? This supersedes the current verdict and requires a new approval.")) return;
+  async function requestRecheck(): Promise<boolean> {
+    if (recheckState === "sending" || recheckState === "sent") return false;
     // The guidance is a neutral default: the dialog cannot see the chat draft, and the
     // server re-validates everything. This string is a suggestion, never authority over
     // target, tools, or approval.
@@ -109,10 +116,18 @@ export function ApprovalDialog({
       );
       if (!answer.ok) throw new Error(answer.error ?? "The re-check could not be started.");
       setRecheckState("sent");
+      return true;
     } catch (error) {
       setRecheckState("error");
       setRecheckError(error instanceof Error ? error.message : "The re-check could not be started.");
+      return false;
     }
+  }
+
+  // The confirmation stays open while the request runs so a failure shows next to the
+  // button that caused it. The chat pane also renders it, but that pane is hidden here.
+  async function confirmRecheck() {
+    if (await requestRecheck()) setConfirmingRecheck(false);
   }
 
   function requestDecision(kind: "allow" | "deny") {
@@ -229,7 +244,10 @@ export function ApprovalDialog({
                       approve={() => requestDecision("allow")}
                       deny={() => requestDecision("deny")}
                       disabled={acting !== null}
-                      onRecheck={() => void requestRecheck()}
+                      onRecheck={() => {
+                        setRecheckError(null);
+                        setConfirmingRecheck(true);
+                      }}
                       rechecking={recheckState === "sending" || recheckState === "sent"}
                     />
                   </>
@@ -309,6 +327,43 @@ export function ApprovalDialog({
             disabled={acting !== null}
           >
             {confirming === "allow" ? "Approve" : "Deny"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* Recheck confirmation uses the same in app pattern as approve and deny
+        so the reviewer stays in context instead of answering a browser prompt. */}
+    <Dialog
+      open={confirmingRecheck}
+      onOpenChange={(next) => !next && recheckState !== "sending" && setConfirmingRecheck(false)}
+    >
+      <DialogContent showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Start a fresh investigation?</DialogTitle>
+          <DialogDescription>
+            This supersedes the current verdict and requires a new approval.
+          </DialogDescription>
+        </DialogHeader>
+        {recheckError ? (
+          <p role="alert" className="text-body text-destructive">
+            {recheckError}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setConfirmingRecheck(false)}
+            disabled={recheckState === "sending"}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void confirmRecheck()}
+            loading={recheckState === "sending"}
+            disabled={recheckState === "sending" || recheckState === "sent"}
+          >
+            Start re-check
           </Button>
         </div>
       </DialogContent>
