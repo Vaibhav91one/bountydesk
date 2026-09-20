@@ -173,11 +173,11 @@ export function ApprovalDialog({
       <DialogContent className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
-            className={`absolute inset-0 flex min-h-0 w-[200%] transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${
+            className={`absolute inset-0 flex min-h-0 w-[200%] transform-gpu will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none motion-reduce:will-change-auto ${
               chatting ? "-translate-x-1/2" : "translate-x-0"
             }`}
           >
-            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden" aria-hidden={chatting} inert={chatting || undefined}>
+            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden contain-[layout_style_paint]" aria-hidden={chatting} inert={chatting || undefined}>
               <DialogHeader className="shrink-0 border-b border-border/50 p-5 pr-14">
                 <DialogTitle>Sign the verdict</DialogTitle>
                 <DialogDescription>
@@ -237,7 +237,7 @@ export function ApprovalDialog({
               </div>
             </section>
 
-            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden" aria-hidden={!chatting} inert={!chatting || undefined}>
+            <section className="flex min-h-0 min-w-0 w-1/2 shrink-0 flex-col overflow-hidden contain-[layout_style_paint]" aria-hidden={!chatting} inert={!chatting || undefined}>
               <div className="sticky top-0 z-10 grid grid-cols-[1fr_auto_1fr] items-center border-b border-border/50 bg-popover p-4">
                 <Button
                   type="button"
@@ -262,6 +262,7 @@ export function ApprovalDialog({
                   />
                   <h2>Agent Bounty</h2>
                 </div>
+                <div aria-hidden="true" className="justify-self-end pr-12" />
               </div>
               <div className="flex min-h-0 flex-1 flex-col">
                 <AgentChat
@@ -282,7 +283,7 @@ export function ApprovalDialog({
     {/* Confirmation dialog for the irreversible Approve / Deny actions. Shows when
         requestDecision sets `confirming`; confirmDecision commits it. */}
     <Dialog open={confirming !== null} onOpenChange={(next) => !next && setConfirming(null)}>
-      <DialogContent>
+      <DialogContent showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>
             {confirming === "allow" ? "Approve this verdict?" : "Deny this verdict?"}

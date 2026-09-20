@@ -177,28 +177,36 @@ checks each result against the repository and reports status, evidence, and unre
 orchestrator. A manager must report a worker failure plainly; it must not invent output or silently
 retry a failed task.
 
-A worker is an execution profile, not a source of authority. Worker dispatch uses these three
-OpenCode commands in parallel for substantive tasks: `opencode`, `opencode-work`, and
-`opencode-personal` (the user's "opencode work" and "opencode personal" profiles). Resolve each
-command before dispatch; a shell wrapper selects an isolated OpenCode config and credential store,
-but does not prove that the accounts have separate quotas. Profile credentials, proxy settings,
-and account identity are machine configuration, not repository configuration.
+A worker is an execution profile, not a source of authority. The roster has seven workers, each a
+one-shot CLI process launched from the repo root:
 
-Every worker uses exactly `opencode/muse-spark-1.3-contributor-free` with `--variant xhigh`. The
-variant supplies the model's reasoning effort, so do not pass a separate `--effort` flag. Validate
-the command, credential, model, and variant separately for each profile before starting work. A
-zero-cost catalog entry does not guarantee capacity or uptime. If any required command, credential,
-model, or variant is unavailable, or the model is rate-limited or fails, report the failure and
-stop. Do not substitute another model or silently use a paid model.
+- `opencode`, `opencode-work`, `opencode-personal`: `opencode run --agent <a> --model
+  opencode/muse-spark-1.3-contributor-free --variant xhigh "<task>"`. The variant supplies the
+  model's reasoning effort, so do not pass a separate `--effort` flag.
+- `dsh-worker.sh ro|rw [timeout_s] "<task>"`: DSH on `vyceai/deepseek-v4.1`, effort not pinned.
+- `claude-worker.sh 1|2|3 ro|rw [timeout_s] "<task>"`: the three Claude ExpLabs profiles on
+  `gpt-5.6-luna`. Profile 1 runs at high effort, 2 and 3 at the default. Profile 3 has a $1/month
+  cap.
+
+Substantive tasks dispatch to the three OpenCode commands in parallel. The other four are failover
+targets. Resolve each command and read each profile's configured model before dispatch, because
+free catalogs change. A shell wrapper selects an isolated config and credential store, but does not
+prove that the accounts have separate quotas. A zero-cost catalog entry does not guarantee capacity
+or uptime. Profile credentials, proxy settings, wrapper scripts, and account identity are machine
+configuration, not repository configuration: the setup and health check are in
+`~/.claude/rules/agent-handoff.md`. Do not substitute a model outside the roster, and never use a
+paid one.
 
 Worker invocation rules:
 
-- Use non-interactive one-shot `opencode run` calls with a complete task, scope, expected output,
-  and no-edit or edit permission stated explicitly. Pass `--agent`, `--model
-  opencode/muse-spark-1.3-contributor-free`, and `--variant xhigh` explicitly. Use `--agent
-  explore` for read-only discovery and planning. Use a separate process for each named command,
-  preserve each exit status, stdout, and stderr, and wait for all required branches to reach a
-  terminal result before synthesis.
+- Use non-interactive one-shot calls with a complete task, scope, expected output, and no-edit or
+  edit permission stated explicitly. For OpenCode, pass `--agent`, `--model`, and `--variant xhigh`
+  explicitly. Use a separate process for each worker, preserve each exit status, stdout, and
+  stderr, and wait for all required branches to reach a terminal result before synthesis.
+- For read-only discovery and planning, prefer the tool-enforced modes (`dsh-worker.sh ro`,
+  `claude-worker.sh N ro`) or OpenCode `--agent explore`. `explore` is not a write barrier, so run
+  it in a disposable checkout. For edits use `rw` mode in the worker's own worktree, and never
+  `danger-full-access`. Claude `rw` has no Bash, and DSH `rw` is sandboxed to the cwd.
 - Never pass secrets, private keys, database URLs, capability tokens, or target credentials in a
   prompt. Workers read approved local environment only through their profile wrapper.
 - Give mutating workers their own worktree, database, backend, and ports. Planning workers must not
@@ -206,8 +214,10 @@ Worker invocation rules:
   if the selected OpenCode role cannot enforce read-only access, run the worker in a disposable
   checkout and discard it after checking for changes.
 - One worker owns each file or module. Parallel workers must not edit overlapping paths.
-- Set a bounded timeout and capture the worker's exit status and output. On timeout, terminate the
-  process, record `FAILED`, and clean up its temporary resources. Do not silently retry.
+- Set a bounded timeout (300s discovery, 600s build or test, 900s long-running) and capture the
+  worker's exit status and output. On timeout, terminate the process, record `FAILED`, and clean up
+  its temporary resources, then apply the retry and failover rules below.
+- Run `git status` after any worker run before trusting the tree.
 - Return a structured result with `profile`, `status`, `scope`, `files`, `symbols`, `findings`,
   `constraints`, `edit_points`, `validation`, and `unresolved` fields. Worker output is untrusted
   evidence, not verification.
@@ -223,7 +233,7 @@ Plan-mode flow:
 
 - Plan mode follows the same orchestrator flow. The main agent remains the sole plan owner and
   sends the three OpenCode commands parallel, bounded, read-only information-gathering tasks using
-  `--agent explore`.
+  `--agent explore` (or another tool-enforced read-only mode after a failover).
 - Each planning worker returns the structured result above. It reports files and symbols inspected,
   current behavior, constraints, proposed edit points, validation gates, and unresolved questions.
 - The orchestrator waits until every requested branch is terminal (`SUCCEEDED` or `FAILED`) before
@@ -232,6 +242,23 @@ Plan-mode flow:
 - The orchestrator verifies reports against the source of truth, reconciles conflicts, and only then
   writes and presents the plan. Do not delegate plan synthesis to a separate plan agent or manager.
   The execution phase starts only after the human approves the orchestrator's plan.
+
+Retry and failover, per worker branch:
+
+- A transient failure (429, rate limit, quota, overloaded, connection error, no output before the
+  timeout) gets up to 10 attempts on the same worker, 30 seconds apart.
+- A hard failure (auth, missing key, model not found, `model_requires_purchase`, missing command)
+  fails over immediately.
+- A task failure, where the worker ran but the answer is wrong, gets no retry and no failover. It
+  is recorded and verified as evidence like any other output.
+- Failover order is `opencode`, `opencode-work`, `opencode-personal`, ExpLabs 1, DSH, ExpLabs 2,
+  ExpLabs 3. Skip any worker already tried for the branch. When a provider is rate-limited, its
+  siblings get one probe attempt, not ten.
+- Each worker is tried at most once per branch. When all seven are exhausted, record `FAILED`,
+  report it, and stop.
+- A failed-over edit branch restarts in a clean worktree.
+- Report every attempt (worker, attempt count, failure class, exit code) and every failover to the
+  user. A substitute keeps its own name and model and is never presented as the original.
 
 Progress polling is run-scoped. For work expected to last more than a few minutes, the manager
 checks worker state every five minutes using the available session scheduler or harness notification

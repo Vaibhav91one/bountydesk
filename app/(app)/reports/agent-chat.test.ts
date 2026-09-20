@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   ADVISORY_LABEL,
   canSubmitReviewerMessage,
+  chatStatusSignature,
   failedRequestFromStatus,
   isFreshAgentMessage,
   newlyObservedAgentIds,
@@ -143,4 +144,23 @@ test("a failed request is only reported when the reviewer's own row has no reply
   };
 
   assert.equal(failedRequestFromStatus(status), null);
+});
+
+test("the polling signature changes when thread status changes with unchanged ids", () => {
+  const reviewerMessage: ChatMessage = {
+    id: "m1",
+    clientRequestId: "req-1",
+    sender: "REVIEWER",
+    body: "Any update?",
+    createdAt: "",
+  };
+
+  const running = statusWithThread("RUNNING", reviewerMessage);
+  const runningAgain = statusWithThread("RUNNING", reviewerMessage);
+  const errored = statusWithThread("ERROR", reviewerMessage);
+  const cancelled = statusWithThread("CANCELLED", reviewerMessage);
+
+  assert.equal(chatStatusSignature(running), chatStatusSignature(runningAgain));
+  assert.notEqual(chatStatusSignature(running), chatStatusSignature(errored));
+  assert.notEqual(chatStatusSignature(running), chatStatusSignature(cancelled));
 });
