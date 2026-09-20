@@ -101,6 +101,14 @@ function allMessages(status: ChatStatus | null): ChatMessage[] {
   return status?.threads.flatMap((thread) => thread.messages) ?? [];
 }
 
+// Thread status drives the pending and failed rows, so a status change with
+// unchanged ids still needs to reach the render and reset the polling guard.
+export function chatStatusSignature(status: ChatStatus): string {
+  return status.threads
+    .map((thread) => `${thread.id}:${thread.status}:${thread.messages.map((message) => message.id).join(",")}`)
+    .join("|");
+}
+
 function latestReviewerMessage(status: ChatStatus | null): ChatMessage | null {
   return (
     allMessages(status)
@@ -231,12 +239,14 @@ export function AgentChat({
   const activeRef = useRef(active);
   const prevActiveRef = useRef(active);
   const statusRef = useRef<ChatStatus | null>(null);
+  const modeRef = useRef(mode);
   const nearBottomRef = useRef(true);
   const ownChangeRef = useRef(false);
   const initialScrollRef = useRef(false);
-  // Shallow signature of the last rendered message list: count + latest ids. Polling
-  // every few seconds must not re-render the input while a reviewer is typing if the
-  // server returned nothing new, so we skip setState when the signature is unchanged.
+  // Signature of the last applied poll result, thread status included because the
+  // pending and failed rows render from it. Polling every few seconds must not
+  // re-render the input while a reviewer is typing if the server returned nothing
+  // new, so we skip setState when the signature is unchanged.
   const lastMessageSigRef = useRef<string>("");
   const scrollMessages = useCallback((behavior: ScrollBehavior = "smooth") => {
     const list = messagesRef.current;
@@ -268,6 +278,7 @@ export function AgentChat({
         cache: "no-store",
       });
       if (response.status === 404) {
+        lastMessageSigRef.current = "";
         setMode("disabled");
         setLoadError(null);
         return;
@@ -296,8 +307,8 @@ export function AgentChat({
           }
         }
       }
-      const messageSig = `${nextMessages.length}:${nextMessages.map((message) => message.id).join(",")}`;
-      if (messageSig === lastMessageSigRef.current && mode === "ready") {
+      const messageSig = chatStatusSignature(next);
+      if (messageSig === lastMessageSigRef.current && modeRef.current === "ready") {
         // Nothing changed since the last poll: skip the setState cascade so a reviewer
         // typing in the input is never disturbed by a no-op re-render.
         return;
@@ -308,6 +319,7 @@ export function AgentChat({
       setMode("ready");
       setLoadError(null);
     } catch (error) {
+      lastMessageSigRef.current = "";
       setMode("error");
       setLoadError(errorText(error));
     }
@@ -340,6 +352,10 @@ export function AgentChat({
   useEffect(() => {
     statusRef.current = status;
   }, [status]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
     mountedAtRef.current = Date.now();

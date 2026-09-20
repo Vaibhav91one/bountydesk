@@ -1,10 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowClockwise, CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, CaretDown, ChatCircleDots, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
-import { MascotIcon } from "@/components/mascot-icon";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,9 +70,7 @@ export function VerdictCard({
   speakerScope = "speaker",
   onChat,
   approve,
-  approving,
   deny,
-  denying,
   disabled,
   onRecheck,
   rechecking,
@@ -99,9 +96,7 @@ export function VerdictCard({
   speakerScope?: string;
   onChat?: () => void;
   approve?: () => void;
-  approving?: boolean;
   deny?: () => void;
-  denying?: boolean;
   disabled?: boolean;
   /** Starts a fresh guided investigation that supersedes this verdict. Lives beside Approve. */
   onRecheck?: () => void;
@@ -278,7 +273,7 @@ export function VerdictCard({
           {/* Chat is advisory and has no path to either decision. Approval and denial remain
               separate guarded controls beside it. */}
           <Button size="sm" variant="outline" onClick={onChat} disabled={disabled}>
-            <MascotIcon state={speaker} scope="approval-chat-button" className="size-4" />
+            <RollingIcon icon={ChatCircleDots} className="size-4" />
             Chat with Agent Bounty
           </Button>
 
@@ -289,36 +284,36 @@ export function VerdictCard({
             size="sm"
             variant="ghost"
             onClick={deny}
-            loading={denying}
             disabled={disabled}
             className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           >
             <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
-          {/* Approve is a dropdown button: the primary click approves, the caret opens more
-              actions like Ask to re-check. This keeps the most common action one click while
-              still surfacing secondary verdict actions on the same control. */}
+          {/* The trigger only opens the menu, so one click never triggers two things. Only
+              choosing Approve asks to confirm the verdict. */}
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
                 <Button
                   size="sm"
-                  variant="dropdown"
-                  onClick={approve}
-                  loading={approving}
+                  variant="default"
                   disabled={disabled}
-                  aria-label="Approve verdict"
+                  aria-label="Choose a decision"
                   aria-haspopup="menu"
                 >
-                  <RollingIcon icon={CheckCircle} className="size-4" /> Approve
+                  Decide
                   <CaretDown className="size-3" aria-hidden="true" />
                 </Button>
               }
             />
             <DropdownMenuContent align="end" side="top">
+              <DropdownMenuItem onClick={approve}>
+                <RollingIcon icon={CheckCircle} className="size-4" />
+                Approve
+              </DropdownMenuItem>
               {onRecheck ? (
                 <DropdownMenuItem
-                  onSelect={() => onRecheck()}
+                  onClick={() => onRecheck()}
                   disabled={disabled || rechecking}
                 >
                   <RollingIcon icon={ArrowClockwise} className="size-4" />
