@@ -234,6 +234,10 @@ export function AgentChat({
   const nearBottomRef = useRef(true);
   const ownChangeRef = useRef(false);
   const initialScrollRef = useRef(false);
+  // Shallow signature of the last rendered message list: count + latest ids. Polling
+  // every few seconds must not re-render the input while a reviewer is typing if the
+  // server returned nothing new, so we skip setState when the signature is unchanged.
+  const lastMessageSigRef = useRef<string>("");
   const scrollMessages = useCallback((behavior: ScrollBehavior = "smooth") => {
     const list = messagesRef.current;
     if (list) list.scrollTo({ top: list.scrollHeight, behavior });
@@ -292,6 +296,13 @@ export function AgentChat({
           }
         }
       }
+      const messageSig = `${nextMessages.length}:${nextMessages.map((message) => message.id).join(",")}`;
+      if (messageSig === lastMessageSigRef.current && mode === "ready") {
+        // Nothing changed since the last poll: skip the setState cascade so a reviewer
+        // typing in the input is never disturbed by a no-op re-render.
+        return;
+      }
+      lastMessageSigRef.current = messageSig;
       setStatus(next);
       onReasonChange(latestReviewerMessage(next)?.body ?? null);
       setMode("ready");
@@ -304,7 +315,7 @@ export function AgentChat({
 
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void loadStatus(), 0);
-    const interval = window.setInterval(() => void loadStatus(), 1_500);
+    const interval = window.setInterval(() => void loadStatus(), 3_000);
     return () => {
       window.clearTimeout(initialLoad);
       window.clearInterval(interval);

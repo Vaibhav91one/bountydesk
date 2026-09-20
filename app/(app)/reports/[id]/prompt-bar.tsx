@@ -55,7 +55,7 @@ export function PromptBar({
 
   return (
     <div className="flex flex-col">
-      <div className="no-scrollbar mb-2 flex gap-2 overflow-x-auto" role="group" aria-label="Suggested prompts">
+      <div className="no-scrollbar mb-2 flex justify-center gap-2 overflow-x-auto" role="group" aria-label="Suggested prompts">
         {QUICK_PROMPTS.map(({ label, icon: Icon, prompt }) => (
           <Button
             key={label}
@@ -99,9 +99,6 @@ export function PromptBar({
           {sending ? null : <ArrowUp weight="bold" className="size-4" />}
         </Button>
       </form>
-      <p className="mt-1.5 px-2 text-meta text-muted-foreground/70">
-        Plain text only. Approval and denial are separate.
-      </p>
     </div>
   );
 }

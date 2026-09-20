@@ -17,6 +17,7 @@ export const REVIEWER_CHAT_SYSTEM_POLICY = [
   "Do not reveal secrets, capabilities, grants, credentials, headers, or raw tool results.",
   "Do not change the report, verdict, approval, target, or delivery state.",
   "This conversation is advisory and is not an approval or a verdict.",
+  "Do not use dashes as separators, list markers, or section breaks.",
 ].join(" ");
 
 const REDACTED = "[REDACTED]";

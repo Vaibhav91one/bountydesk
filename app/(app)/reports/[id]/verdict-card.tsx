@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowClockwise, CaretDown, ChatCircleDots, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
+import { ArrowClockwise, CaretDown, CheckCircle, Prohibit } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
+import { MascotIcon } from "@/components/mascot-icon";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,17 +28,6 @@ import { VerdictBody, VerdictDialog } from "./verdict-dialog";
  * reading of the record, not a confidence the model reported: there is no such number, and
  * inventing one to fill a meter would be the model grading its own work.
  */
-const SEVERITY_VARIANT: Record<
-  Finding["severity"],
-  "destructive" | "default" | "secondary" | "outline"
-> = {
-  critical: "destructive",
-  high: "destructive",
-  medium: "default",
-  low: "secondary",
-  info: "outline",
-};
-
 const EVIDENCE: Record<string, { bars: number; tone: string; label: string }> = {
   REPRODUCED: { bars: 3, tone: "bg-phase-delivered", label: "Agent's own investigation" },
   NOT_REPRODUCED: { bars: 2, tone: "bg-phase-analysis", label: "Ran, did not reproduce" },
@@ -55,27 +45,6 @@ function Meter({ bars, tone }: { bars: number; tone: string }) {
         />
       ))}
     </span>
-  );
-}
-
-function ApprovalPreview({ summary, findings }: { summary: string; findings: Finding[] }) {
-  const words = summary.trim().split(/\s+/);
-  const preview = words.slice(0, 34).join(" ");
-  const truncated = words.length > 34;
-
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <p className="line-clamp-2 break-words text-body text-foreground">
-        {preview}
-        {truncated ? "…" : ""}
-      </p>
-      {findings[0] ? (
-        <span className="flex flex-wrap items-center gap-2 text-meta text-muted-foreground">
-          <span className="break-words text-foreground">{findings[0].title}</span>
-          <Badge variant={SEVERITY_VARIANT[findings[0].severity]}>{findings[0].severity}</Badge>
-        </span>
-      ) : null}
-    </div>
   );
 }
 
@@ -146,7 +115,6 @@ export function VerdictCard({
   superseded?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const evidence = EVIDENCE[outcome] ?? EVIDENCE.INCONCLUSIVE;
 
   return (
@@ -204,30 +172,16 @@ export function VerdictCard({
                   <span className="text-meta text-muted-foreground">drafted this reply</span>
                 </span>
 
-                {previewOpen ? (
-                  /* Rendered from structured fields, never by parsing the markdown payload. */
-                  <VerdictBody
-                    summary={summary}
-                    findings={findings}
-                    findingsArtifactId={findingsArtifactId}
-                  />
-                ) : (
-                  <ApprovalPreview summary={summary} findings={findings} />
-                )}
+                {/* Rendered from structured fields, never by parsing the markdown payload. The
+                    scroll container above holds the full body, so there is no preview toggle. */}
+                <VerdictBody
+                  summary={summary}
+                  findings={findings}
+                  findingsArtifactId={findingsArtifactId}
+                />
               </div>
             </div>
           </div>
-
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost"
-            aria-expanded={previewOpen}
-            onClick={() => setPreviewOpen((current) => !current)}
-            className="w-fit shrink-0 px-4 text-muted-foreground hover:bg-transparent hover:text-foreground"
-          >
-            {previewOpen ? "Read less" : "Read more"}
-          </Button>
         </div>
       ) : null}
 
@@ -324,7 +278,7 @@ export function VerdictCard({
           {/* Chat is advisory and has no path to either decision. Approval and denial remain
               separate guarded controls beside it. */}
           <Button size="sm" variant="outline" onClick={onChat} disabled={disabled}>
-            <RollingIcon icon={ChatCircleDots} className="size-4" />
+            <MascotIcon state={speaker} scope="approval-chat-button" className="size-4" />
             Chat with Agent Bounty
           </Button>
 
@@ -341,25 +295,28 @@ export function VerdictCard({
           >
             <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
-          <Button size="sm" onClick={approve} loading={approving} disabled={disabled}>
-            <RollingIcon icon={CheckCircle} className="size-4" /> Approve
-          </Button>
-          {onRecheck ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    aria-label="More verdict actions"
-                    disabled={disabled}
-                    className="px-2"
-                  />
-                }
-              >
-                <CaretDown className="size-4" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" side="top">
+          {/* Approve is a dropdown button: the primary click approves, the caret opens more
+              actions like Ask to re-check. This keeps the most common action one click while
+              still surfacing secondary verdict actions on the same control. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="dropdown"
+                  onClick={approve}
+                  loading={approving}
+                  disabled={disabled}
+                  aria-label="Approve verdict"
+                  aria-haspopup="menu"
+                >
+                  <RollingIcon icon={CheckCircle} className="size-4" /> Approve
+                  <CaretDown className="size-3" aria-hidden="true" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" side="top">
+              {onRecheck ? (
                 <DropdownMenuItem
                   onSelect={() => onRecheck()}
                   disabled={disabled || rechecking}
@@ -367,9 +324,9 @@ export function VerdictCard({
                   <RollingIcon icon={ArrowClockwise} className="size-4" />
                   {rechecking ? "Starting re-check…" : "Ask to re-check"}
                 </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : null}
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
         )}
       </div>
