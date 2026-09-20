@@ -323,10 +323,14 @@ export async function requestRecheckAction(
   verdictId: string,
   note?: string,
 ): Promise<ActionResult> {
+  const session = await requireReviewer();
+  // A server action is callable with any JSON, so the type is checked here, not just the length.
+  if (note !== undefined && typeof note !== "string") {
+    return { ok: false, error: "The note is not valid." };
+  }
   if (note !== undefined && note.length > MAX_RECHECK_NOTE_LENGTH) {
     return { ok: false, error: "The note is too long." };
   }
-  const session = await requireReviewer();
   const guidance = composeRecheckGuidance(note);
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);

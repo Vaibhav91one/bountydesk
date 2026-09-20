@@ -344,14 +344,14 @@ export function ApprovalDialog({
         }
       }}
     >
-      <DialogContent showCloseButton={false}>
+      <DialogContent showCloseButton={false} className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Start a fresh investigation?</DialogTitle>
           <DialogDescription>
             This supersedes the current verdict and requires a new approval.
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[85vh] space-y-4 overflow-y-auto">
+        <div className="space-y-4">
           {recheckSummary ? (
             <section className="space-y-2 rounded-md border border-border/50 bg-muted/20 p-3 text-sm">
               <h3 className="font-medium text-foreground">What the agent ran</h3>

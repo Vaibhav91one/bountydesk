@@ -414,15 +414,15 @@ function recheckSummaryFor(
   const current = file.verdict;
   if (!run || !current) return null;
 
-  // Mirrored tool-call events carry the tool name on data. startsWith keeps probe_target
-  // and probe_target_write together, which are one capability from a reviewer's view.
+  // Mirrored tool-call events carry the tool name on data. Both target probes count as one
+  // capability from a reviewer's view; an exact list keeps an unknown tool name out of the count.
   const probeCount = file.events.filter((event) => {
     if (event.channel !== "agent") return false;
     const data =
       event.data && typeof event.data === "object"
         ? (event.data as { toolName?: unknown })
         : null;
-    return typeof data?.toolName === "string" && data.toolName.startsWith("probe_target");
+    return data?.toolName === "probe_target" || data?.toolName === "probe_target_write";
   }).length;
 
   const findings = verdictFindings(current.evidence)
