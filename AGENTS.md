@@ -57,8 +57,8 @@ Job execution and report lifecycle are separate enums. Job execution runs
 `lease_expires_at`, `attempts`, `fence`) is orthogonal to that, not a state of its own. The
 frozen MVP report enum is `TRIAGING | REPRODUCING | ANALYSIS_ONLY | AWAITING_APPROVAL |
 DELIVERING | DELIVERED | DENIED | OUT_OF_SCOPE | CANCELLED | EXPIRED`, and the last five are
-terminal. `AWAITING_REPORTER` is a post-MVP extension, non-terminal, and must not be emitted
-until reporter-reply correlation ships. `DEAD_LETTER` belongs to job execution only.
+terminal. There is no reporter-reply state: the reviewer chat is the only conversation channel,
+so `AWAITING_REPORTER` is not part of the enum. `DEAD_LETTER` belongs to job execution only.
 
 The durable jobs table is the queue. Idempotency is the unique `(channel, delivery_id)`, and
 the decision is made on state rather than on whether the row exists. Insert `RECEIVED`, return
@@ -447,19 +447,18 @@ scope decisions, not the time-box, and stay deferred there.
 
 What the end of the window does not change is the safety invariants, which were never about the
 schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until their
-verified-recipient and transport-receipt contracts exist. `AWAITING_REPORTER` still is not emitted
-until reporter-reply correlation ships. Every verdict is still human-approved, which no phase ever
-turns off. Those hold whether or not there is time on the clock.
+verified-recipient and transport-receipt contracts exist. Every verdict is still human-approved,
+which no phase ever turns off. Those hold whether or not there is time on the clock.
 
 The parked surfaces, so a plan knows where they live:
 
 - Email, upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
   `built: false`). Email and upload share one blocker, the outbound contract above; drive was out
   of scope for the demo rather than merely unbuilt.
-- The reviewer-to-agent conversation behind the parked "Chat with Agent Bounty" control
-  (`app/(app)/reports/[id]/verdict-card.tsx`). The panel works; nothing a reviewer typed reached
-  the harness, which is why denying got its own button instead.
-- Reporter reply and resume (`AWAITING_REPORTER`), described below in the lifecycle section.
+- Guided re-check. The reviewer chat is built (`lib/reviewer-chat`, advisory only, behind
+  `REVIEWER_CHAT_ENABLED`), and Ask to re-check is built (`lib/investigation-runs/recheck.ts`), but
+  the dialog sends a fixed neutral instruction. Passing the reviewer's own chat text as the
+  guidance is open work.
 - The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
 - Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is

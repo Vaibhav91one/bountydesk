@@ -138,9 +138,8 @@ Retries (redraft after Deny, infra retry) are new turns too. Serialization is **
 
 Reconnect is server-side: persist `session.id`, `turnId` and `lastSequenceNumber`; resume with `getTurn`, then `subscribeToTurn` with `afterSequenceNumber`. The sequence number is **per stream/turn, not per session**.
 
-"Request more info" is deferred beyond the hackathon MVP. When reporter-reply correlation ships,
-it adds the non-terminal `AWAITING_REPORTER` state and correlates a reply by `source_ref` back to the
-existing report/session rather than creating a new report. The MVP must not emit this state.
+"Request more info" is dropped. The reviewer chat is the only conversation channel, so there is no
+reporter-reply correlation and no `AWAITING_REPORTER` state.
 
 **Frozen lifecycle clarification (2026-08-26).** The MVP report enum is `TRIAGING`, `REPRODUCING`,
 `ANALYSIS_ONLY`, `AWAITING_APPROVAL`, `DELIVERING`, `DELIVERED`, `DENIED`, `OUT_OF_SCOPE`,

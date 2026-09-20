@@ -211,13 +211,12 @@ scope decisions, not time, and stay deferred there; and the permanent non-goals 
 
 Now active, held out of the MVP window for time:
 
-- Reporter reply/resume (`AWAITING_REPORTER`), once reporter-reply correlation ships.
 - Outbound delivery adapters for email and upload. Building them means their verified-recipient
   identity and transport-receipt contract first: until that exists, the app records no
   `DeliveryAttempt` and moves no such report to `DELIVERED`. That gate is a contract, not a date,
   so it holds while this item is active.
-- The reviewer-to-agent conversation behind the parked "Chat with Agent Bounty" control, and
-  manifest-driven multi-target onboarding (see AGENTS.md's backlog section).
+- Guided re-check: pass the reviewer's chat text as re-check guidance instead of the fixed neutral
+  instruction, and manifest-driven multi-target onboarding (see AGENTS.md's backlog section).
 - The private-repository policy (`POLICY_REFUSED`).
 
 Still deferred, by scope rather than time (unchanged from decisions.md):
