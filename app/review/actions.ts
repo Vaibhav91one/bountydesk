@@ -17,6 +17,10 @@ import {
 import { deliverById } from "@/lib/delivery/worker";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import { requestRecheck } from "@/lib/investigation-runs/recheck";
+import {
+  composeRecheckGuidance,
+  MAX_RECHECK_NOTE_LENGTH,
+} from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
@@ -308,16 +312,22 @@ export async function denyVerdict(
 
 /**
  * Supersede the pending verdict and open a fresh REVIEWER_GUIDANCE investigation run. The
- * reviewer's guidance steers the next investigation; it never edits the old verdict (that row
- * stays immutable history), never approves anything, and never selects a target or tool. The
- * fresh run drafts its own new verdict revision, which needs its own human approval.
+ * browser sends only an optional note, the server owns the default instruction and composes
+ * the final guidance so a request cannot replace the default with its own text. The guidance
+ * never edits the old verdict (that row stays immutable history), never approves anything,
+ * and never selects a target or tool. The fresh run drafts its own new verdict revision,
+ * which needs its own human approval.
  */
 export async function requestRecheckAction(
   reportId: string,
   verdictId: string,
-  guidance: string,
+  note?: string,
 ): Promise<ActionResult> {
+  if (note !== undefined && note.length > MAX_RECHECK_NOTE_LENGTH) {
+    return { ok: false, error: "The note is too long." };
+  }
   const session = await requireReviewer();
+  const guidance = composeRecheckGuidance(note);
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);
   return result.ok ? { ok: true } : { ok: false, error: result.reason };

@@ -7,6 +7,7 @@ import {
   verdictFindings,
   type CaseFile,
 } from "@/lib/reports/case-facts";
+import type { RecheckSummary } from "@/lib/reports/recheck-summary";
 import { phaseOf } from "@/lib/reports/columns";
 import {
   outcomeLabel,
@@ -127,6 +128,9 @@ export type CaseLiveView = {
   showOutcomeBadge: boolean;
   approvalDecision: string | null;
   awaitingVerdictId: string | null;
+  /** What the re-check dialog shows about the run being superseded. Null when there is no
+   * run row or no verdict to summarize, and the dialog falls back to its default text. */
+  recheckSummary: RecheckSummary | null;
 
   target: { name: string; imageDigest: string } | null;
   sandbox: { id: string; appPort: number | null } | null;
@@ -390,7 +394,65 @@ function caseStateLabel(file: CaseFile, deliveryState: string | null): string {
   return reportStateLabel(file.state, deliveryState);
 }
 
-export function caseLiveView(file: CaseFile): CaseLiveView {
+/**
+ * What the re-check dialog shows about the run being superseded.
+ *
+ * Null when there is no run row or no verdict, so the dialog falls back to its default
+ * text. Only plain counts and truncated titles cross into the view, never argument previews
+ * or sandbox output: reviewer text and sandbox output are untrusted, and must never select
+ * a target, tool or scope.
+ */
+function recheckSummaryFor(
+  file: CaseFile & {
+    latestRun?: { runNumber: number; status: string; reason: string } | null;
+  },
+  investigationSteps: number,
+): RecheckSummary | null {
+  // latestRun is optional so pure fixtures built before run rows existed still typecheck.
+  // Missing counts as no run.
+  const run = file.latestRun ?? null;
+  const current = file.verdict;
+  if (!run || !current) return null;
+
+  // Mirrored tool-call events carry the tool name on data. startsWith keeps probe_target
+  // and probe_target_write together, which are one capability from a reviewer's view.
+  const probeCount = file.events.filter((event) => {
+    if (event.channel !== "agent") return false;
+    const data =
+      event.data && typeof event.data === "object"
+        ? (event.data as { toolName?: unknown })
+        : null;
+    return typeof data?.toolName === "string" && data.toolName.startsWith("probe_target");
+  }).length;
+
+  const findings = verdictFindings(current.evidence)
+    .slice(0, 5)
+    .map((finding) => ({
+      title: finding.title.slice(0, 120),
+      severity: finding.severity,
+    }));
+
+  const last = file.events.length > 0 ? file.events[file.events.length - 1] : null;
+
+  return {
+    runNumber: run.runNumber,
+    runStatus: run.status,
+    runReason: run.reason,
+    verdictRevision: current.revision,
+    outcome: current.outcome,
+    probeCount,
+    eventCount: investigationSteps,
+    artifactCount: file.artifacts.length,
+    findings,
+    lastEventAt: last ? last.at.toISOString().slice(11, 19) : null,
+  };
+}
+
+export function caseLiveView(
+  file: CaseFile & {
+    latestRun?: { runNumber: number; status: string; reason: string } | null;
+  },
+): CaseLiveView {
   const deliveryState = file.delivery?.state ?? null;
   const verdictOutcome = file.verdict?.outcome ?? null;
 
@@ -476,6 +538,7 @@ export function caseLiveView(file: CaseFile): CaseLiveView {
       : false,
     approvalDecision: file.approval?.decision ?? null,
     awaitingVerdictId: file.awaitingVerdictId,
+    recheckSummary: recheckSummaryFor(file, investigationSteps),
 
     target: file.target,
     sandbox: file.sandbox,

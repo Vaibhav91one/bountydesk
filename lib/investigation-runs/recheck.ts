@@ -25,6 +25,7 @@ import { computeContentHash } from "@/lib/verdicts/hash";
 import { targetIdentityHash } from "@/lib/targets/identity";
 
 /** Guidance shares the chat message bounds and normalization: bounded, plain text, untrusted. */
+// Keep above MAX_RECHECK_NOTE_LENGTH so the default plus a full note still fits.
 export const GUIDANCE_MAX_LENGTH = 4_000;
 const guidanceSchema = z
   .string()
