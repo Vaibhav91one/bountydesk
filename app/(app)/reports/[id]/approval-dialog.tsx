@@ -344,7 +344,12 @@ export function ApprovalDialog({
         }
       }}
     >
-      <DialogContent showCloseButton={false} className="max-h-[90vh] overflow-y-auto">
+      {/* The base dialog is a one-column grid whose column grows to its widest child, so a long
+            finding title would push the buttons off screen. minmax(0,1fr) pins it to the dialog. */}
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto"
+      >
         <DialogHeader>
           <DialogTitle>Start a fresh investigation?</DialogTitle>
           <DialogDescription>
