@@ -25,12 +25,16 @@ import { computeContentHash } from "@/lib/verdicts/hash";
 import { targetIdentityHash } from "@/lib/targets/identity";
 
 /** Guidance shares the chat message bounds and normalization: bounded, plain text, untrusted. */
+// Keep above MAX_RECHECK_NOTE_LENGTH so the default plus a full note still fits.
 export const GUIDANCE_MAX_LENGTH = 4_000;
+// The coarse cap bounds the work toPlainText does. The real limit is checked after it, because
+// NFKC normalization can expand characters and the stored body is the normalized one.
 const guidanceSchema = z
   .string()
-  .max(GUIDANCE_MAX_LENGTH)
+  .max(GUIDANCE_MAX_LENGTH * 4)
   .transform(toPlainText)
-  .refine((value) => value.length > 0, { message: "Guidance cannot be empty" });
+  .refine((value) => value.length > 0, { message: "Guidance cannot be empty" })
+  .refine((value) => value.length <= GUIDANCE_MAX_LENGTH, { message: "Guidance is too long" });
 
 export type RecheckResult =
   | { ok: true; runId: string }

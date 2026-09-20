@@ -17,9 +17,11 @@ import {
 } from "@/components/ui/dialog";
 
 import { allowVerdict, denyVerdict, requestRecheckAction, type ActionResult } from "@/app/review/actions";
+import { MAX_RECHECK_NOTE_LENGTH } from "@/lib/investigation-runs/recheck-guidance";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
+import type { RecheckSummary } from "@/lib/reports/recheck-summary";
 
 import { AgentChat } from "./agent-chat";
 import { VerdictCard } from "./verdict-card";
@@ -52,6 +54,7 @@ export function ApprovalDialog({
   findings,
   speaker,
   speakerScope,
+  recheckSummary,
 }: {
   reportId: string;
   verdictId: string;
@@ -70,6 +73,7 @@ export function ApprovalDialog({
   findings: Finding[];
   speaker: MascotKey;
   speakerScope: string;
+  recheckSummary?: RecheckSummary | null;
 }) {
   const queryClient = useQueryClient();
   const [chatting, setChatting] = useState(false);
@@ -79,6 +83,7 @@ export function ApprovalDialog({
   const [decision, setDecision] = useState<"ALLOWED" | "DENIED" | null>(null);
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
+  const [recheckNote, setRecheckNote] = useState("");
   const [open, setOpen] = useState(false);
   // Which irreversible decision the reviewer just clicked, if any. null means no
   // confirmation dialog is showing.
@@ -103,19 +108,14 @@ export function ApprovalDialog({
 
   async function requestRecheck(): Promise<boolean> {
     if (recheckState === "sending" || recheckState === "sent") return false;
-    // The guidance is a neutral default: the dialog cannot see the chat draft, and the
-    // server re-validates everything. This string is a suggestion, never authority over
-    // target, tools, or approval.
+    // The server owns the default instruction and treats the optional note as untrusted guidance.
     setRecheckState("sending");
     setRecheckError(null);
     try {
-      const answer = await requestRecheckAction(
-        reportId,
-        verdictId,
-        "The reviewer asked for a fresh look at this report. Investigate it from scratch and draft your own conclusion.",
-      );
+      const answer = await requestRecheckAction(reportId, verdictId, recheckNote.trim() || undefined);
       if (!answer.ok) throw new Error(answer.error ?? "The re-check could not be started.");
       setRecheckState("sent");
+      setRecheckNote("");
       return true;
     } catch (error) {
       setRecheckState("error");
@@ -245,6 +245,7 @@ export function ApprovalDialog({
                       deny={() => requestDecision("deny")}
                       disabled={acting !== null}
                       onRecheck={() => {
+                        setRecheckNote("");
                         setRecheckError(null);
                         setConfirmingRecheck(true);
                       }}
@@ -336,35 +337,116 @@ export function ApprovalDialog({
         so the reviewer stays in context instead of answering a browser prompt. */}
     <Dialog
       open={confirmingRecheck}
-      onOpenChange={(next) => !next && recheckState !== "sending" && setConfirmingRecheck(false)}
+      onOpenChange={(next) => {
+        if (!next && recheckState !== "sending") {
+          setRecheckNote("");
+          setConfirmingRecheck(false);
+        }
+      }}
     >
-      <DialogContent showCloseButton={false}>
+      {/* The base dialog is a one-column grid whose column grows to its widest child, so a long
+            finding title would push the buttons off screen. minmax(0,1fr) pins it to the dialog. */}
+      <DialogContent
+        showCloseButton={false}
+        className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto"
+      >
         <DialogHeader>
           <DialogTitle>Start a fresh investigation?</DialogTitle>
           <DialogDescription>
             This supersedes the current verdict and requires a new approval.
           </DialogDescription>
         </DialogHeader>
-        {recheckError ? (
-          <p role="alert" className="text-body text-destructive">
-            {recheckError}
+        <div className="space-y-4">
+          {recheckSummary ? (
+            <section className="space-y-2 rounded-md border border-border/50 bg-muted/20 p-3 text-sm">
+              <h3 className="font-medium text-foreground">What the agent ran</h3>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
+                <div>
+                  <dt className="inline">Run</dt>{" "}
+                  <dd className="inline text-foreground">
+                    {recheckSummary.runNumber} ({recheckSummary.runStatus})
+                  </dd>
+                </div>
+                <div>
+                  <dt className="inline">Verdict</dt>{" "}
+                  <dd className="inline text-foreground">
+                    Revision {recheckSummary.verdictRevision}, {recheckSummary.outcome}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="inline">Target probes</dt>{" "}
+                  <dd className="inline text-foreground">{recheckSummary.probeCount}</dd>
+                </div>
+                <div>
+                  <dt className="inline">Events</dt>{" "}
+                  <dd className="inline text-foreground">{recheckSummary.eventCount}</dd>
+                </div>
+                <div>
+                  <dt className="inline">Artifacts</dt>{" "}
+                  <dd className="inline text-foreground">{recheckSummary.artifactCount}</dd>
+                </div>
+                <div>
+                  <dt className="inline">Last event</dt>{" "}
+                  <dd className="inline text-foreground">{recheckSummary.lastEventAt ?? "None"}</dd>
+                </div>
+              </dl>
+              {recheckSummary.findings.length ? (
+                <ul className="space-y-1 text-muted-foreground" aria-label="Finding titles">
+                  {recheckSummary.findings.slice(0, 5).map((finding, index) => (
+                    <li key={`${finding.title}-${index}`} className="truncate">
+                      {finding.title}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
+          <p className="text-body text-muted-foreground">
+            The fresh run uses the default instructions to investigate this report from scratch. Anything
+            you add below is extra guidance. It cannot change the target, tools, scope or approval.
           </p>
-        ) : null}
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setConfirmingRecheck(false)}
-            disabled={recheckState === "sending"}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={() => void confirmRecheck()}
-            loading={recheckState === "sending"}
-            disabled={recheckState === "sending" || recheckState === "sent"}
-          >
-            Start re-check
-          </Button>
+          <div className="space-y-2">
+            <label htmlFor="recheck-note" className="text-sm font-medium text-foreground">
+              Anything you want to tell the agent? (optional)
+            </label>
+            <textarea
+              id="recheck-note"
+              rows={4}
+              value={recheckNote}
+              maxLength={MAX_RECHECK_NOTE_LENGTH}
+              disabled={recheckState === "sending"}
+              aria-describedby="recheck-note-counter"
+              onChange={(event) => setRecheckNote(event.target.value)}
+              className="w-full resize-y rounded-md border border-transparent bg-input/50 px-3 py-2 text-base transition-[color,box-shadow,background-color] outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm"
+            />
+            <p id="recheck-note-counter" className="text-right text-xs text-muted-foreground">
+              {recheckNote.length} / {MAX_RECHECK_NOTE_LENGTH}
+            </p>
+          </div>
+          {recheckError ? (
+            <p role="alert" className="text-body text-destructive">
+              {recheckError}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setRecheckNote("");
+                setConfirmingRecheck(false);
+              }}
+              disabled={recheckState === "sending"}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => void confirmRecheck()}
+              loading={recheckState === "sending"}
+              disabled={recheckState === "sending" || recheckState === "sent"}
+            >
+              Start re-check
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

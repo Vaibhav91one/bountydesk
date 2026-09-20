@@ -8,6 +8,7 @@ import {
   db,
   desc,
   eq,
+  investigationRun,
   outboundDelivery,
   report,
   sessionEvent,
@@ -67,6 +68,13 @@ export function caseSourceLabel(sourceRef: string, id: string): string {
   return issue ? `Issue #${issue}` : `#${id.slice(0, 8)}`;
 }
 
+/** The newest investigation run for a report, if the report has any run rows yet. */
+export type CaseLatestRun = {
+  runNumber: number;
+  status: string;
+  reason: string;
+};
+
 /**
  * One report and everything hanging off it, or null if there is no such report.
  *
@@ -74,7 +82,9 @@ export function caseSourceLabel(sourceRef: string, id: string): string {
  * verdict landing between the report read and the event read would render a page describing
  * two different moments.
  */
-export async function readCase(id: string): Promise<CaseFile | null> {
+export async function readCase(
+  id: string,
+): Promise<(CaseFile & { latestRun: CaseLatestRun | null }) | null> {
   return db.transaction(
     async (tx) => {
       const [row] = await tx
@@ -113,6 +123,20 @@ export async function readCase(id: string): Promise<CaseFile | null> {
         })
         .from(agentSession)
         .where(eq(agentSession.reportId, id));
+
+      // The newest run, if any. Bounded to one row on the report predicate, which reads
+      // through the existing investigation_run_report_idx, so a report with a long re-check
+      // history does not pay for all of it here. Null for reports written before run rows.
+      const [latestRun] = await tx
+        .select({
+          runNumber: investigationRun.runNumber,
+          status: investigationRun.status,
+          reason: investigationRun.reason,
+        })
+        .from(investigationRun)
+        .where(eq(investigationRun.reportId, id))
+        .orderBy(desc(investigationRun.runNumber))
+        .limit(1);
 
       // A verdict awaiting approval is gated on the verdict/hash pair, not the thread marker:
       // a synthesized ANALYSIS_ONLY verdict (a dead-end run) has a verdict and hash to approve
@@ -323,6 +347,7 @@ export async function readCase(id: string): Promise<CaseFile | null> {
           ? { name: row.targetName, imageDigest: row.targetDigest ?? "" }
           : null,
         verdict: latest ?? null,
+        latestRun: latestRun ?? null,
         verdictHistory,
         approval: decision ?? null,
         delivery: dispatch ?? null,

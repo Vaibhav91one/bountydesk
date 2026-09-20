@@ -34,6 +34,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     showOutcomeBadge: false,
     approvalDecision: null,
     awaitingVerdictId: null,
+    recheckSummary: null,
     target: null,
     sandbox: null,
     finalSummary: null,
