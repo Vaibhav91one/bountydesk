@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle, Info, Signature, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -81,6 +80,9 @@ export function ApprovalDialog({
   const [recheckState, setRecheckState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [recheckError, setRecheckError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  // Which irreversible decision the reviewer just clicked, if any. null means no
+  // confirmation dialog is showing.
+  const [confirming, setConfirming] = useState<"allow" | "deny" | null>(null);
 
   function onOpenChange(next: boolean) {
     setOpen(next);
@@ -113,29 +115,47 @@ export function ApprovalDialog({
     }
   }
 
-  async function decide(kind: "allow" | "deny") {
+  function requestDecision(kind: "allow" | "deny") {
+    // The reviewer clicked Approve or Deny. Rather than committing immediately,
+    // surface a confirmation dialog so the irreversible action is deliberate.
+    setConfirming(kind);
+  }
+
+  async function confirmDecision() {
+    if (!confirming) return;
     if (acting) return;
+    const kind = confirming;
+    setConfirming(null);
     setActing(kind);
-    const answer =
-      kind === "allow"
-        ? await allowVerdict(reportId, verdictId)
-        : await denyVerdict(reportId, verdictId, reason ?? undefined);
-    setActing(null);
-    setResult(answer);
-    if (!answer.ok) return;
+    try {
+      const answer =
+        kind === "allow"
+          ? await allowVerdict(reportId, verdictId)
+          : await denyVerdict(reportId, verdictId, reason ?? undefined);
+      setActing(null);
+      setResult(answer);
+      if (!answer.ok) return;
 
-    setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
-    setOpen(false);
+      setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
+      setOpen(false);
 
-    // The action has already committed by the time it returns, so writing the decision into the
-    // cache is not optimism, it is the same fact a round trip earlier. It is what takes this
-    // button off the screen and puts the signed record in its place on the next render; the
-    // refetch behind it fills in everything the server derives from the decision.
-    applyDecisionOptimistically(queryClient, reportId, kind === "allow" ? "APPROVED" : "DENIED");
-    await refreshReportViews(queryClient, reportId);
+      // The action has already committed by the time it returns, so writing the decision into the
+      // cache is not optimism, it is the same fact a round trip earlier. It is what takes this
+      // button off the screen and puts the signed record in its place on the next render; the
+      // refetch behind it fills in everything the server derives from the decision.
+      applyDecisionOptimistically(queryClient, reportId, kind === "allow" ? "APPROVED" : "DENIED");
+      await refreshReportViews(queryClient, reportId);
+    } catch (error) {
+      setActing(null);
+      setResult({
+        ok: false,
+        error: error instanceof Error ? error.message : "The decision could not be completed.",
+      });
+    }
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger
         render={
@@ -206,10 +226,8 @@ export function ApprovalDialog({
                       speaker={speaker}
                       speakerScope={speakerScope}
                       onChat={() => setChatting(true)}
-                      approve={() => decide("allow")}
-                      approving={acting === "allow"}
-                      deny={() => decide("deny")}
-                      denying={acting === "deny"}
+                      approve={() => requestDecision("allow")}
+                      deny={() => requestDecision("deny")}
                       disabled={acting !== null}
                       onRecheck={() => void requestRecheck()}
                       rechecking={recheckState === "sending" || recheckState === "sent"}
@@ -244,27 +262,6 @@ export function ApprovalDialog({
                   />
                   <h2>Agent Bounty</h2>
                 </div>
-                {/* Info sits left of the dialog close button with the same button design. The
-                    trailing padding reserves the close slot owned by DialogContent. */}
-                <div className="flex justify-self-end pr-12">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          size="icon-xs"
-                          variant="ghost"
-                          aria-label="About advisory chat"
-                          className="bg-secondary"
-                        />
-                      }
-                    >
-                      <Info className="size-4" />
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      Agent Bounty can discuss this report but cannot change its verdict or approval.
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
               </div>
               <div className="flex min-h-0 flex-1 flex-col">
                 <AgentChat
@@ -281,5 +278,40 @@ export function ApprovalDialog({
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Confirmation dialog for the irreversible Approve / Deny actions. Shows when
+        requestDecision sets `confirming`; confirmDecision commits it. */}
+    <Dialog open={confirming !== null} onOpenChange={(next) => !next && setConfirming(null)}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            {confirming === "allow" ? "Approve this verdict?" : "Deny this verdict?"}
+          </DialogTitle>
+          <DialogDescription>
+            {confirming === "allow"
+              ? "This posts the drafted comment to the issue as the agent's verdict. This action cannot be undone."
+              : "This closes the case on BountyDesk. The chat reason (if any) is not sent to the reporter. This action cannot be undone."}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setConfirming(null)}
+            disabled={acting !== null}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant={confirming === "allow" ? "default" : "destructive"}
+            onClick={() => void confirmDecision()}
+            loading={acting !== null}
+            disabled={acting !== null}
+          >
+            {confirming === "allow" ? "Approve" : "Deny"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }
