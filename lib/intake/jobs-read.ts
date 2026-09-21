@@ -1,3 +1,4 @@
+import { redactReviewerText } from "@/lib/reviewer-chat/context";
 import { desc, eq, gte } from "drizzle-orm";
 
 import { connectedRepository, inboundJob, report } from "@/lib/db/schema";
@@ -85,7 +86,8 @@ export function deadLetterReasonFor(
   lastError: string | null,
 ): string | null {
   if (state !== "DEAD_LETTER") return null;
-  const text = lastError?.trim();
+  // The worker's error can echo upstream text, so secrets are stripped before it reaches a browser.
+  const text = lastError ? redactReviewerText(lastError).trim() : "";
   if (!text) return null;
   return text.length > REASON_MAX ? text.slice(0, REASON_MAX) : text;
 }

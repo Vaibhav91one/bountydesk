@@ -1,7 +1,7 @@
 import { and, eq, lte, sql } from "drizzle-orm";
 
-import { agentSession, db, type Executor } from "@/lib/db";
-import { recordEvent } from "@/lib/reports/lifecycle";
+import { agentSession, db, investigationRun, report, type Executor } from "@/lib/db";
+import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import { VerdictIntegrityError } from "@/lib/verdicts/lifecycle";
 
 /**
@@ -274,6 +274,33 @@ export async function abandonVerdictConflict(lease: AgentSessionLease): Promise<
       .where(heldBy(lease))
       .returning({ id: agentSession.id });
     if (!updated) throw new LeaseLostError(lease.id);
+    // A re-check waits on this session. Ending only the session would leave its run RUNNING
+    // and the report in REPRODUCING with nothing left that could finish either, so the run
+    // ends in ERROR and a human decides from ANALYSIS_ONLY.
+    const [reportRow] = await tx
+      .select({ state: report.state })
+      .from(report)
+      .where(eq(report.id, lease.reportId))
+      .for("update");
+    if (reportRow?.state === "REPRODUCING") {
+      await tx
+        .update(investigationRun)
+        .set({
+          status: "ERROR",
+          finishedAt: new Date(),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(investigationRun.reportId, lease.reportId),
+            eq(investigationRun.reason, "REVIEWER_GUIDANCE"),
+            eq(investigationRun.status, "RUNNING"),
+          ),
+        );
+      await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
+    }
     await recordEvent(
       lease.reportId,
       "agent.session_abandoned",

@@ -109,6 +109,7 @@ export function Card({
   // running label ("Reproducing" says nothing about the queued run), but not a handoff or
   // delivery failure and never a review the card is still waiting on.
   const recheck = recheckStatusLabel(card.runStatus, card.verdictSuperseded);
+  const recheckFailed = card.verdictSuperseded && card.runStatus === "ERROR";
 
   const status = card.handoffFailed
     ? "Handoff failed"
@@ -201,10 +202,12 @@ export function Card({
         {/* The phase, and the outcome or the honest absence of one. Never a canary or a
             confidence: no reproduction has run, so the card has nothing to say about one. */}
         <span className="flex items-center gap-2 text-meta text-muted-foreground">
-          {running ? (
+          {/* A failed re-check is finished, so it gets a still, red dot instead of the spinner
+              that queued and running use. */}
+          {running && !recheckFailed ? (
             <PhaseSpinner phase={phase} />
           ) : (
-            <PhaseDot phase={phase} />
+            <PhaseDot phase={phase} className={recheckFailed ? "bg-destructive" : undefined} />
           )}
           {status}
         </span>

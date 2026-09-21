@@ -138,17 +138,9 @@ export async function ensureInitialRun(
 }
 
 /**
- * Supersede the pending verdict and open a fresh REVIEWER_GUIDANCE run, in one transaction:
- *
- * - lock report, agent_session, and verdict rows;
- * - refuse anything but AWAITING_APPROVAL with a pending tuple matching this exact verdict;
- * - recompute the payload hash server-side, never trust the caller's copy;
- * - refuse a verdict that already has a decision or a supersession row;
- * - insert the supersession link, clear the pending tuple, transition to REPRODUCING.
- *
- * The verdict row itself is never mutated; supersession is a separate immutable link.
- * The new run stays PENDING here; the continuation worker (daemon loop) claims it, provisions
- * the fresh sandbox group, and starts the new TrueForge session.
+ * Put a failed re-check run back in the queue. Only the newest run, only a REVIEWER_GUIDANCE
+ * one that ended in ERROR, and only while the report still waits on it: anything else would
+ * either resurrect an old run or leave a pending row no claimant selects.
  */
 export async function retryRecheck(
   reportId: string,
@@ -161,6 +153,7 @@ export async function retryRecheck(
         runNumber: investigationRun.runNumber,
         parentRunId: investigationRun.parentRunId,
         status: investigationRun.status,
+        reason: investigationRun.reason,
         guidanceHash: investigationRun.guidanceHash,
         targetProfileId: investigationRun.targetProfileId,
         targetIdentityHash: investigationRun.targetIdentityHash,
@@ -171,6 +164,7 @@ export async function retryRecheck(
       .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
       .for("update");
     if (!row) return { ok: false, reason: "re-check run not found" };
+    if (row.reason !== "REVIEWER_GUIDANCE") return { ok: false, reason: "not a re-check run" };
     if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
     if (row.status !== "ERROR") return { ok: false, reason: "only a failed re-check can be retried" };
     const [latest] = await tx
@@ -197,6 +191,11 @@ export async function retryRecheck(
   });
 }
 
+/**
+ * Stop waiting on a queued or failed re-check. The old verdict is already superseded and
+ * cannot be approved again, so the report moves to ANALYSIS_ONLY, where a human decides,
+ * instead of staying in REPRODUCING with no run that could finish it.
+ */
 export async function cancelRecheck(
   reportId: string,
   runId: string,
@@ -208,6 +207,7 @@ export async function cancelRecheck(
         reportId: investigationRun.reportId,
         runNumber: investigationRun.runNumber,
         status: investigationRun.status,
+        reason: investigationRun.reason,
         state: report.state,
       })
       .from(investigationRun)
@@ -215,6 +215,7 @@ export async function cancelRecheck(
       .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
       .for("update");
     if (!row) return { ok: false, reason: "re-check run not found" };
+    if (row.reason !== "REVIEWER_GUIDANCE") return { ok: false, reason: "not a re-check run" };
     if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
     if (row.status !== "PENDING" && row.status !== "ERROR") {
       return { ok: false, reason: "only a pending or failed re-check can be cancelled" };
@@ -236,10 +237,24 @@ export async function cancelRecheck(
       { runId: row.id, runNumber: row.runNumber },
       { idempotencyKey: `agent.recheck_cancelled:${row.id}`, tx },
     );
+    await transition(reportId, "REPRODUCING", "ANALYSIS_ONLY", tx);
     return { ok: true };
   });
 }
 
+/**
+ * Supersede the pending verdict and open a fresh REVIEWER_GUIDANCE run, in one transaction:
+ *
+ * - lock report, agent_session, and verdict rows;
+ * - refuse anything but AWAITING_APPROVAL with a pending tuple matching this exact verdict;
+ * - recompute the payload hash server-side, never trust the caller's copy;
+ * - refuse a verdict that already has a decision or a supersession row;
+ * - insert the supersession link, clear the pending tuple, transition to REPRODUCING.
+ *
+ * The verdict row itself is never mutated; supersession is a separate immutable link.
+ * The new run stays PENDING here; the continuation worker (daemon loop) claims it, provisions
+ * the fresh sandbox group, and starts the new TrueForge session.
+ */
 export async function requestRecheck(
   reportId: string,
   verdictId: string,

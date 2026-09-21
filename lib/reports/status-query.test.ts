@@ -174,3 +174,23 @@ test("a list reads handoff and delivery liveness, not just report state", () => 
   assert.equal(listRefetchInterval([stalled]), AMBIENT_REFETCH_MS);
   assert.equal(listRefetchInterval([sending]), 4000);
 });
+
+test("a failed re-check slows the poll instead of asking every 1.5 seconds forever", () => {
+  const failed = {
+    runNumber: 2,
+    runStatus: "ERROR",
+    runReason: "REVIEWER_GUIDANCE",
+    verdictRevision: 1,
+    outcome: "REPRODUCED",
+    probeCount: 0,
+    eventCount: 0,
+    artifactCount: 0,
+    findings: [],
+    lastEventAt: null,
+  };
+  assert.equal(caseRefetchInterval(view({ state: "REPRODUCING", recheckSummary: failed })), 15_000);
+  assert.equal(
+    caseRefetchInterval(view({ state: "REPRODUCING", recheckSummary: { ...failed, runStatus: "RUNNING" } })),
+    1500,
+  );
+});

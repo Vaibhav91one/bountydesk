@@ -150,3 +150,9 @@ test("the visible set drops finished and fresh rows together", () => {
     ["DEAD_LETTER"],
   );
 });
+
+test("a dead letter reason never carries a bearer token from the worker's error", () => {
+  const reason = deadLetterReasonFor("DEAD_LETTER", "upstream failed: Bearer abc123def456ghi789 rejected");
+  assert.ok(reason);
+  assert.ok(!reason.includes("abc123def456ghi789"));
+});
