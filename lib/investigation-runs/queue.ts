@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import { safeErrorText } from "@/lib/errors/safe-error";
+
 import {
   agentSession,
   and,
@@ -37,10 +39,6 @@ export const RECHECK_MAX_ATTEMPTS = 8;
 export const RECHECK_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
 
 const RECHECK_FAILURE_EVENT = "agent.recheck_failed";
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export type RecheckRunLease = {
   runId: string;
@@ -269,6 +267,10 @@ export function recheckSweepReason(
 }
 
 export async function sweepRecheckRuns(now = new Date()): Promise<{ released: number; failed: number }> {
+  // Raw sql templates do not know a column type, so a Date parameter reaches the driver
+  // unserialized and it throws. ISO strings cast in SQL avoid that.
+  const nowIso = now.toISOString();
+  const pendingCutoffIso = new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS).toISOString();
   return db.transaction(async (tx) => {
     const released = await tx
       .update(investigationRun)
@@ -277,7 +279,7 @@ export async function sweepRecheckRuns(now = new Date()): Promise<{ released: nu
         ${investigationRun.reason} = 'REVIEWER_GUIDANCE'
         and ${investigationRun.status} = 'RUNNING'
         and ${investigationRun.attempts} < ${RECHECK_MAX_ATTEMPTS}
-        and ${investigationRun.leaseExpiresAt} <= ${now}
+        and ${investigationRun.leaseExpiresAt} <= ${nowIso}::timestamptz
       `)
       .returning({ id: investigationRun.id });
 
@@ -299,7 +301,7 @@ export async function sweepRecheckRuns(now = new Date()): Promise<{ released: nu
              and ${investigationRun.attempts} = 0
              and ${investigationRun.leaseOwner} is null
              and ${investigationRun.leaseExpiresAt} is null
-             and ${investigationRun.createdAt} <= ${new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS)}
+             and ${investigationRun.createdAt} <= ${pendingCutoffIso}::timestamptz
            )
            or (
              ${investigationRun.status} = 'PENDING'
@@ -308,7 +310,7 @@ export async function sweepRecheckRuns(now = new Date()): Promise<{ released: nu
            or (
              ${investigationRun.status} = 'RUNNING'
              and ${investigationRun.attempts} >= ${RECHECK_MAX_ATTEMPTS}
-             and ${investigationRun.leaseExpiresAt} <= ${now}
+             and ${investigationRun.leaseExpiresAt} <= ${nowIso}::timestamptz
            )
          )
        returning ${investigationRun.id} as id,
@@ -479,7 +481,7 @@ export async function runRecheckOnce(
       targetConfig: context.targetConfig,
     });
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${errorMessage(error)}`);
+    console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${safeErrorText(error)}`);
     await failRecheckRun(lease, "sandbox provisioning failed");
     return lease.runId;
   }
@@ -496,7 +498,7 @@ export async function runRecheckOnce(
   try {
     ({ sessionId } = await client.createSession({}));
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: TrueForge session creation failed: ${errorMessage(error)}`);
+    console.error(`re-check run ${lease.runId}: TrueForge session creation failed: ${safeErrorText(error)}`);
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
     await failRecheckRun(lease, "TrueForge session creation failed");
     return lease.runId;
@@ -579,26 +581,26 @@ export async function runRecheckOnce(
         guidanceHash: lease.guidanceHash,
       }, { idempotencyKey: `agent.recheck_started:${lease.runId}` });
     } catch (error) {
-      console.error(`re-check run ${lease.runId}: start event failed: ${errorMessage(error)}`);
+      console.error(`re-check run ${lease.runId}: start event failed: ${safeErrorText(error)}`);
     }
     // The superseded session is dead weight now: its sandbox was torn down at draft time, the
     // poller follows agent_session, and the chat worker refuses superseded threads. Its events
     // are mirrored in session_event, so deleting the remote copy loses nothing.
     if (oldSessionId && oldSessionId !== sessionId) {
       await client.deleteSession(oldSessionId).catch((error) => {
-        console.error(`re-check run ${lease.runId}: superseded session ${oldSessionId} deletion failed: ${errorMessage(error)}`);
+        console.error(`re-check run ${lease.runId}: superseded session ${oldSessionId} deletion failed: ${safeErrorText(error)}`);
       });
     }
     try {
       await releaseRun(lease, "RUNNING");
     } catch (error) {
       if (!(error instanceof RecheckLeaseLostError)) {
-        console.error(`re-check run ${lease.runId}: lease release failed: ${errorMessage(error)}`);
+        console.error(`re-check run ${lease.runId}: lease release failed: ${safeErrorText(error)}`);
       }
     }
     return lease.runId;
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: turn failed: ${errorMessage(error)}`);
+    console.error(`re-check run ${lease.runId}: turn failed: ${safeErrorText(error)}`);
     // Cleanup is valid only if the new session/turn transaction did not commit.
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
     await client.deleteSession(sessionId).catch(() => undefined);

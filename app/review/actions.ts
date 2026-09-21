@@ -343,14 +343,22 @@ export async function requestRecheckAction(
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
   await requireReviewer();
-  const result = await retryRecheck(reportId, runId);
-  revalidateReportViews(reportId);
-  return result.ok ? { ok: true } : { ok: false, error: result.reason };
+  try {
+    const result = await retryRecheck(reportId, runId);
+    revalidateReportViews(reportId);
+    return result.ok ? { ok: true } : { ok: false, error: result.reason };
+  } catch {
+    return { ok: false, error: "Could not retry the re-check." };
+  }
 }
 
 export async function cancelRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
   await requireReviewer();
-  const result = await cancelRecheck(reportId, runId);
-  revalidateReportViews(reportId);
-  return result;
+  try {
+    const result = await cancelRecheck(reportId, runId);
+    revalidateReportViews(reportId);
+    return result;
+  } catch {
+    return { ok: false, error: "Could not cancel the re-check." };
+  }
 }

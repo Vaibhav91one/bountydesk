@@ -4,7 +4,9 @@ import {
   publishVerdictInputSchema,
   synthesizeAnalysisOnlyVerdict,
 } from "@/lib/mcp/publish-verdict";
+import { safeErrorText } from "@/lib/errors/safe-error";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
+import { redactReviewerText } from "@/lib/reviewer-chat/context";
 import { isTerminal } from "@/lib/reports/states";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
@@ -83,6 +85,38 @@ const ARGUMENT_PREVIEW_ALLOWLIST = new Set([
   "timeout_seconds",
 ]);
 
+const SENSITIVE_ARGUMENT_KEY = /(?:token|secret|password|passwd|credential|authorization|cookie|api[-_ ]?key)/i;
+
+function safePreviewValue(value: unknown, key?: string): unknown {
+  if (typeof value === "string") {
+    if (key && SENSITIVE_ARGUMENT_KEY.test(key)) return "[REDACTED]";
+    const redacted = redactReviewerText(value).replace(
+      /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/))[^/?#@]*@/i,
+      "$1",
+    );
+    try {
+      const url = new URL(redacted);
+      url.username = "";
+      url.password = "";
+      url.search = "";
+      url.hash = "";
+      return url.toString();
+    } catch {
+      return redacted.replace(/[?#].*$/, "");
+    }
+  }
+  if (Array.isArray(value)) return value.map((item) => safePreviewValue(item));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, childValue]) => [
+        childKey,
+        safePreviewValue(childValue, childKey),
+      ]),
+    );
+  }
+  return value;
+}
+
 /**
  * The safe subset of a tool call's arguments, or undefined when there is nothing safe to show
  * (including when the arguments aren't a plain JSON object at all, e.g. publish_verdict's
@@ -90,24 +124,23 @@ const ARGUMENT_PREVIEW_ALLOWLIST = new Set([
  * arguments preview as nothing, which is deliberate -- the verdict itself is already visible in
  * the verdict panel, and its capability token must never repeat anywhere else).
  */
-function previewArguments(argumentsJson: string): string | undefined {
-  let parsed: unknown;
+export function previewArguments(argumentsJson: string): string | undefined {
   try {
-    parsed = JSON.parse(argumentsJson);
+    const parsed: unknown = JSON.parse(argumentsJson);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
+
+    const safe = Object.fromEntries(
+      Object.entries(parsed as Record<string, unknown>)
+        .filter(([key]) => ARGUMENT_PREVIEW_ALLOWLIST.has(key))
+        .map(([key, value]) => [key, safePreviewValue(value, key)]),
+    );
+    if (Object.keys(safe).length === 0) return undefined;
+
+    const json = JSON.stringify(safe);
+    return json.length > TOOL_ARGUMENTS_PREVIEW_LIMIT ? `${json.slice(0, TOOL_ARGUMENTS_PREVIEW_LIMIT)}…` : json;
   } catch {
     return undefined;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-
-  const safe = Object.fromEntries(
-    Object.entries(parsed as Record<string, unknown>).filter(([key]) =>
-      ARGUMENT_PREVIEW_ALLOWLIST.has(key),
-    ),
-  );
-  if (Object.keys(safe).length === 0) return undefined;
-
-  const json = JSON.stringify(safe);
-  return json.length > TOOL_ARGUMENTS_PREVIEW_LIMIT ? `${json.slice(0, TOOL_ARGUMENTS_PREVIEW_LIMIT)}…` : json;
 }
 
 /**
@@ -138,7 +171,7 @@ async function mirrorToolCalls(reportId: string, calls: ObservedToolCall[]): Pro
   } catch (error) {
     console.error(
       `agent session for report ${reportId}: failed to mirror tool-call trace events: ${
-        error instanceof Error ? error.message : String(error)
+        safeErrorText(error)
       }`,
     );
   }
@@ -844,7 +877,7 @@ export async function pollOnce(
       return finishWithoutApproval(lease, {
         turnStatus: "ERROR",
         lastError: `Live harness session was lost (session or turn not found): ${
-          error instanceof Error ? error.message : String(error)
+          safeErrorText(error)
         }. This says nothing about the report itself.`,
       });
     }
@@ -862,7 +895,7 @@ export async function pollOnce(
     await markMirrored(lease, cursor).catch((error: unknown) => {
       console.error(
         `agent session ${lease.id}: failed to persist tool-call mirroring cursor: ${
-          error instanceof Error ? error.message : String(error)
+          safeErrorText(error)
         }`,
       );
     });
@@ -877,7 +910,7 @@ export async function pollOnce(
       if (error instanceof LeaseLostError) throw error;
       console.error(
         `agent session ${lease.id}: failed to persist final summary: ${
-          error instanceof Error ? error.message : String(error)
+          safeErrorText(error)
         }`,
       );
     });
@@ -898,7 +931,7 @@ export async function pollOnce(
       // Never inferred as an approval or a denial: the turn errored, full stop.
       return finishWithoutApproval(lease, {
         turnStatus: "ERROR",
-        lastError: snapshot.message,
+        lastError: safeErrorText(snapshot.message),
       });
 
     case "cancelled":
