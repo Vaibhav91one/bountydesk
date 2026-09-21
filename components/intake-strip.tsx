@@ -22,8 +22,16 @@ function ageFor(job: IntakeJobView): string {
 
 function lineFor(job: IntakeJobView): string {
   if (job.state === "DEAD_LETTER") {
+    // The delivery id lives in the title for support, so the visible line stays readable.
+    const subject = job.label ?? "intake";
     const cause = job.reason ? `, ${job.reason}` : "";
-    return `Intake failed: ${subjectFor(job)}${cause} (delivery ${job.deliveryPrefix})`;
+    const tries =
+      Number.isFinite(job.attempts) &&
+      Number.isFinite(job.maxAttempts) &&
+      job.attempts > 0
+        ? ` after ${job.attempts} attempts`
+        : "";
+    return `Intake failed: ${subject}${cause}${tries}`;
   }
   const verb = job.state === "SESSION_CREATED" || job.state === "RUNNING" ? "running" : "pending";
   return `Intake ${verb}: ${subjectFor(job)}, received ${ageFor(job)}`;
@@ -54,10 +62,11 @@ export function IntakeStrip({ refetchInterval }: { refetchInterval: number | fal
         {jobs.map((job) => (
           <li
             key={job.id}
+            title={`delivery ${job.deliveryPrefix}`}
             className={
               job.state === "DEAD_LETTER"
-                ? "text-body text-destructive"
-                : "text-body text-muted-foreground"
+                ? "text-body text-destructive min-w-0 break-words"
+                : "text-body text-muted-foreground min-w-0 break-words"
             }
           >
             {lineFor(job)}
