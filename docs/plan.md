@@ -215,8 +215,7 @@ Now active, held out of the MVP window for time:
   identity and transport-receipt contract first: until that exists, the app records no
   `DeliveryAttempt` and moves no such report to `DELIVERED`. That gate is a contract, not a date,
   so it holds while this item is active.
-- Guided re-check: pass the reviewer's chat text as re-check guidance instead of the fixed neutral
-  instruction, and manifest-driven multi-target onboarding (see AGENTS.md's backlog section).
+- Manifest-driven multi-target onboarding (see AGENTS.md's backlog section).
 - The private-repository policy (`POLICY_REFUSED`).
 
 Still deferred, by scope rather than time (unchanged from decisions.md):
