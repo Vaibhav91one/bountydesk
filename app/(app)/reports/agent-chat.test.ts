@@ -8,6 +8,7 @@ import {
   failedRequestFromStatus,
   isFreshAgentMessage,
   newlyObservedAgentIds,
+  optimisticReviewerRows,
   QUICK_PROMPTS,
   responseRequestId,
   reviewerMessagePayload,
@@ -162,4 +163,35 @@ test("the polling signature changes when thread status changes with unchanged id
   assert.equal(chatStatusSignature(running), chatStatusSignature(runningAgain));
   assert.notEqual(chatStatusSignature(running), chatStatusSignature(errored));
   assert.notEqual(chatStatusSignature(running), chatStatusSignature(cancelled));
+});
+
+test("an in-flight message shows optimistically, then defers to the server row", () => {
+  const sending: ChatRequest = { clientRequestId: "req-1", body: "Is this exploitable?" };
+
+  // Before the server echoes it back, the optimistic reviewer bubble stands in.
+  const optimistic = optimisticReviewerRows(sending, null, []);
+  assert.equal(optimistic.length, 1);
+  assert.equal(optimistic[0].sender, "REVIEWER");
+  assert.equal(optimistic[0].clientRequestId, "req-1");
+  assert.equal(optimistic[0].body, "Is this exploitable?");
+
+  // Once the real row lands (same clientRequestId), the optimistic one drops out.
+  const server: ChatMessage[] = [
+    { id: "server-1", clientRequestId: "req-1", sender: "REVIEWER", body: "Is this exploitable?", createdAt: "2026-09-21T00:00:00Z" },
+  ];
+  assert.deepEqual(optimisticReviewerRows(sending, null, server), []);
+});
+
+test("a failed request keeps its bubble; nothing optimistic when idle", () => {
+  const failed: ChatRequest = { clientRequestId: "req-2", body: "Summarize" };
+  const rows = optimisticReviewerRows(null, failed, []);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].clientRequestId, "req-2");
+  assert.deepEqual(optimisticReviewerRows(null, null, []), []);
+});
+
+test("the composer stays locked until the reply lands, not just while sending", () => {
+  // busy = sending || a reply still pending. Either keeps the send button disabled.
+  assert.equal(canSubmitReviewerMessage("Question", true, "ready"), false);
+  assert.equal(canSubmitReviewerMessage("Question", false, "ready"), true);
 });

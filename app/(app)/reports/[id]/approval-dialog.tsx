@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, CheckCircle, Signature, Warning } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, CheckCircle, CircleNotch, Signature, Warning } from "@phosphor-icons/react/ssr";
 
 import { AnimatedMascotSvg } from "@/components/animated-mascot-svg";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -352,8 +352,21 @@ export function ApprovalDialog({
             finding title would push the buttons off screen. minmax(0,1fr) pins it to the dialog. */}
       <DialogContent
         showCloseButton={false}
-        className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto"
+        className="relative max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto"
       >
+        {/* While the run is being requested the whole dialog is locked: the controls are already
+            disabled, and this overlay makes that state obvious and swallows any stray click so
+            nothing races the in-flight request. */}
+        {recheckState === "sending" ? (
+          <div
+            className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-[inherit] bg-background/60 backdrop-blur-sm"
+            role="status"
+            aria-live="polite"
+          >
+            <CircleNotch className="size-6 animate-spin text-foreground" />
+            <span className="text-sm text-muted-foreground">Starting re-check…</span>
+          </div>
+        ) : null}
         <DialogHeader>
           <DialogTitle>Start a fresh investigation?</DialogTitle>
           <DialogDescription>

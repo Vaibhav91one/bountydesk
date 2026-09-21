@@ -290,32 +290,31 @@ export function VerdictCard({
           >
             <RollingIcon icon={Prohibit} className="size-4" /> Deny
           </Button>
-          {/* The trigger only opens the menu, so one click never triggers two things. Only
-              choosing Approve asks to confirm the verdict. */}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="sm"
-                  variant="default"
-                  disabled={disabled}
-                  aria-label="Choose a decision"
-                  aria-haspopup="menu"
-                >
-                  Decide
-                  <CaretDown className="size-3" aria-hidden="true" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" side="top">
-              <DropdownMenuItem onClick={approve}>
-                <RollingIcon icon={CheckCircle} className="size-4" />
-                Approve
-              </DropdownMenuItem>
-              {/* A reproduced verdict is only ever approved or denied. Offering a re-check here
-                  let a weaker follow-up run (e.g. an HTTP-only probe that misses a client-side
-                  sink) supersede it with a NOT_REPRODUCED, which is exactly the flip we don't want. */}
-              {onRecheck && canOfferRecheck(outcome) ? (
+          {/* A re-check is only worth offering when it can change the outcome, which a reproduced
+              verdict never should (a weaker follow-up run, say an HTTP-only probe that misses a
+              client-side sink, could supersede it with NOT_REPRODUCED). With no re-check to offer,
+              the "Decide" menu would hold a single item, so approving is a plain button instead. */}
+          {onRecheck && canOfferRecheck(outcome) ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="default"
+                    disabled={disabled}
+                    aria-label="Choose a decision"
+                    aria-haspopup="menu"
+                  >
+                    Decide
+                    <CaretDown className="size-3" aria-hidden="true" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" side="top">
+                <DropdownMenuItem onClick={approve}>
+                  <RollingIcon icon={CheckCircle} className="size-4" />
+                  Approve
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => onRecheck()}
                   disabled={disabled || rechecking}
@@ -323,9 +322,13 @@ export function VerdictCard({
                   <RollingIcon icon={ArrowClockwise} className="size-4" />
                   {rechecking ? "Starting re-check…" : "Ask to re-check"}
                 </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button size="sm" variant="default" onClick={approve} disabled={disabled}>
+              <RollingIcon icon={CheckCircle} className="size-4" /> Approve
+            </Button>
+          )}
         </span>
         )}
       </div>

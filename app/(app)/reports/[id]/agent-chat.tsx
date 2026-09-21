@@ -110,6 +110,33 @@ export function chatStatusSignature(status: ChatStatus): string {
     .join("|");
 }
 
+/**
+ * Reviewer rows to show before the server has echoed them back: the in-flight request, and on a
+ * network failure the request that never persisted. Each is dropped as soon as a server row with
+ * the same clientRequestId arrives, so the optimistic bubble hands off to the real one seamlessly.
+ */
+export function optimisticReviewerRows(
+  sending: ChatRequest | null,
+  failed: ChatRequest | null,
+  serverMessages: ChatMessage[],
+): ChatMessage[] {
+  const known = new Set(serverMessages.map((message) => message.clientRequestId));
+  const now = new Date().toISOString();
+  const rows: ChatMessage[] = [];
+  for (const request of [sending, failed]) {
+    if (!request || known.has(request.clientRequestId)) continue;
+    if (rows.some((row) => row.clientRequestId === request.clientRequestId)) continue;
+    rows.push({
+      id: request.clientRequestId,
+      clientRequestId: request.clientRequestId,
+      sender: "REVIEWER",
+      body: request.body,
+      createdAt: now,
+    });
+  }
+  return rows;
+}
+
 function latestReviewerMessage(status: ChatStatus | null): ChatMessage | null {
   return (
     allMessages(status)
@@ -338,9 +365,13 @@ export function AgentChat({
   const failedRequest: FailedChatRequest | null = failed
     ? { ...failed, terminalStatus: terminalStatusFor(status, failed.clientRequestId) }
     : failedRequestFromStatus(status);
-  const canSend = canSubmitReviewerMessage(draft, Boolean(sending), mode);
   const messages = allMessages(status);
   const pendingMessage = pendingReviewerMessage(status);
+  // Busy the whole time a turn is in flight, not just while the POST is open: pendingMessage stays
+  // set until the agent's reply lands, so one message at a time holds through the "thinking" window.
+  const busy = Boolean(sending) || Boolean(pendingMessage);
+  const canSend = canSubmitReviewerMessage(draft, busy, mode);
+  const displayMessages = [...messages, ...optimisticReviewerRows(sending, failed, messages)];
   const newestAgentId = [...messages].reverse().find((message) => message.sender === "AGENT")?.id;
 
   const updateNearBottom = useCallback(() => {
@@ -398,7 +429,7 @@ export function AgentChat({
     const behavior = ownChange ? "smooth" : "auto";
     ownChangeRef.current = false;
     requestAnimationFrame(() => scrollMessages(behavior));
-  }, [active, mode, messages.length, pendingMessage?.clientRequestId, scrollMessages]);
+  }, [active, mode, displayMessages.length, pendingMessage?.clientRequestId, scrollMessages]);
 
   async function submit(request: ChatRequest) {
     setSending(request);
@@ -438,7 +469,7 @@ export function AgentChat({
   }
 
   function sendPrompt(prompt: string) {
-    if (sending || mode !== "ready") return;
+    if (busy || mode !== "ready") return;
     ownChangeRef.current = true;
     void submit({ clientRequestId: newRequestId(), body: prompt });
   }
@@ -487,12 +518,12 @@ export function AgentChat({
             aria-label="Conversation with Agent Bounty"
             className="flex flex-col gap-3"
           >
-            {messages.length === 0 ? (
+            {displayMessages.length === 0 ? (
               <p className="text-meta text-muted-foreground">
                 Ask a question about the evidence or the exact comment before deciding.
               </p>
             ) : null}
-            {messages.map((message) =>
+            {displayMessages.map((message) =>
               message.sender === "AGENT" ? (
                 <div key={message.id} className="flex flex-col gap-1.5">
                   {revealingAgentIds.has(message.id) ? (
@@ -603,7 +634,7 @@ export function AgentChat({
                 onDraftChange={setDraft}
                 onSend={send}
                 onQuickPrompt={sendPrompt}
-                sending={Boolean(sending)}
+                busy={busy}
                 mode={mode}
                 inputRef={inputRef}
               />
