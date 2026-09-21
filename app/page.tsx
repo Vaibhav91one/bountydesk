@@ -16,7 +16,6 @@ import { MarqueeAlongSvgPath } from "@/components/ui/marquee-along-svg-path";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MASCOT_FOR_STATE } from "@/lib/mascot/catalog";
-import { loginUrl } from "@/lib/auth/oauth";
 
 import {
   INTEGRATIONS,
@@ -516,7 +515,7 @@ export default function LandingPage() {
             <Button
               size="lg"
               nativeButton={false}
-              render={<Link href={loginUrl()} prefetch={false} />}
+              render={<Link href="/login" prefetch={false} />}
               className="rounded-full px-6"
             >
               <RollingIcon icon={Sparkle} weight="fill" className="size-4" />{" "}
@@ -617,7 +616,7 @@ export default function LandingPage() {
                       size="sm"
                       variant="outline"
                       nativeButton={false}
-                      render={<Link href={loginUrl()} prefetch={false} />}
+                      render={<Link href="/login" prefetch={false} />}
                       className="w-full justify-center"
                     >
                       <RollingIcon icon={GitHubLight} className="size-4" />{" "}

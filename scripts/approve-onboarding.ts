@@ -6,26 +6,23 @@ import { approveOnboardingRequest } from "@/lib/build-onboarding/approve-request
 /**
  * Approve a proposed target manifest, as a reviewer, so the pipeline may write the TargetProfile.
  *
- *   npm run approve:onboarding -- <repoId> <reviewer-github-user-id> <reviewer-login>
+ *   npm run approve:onboarding -- <repoId> <reviewer-email> [reviewer-login]
  *
- * The reviewer id is checked against the same allow-list the UI uses, so this is a real human
+ * The reviewer email is checked against the same allow-list the UI uses, so this is a real human
  * gate, not a bypass: only a listed reviewer can move a row to APPROVED, and only from
  * AWAITING_APPROVAL. The React panel that will replace this runs the same approveOnboardingRequest.
  */
 async function main(): Promise<void> {
   const rawRepoId = process.argv[2];
-  const userId = Number(process.argv[3]);
-  const login = process.argv[4];
+  const email = process.argv[3];
+  const login = process.argv[4] ?? email;
 
-  if (!process.argv[2] || !Number.isSafeInteger(userId) || !login) {
-    console.error("usage: approve-onboarding.ts <repoId> <reviewer-user-id> <reviewer-login>");
+  if (!rawRepoId || !email) {
+    console.error("usage: approve-onboarding.ts <repoId> <reviewer-email> [reviewer-login]");
     process.exit(1);
   }
 
-  const result = await approveOnboardingRequest(
-    { userId, login, expiresAt: Date.now() + 60_000 },
-    rawRepoId,
-  );
+  const result = await approveOnboardingRequest({ login, email, avatarUrl: null }, rawRepoId);
 
   if (!result.ok) {
     console.error(result.error);

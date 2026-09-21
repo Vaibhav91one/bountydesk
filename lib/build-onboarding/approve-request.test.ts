@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
-const REVIEWER_ID = 4242;
-process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
+const REVIEWER_EMAIL = "reviewer@bountydesk.test";
+process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
@@ -42,7 +42,7 @@ function stateOf(repoId: number) {
     .then((rows) => rows[0]);
 }
 
-const reviewer = { userId: REVIEWER_ID, login: "octocat", expiresAt: Date.now() + 60_000 };
+const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null };
 
 test("a reviewer moves an awaiting row to APPROVED and is recorded", async () => {
   const repoId = await seed("AWAITING_APPROVAL");
@@ -56,7 +56,7 @@ test("a reviewer moves an awaiting row to APPROVED and is recorded", async () =>
 test("a non-reviewer changes nothing", async () => {
   const repoId = await seed("AWAITING_APPROVAL");
   const result = await mod.approveOnboardingRequest(
-    { userId: 9999, login: "stranger", expiresAt: Date.now() + 60_000 },
+    { login: "stranger", email: "stranger@example.com", avatarUrl: null },
     repoId,
   );
   assert.equal(result.ok, false);

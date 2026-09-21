@@ -38,7 +38,10 @@ const nextConfig: NextConfig = {
       { source: "/settings/connections", destination: "/connections", permanent: false },
     ];
   },
-  /* config options here */
+  // Profile pictures are served from Clerk's image CDN (Google avatars are proxied through it).
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "img.clerk.com" }],
+  },
 };
 
 export default nextConfig;

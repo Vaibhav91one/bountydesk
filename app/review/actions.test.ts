@@ -9,23 +9,32 @@ import { computeContentHash } from "@/lib/verdicts/hash";
  * database one (row locks, the unique approval_decision/approval_submission indexes), so a
  * mock database would agree with a wrong implementation.
  *
- * allowVerdict and denyVerdict both start with requireReviewer(), which reads the session
- * cookie through next/headers. That call has no request scope in a plain node:test process
- * (cookies() throws "called outside a request scope" there), so next/headers is mocked here
- * with a settable cookie value. This needs node run with --experimental-test-module-mocks,
- * which is why package.json's test script carries that flag.
+ * allowVerdict and denyVerdict both start with requireReviewer(), which resolves the session
+ * from Clerk. Clerk's auth()/currentUser() have no request scope in a plain node:test process, so
+ * @clerk/nextjs/server is mocked here with a settable signed-in user. This needs node run with
+ * --experimental-test-module-mocks, which is why package.json's test script carries that flag.
  */
 const REVIEWER_ID = 5150;
+const REVIEWER_EMAIL = "reviewer@bountydesk.test";
+process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
 process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
-process.env.AUTH_SECRET = "b".repeat(32);
 
-let cookieValue: string | undefined;
+let clerkUser: { id: string; email: string; login: string } | null = null;
 let deliverCalls: { deliveryId: string; owner: string }[] = [];
-mock.module("next/headers", {
+mock.module("@clerk/nextjs/server", {
   namedExports: {
-    cookies: async () => ({
-      get: (name: string) => (cookieValue ? { name, value: cookieValue } : undefined),
-    }),
+    auth: async () => ({ userId: clerkUser?.id ?? null }),
+    currentUser: async () =>
+      clerkUser
+        ? {
+            id: clerkUser.id,
+            username: clerkUser.login,
+            firstName: null,
+            imageUrl: null,
+            primaryEmailAddress: { emailAddress: clerkUser.email },
+            emailAddresses: [{ emailAddress: clerkUser.email }],
+          }
+        : null,
   },
 });
 mock.module("next/cache", {
@@ -45,7 +54,6 @@ mock.module("@/lib/delivery/worker", {
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
 let actions: typeof import("./actions");
-let sessionLib: typeof import("@/lib/auth/session");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -53,7 +61,6 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   actions = await import("./actions");
-  sessionLib = await import("@/lib/auth/session");
 });
 
 after(async () => {
@@ -65,16 +72,16 @@ beforeEach(() => {
   deliverCalls = [];
 });
 
+// The first arg keeps the old shape: REVIEWER_ID maps to the allowlisted email, any other id to an
+// outsider one, so the existing call sites (signIn(REVIEWER_ID, "alice"), signIn(999_999, ...)) and
+// their reviewer/non-reviewer intent carry over to the email allowlist unchanged.
 function signIn(userId: number, login = "reviewer") {
-  cookieValue = sessionLib.seal({
-    login,
-    userId,
-    expiresAt: Math.floor(Date.now() / 1000) + 3600,
-  });
+  const email = userId === REVIEWER_ID ? REVIEWER_EMAIL : `${login}@outsider.test`;
+  clerkUser = { id: `clerk_${login}`, email, login };
 }
 
 function signOut() {
-  cookieValue = undefined;
+  clerkUser = null;
 }
 
 let seq = 0;

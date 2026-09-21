@@ -1,9 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isReviewer, reviewerIds } from "./reviewers";
+import { isReviewer, isReviewerEmail, reviewerEmails, reviewerIds } from "./reviewers";
 
-test("the allowlist is a set of numeric ids", () => {
+test("the dashboard allowlist matches emails case-insensitively", () => {
+  process.env.REVIEWER_EMAILS = " Reviewer@Bountydesk.test , second@bountydesk.test ";
+
+  assert.deepEqual([...reviewerEmails()].sort(), [
+    "reviewer@bountydesk.test",
+    "second@bountydesk.test",
+  ]);
+  assert.equal(isReviewerEmail("reviewer@bountydesk.test"), true);
+  assert.equal(isReviewerEmail("REVIEWER@bountydesk.test"), true);
+  assert.equal(isReviewerEmail("stranger@example.com"), false);
+  assert.equal(isReviewerEmail(null), false);
+  assert.equal(isReviewerEmail(undefined), false);
+  assert.equal(isReviewerEmail(""), false);
+});
+
+test("a missing or empty email allowlist fails closed", () => {
+  delete process.env.REVIEWER_EMAILS;
+  assert.throws(() => reviewerEmails(), /REVIEWER_EMAILS is not set/);
+
+  for (const bad of ["", "   ", ",,,"]) {
+    process.env.REVIEWER_EMAILS = bad;
+    assert.throws(() => reviewerEmails(), /REVIEWER_EMAILS/, bad);
+  }
+});
+
+test("the GitHub-webhook allowlist is a set of numeric ids", () => {
   process.env.REVIEWER_GITHUB_IDS = " 42 , 583231 ";
 
   assert.deepEqual([...reviewerIds()].sort((a, b) => a - b), [42, 583231]);
@@ -11,7 +36,7 @@ test("the allowlist is a set of numeric ids", () => {
   assert.equal(isReviewer(43), false);
 });
 
-test("a missing, empty or malformed allowlist fails closed", () => {
+test("a missing, empty or malformed id allowlist fails closed", () => {
   delete process.env.REVIEWER_GITHUB_IDS;
   assert.throws(() => reviewerIds(), /REVIEWER_GITHUB_IDS is not set/);
 
@@ -26,22 +51,4 @@ test("a missing, empty or malformed allowlist fails closed", () => {
     process.env.REVIEWER_GITHUB_IDS = bad;
     assert.throws(() => reviewerIds(), /numeric GitHub user ids|empty/, bad);
   }
-});
-
-test("a valid cookie stops authorizing once its reviewer leaves the allowlist", async () => {
-  process.env.AUTH_SECRET = Buffer.alloc(32, "s").toString("base64");
-  process.env.REVIEWER_GITHUB_IDS = "583231";
-
-  const { newSession, seal } = await import("./session");
-  const { authorizedSession } = await import("./reviewers");
-
-  const cookie = seal(newSession("octocat", 583231));
-  assert.equal(authorizedSession(cookie)?.userId, 583231);
-
-  // Same cookie, still signed by us and nowhere near expiry. The allowlist is what changed.
-  process.env.REVIEWER_GITHUB_IDS = "42";
-  assert.equal(authorizedSession(cookie), null);
-
-  assert.equal(authorizedSession(undefined), null);
-  assert.equal(authorizedSession("not-a-cookie"), null);
 });

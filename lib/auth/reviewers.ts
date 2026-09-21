@@ -1,19 +1,40 @@
 import { requireEnv } from "@/lib/env";
 
-import { type Session, unseal } from "./session";
-
 /**
  * Who may operate BountyDesk.
  *
- * GitHub OAuth answers "which GitHub account is this", which is not the same question as
- * "may this person approve a verdict". Without a second answer, every GitHub account on the
- * internet is an operator. The MVP ships the smallest one that is real: a server-held
- * allowlist, checked on every protected request rather than only at login, so removing
- * someone takes effect before their seven-day cookie expires. Tenant membership and roles
- * are deliberately deferred.
+ * Sign-in (Clerk, via Google or GitHub) answers "which account is this", which is not the same
+ * question as "may this person approve a verdict". Without a second answer, every account on the
+ * internet is an operator. The allowlist is that second answer, checked on every protected
+ * request rather than only at login, so removing someone takes effect at once.
  *
- * The list holds numeric user ids, not logins. A login can be changed or, once released,
- * taken by someone else; the id cannot.
+ * Two allowlists, two audiences. The dashboard authorizes by email, because that is the identity
+ * Clerk resolves for a Google or GitHub sign-in. The GitHub-issue `/reproduce` gate authorizes by
+ * GitHub numeric id, because it matches a webhook actor and never involves a dashboard login. They
+ * are deliberately independent.
+ */
+export function reviewerEmails(): Set<string> {
+  const raw = requireEnv("REVIEWER_EMAILS");
+  const emails = raw
+    .split(",")
+    .map((part) => part.trim().toLowerCase())
+    .filter((part) => part.length > 0);
+
+  if (emails.length === 0) {
+    throw new Error("REVIEWER_EMAILS is empty, so nobody could review anything");
+  }
+  return new Set(emails);
+}
+
+/** Dashboard authorization: does this signed-in email belong to a reviewer? */
+export function isReviewerEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  return reviewerEmails().has(email.trim().toLowerCase());
+}
+
+/**
+ * The GitHub numeric ids allowed to trigger `/reproduce` from an issue. Unchanged from the
+ * GitHub-native actor model: a login can be changed or reassigned, the id cannot.
  */
 export function reviewerIds(): Set<number> {
   const raw = requireEnv("REVIEWER_GITHUB_IDS");
@@ -38,20 +59,7 @@ export function reviewerIds(): Set<number> {
   return new Set(ids);
 }
 
+/** GitHub-webhook authorization: is this webhook sender a reviewer? */
 export function isReviewer(userId: number): boolean {
   return reviewerIds().has(userId);
-}
-
-/**
- * The whole authorization decision for one cookie value, with no request plumbing attached.
- *
- * The DAL is this function plus a cookie read, which is what lets the interesting half be
- * tested directly: that a perfectly valid, unexpired cookie stops authorizing anything the
- * moment its user leaves the allowlist.
- */
-export function authorizedSession(cookieValue: string | undefined): Session | null {
-  const session = unseal(cookieValue);
-  if (!session) return null;
-
-  return isReviewer(session.userId) ? session : null;
 }
