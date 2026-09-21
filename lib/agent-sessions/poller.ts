@@ -20,6 +20,7 @@ import {
 } from "@/lib/trueforge/client";
 import { SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "@/lib/trueforge/agent-config";
 
+import { DEFAULT_TURN_MAX_MS, isOpenTurnStatus, isTurnOverdue } from "./turn-deadline";
 import {
   abandonVerdictConflict,
   assertHeld,
@@ -49,6 +50,7 @@ const MIN_HEARTBEAT_INTERVAL_MS = 50;
  * worker has had a chance to act; a retried poll before then is a safe no-op (see below) but
  * there is no point spinning on it. */
 const AWAITING_APPROVAL_POLL_MS = 30_000;
+const TURN_TIMEOUT_REASON = "The investigation did not finish within 30 minutes.";
 
 function inFuture(ms: number): Date {
   return new Date(Date.now() + ms);
@@ -292,6 +294,29 @@ async function handleVerifiedPendingCall(
       }
     } else if (reportRow.state === "ANALYSIS_ONLY" && !analysisOnly) {
       await transition(lease.reportId, "ANALYSIS_ONLY", "AWAITING_APPROVAL", tx);
+    } else if (reportRow.state === "ANALYSIS_ONLY" && analysisOnly) {
+      // The re-poll of a verdict already parked in the analysis lane: the first poll moved the
+      // report here and recorded the pending call. Reaching this branch again is the idempotent
+      // retry, not a refusal; a call that no longer matches what was recorded still errors.
+      if (
+        lease.pendingVerdictId &&
+        (lease.pendingThreadId !== call.threadId ||
+          lease.pendingToolCallId !== call.toolCallId ||
+          lease.pendingVerdictId !== verdictRow.id ||
+          (draftedVerdictId !== undefined && draftedVerdictId !== verdictRow.id) ||
+          lease.pendingApprovedContentHash !== verdictRow.contentHash)
+      ) {
+        await release(
+          lease,
+          {
+            turnStatus: "ERROR",
+            lastError:
+              "pending publish_verdict does not match the pending call already recorded for review",
+          },
+          tx,
+        );
+        return;
+      }
     } else if (reportRow.state === "AWAITING_APPROVAL") {
       if (
         lease.pendingThreadId !== call.threadId ||
@@ -739,7 +764,18 @@ export async function pollOnce(
 
   if (!lease.turnId) {
     // The driver created the session but has not started a turn yet; nothing to ask
-    // TrueForge about.
+    // TrueForge about. There cannot be a pending harness approval without a turn id, so the
+    // session deadline is safe to apply before rescheduling this row.
+    if (
+      reportRow?.state === "TRIAGING" &&
+      isOpenTurnStatus(lease.turnStatus) &&
+      isTurnOverdue(lease.createdAt, new Date(), DEFAULT_TURN_MAX_MS)
+    ) {
+      return finishWithoutApproval(lease, {
+        turnStatus: "ERROR",
+        lastError: TURN_TIMEOUT_REASON,
+      });
+    }
     await release(lease, { nextPollAt: inFuture(POLL_BACKOFF_MS) });
     return lease.id;
   }
@@ -800,6 +836,24 @@ export async function pollOnce(
   }
   const { snapshot, toolCalls, cursor, finalSummary } = pollResult;
 
+  // RUNNING and INVESTIGATING are the only open turn states here. A pending approval is a
+  // different workflow, and terminal states have already been excluded by claim(). The limit stops
+  // a first investigation that the harness keeps reporting as running from being claimed forever.
+  // Only the first investigation, while the report is still TRIAGING: created_at is the start of
+  // that turn. A re-check and the harness finishing after an approval both reuse this same row
+  // with a new turn, so created_at can be days old there and would read as overdue at once. The
+  // state is read only when the turn already looks overdue.
+  const turnIsOverdue =
+    snapshot.status === "running" &&
+    isOpenTurnStatus(lease.turnStatus) &&
+    isTurnOverdue(lease.createdAt, new Date(), DEFAULT_TURN_MAX_MS) &&
+    (await db
+      .select({ state: report.state })
+      .from(report)
+      .where(eq(report.id, lease.reportId))
+      .limit(1)
+      .then((rows) => rows[0]?.state === "TRIAGING"));
+
   // Mirrored regardless of the turn's status: a call already made is a call already made,
   // whether the turn is still running, has errored, or is sitting on a pending approval.
   // Best-effort with respect to everything below: mirrorToolCalls never throws, and the cursor
@@ -828,6 +882,13 @@ export async function pollOnce(
           safeErrorText(error)
         }`,
       );
+    });
+  }
+
+  if (turnIsOverdue) {
+    return finishWithoutApproval(lease, {
+      turnStatus: "ERROR",
+      lastError: TURN_TIMEOUT_REASON,
     });
   }
 

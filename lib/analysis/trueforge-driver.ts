@@ -1,3 +1,4 @@
+import { safeErrorText } from "@/lib/errors/safe-error";
 import { randomBytes, randomUUID } from "node:crypto";
 
 import {
@@ -354,10 +355,17 @@ export function createTrueforgeAnalysisDriver(
                 );
                 provisioned = { ...single, sandboxIds: [single.sandboxId] };
               }
-            } catch {
+            } catch (error) {
               // A genuine cancellation must still propagate as one, not be swallowed into "no
               // target this run" -- the caller's lease/retry semantics depend on seeing it.
               if (signal.aborted) throw signal.reason;
+              // The run continues without a sandbox, so the reason has to reach a log or nobody
+              // learns why (an inactive target snapshot looked exactly like a missing key).
+              console.error(
+                `report ${reportId}: sandbox provisioning failed, continuing without one: ${
+                  safeErrorText(error)
+                }`,
+              );
               provisioned = null;
             }
           }

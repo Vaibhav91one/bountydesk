@@ -1094,6 +1094,34 @@ test("a pending ANALYSIS_ONLY draft stays in the analysis lane with a verdict to
   assert.equal(verdictRow.summary, "the agent's own drafted conclusion");
 });
 
+test("re-polling a parked ANALYSIS_ONLY draft keeps it awaiting approval instead of erroring", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  const pending = draftedPublishVerdictCall(fixture.capabilityToken, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "the agent's own drafted conclusion",
+    findings: [],
+  });
+  const client = fakeClient({ status: "awaiting_approval", pending: [pending] });
+
+  await poller.pollOnce("w-parked-1", { client });
+  const first = await sessionRow(fixture.agentSessionId);
+  assert.equal(first.turnStatus, "AWAITING_APPROVAL_HARNESS");
+
+  // The second poll of the same pending call is what production does every 30 seconds.
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ nextPollAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-parked-2", { client });
+
+  const second = await sessionRow(fixture.agentSessionId);
+  assert.equal(second.turnStatus, "AWAITING_APPROVAL_HARNESS");
+  assert.equal(second.pendingVerdictId, first.pendingVerdictId);
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+});
+
 test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const { SYNTHESIZED_ANALYSIS_SUMMARY } = await import("@/lib/mcp/publish-verdict");
