@@ -26,12 +26,18 @@ export const currentSession = cache(async (): Promise<Session | null> => {
   const user = await currentUser();
   if (!user) return null;
 
-  const email =
-    user.primaryEmailAddress?.emailAddress ?? user.emailAddresses[0]?.emailAddress ?? null;
-  if (!isReviewerEmail(email) || !email) return null;
+  // One person, one Clerk user, possibly several linked accounts (Google plus a GitHub whose email
+  // may differ). Authorize if any verified email is on the allowlist, so linking a differently
+  // addressed GitHub still works. Clerk only lets you attach an email you have verified, so this
+  // cannot be spoofed. The session email is the matched one, which keeps the downstream
+  // isReviewerEmail(session.email) checks consistent.
+  const verified = user.emailAddresses.filter((e) => e.verification?.status === "verified");
+  const candidates = (verified.length ? verified : user.emailAddresses).map((e) => e.emailAddress);
+  const reviewerEmail = candidates.find((email) => isReviewerEmail(email));
+  if (!reviewerEmail) return null;
 
-  const login = user.username ?? user.firstName ?? email;
-  return { login, email, avatarUrl: user.imageUrl ?? null };
+  const login = user.username ?? user.firstName ?? reviewerEmail;
+  return { login, email: reviewerEmail, avatarUrl: user.imageUrl ?? null };
 });
 
 /**

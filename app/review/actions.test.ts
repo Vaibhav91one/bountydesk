@@ -19,6 +19,10 @@ const REVIEWER_EMAIL = "reviewer@bountydesk.test";
 process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
 process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
 
+// @clerk/nextjs/server pulls in `server-only`, whose guard throws outside a React Server
+// environment (the CI Node runtime hits this even with the Clerk mock below). Neutralize it first.
+mock.module("server-only", { namedExports: {} });
+
 let clerkUser: { id: string; email: string; login: string } | null = null;
 let deliverCalls: { deliveryId: string; owner: string }[] = [];
 mock.module("@clerk/nextjs/server", {

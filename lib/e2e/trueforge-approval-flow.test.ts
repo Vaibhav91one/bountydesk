@@ -28,6 +28,10 @@ process.env.TRUEFORGE_API_KEY = "";
 const SECRET = "e2e-approval-flow-secret";
 process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
+// @clerk/nextjs/server pulls in `server-only`, whose guard throws outside a React Server
+// environment (the CI Node runtime hits this even with the Clerk mock below). Neutralize it first.
+mock.module("server-only", { namedExports: {} });
+
 let clerkUser: { id: string; email: string; login: string } | null = null;
 mock.module("@clerk/nextjs/server", {
   namedExports: {

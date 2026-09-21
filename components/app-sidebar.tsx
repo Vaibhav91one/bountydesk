@@ -79,7 +79,7 @@ export function AppSidebar({
   activeReports?: ActiveReport[];
 }) {
   const pathname = usePathname();
-  const { signOut } = useClerk();
+  const { signOut, openUserProfile } = useClerk();
 
   // Only while the list is on screen. It renders under /board and nowhere else (see the
   // SidebarMenuSub below), so polling it from the settings page would be a query per reviewer
@@ -213,7 +213,12 @@ export function AppSidebar({
                 }
               />
               <DropdownMenuContent side="top" align="end" sideOffset={8} className="w-56">
-                <DropdownMenuItem disabled>
+                {/* Opens Clerk's profile, where a Google user connects their GitHub account
+                    (matching email or not) so both sign-ins reach the one reviewer identity. */}
+                <DropdownMenuItem
+                  nativeButton
+                  render={<button type="button" onClick={() => openUserProfile()} />}
+                >
                   <Gear />
                   Account settings
                 </DropdownMenuItem>
