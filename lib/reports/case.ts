@@ -73,6 +73,11 @@ export type CaseLatestRun = {
   runNumber: number;
   status: string;
   reason: string;
+  /** When the run was created and last touched, plus how many times a worker claimed it.
+   * Read here so the lifecycle can name a stuck re-check without a second query. */
+  createdAt: Date;
+  updatedAt: Date;
+  attempts: number;
 };
 
 /**
@@ -132,6 +137,9 @@ export async function readCase(
           runNumber: investigationRun.runNumber,
           status: investigationRun.status,
           reason: investigationRun.reason,
+          createdAt: investigationRun.createdAt,
+          updatedAt: investigationRun.updatedAt,
+          attempts: investigationRun.attempts,
         })
         .from(investigationRun)
         .where(eq(investigationRun.reportId, id))

@@ -13,7 +13,16 @@ const AT = new Date("2026-08-31T12:00:00Z");
 const LATER = new Date("2026-08-31T12:04:05Z");
 
 type FileWithRun = CaseFile & {
-  latestRun: { runNumber: number; status: string; reason: string } | null;
+  latestRun:
+    | {
+        runNumber: number;
+        status: string;
+        reason: string;
+        createdAt?: Date;
+        updatedAt?: Date;
+        attempts?: number;
+      }
+    | null;
 };
 
 function caseFile(overrides: Partial<FileWithRun> = {}): FileWithRun {
@@ -188,4 +197,29 @@ test("no events means zero counts and no last event time", () => {
     findings: [],
     lastEventAt: null,
   });
+});
+
+test("run timestamps and attempts ride along without changing the summary", () => {
+  // readCase now selects createdAt, updatedAt and attempts so a stuck re-check is describable
+  // without a second query. The dialog only needs the counts, so the extra columns must not
+  // change what it shows.
+  const view = caseLiveView(
+    caseFile({
+      latestRun: {
+        runNumber: 2,
+        status: "PENDING",
+        reason: "REVIEWER_GUIDANCE",
+        createdAt: AT,
+        updatedAt: LATER,
+        attempts: 3,
+      },
+      verdict: verdictWithFindings([]),
+      events: [],
+      artifacts: [],
+    }),
+  );
+
+  assert.equal(view.recheckSummary?.runNumber, 2);
+  assert.equal(view.recheckSummary?.runStatus, "PENDING");
+  assert.equal(view.recheckSummary?.runReason, "REVIEWER_GUIDANCE");
 });

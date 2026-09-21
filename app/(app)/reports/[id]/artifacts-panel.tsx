@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CaretDown, File, Hash } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
+import { formatStamp } from "@/lib/format";
 import type { CaseArtifactView, CaseVerdictHistoryView } from "@/lib/reports/case-view";
 import { cn } from "@/lib/utils";
 
@@ -140,7 +141,7 @@ function RevisionGroups({
                 <span className="text-meta text-muted-foreground">Earlier runs</span>
               ) : entry ? (
                 <span className="text-meta text-muted-foreground">
-                  {entry.outcomeLabel} · {new Date(entry.createdAt).toLocaleDateString()}
+                  {entry.outcomeLabel} · {formatStamp(new Date(entry.createdAt))}
                 </span>
               ) : null}
               {entry?.superseded ? (

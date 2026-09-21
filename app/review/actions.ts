@@ -16,7 +16,11 @@ import {
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
-import { requestRecheck } from "@/lib/investigation-runs/recheck";
+import {
+  cancelRecheck,
+  requestRecheck,
+  retryRecheck,
+} from "@/lib/investigation-runs/recheck";
 import {
   composeRecheckGuidance,
   MAX_RECHECK_NOTE_LENGTH,
@@ -335,4 +339,18 @@ export async function requestRecheckAction(
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);
   return result.ok ? { ok: true } : { ok: false, error: result.reason };
+}
+
+export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
+  await requireReviewer();
+  const result = await retryRecheck(reportId, runId);
+  revalidateReportViews(reportId);
+  return result.ok ? { ok: true } : { ok: false, error: result.reason };
+}
+
+export async function cancelRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
+  await requireReviewer();
+  const result = await cancelRecheck(reportId, runId);
+  revalidateReportViews(reportId);
+  return result;
 }

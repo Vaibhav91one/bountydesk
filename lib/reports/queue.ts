@@ -44,6 +44,18 @@ export type QueueCard = {
   state: ReportState;
   /** The latest revision's outcome. null means no verdict has been drafted yet. */
   outcome: VerdictOutcome | null;
+  /**
+   * The latest verdict has a supersession link, so it is dead history, not the current
+   * answer. A re-check writes the link when it starts and the replacement verdict only
+   * lands when the new run drafts one, so between the two the card must not show the old
+   * outcome beside the new state.
+   */
+  verdictSuperseded: boolean;
+  /**
+   * The newest investigation run's status, or null for reports written before run rows.
+   * Read so the card can say what the re-check is doing; it never decides anything.
+   */
+  runStatus: string | null;
   /** The outbox state for the newest delivery row, if approval has reached delivery. */
   deliveryState: DeliveryState | null;
   /**
@@ -102,6 +114,25 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
         select v.outcome from verdict v
         where v.report_id = ${report.id}
         order by v.revision desc
+        limit 1
+      )`,
+      // A re-check supersedes the verdict it started from, so the newest row above can be
+      // dead history with no replacement yet. Correlated on the latest id rather than joined,
+      // for the same row-multiplication reason as the outcome subselect.
+      verdictSuperseded: sql<boolean>`exists (
+        select 1 from verdict_supersession s where s.old_verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
+      )`,
+      // The newest run, whatever its reason. Bounded to one row on the report predicate, so
+      // a report with a long re-check history does not pay for all of it here.
+      runStatus: sql<string | null>`(
+        select r.status from investigation_run r
+        where r.report_id = ${report.id}
+        order by r.run_number desc
         limit 1
       )`,
       eventCount: sql<number>`(
@@ -164,7 +195,12 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     sourceLabel: sourceLabel(row.sourceRef, row.id),
     targetName: row.targetName,
     state: row.state,
-    outcome: row.outcome,
+    // The display outcome, not the stored one. A superseded verdict is still the latest row,
+    // but showing it would put "Not reproduced" beside a state badge reading "Reproducing".
+    // The raw value stays in the query; the card just does not hand it to badges.
+    outcome: row.verdictSuperseded ? null : row.outcome,
+    verdictSuperseded: row.verdictSuperseded,
+    runStatus: row.runStatus,
     deliveryState: row.deliveryState,
     handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,
@@ -174,6 +210,9 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
         ? row.pendingVerdictId
         : null,
+    // Read off the stored outcome, not the display one. A superseded draft still means a
+    // verdict existed, and flipping this on a re-check would claim the agent is working a
+    // report whose new run has not produced a single tool call yet.
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
   }));
 }
@@ -340,6 +379,23 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
         order by v.revision desc
         limit 1
       )`,
+      // Same supersession flag as the board read: the index shows the same outcome badges,
+      // so it must hide the same dead history.
+      verdictSuperseded: sql<boolean>`exists (
+        select 1 from verdict_supersession s where s.old_verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
+      )`,
+      // Same newest-run status as the board read, for the same re-check wording.
+      runStatus: sql<string | null>`(
+        select r.status from investigation_run r
+        where r.report_id = ${report.id}
+        order by r.run_number desc
+        limit 1
+      )`,
       eventCount: sql<number>`(
         select count(*)::int from session_event e where e.report_id = ${report.id}
       )`,
@@ -409,7 +465,11 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     sourceLabel: sourceLabel(row.sourceRef, row.id),
     targetName: row.targetName,
     state: row.state,
-    outcome: row.outcome,
+    // Display outcome, same rule as the board read above: a superseded latest verdict hides
+    // until the re-check drafts its replacement.
+    outcome: row.verdictSuperseded ? null : row.outcome,
+    verdictSuperseded: row.verdictSuperseded,
+    runStatus: row.runStatus,
     deliveryState: row.deliveryState,
     handoffFailed: row.handoffFailed,
     eventCount: row.eventCount,

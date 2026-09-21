@@ -438,3 +438,156 @@ test("a long harness error is trimmed to one line for the row", () => {
   assert.ok(note.length <= 70, `note was ${note.length} characters`);
   assert.ok(!note.includes("second line"), "only the first line reaches the row");
 });
+
+function supersededFile(
+  run: { runNumber: number; status: string; reason: string },
+  overrides: Partial<CaseFile> = {},
+) {
+  // A report just after Ask to re-check: state moved on, the pending tuple is gone, revision 1
+  // is dead history, and the fresh run has not drafted anything yet.
+  const v = verdict();
+  const base = caseFile({
+    state: "REPRODUCING",
+    turnStatus: "CANCELLED",
+    verdict: v,
+    verdictHistory: [
+      {
+        id: v.id,
+        revision: 1,
+        outcome: v.outcome,
+        summary: v.summary,
+        createdAt: AT,
+        superseded: true,
+      },
+    ],
+    awaitingVerdictId: null,
+    events: [toolCallEvent(1)],
+    ...overrides,
+  });
+  return { ...base, latestRun: run };
+}
+
+test("a queued re-check is its own visible step, not a done investigation", () => {
+  const view = caseLiveView(
+    supersededFile({ runNumber: 2, status: "PENDING", reason: "REVIEWER_GUIDANCE" }),
+  );
+
+  assert.equal(view.steps.length, 5, "the re-check reuses the five rows");
+  assert.equal(step(view, "investigation").state, "current");
+  assert.equal(step(view, "investigation").note, "Re-check run 2 queued");
+  assert.equal(step(view, "verdict").state, "pending");
+  assert.equal(step(view, "verdict").note, "Revision 1 superseded, re-check queued");
+  assert.equal(step(view, "approval").state, "pending");
+  assert.equal(step(view, "approval").note, "Not reached");
+  assert.equal(step(view, "delivery").state, "pending");
+  assert.equal(view.investigating, false, "a verdict exists, so the shared flag stays false");
+});
+
+test("a running re-check reads as running with no approval on offer", () => {
+  const view = caseLiveView(
+    supersededFile(
+      { runNumber: 2, status: "RUNNING", reason: "REVIEWER_GUIDANCE" },
+      { turnStatus: "RUNNING" },
+    ),
+  );
+
+  assert.equal(step(view, "investigation").state, "current");
+  assert.equal(step(view, "investigation").note, "Re-check run 2 running");
+  assert.equal(step(view, "verdict").note, "Revision 1 superseded, re-check running");
+  assert.equal(step(view, "approval").note, "Not reached");
+  assert.equal(view.awaitingVerdictId, null);
+});
+
+test("a stale pending id behind a re-check never reopens approval", () => {
+  // requestRecheck clears the tuple, so any id still present is a stale read. The row must not
+  // flip back to Waiting on a reviewer while the fresh run owns the report.
+  const v = verdict();
+  const view = caseLiveView(
+    supersededFile(
+      { runNumber: 2, status: "PENDING", reason: "REVIEWER_GUIDANCE" },
+      { awaitingVerdictId: v.id },
+    ),
+  );
+
+  assert.equal(step(view, "approval").state, "pending");
+  assert.equal(step(view, "approval").note, "Not reached");
+});
+
+test("a failed re-check names the recorded message as plain text", () => {
+  const view = caseLiveView(
+    supersededFile(
+      { runNumber: 2, status: "ERROR", reason: "REVIEWER_GUIDANCE" },
+      {
+        events: [
+          toolCallEvent(1),
+          {
+            seq: 2,
+            type: "agent.recheck_failed",
+            channel: "agent",
+            data: { message: "sandbox quota spent\nsecond line" },
+            eventKey: null,
+            at: AT,
+          },
+        ],
+      },
+    ),
+  );
+
+  assert.equal(step(view, "investigation").state, "skipped");
+  assert.equal(
+    step(view, "investigation").note,
+    "Re-check failed (run 2): sandbox quota spent",
+  );
+  assert.equal(step(view, "verdict").note, "Revision 1 superseded, re-check failed");
+  assert.equal(step(view, "approval").note, "Not reached");
+});
+
+test("a failed re-check without an event still reads as failed", () => {
+  const view = caseLiveView(
+    supersededFile({ runNumber: 3, status: "ERROR", reason: "REVIEWER_GUIDANCE" }),
+  );
+
+  assert.equal(step(view, "investigation").note, "Re-check failed (run 3)");
+  assert.equal(step(view, "investigation").state, "skipped");
+});
+
+test("an initial run never reads as a re-check", () => {
+  const v = verdict();
+  const base = caseFile({
+    state: "AWAITING_APPROVAL",
+    verdict: v,
+    verdictHistory: [
+      { id: v.id, revision: 1, outcome: v.outcome, summary: v.summary, createdAt: AT, superseded: false },
+    ],
+    awaitingVerdictId: v.id,
+  });
+  const view = caseLiveView({
+    ...base,
+    latestRun: { runNumber: 1, status: "AWAITING_APPROVAL", reason: "INITIAL" },
+  });
+
+  assert.equal(step(view, "investigation").state, "done");
+  assert.equal(step(view, "approval").note, "Waiting on a reviewer");
+});
+
+test("a guidance run over a current verdict is not a re-check", () => {
+  // The supersession link is what makes the on screen verdict history. A run row alone, without
+  // it, leaves the normal verdict and approval rows in place.
+  const v = verdict();
+  const base = caseFile({
+    state: "REPRODUCING",
+    turnStatus: "RUNNING",
+    verdict: v,
+    verdictHistory: [
+      { id: v.id, revision: 1, outcome: v.outcome, summary: v.summary, createdAt: AT, superseded: false },
+    ],
+    events: [toolCallEvent(1)],
+  });
+  const view = caseLiveView({
+    ...base,
+    latestRun: { runNumber: 2, status: "RUNNING", reason: "REVIEWER_GUIDANCE" },
+  });
+
+  assert.equal(step(view, "investigation").note, "1 step recorded");
+  assert.equal(step(view, "verdict").note, "Revision 1");
+});

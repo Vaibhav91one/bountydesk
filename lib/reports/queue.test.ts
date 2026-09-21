@@ -277,6 +277,49 @@ test("the card carries the latest verdict revision, not the first", async () => 
   assert.equal(card.outcome, "ANALYSIS_ONLY");
 });
 
+test("a superseded verdict hides its outcome until the re-check replaces it", async () => {
+  const id = await seedReport("REPRODUCING");
+  const first = await seedVerdictRevision(id, 1, "NOT_REPRODUCED");
+  const [run] = await dbm.db
+    .insert(dbm.investigationRun)
+    .values({ reportId: id, runNumber: 1, reason: "REVIEWER_GUIDANCE", status: "PENDING" })
+    .returning({ id: dbm.investigationRun.id });
+  await dbm.db.insert(dbm.verdictSupersession).values({
+    reportId: id,
+    oldVerdictId: first.id,
+    supersededByRunId: run.id,
+    reason: "reviewer-guided-recheck",
+    actor: "vaibhav",
+  });
+
+  // REPRODUCING folds into the analysis-only column, so the state badge reads "Reproducing"
+  // while the newest row is still the superseded rev 1. Handing that outcome to badges would
+  // put "Not reproduced" beside it, so the card carries the flag and hides the outcome.
+  const columns = await queue.listQueue();
+  const card = column(columns, "analysis-only").cards.find((c) => c.id === id);
+
+  assert.ok(card);
+  assert.equal(card.outcome, null);
+  assert.equal(card.verdictSuperseded, true);
+  assert.equal(card.runStatus, "PENDING");
+
+  const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.ok(row);
+  assert.equal(row.outcome, null);
+  assert.equal(row.verdictSuperseded, true);
+  assert.equal(row.runStatus, "PENDING");
+
+  // Once the new run drafts its replacement the latest verdict is current again, so it shows.
+  await seedVerdictRevision(id, 2, "REPRODUCED");
+
+  const replaced = column(await queue.listQueue(), "analysis-only").cards.find(
+    (c) => c.id === id,
+  );
+  assert.ok(replaced);
+  assert.equal(replaced.outcome, "REPRODUCED");
+  assert.equal(replaced.verdictSuperseded, false);
+});
+
 test("an older failed handoff does not mark the latest verdict revision failed", async () => {
   const id = await seedReport("AWAITING_APPROVAL");
   const oldVerdict = await seedVerdictRevision(id, 1, "REPRODUCED");

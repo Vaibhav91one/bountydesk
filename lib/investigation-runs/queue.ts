@@ -33,6 +33,10 @@ import {
 /** Runs are claimed the way every other queue in this codebase is: lease, fence, SKIP LOCKED. */
 // Provisioning can take five minutes; lease must outlive one attempt so a sweeper cannot start a duplicate run.
 const RECHECK_LEASE_SECONDS = 600;
+export const RECHECK_MAX_ATTEMPTS = 8;
+export const RECHECK_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
+
+const RECHECK_FAILURE_EVENT = "agent.recheck_failed";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -132,7 +136,7 @@ export async function claimRecheckRun(owner: string): Promise<RecheckRunLease | 
         where r.reason = 'REVIEWER_GUIDANCE'
           and r.status = 'PENDING'
           and (r.lease_expires_at is null or r.lease_expires_at < now())
-          and r.attempts < 8
+          and r.attempts < ${RECHECK_MAX_ATTEMPTS}
         order by r.created_at
         limit 1
         for update skip locked
@@ -199,6 +203,129 @@ async function releaseRun(
     .where(heldBy(lease))
     .returning({ id: investigationRun.id });
   if (updated.length === 0) throw new RecheckLeaseLostError(lease.runId);
+}
+
+async function failRecheckRun(lease: RecheckRunLease, reason: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(investigationRun)
+      .set({
+        status: "ERROR",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        finishedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(heldBy(lease))
+      .returning({ id: investigationRun.id, reportId: investigationRun.reportId, runNumber: investigationRun.runNumber });
+    if (!updated) throw new RecheckLeaseLostError(lease.runId);
+
+    await recordEvent(
+      updated.reportId,
+      RECHECK_FAILURE_EVENT,
+      { runId: updated.id, runNumber: updated.runNumber, reason },
+      { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${updated.id}`, tx },
+    );
+  });
+}
+
+export type RecheckSweepCandidate = {
+  reason: string;
+  status: string;
+  attempts: number;
+  createdAt: Date;
+  leaseOwner: string | null;
+  leaseExpiresAt: Date | null;
+};
+
+export function recheckSweepReason(
+  candidate: RecheckSweepCandidate,
+  now: Date = new Date(),
+): string | null {
+  if (candidate.reason !== "REVIEWER_GUIDANCE") return null;
+  if (candidate.status === "PENDING") {
+    if (
+      candidate.attempts === 0 &&
+      candidate.leaseOwner === null &&
+      candidate.leaseExpiresAt === null &&
+      now.getTime() - candidate.createdAt.getTime() >= RECHECK_PENDING_TIMEOUT_MS
+    ) {
+      return "pending re-check was not claimed before its timeout";
+    }
+    if (candidate.attempts >= RECHECK_MAX_ATTEMPTS) {
+      return "re-check claim attempt limit reached";
+    }
+    return null;
+  }
+  if (
+    candidate.status === "RUNNING" &&
+    candidate.attempts >= RECHECK_MAX_ATTEMPTS &&
+    candidate.leaseExpiresAt !== null &&
+    candidate.leaseExpiresAt.getTime() <= now.getTime()
+  ) {
+    return "re-check claim attempt limit reached after lease expiry";
+  }
+  return null;
+}
+
+export async function sweepRecheckRuns(now = new Date()): Promise<{ released: number; failed: number }> {
+  return db.transaction(async (tx) => {
+    const released = await tx
+      .update(investigationRun)
+      .set({ status: "PENDING", leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() })
+      .where(sql`
+        ${investigationRun.reason} = 'REVIEWER_GUIDANCE'
+        and ${investigationRun.status} = 'RUNNING'
+        and ${investigationRun.attempts} < ${RECHECK_MAX_ATTEMPTS}
+        and ${investigationRun.leaseExpiresAt} <= ${now}
+      `)
+      .returning({ id: investigationRun.id });
+
+    const rows = await tx.execute<{
+      id: string;
+      report_id: string;
+      run_number: number;
+    }>(sql`
+      update ${investigationRun}
+         set status = 'ERROR',
+             lease_owner = null,
+             lease_expires_at = null,
+             finished_at = now(),
+             updated_at = now()
+       where ${investigationRun.reason} = 'REVIEWER_GUIDANCE'
+         and (
+           (
+             ${investigationRun.status} = 'PENDING'
+             and ${investigationRun.attempts} = 0
+             and ${investigationRun.leaseOwner} is null
+             and ${investigationRun.leaseExpiresAt} is null
+             and ${investigationRun.createdAt} <= ${new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS)}
+           )
+           or (
+             ${investigationRun.status} = 'PENDING'
+             and ${investigationRun.attempts} >= ${RECHECK_MAX_ATTEMPTS}
+           )
+           or (
+             ${investigationRun.status} = 'RUNNING'
+             and ${investigationRun.attempts} >= ${RECHECK_MAX_ATTEMPTS}
+             and ${investigationRun.leaseExpiresAt} <= ${now}
+           )
+         )
+       returning ${investigationRun.id} as id,
+                 ${investigationRun.reportId} as report_id,
+                 ${investigationRun.runNumber} as run_number
+    `);
+
+    for (const row of rows) {
+      await recordEvent(
+        row.report_id,
+        RECHECK_FAILURE_EVENT,
+        { runId: row.id, runNumber: row.run_number, reason: "re-check was abandoned by the sweeper" },
+        { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${row.id}`, tx },
+      );
+    }
+    return { released: released.length, failed: rows.length };
+  });
 }
 
 /**
@@ -289,7 +416,7 @@ export async function runRecheckOnce(
     .limit(1);
 
   if (!context || context.state !== "REPRODUCING") {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "report is no longer REPRODUCING");
     return lease.runId;
   }
 
@@ -306,7 +433,7 @@ export async function runRecheckOnce(
         })
       : null;
   if (currentIdentity !== (await currentRunIdentity(lease.runId))) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "bound target identity changed");
     return lease.runId;
   }
 
@@ -324,7 +451,7 @@ export async function runRecheckOnce(
       }
     : null;
   if (!grantSnapshot || !hasActiveRepositoryGrant(grantSnapshot)) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "repository grant is no longer active");
     return lease.runId;
   }
 
@@ -337,7 +464,7 @@ export async function runRecheckOnce(
     !context.targetImageDigest ||
     !context.targetSnapshotId
   ) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "re-check target is not ready");
     return lease.runId;
   }
   const provisioner = opts.provision ?? provisionRecheckTarget;
@@ -353,11 +480,11 @@ export async function runRecheckOnce(
     });
   } catch (error) {
     console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${errorMessage(error)}`);
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "sandbox provisioning failed");
     return lease.runId;
   }
   if (!provisioned) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "sandbox provisioning returned no sandbox");
     return lease.runId;
   }
 
@@ -371,7 +498,7 @@ export async function runRecheckOnce(
   } catch (error) {
     console.error(`re-check run ${lease.runId}: TrueForge session creation failed: ${errorMessage(error)}`);
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "TrueForge session creation failed");
     return lease.runId;
   }
 
@@ -476,7 +603,7 @@ export async function runRecheckOnce(
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
     await client.deleteSession(sessionId).catch(() => undefined);
     try {
-      await releaseRun(lease, "ERROR");
+      await failRecheckRun(lease, "re-check turn failed");
     } catch (releaseError) {
       if (!(releaseError instanceof RecheckLeaseLostError)) throw releaseError;
     }

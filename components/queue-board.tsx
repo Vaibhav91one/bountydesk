@@ -7,6 +7,7 @@ import { PhaseDot, PhaseSpinner } from "@/components/phase-dot";
 import {
   ReportOutcomeBadge,
   ReportStateBadge,
+  recheckStatusLabel,
   shouldShowOutcomeBadge,
 } from "@/components/report-badges";
 import { RollingIcon } from "@/components/rolling-icon";
@@ -84,16 +85,6 @@ function driftAt(index: number) {
   return FLOAT[index % FLOAT.length];
 }
 
-/** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
-function age(from: string): string {
-  const minutes = Math.floor((Date.now() - new Date(from).getTime()) / 60_000);
-  if (minutes < 1) return "now";
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(hours / 24)}d`;
-}
-
 export function Card({
   card,
   showState,
@@ -114,6 +105,10 @@ export function Card({
   const stalled = failedDelivery || card.handoffFailed;
   const running = !stalled && RUNNING.has(card.state);
   const float = driftAt(index);
+  // A superseded verdict means a re-check is underway or failed. That outranks the generic
+  // running label ("Reproducing" says nothing about the queued run), but not a handoff or
+  // delivery failure and never a review the card is still waiting on.
+  const recheck = recheckStatusLabel(card.runStatus, card.verdictSuperseded);
 
   const status = card.handoffFailed
     ? "Handoff failed"
@@ -121,6 +116,8 @@ export function Card({
     ? "Needs review"
     : failedDelivery
       ? "Delivery failed"
+    : recheck
+      ? recheck
     : running
       ? RUNNING_LABEL[card.state]
       : card.state === "DELIVERED"
@@ -187,7 +184,9 @@ export function Card({
               failed={card.handoffFailed}
             />
           ) : null}
-          {shouldShowOutcomeBadge(card.state, card.outcome) ? (
+          {shouldShowOutcomeBadge(card.state, card.outcome, {
+            superseded: card.verdictSuperseded,
+          }) ? (
             <ReportOutcomeBadge outcome={card.outcome} />
           ) : null}
           {/* Nothing in the report's own state distinguishes "queued" from "an agent is
@@ -210,8 +209,11 @@ export function Card({
           {status}
         </span>
         <span className="text-meta text-muted-foreground">
-          {card.eventCount} {card.eventCount === 1 ? "event" : "events"} ·{" "}
-          {age(card.updatedAt)}
+          {card.eventCount} {card.eventCount === 1 ? "event" : "events"}
+          {/* The age string is cut on the server and arrives as a prop, so server HTML and
+              hydration render the same text. Cards built outside the queue read path predate
+              the field and show no age rather than a clock read during render. */}
+          {card.ageLabel ? ` · ${card.ageLabel}` : null}
         </span>
       </div>
 
