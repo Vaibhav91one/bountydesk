@@ -95,11 +95,17 @@ export function LifecycleList({
                   )}
                 />
 
-                <span className="min-w-0 flex-1 text-body font-medium text-foreground">
-                  <span className="line-clamp-2">{step.label}</span>
-                </span>
+                {/* Narrow rows stack the note under the label so the label keeps its width:
+                    the note no longer competes for the same line below sm. */}
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-3">
+                  <span className="min-w-0 flex-1 break-words text-body font-medium text-foreground">
+                    <span className="line-clamp-2">{step.label}</span>
+                  </span>
 
-                <span className="shrink-0 text-meta text-muted-foreground">{step.note}</span>
+                  <span className="min-w-0 break-words text-meta text-muted-foreground sm:shrink-0">
+                    {step.note}
+                  </span>
+                </span>
 
                 {/* An outward affordance rather than the old chevron: the row no longer
                     expands in place, it opens the sheet that holds the events. */}
