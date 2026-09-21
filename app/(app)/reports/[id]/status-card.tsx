@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 
+import { RecheckActions } from "./recheck-actions";
+
 /** One fact. The value is always something the database holds. */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -35,12 +37,14 @@ export function StatusCard({
   issueUrl,
   channel,
   repositoryFullName,
+  reportId,
 }: {
   status: CaseLiveView;
   issueUrl: string | null;
   /** Header facts that identify the report rather than track it, so they come from the page. */
   channel: string;
   repositoryFullName: string | null;
+  reportId: string;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
@@ -76,7 +80,9 @@ export function StatusCard({
           <Fact label="Intake">{repositoryFullName ?? channel}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
             {status.verdict
-              ? `${status.verdict.outcomeLabel} · revision ${status.verdict.revision}`
+              ? status.verdict.superseded
+                ? `Superseded by a re-check · revision ${status.verdict.revision}`
+                : `${status.verdict.outcomeLabel} · revision ${status.verdict.revision}`
               : "Nothing drafted yet"}
           </Fact>
           <Fact label="Recorded events">
@@ -89,6 +95,18 @@ export function StatusCard({
           </Fact>
         </div>
       </div>
+
+      {/* The harness session can be lost after the draft is stored. The verdict below is
+          still the exact text to approve or deny, and approval needs no live session. */}
+      {status.verdict && status.turnStatus === "ERROR" ? (
+        <p className="border-t border-border/50 px-5 py-3 text-meta text-muted-foreground">
+          The live session is gone, but the drafted verdict still stands for review.
+        </p>
+      ) : null}
+
+      {status.state === "REPRODUCING" && status.recheckSummary ? (
+        <RecheckActions reportId={reportId} summary={status.recheckSummary} />
+      ) : null}
     </section>
   );
 }

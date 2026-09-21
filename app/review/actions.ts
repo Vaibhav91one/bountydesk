@@ -16,12 +16,18 @@ import {
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
-import { requestRecheck } from "@/lib/investigation-runs/recheck";
+import {
+  cancelRecheck,
+  requestRecheck,
+  retryRecheck,
+} from "@/lib/investigation-runs/recheck";
 import {
   composeRecheckGuidance,
   MAX_RECHECK_NOTE_LENGTH,
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
+import { isReportId } from "@/lib/reports/case";
+import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type ActionResult = { ok: boolean; error?: string };
@@ -335,4 +341,28 @@ export async function requestRecheckAction(
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);
   return result.ok ? { ok: true } : { ok: false, error: result.reason };
+}
+
+export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
+  await requireReviewer();
+  if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
+  try {
+    const result = await retryRecheck(reportId, runId);
+    revalidateReportViews(reportId);
+    return result.ok ? { ok: true } : { ok: false, error: result.reason };
+  } catch (error) {
+    return thrownActionError(error, "retry");
+  }
+}
+
+export async function cancelRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
+  await requireReviewer();
+  if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
+  try {
+    const result = await cancelRecheck(reportId, runId);
+    revalidateReportViews(reportId);
+    return result;
+  } catch (error) {
+    return thrownActionError(error, "cancel");
+  }
 }

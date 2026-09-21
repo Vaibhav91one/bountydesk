@@ -19,7 +19,7 @@ import {
   type Executor,
 } from "@/lib/db";
 import { toPlainText } from "@/lib/reviewer-chat/schema";
-import { transition } from "@/lib/reports/lifecycle";
+import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import { canTransition } from "@/lib/reports/states";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { targetIdentityHash } from "@/lib/targets/identity";
@@ -39,6 +39,8 @@ const guidanceSchema = z
 export type RecheckResult =
   | { ok: true; runId: string }
   | { ok: false; reason: string };
+
+export type RecheckActionResult = { ok: true } | { ok: false; reason: string };
 
 export class RecheckRefused extends Error {
   constructor(reason: string) {
@@ -133,6 +135,124 @@ export async function ensureInitialRun(
     .limit(1);
   if (!winner) throw new RecheckRefused("could not establish an initial investigation run");
   return winner;
+}
+
+/**
+ * Put a failed re-check run back in the queue. Only the newest run, only a REVIEWER_GUIDANCE
+ * one that ended in ERROR, and only while the report still waits on it: anything else would
+ * either resurrect an old run or leave a pending row no claimant selects.
+ */
+export async function retryRecheck(
+  reportId: string,
+  runId: string,
+): Promise<RecheckResult> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        id: investigationRun.id,
+        runNumber: investigationRun.runNumber,
+        parentRunId: investigationRun.parentRunId,
+        status: investigationRun.status,
+        reason: investigationRun.reason,
+        guidanceHash: investigationRun.guidanceHash,
+        targetProfileId: investigationRun.targetProfileId,
+        targetIdentityHash: investigationRun.targetIdentityHash,
+        state: report.state,
+      })
+      .from(investigationRun)
+      .innerJoin(report, eq(report.id, investigationRun.reportId))
+      .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
+      .for("update");
+    if (!row) return { ok: false, reason: "re-check run not found" };
+    // Name the stored reason so a reviewer can tell a backfilled initial run from a wrong id.
+    if (row.reason !== "REVIEWER_GUIDANCE")
+      return { ok: false, reason: `not a re-check run (${row.reason})` };
+    if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
+    if (row.status !== "ERROR") return { ok: false, reason: "only a failed re-check can be retried" };
+    const [latest] = await tx
+      .select({ id: investigationRun.id })
+      .from(investigationRun)
+      .where(eq(investigationRun.reportId, reportId))
+      .orderBy(sql`${investigationRun.runNumber} desc`)
+      .limit(1);
+    if (latest?.id !== row.id) return { ok: false, reason: "only the latest re-check can be retried" };
+
+    await tx
+      .update(investigationRun)
+      .set({
+        status: "PENDING",
+        attempts: 0,
+        startedAt: null,
+        finishedAt: null,
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(investigationRun.id, row.id));
+    return { ok: true, runId: row.id };
+  });
+}
+
+/**
+ * Stop waiting on a queued or failed re-check. The old verdict is already superseded and
+ * cannot be approved again, so the report moves to ANALYSIS_ONLY, where a human decides,
+ * instead of staying in REPRODUCING with no run that could finish it.
+ */
+export async function cancelRecheck(
+  reportId: string,
+  runId: string,
+): Promise<RecheckActionResult> {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({
+        id: investigationRun.id,
+        reportId: investigationRun.reportId,
+        runNumber: investigationRun.runNumber,
+        status: investigationRun.status,
+        reason: investigationRun.reason,
+        state: report.state,
+      })
+      .from(investigationRun)
+      .innerJoin(report, eq(report.id, investigationRun.reportId))
+      .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
+      .for("update");
+    if (!row) return { ok: false, reason: "re-check run not found" };
+    // Same context as the retry path above, so both reviewer actions explain the refusal.
+    if (row.reason !== "REVIEWER_GUIDANCE")
+      return { ok: false, reason: `not a re-check run (${row.reason})` };
+    if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
+    if (row.status !== "PENDING" && row.status !== "ERROR") {
+      return { ok: false, reason: "only a pending or failed re-check can be cancelled" };
+    }
+    // Same guard as retry: cancelling an older run would move the report to ANALYSIS_ONLY while
+    // a newer run is still active.
+    const [latest] = await tx
+      .select({ id: investigationRun.id })
+      .from(investigationRun)
+      .where(eq(investigationRun.reportId, reportId))
+      .orderBy(sql`${investigationRun.runNumber} desc`)
+      .limit(1);
+    if (latest?.id !== row.id) return { ok: false, reason: "only the latest re-check can be cancelled" };
+
+    await tx
+      .update(investigationRun)
+      .set({
+        status: "CANCELLED",
+        finishedAt: new Date(),
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(investigationRun.id, row.id));
+    await recordEvent(
+      reportId,
+      "agent.recheck_cancelled",
+      { runId: row.id, runNumber: row.runNumber },
+      { idempotencyKey: `agent.recheck_cancelled:${row.id}`, tx },
+    );
+    await transition(reportId, "REPRODUCING", "ANALYSIS_ONLY", tx);
+    return { ok: true };
+  });
 }
 
 /**

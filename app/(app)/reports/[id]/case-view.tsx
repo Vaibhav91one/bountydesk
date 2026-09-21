@@ -94,6 +94,7 @@ export function CaseView({
         issueUrl={issueUrl}
         channel={channel}
         repositoryFullName={repositoryFullName}
+        reportId={reportId}
       />
 
       {/* The pipeline beside the shape it runs through. Equal height on purpose: they are

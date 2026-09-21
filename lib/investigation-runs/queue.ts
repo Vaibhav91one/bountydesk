@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import { safeErrorText } from "@/lib/errors/safe-error";
+
 import {
   agentSession,
   and,
@@ -33,10 +35,10 @@ import {
 /** Runs are claimed the way every other queue in this codebase is: lease, fence, SKIP LOCKED. */
 // Provisioning can take five minutes; lease must outlive one attempt so a sweeper cannot start a duplicate run.
 const RECHECK_LEASE_SECONDS = 600;
+export const RECHECK_MAX_ATTEMPTS = 8;
+export const RECHECK_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+const RECHECK_FAILURE_EVENT = "agent.recheck_failed";
 
 export type RecheckRunLease = {
   runId: string;
@@ -132,7 +134,7 @@ export async function claimRecheckRun(owner: string): Promise<RecheckRunLease | 
         where r.reason = 'REVIEWER_GUIDANCE'
           and r.status = 'PENDING'
           and (r.lease_expires_at is null or r.lease_expires_at < now())
-          and r.attempts < 8
+          and r.attempts < ${RECHECK_MAX_ATTEMPTS}
         order by r.created_at
         limit 1
         for update skip locked
@@ -199,6 +201,133 @@ async function releaseRun(
     .where(heldBy(lease))
     .returning({ id: investigationRun.id });
   if (updated.length === 0) throw new RecheckLeaseLostError(lease.runId);
+}
+
+async function failRecheckRun(lease: RecheckRunLease, reason: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(investigationRun)
+      .set({
+        status: "ERROR",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        finishedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(heldBy(lease))
+      .returning({ id: investigationRun.id, reportId: investigationRun.reportId, runNumber: investigationRun.runNumber });
+    if (!updated) throw new RecheckLeaseLostError(lease.runId);
+
+    await recordEvent(
+      updated.reportId,
+      RECHECK_FAILURE_EVENT,
+      { runId: updated.id, runNumber: updated.runNumber, reason },
+      { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${updated.id}`, tx },
+    );
+  });
+}
+
+export type RecheckSweepCandidate = {
+  reason: string;
+  status: string;
+  attempts: number;
+  createdAt: Date;
+  leaseOwner: string | null;
+  leaseExpiresAt: Date | null;
+};
+
+export function recheckSweepReason(
+  candidate: RecheckSweepCandidate,
+  now: Date = new Date(),
+): string | null {
+  if (candidate.reason !== "REVIEWER_GUIDANCE") return null;
+  if (candidate.status === "PENDING") {
+    if (
+      candidate.attempts === 0 &&
+      candidate.leaseOwner === null &&
+      candidate.leaseExpiresAt === null &&
+      now.getTime() - candidate.createdAt.getTime() >= RECHECK_PENDING_TIMEOUT_MS
+    ) {
+      return "pending re-check was not claimed before its timeout";
+    }
+    if (candidate.attempts >= RECHECK_MAX_ATTEMPTS) {
+      return "re-check claim attempt limit reached";
+    }
+    return null;
+  }
+  if (
+    candidate.status === "RUNNING" &&
+    candidate.attempts >= RECHECK_MAX_ATTEMPTS &&
+    candidate.leaseExpiresAt !== null &&
+    candidate.leaseExpiresAt.getTime() <= now.getTime()
+  ) {
+    return "re-check claim attempt limit reached after lease expiry";
+  }
+  return null;
+}
+
+export async function sweepRecheckRuns(now = new Date()): Promise<{ released: number; failed: number }> {
+  // Raw sql templates do not know a column type, so a Date parameter reaches the driver
+  // unserialized and it throws. ISO strings cast in SQL avoid that.
+  const nowIso = now.toISOString();
+  const pendingCutoffIso = new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS).toISOString();
+  return db.transaction(async (tx) => {
+    const released = await tx
+      .update(investigationRun)
+      .set({ status: "PENDING", leaseOwner: null, leaseExpiresAt: null, updatedAt: new Date() })
+      .where(sql`
+        ${investigationRun.reason} = 'REVIEWER_GUIDANCE'
+        and ${investigationRun.status} = 'RUNNING'
+        and ${investigationRun.attempts} < ${RECHECK_MAX_ATTEMPTS}
+        and ${investigationRun.leaseExpiresAt} <= ${nowIso}::timestamptz
+      `)
+      .returning({ id: investigationRun.id });
+
+    const rows = await tx.execute<{
+      id: string;
+      report_id: string;
+      run_number: number;
+    }>(sql`
+      update ${investigationRun}
+         set status = 'ERROR',
+             lease_owner = null,
+             lease_expires_at = null,
+             finished_at = now(),
+             updated_at = now()
+       where ${investigationRun.reason} = 'REVIEWER_GUIDANCE'
+         and (
+           (
+             ${investigationRun.status} = 'PENDING'
+             and ${investigationRun.attempts} = 0
+             and ${investigationRun.leaseOwner} is null
+             and ${investigationRun.leaseExpiresAt} is null
+             and ${investigationRun.createdAt} <= ${pendingCutoffIso}::timestamptz
+           )
+           or (
+             ${investigationRun.status} = 'PENDING'
+             and ${investigationRun.attempts} >= ${RECHECK_MAX_ATTEMPTS}
+           )
+           or (
+             ${investigationRun.status} = 'RUNNING'
+             and ${investigationRun.attempts} >= ${RECHECK_MAX_ATTEMPTS}
+             and ${investigationRun.leaseExpiresAt} <= ${nowIso}::timestamptz
+           )
+         )
+       returning ${investigationRun.id} as id,
+                 ${investigationRun.reportId} as report_id,
+                 ${investigationRun.runNumber} as run_number
+    `);
+
+    for (const row of rows) {
+      await recordEvent(
+        row.report_id,
+        RECHECK_FAILURE_EVENT,
+        { runId: row.id, runNumber: row.run_number, reason: "re-check was abandoned by the sweeper" },
+        { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${row.id}`, tx },
+      );
+    }
+    return { released: released.length, failed: rows.length };
+  });
 }
 
 /**
@@ -289,7 +418,7 @@ export async function runRecheckOnce(
     .limit(1);
 
   if (!context || context.state !== "REPRODUCING") {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "report is no longer REPRODUCING");
     return lease.runId;
   }
 
@@ -306,7 +435,7 @@ export async function runRecheckOnce(
         })
       : null;
   if (currentIdentity !== (await currentRunIdentity(lease.runId))) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "bound target identity changed");
     return lease.runId;
   }
 
@@ -324,7 +453,7 @@ export async function runRecheckOnce(
       }
     : null;
   if (!grantSnapshot || !hasActiveRepositoryGrant(grantSnapshot)) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "repository grant is no longer active");
     return lease.runId;
   }
 
@@ -337,7 +466,7 @@ export async function runRecheckOnce(
     !context.targetImageDigest ||
     !context.targetSnapshotId
   ) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "re-check target is not ready");
     return lease.runId;
   }
   const provisioner = opts.provision ?? provisionRecheckTarget;
@@ -352,12 +481,12 @@ export async function runRecheckOnce(
       targetConfig: context.targetConfig,
     });
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${errorMessage(error)}`);
-    await releaseRun(lease, "ERROR");
+    console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${safeErrorText(error)}`);
+    await failRecheckRun(lease, "sandbox provisioning failed");
     return lease.runId;
   }
   if (!provisioned) {
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "sandbox provisioning returned no sandbox");
     return lease.runId;
   }
 
@@ -369,9 +498,9 @@ export async function runRecheckOnce(
   try {
     ({ sessionId } = await client.createSession({}));
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: TrueForge session creation failed: ${errorMessage(error)}`);
+    console.error(`re-check run ${lease.runId}: TrueForge session creation failed: ${safeErrorText(error)}`);
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
-    await releaseRun(lease, "ERROR");
+    await failRecheckRun(lease, "TrueForge session creation failed");
     return lease.runId;
   }
 
@@ -452,31 +581,31 @@ export async function runRecheckOnce(
         guidanceHash: lease.guidanceHash,
       }, { idempotencyKey: `agent.recheck_started:${lease.runId}` });
     } catch (error) {
-      console.error(`re-check run ${lease.runId}: start event failed: ${errorMessage(error)}`);
+      console.error(`re-check run ${lease.runId}: start event failed: ${safeErrorText(error)}`);
     }
     // The superseded session is dead weight now: its sandbox was torn down at draft time, the
     // poller follows agent_session, and the chat worker refuses superseded threads. Its events
     // are mirrored in session_event, so deleting the remote copy loses nothing.
     if (oldSessionId && oldSessionId !== sessionId) {
       await client.deleteSession(oldSessionId).catch((error) => {
-        console.error(`re-check run ${lease.runId}: superseded session ${oldSessionId} deletion failed: ${errorMessage(error)}`);
+        console.error(`re-check run ${lease.runId}: superseded session ${oldSessionId} deletion failed: ${safeErrorText(error)}`);
       });
     }
     try {
       await releaseRun(lease, "RUNNING");
     } catch (error) {
       if (!(error instanceof RecheckLeaseLostError)) {
-        console.error(`re-check run ${lease.runId}: lease release failed: ${errorMessage(error)}`);
+        console.error(`re-check run ${lease.runId}: lease release failed: ${safeErrorText(error)}`);
       }
     }
     return lease.runId;
   } catch (error) {
-    console.error(`re-check run ${lease.runId}: turn failed: ${errorMessage(error)}`);
+    console.error(`re-check run ${lease.runId}: turn failed: ${safeErrorText(error)}`);
     // Cleanup is valid only if the new session/turn transaction did not commit.
     for (const sandboxId of provisioned.sandboxIds) await teardownSandbox(sandboxId, true);
     await client.deleteSession(sessionId).catch(() => undefined);
     try {
-      await releaseRun(lease, "ERROR");
+      await failRecheckRun(lease, "re-check turn failed");
     } catch (releaseError) {
       if (!(releaseError instanceof RecheckLeaseLostError)) throw releaseError;
     }

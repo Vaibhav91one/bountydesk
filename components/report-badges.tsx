@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 
 export {
   outcomeLabel,
+  recheckStatusLabel,
   reportStateLabel,
   shouldShowOutcomeBadge,
 } from "@/lib/reports/labels";

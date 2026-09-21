@@ -264,13 +264,94 @@ function stepMascot(key: string, state: StepState, file: CaseFile): MascotKey {
 }
 
 /**
+ * The newest run as the lifecycle reads it. Optional fields keep fixtures written before run
+ * timestamps existed typechecking, and the extra columns stay optional here because this file
+ * is pure: case.ts owns the database read, this file only branches on what it was given.
+ */
+type LifecycleRun = {
+  id: string;
+  runNumber: number;
+  status: string;
+  reason: string;
+  createdAt?: Date;
+  updatedAt?: Date;
+  attempts?: number;
+} | null | undefined;
+
+type LifecycleFile = CaseFile & { latestRun?: LifecycleRun };
+
+/**
+ * Whether the verdict on screen is dead history. A re-check supersedes revision 1 without
+ * deleting it, so the page keeps showing it while the fresh run works. Without this check the
+ * lifecycle would read the old revision as the current answer.
+ */
+function isSupersededVerdict(file: LifecycleFile): boolean {
+  if (!file.verdict) return false;
+  return file.verdictHistory.find((entry) => entry.id === file.verdict!.id)?.superseded ?? false;
+}
+
+/**
+ * The re-check run that owns the lifecycle while it is in flight. Only a REVIEWER_GUIDANCE run
+ * over a superseded verdict counts: any other run is either the initial investigation (which the
+ * existing verdict and event logic already describes) or a finished run whose verdict is the one
+ * on screen.
+ */
+function activeRecheck(file: LifecycleFile): NonNullable<LifecycleRun> | null {
+  const run = file.latestRun ?? null;
+  if (!run || run.reason !== "REVIEWER_GUIDANCE") return null;
+  if (run.status !== "PENDING" && run.status !== "RUNNING") return null;
+  if (!file.verdict || !isSupersededVerdict(file)) return null;
+  return run;
+}
+
+/** Same gate for a re-check that died. The daemon releases the run as ERROR with no new verdict. */
+function failedRecheck(file: LifecycleFile): NonNullable<LifecycleRun> | null {
+  const run = file.latestRun ?? null;
+  if (!run || run.reason !== "REVIEWER_GUIDANCE") return null;
+  if (run.status !== "ERROR") return null;
+  if (!file.verdict || !isSupersededVerdict(file)) return null;
+  return run;
+}
+
+/** Same gate for a re-check the reviewer stopped. Cancel parks the report with no new verdict. */
+function cancelledRecheck(file: LifecycleFile): NonNullable<LifecycleRun> | null {
+  const run = file.latestRun ?? null;
+  if (!run || run.reason !== "REVIEWER_GUIDANCE") return null;
+  if (run.status !== "CANCELLED") return null;
+  if (!file.verdict || !isSupersededVerdict(file)) return null;
+  return run;
+}
+
+/**
+ * Why a re-check run stopped, on one line.
+ *
+ * Reads the newest agent.recheck_failed event when one exists. The text is worker output, so it
+ * is treated as untrusted plain text like every other event body here: first line only, trimmed,
+ * capped, never parsed for a target or tool. Null when no such event was recorded, and the row
+ * falls back to the bare failed label.
+ */
+function recheckFailureDetail(file: LifecycleFile): string | null {
+  const found = [...file.events].reverse().find((event) => event.type === "agent.recheck_failed");
+  if (!found) return null;
+  const data =
+    found.data && typeof found.data === "object"
+      ? (found.data as { message?: unknown; error?: unknown; lastError?: unknown; reason?: unknown })
+      : null;
+  const raw = data?.message ?? data?.error ?? data?.lastError ?? data?.reason ?? null;
+  if (typeof raw !== "string") return null;
+  const line = raw.split("\n")[0].trim();
+  if (!line) return null;
+  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+}
+
+/**
  * The pipeline, and how far this report got through it.
  *
  * Derived from state and from what exists, never from a stored step counter: there is no such
  * column, and inventing one that could drift from the report's own state would make the
  * picture and the truth two different things.
  */
-function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: number) {
+function lifecycle(file: LifecycleFile, investigating: boolean, investigationSteps: number) {
   const past = (states: string[]) => states.includes(file.state);
   const deliveryFailed = file.delivery?.state === "FAILED";
 
@@ -286,6 +367,30 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
   // while it is pending the row below would otherwise say "Handing off".
   const denied = file.approval?.decision === "DENIED";
 
+  // A re-check supersedes the verdict on screen without deleting it. The newest verdict is still
+  // revision 1, so without this branch a REPRODUCING report with a PENDING run would render
+  // "Investigation done" and "Revision 1, done" while nothing is actually decided.
+  const recheck = activeRecheck(file);
+  const recheckFailed = failedRecheck(file);
+  const recheckCancelled = cancelledRecheck(file);
+  const recheckActive = recheck !== null;
+  const recheckOver = recheckFailed !== null || recheckCancelled !== null;
+  const failureDetail = recheckFailed ? recheckFailureDetail(file) : null;
+  const recheckNote = recheck
+    ? `Re-check run ${recheck.runNumber} ${recheck.status === "PENDING" ? "queued" : "running"}`
+    : recheckFailed
+      ? failureDetail
+        ? `Re-check failed (run ${recheckFailed.runNumber}): ${failureDetail}`
+        : `Re-check failed (run ${recheckFailed.runNumber})`
+      : recheckCancelled
+        ? `Re-check cancelled (run ${recheckCancelled.runNumber})`
+        : null;
+
+  // While a re-check owns the report there is nothing to approve: requestRecheck clears the
+  // pending tuple, so any awaiting id here would be stale. The row stays "Not reached" until the
+  // fresh run drafts its own revision.
+  const approvalBlocked = recheckActive || recheckOver;
+
   return [
     {
       key: "intake",
@@ -299,44 +404,70 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
       // A turn that errored still leaves a verdict behind: the poller synthesizes an
       // ANALYSIS_ONLY one so the report reaches a reviewer rather than vanishing. That made a
       // crashed run and a finished run draw the same row, which is why the error outranks the
-      // verdict here.
-      note: turnErrored(file)
-        ? stoppedNote(file.sessionError)
-        : file.verdict
-          ? `${investigationSteps} ${investigationSteps === 1 ? "step" : "steps"} recorded`
-          : investigating
-            ? "In progress"
-            : "Not started",
+      // verdict here. A re-check outranks both: the superseded verdict is history, and the fresh
+      // run is the work being watched.
+      note:
+        recheckNote ??
+        (turnErrored(file)
+          ? stoppedNote(file.sessionError)
+          : file.verdict
+            ? `${investigationSteps} ${investigationSteps === 1 ? "step" : "steps"} recorded`
+            : investigating
+              ? "In progress"
+              : "Not started"),
       // Otherwise done the moment a verdict exists: the live path mints revision 1 only once
       // the agent calls publish_verdict, which is also the last thing that happens in its turn
       // (see lib/mcp/publish-verdict.ts), so a verdict existing means the turn is over.
-      state: turnErrored(file)
-        ? ("skipped" as const)
-        : file.verdict
-          ? ("done" as const)
-          : investigating
-            ? ("current" as const)
-            : ("pending" as const),
+      state:
+        recheckActive
+          ? ("current" as const)
+          : recheckOver
+            ? ("skipped" as const)
+            : turnErrored(file)
+              ? ("skipped" as const)
+              : file.verdict
+                ? ("done" as const)
+                : investigating
+                  ? ("current" as const)
+                  : ("pending" as const),
     },
     {
       key: "verdict",
       label: "Verdict drafted",
-      note: file.verdict ? `Revision ${file.verdict.revision}` : "None yet",
-      state: file.verdict ? ("done" as const) : ("pending" as const),
+      note:
+        recheck && file.verdict
+          ? `Revision ${file.verdict.revision} superseded, re-check ${recheck.status === "PENDING" ? "queued" : "running"}`
+          : recheckFailed && file.verdict
+            ? `Revision ${file.verdict.revision} superseded, re-check failed`
+            : recheckCancelled && file.verdict
+              ? `Revision ${file.verdict.revision} superseded, re-check cancelled`
+              : file.verdict
+                ? `Revision ${file.verdict.revision}`
+                : "None yet",
+      state:
+        recheckActive || recheckOver
+          ? ("pending" as const)
+          : file.verdict
+            ? ("done" as const)
+            : ("pending" as const),
     },
     {
       key: "approval",
       label: "Human approval",
-      note: file.approval
-        ? `${file.approval.decision === "APPROVED" ? "Approved" : "Denied"} by ${file.approval.reviewer}`
-        : file.awaitingVerdictId
-          ? "Waiting on a reviewer"
-          : "Not reached",
-      state: file.approval
-        ? ("done" as const)
-        : file.awaitingVerdictId || past(["AWAITING_APPROVAL"])
-          ? ("current" as const)
-          : ("pending" as const),
+      note: approvalBlocked
+        ? "Not reached"
+        : file.approval
+          ? `${file.approval.decision === "APPROVED" ? "Approved" : "Denied"} by ${file.approval.reviewer}`
+          : file.awaitingVerdictId
+            ? "Waiting on a reviewer"
+            : "Not reached",
+      state: approvalBlocked
+        ? ("pending" as const)
+        : file.approval
+          ? ("done" as const)
+          : file.awaitingVerdictId || past(["AWAITING_APPROVAL"])
+            ? ("current" as const)
+            : ("pending" as const),
     },
     {
       key: "delivery",
@@ -352,24 +483,30 @@ function lifecycle(file: CaseFile, investigating: boolean, investigationSteps: n
             ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
             : file.delivery
               ? file.delivery.state.toLowerCase()
-              : // No delivery row yet. On the harness-backed path that is not necessarily "not
-                // started": the handoff has to reach TrueForge and come back through
-                // publish_verdict before an outbox row exists at all, so a handoff that died
-                // leaves this step honestly reporting "Not enqueued" forever.
-                handoffNote(handoff) ?? "Not enqueued",
-      state: denied || deliveryFailed || handoffDead
-        ? ("skipped" as const)
-        : // A handoff still in flight, including one that failed but has attempts left. Once a
-          // delivery row exists the handoff has done its job and the outbox is the story.
-          handoff && !file.delivery
-          ? ("current" as const)
-          : file.state === "DELIVERED"
-            ? ("done" as const)
-            : file.state === "DELIVERING"
+              : approvalBlocked
+                ? "Not enqueued"
+                : // No delivery row yet. On the harness-backed path that is not necessarily "not
+                  // started": the handoff has to reach TrueForge and come back through
+                  // publish_verdict before an outbox row exists at all, so a handoff that died
+                  // leaves this step honestly reporting "Not enqueued" forever.
+                  handoffNote(handoff) ?? "Not enqueued",
+      state:
+        denied || deliveryFailed || handoffDead
+          ? ("skipped" as const)
+          : // A re-check owns the report, so a stale handoff must not read as in flight.
+            approvalBlocked && !file.delivery
+            ? ("pending" as const)
+            : // A handoff still in flight, including one that failed but has attempts left. Once a
+              // delivery row exists the handoff has done its job and the outbox is the story.
+              handoff && !file.delivery
               ? ("current" as const)
-              : past(TERMINAL)
-                ? ("skipped" as const)
-                : ("pending" as const),
+              : file.state === "DELIVERED"
+                ? ("done" as const)
+                : file.state === "DELIVERING"
+                  ? ("current" as const)
+                  : past(TERMINAL)
+                    ? ("skipped" as const)
+                    : ("pending" as const),
     },
   ];
 }
@@ -404,7 +541,7 @@ function caseStateLabel(file: CaseFile, deliveryState: string | null): string {
  */
 function recheckSummaryFor(
   file: CaseFile & {
-    latestRun?: { runNumber: number; status: string; reason: string } | null;
+    latestRun?: LifecycleRun;
   },
   investigationSteps: number,
 ): RecheckSummary | null {
@@ -435,6 +572,7 @@ function recheckSummaryFor(
   const last = file.events.length > 0 ? file.events[file.events.length - 1] : null;
 
   return {
+    runId: run.id,
     runNumber: run.runNumber,
     runStatus: run.status,
     runReason: run.reason,
@@ -450,7 +588,7 @@ function recheckSummaryFor(
 
 export function caseLiveView(
   file: CaseFile & {
-    latestRun?: { runNumber: number; status: string; reason: string } | null;
+    latestRun?: LifecycleRun;
   },
 ): CaseLiveView {
   const deliveryState = file.delivery?.state ?? null;
@@ -462,6 +600,10 @@ export function caseLiveView(
   // (EVENT_PHASE's "agent" entry) and the session's own turnStatus, both of which move during
   // a live investigation.
   const investigationSteps = file.events.filter((e) => e.channel === "agent").length;
+  // Unchanged for a re-check: a superseded verdict still counts as a verdict here, so this stays
+  // false while the fresh run works. The lifecycle above names the re-check from latestRun
+  // instead, which keeps this flag consistent with the board badge while the status poll behind
+  // a REPRODUCING report keeps asking.
   const investigating = isAgentInvestigating(
     file.turnStatus,
     file.verdict !== null,
@@ -533,8 +675,11 @@ export function caseLiveView(
     deliveryState,
     verdictOutcome,
     outcomeLabel: verdictOutcome ? outcomeLabel(verdictOutcome) : null,
+    // Same superseded flag the board passes, so a re-check hides the old outcome here too.
     showOutcomeBadge: verdictOutcome
-      ? shouldShowOutcomeBadge(file.state, verdictOutcome)
+      ? shouldShowOutcomeBadge(file.state, verdictOutcome, {
+          superseded: isSupersededVerdict(file),
+        })
       : false,
     approvalDecision: file.approval?.decision ?? null,
     awaitingVerdictId: file.awaitingVerdictId,

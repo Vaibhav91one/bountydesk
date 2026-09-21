@@ -34,8 +34,7 @@ import {
   sweepExpiredLeases as sweepReviewerChat,
 } from "@/lib/reviewer-chat/queue";
 import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
-import { runRecheckOnce } from "@/lib/investigation-runs/queue";
-import { db, and, eq, investigationRun, sql } from "@/lib/db";
+import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -242,19 +241,7 @@ async function main(): Promise<void> {
         runRecheckOnce(`daemon-recheck-${randomUUID()}`).then(
           (id) => (signal.aborted && id === null ? null : id),
         ),
-      sweepOnce: async () => {
-        // Expired re-check leases reset to PENDING so the claim query can pick them up again.
-        await db
-          .update(investigationRun)
-          .set({ status: "PENDING", leaseOwner: null, leaseExpiresAt: null })
-          .where(
-            and(
-              eq(investigationRun.status, "RUNNING"),
-              eq(investigationRun.reason, "REVIEWER_GUIDANCE"),
-              sql`${investigationRun.leaseExpiresAt} < now()`,
-            ),
-          );
-      },
+      sweepOnce: () => sweepRecheckRuns(),
     },
   ];
 

@@ -70,9 +70,16 @@ export function caseSourceLabel(sourceRef: string, id: string): string {
 
 /** The newest investigation run for a report, if the report has any run rows yet. */
 export type CaseLatestRun = {
+  /** investigation_run id, so the dialog can retry or cancel this exact run. */
+  id: string;
   runNumber: number;
   status: string;
   reason: string;
+  /** When the run was created and last touched, plus how many times a worker claimed it.
+   * Read here so the lifecycle can name a stuck re-check without a second query. */
+  createdAt: Date;
+  updatedAt: Date;
+  attempts: number;
 };
 
 /**
@@ -129,9 +136,13 @@ export async function readCase(
       // history does not pay for all of it here. Null for reports written before run rows.
       const [latestRun] = await tx
         .select({
+          id: investigationRun.id,
           runNumber: investigationRun.runNumber,
           status: investigationRun.status,
           reason: investigationRun.reason,
+          createdAt: investigationRun.createdAt,
+          updatedAt: investigationRun.updatedAt,
+          attempts: investigationRun.attempts,
         })
         .from(investigationRun)
         .where(eq(investigationRun.reportId, id))

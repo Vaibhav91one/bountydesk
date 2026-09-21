@@ -10,14 +10,34 @@ import type { QueueColumn } from "@/lib/reports/queue";
  */
 export type QueueCardView = Omit<QueueColumn["cards"][number], "updatedAt"> & {
   updatedAt: string;
+  /**
+   * Relative age cut when the view was built, on the server. The board renders this string
+   * instead of computing Date.now() during render, because the server and the browser would
+   * compute different minutes and hydration would mismatch at any minute boundary.
+   */
+  ageLabel: string;
 };
 
 export type QueueColumnView = Omit<QueueColumn, "cards"> & { cards: QueueCardView[] };
 
+/** Coarse on purpose. A queue is scanned, and "3h" answers the question "is this stuck". */
+export function ageLabelFor(from: Date | string, now: number = Date.now()): string {
+  const minutes = Math.floor((now - new Date(from).getTime()) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
 export function queueColumnViews(columns: QueueColumn[]): QueueColumnView[] {
   return columns.map((column) => ({
     ...column,
-    cards: column.cards.map((card) => ({ ...card, updatedAt: card.updatedAt.toISOString() })),
+    cards: column.cards.map((card) => ({
+      ...card,
+      updatedAt: card.updatedAt.toISOString(),
+      ageLabel: ageLabelFor(card.updatedAt),
+    })),
   }));
 }
 

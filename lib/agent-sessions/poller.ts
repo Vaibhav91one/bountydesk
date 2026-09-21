@@ -1,9 +1,11 @@
+import { previewArguments } from "@/lib/agent-sessions/preview-arguments";
 import { and, db, eq, investigationRun, report, sql, verdict } from "@/lib/db";
 import {
   draftVerdictFromPendingCall,
   publishVerdictInputSchema,
   synthesizeAnalysisOnlyVerdict,
 } from "@/lib/mcp/publish-verdict";
+import { safeErrorText } from "@/lib/errors/safe-error";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
 import { isTerminal } from "@/lib/reports/states";
 import { teardownSandbox } from "@/lib/sandbox/provision";
@@ -19,13 +21,16 @@ import {
 import { SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "@/lib/trueforge/agent-config";
 
 import {
+  abandonVerdictConflict,
   assertHeld,
   claim,
+  isVerdictIntegrityConflict,
   LeaseLostError,
   markMirrored,
   recordFinalSummary,
   release,
   renew,
+  shouldAbandonVerdictConflict,
   type AgentSessionLease,
   type AgentSessionReleaseUpdate,
 } from "./queue";
@@ -49,63 +54,9 @@ function inFuture(ms: number): Date {
   return new Date(Date.now() + ms);
 }
 
-/** Long enough to show what a safe field's value was, short enough that a chatty one never
- * makes session_event a second copy of the payload it was called with. */
-const TOOL_ARGUMENTS_PREVIEW_LIMIT = 500;
-
-/**
- * Argument field names safe to copy into the durable, reviewer-visible audit trail. An
- * allowlist, not a denylist: session_event has no UPDATE or DELETE (see AGENTS.md), so a field
- * let through here is there forever. Every scope-guard/bountydesk tool call carries a
- * `capability` token to identify the caller, and several also carry a `grant_token`/`token`
- * from `request_intrusive_approval`/`verify_grant` embedded in `headers` or `body` -- none of
- * that, and nothing this list doesn't name, ever gets copied. A new tool's arguments preview as
- * empty until someone deliberately adds its safe fields here, which is the direction this needs
- * to fail in.
- */
-const ARGUMENT_PREVIEW_ALLOWLIST = new Set([
-  "url",
-  "method",
-  "host",
-  "port",
-  "target",
-  "entry",
-  "action",
-  "name",
-  "ecosystem",
-  "version",
-  "id",
-  "limit",
-  "ttl_minutes",
-  "timeout_seconds",
-]);
-
-/**
- * The safe subset of a tool call's arguments, or undefined when there is nothing safe to show
- * (including when the arguments aren't a plain JSON object at all, e.g. publish_verdict's
- * {capability, outcome, summary, findings}: none of those keys are on the allowlist, so its
- * arguments preview as nothing, which is deliberate -- the verdict itself is already visible in
- * the verdict panel, and its capability token must never repeat anywhere else).
- */
-function previewArguments(argumentsJson: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(argumentsJson);
-  } catch {
-    return undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return undefined;
-
-  const safe = Object.fromEntries(
-    Object.entries(parsed as Record<string, unknown>).filter(([key]) =>
-      ARGUMENT_PREVIEW_ALLOWLIST.has(key),
-    ),
-  );
-  if (Object.keys(safe).length === 0) return undefined;
-
-  const json = JSON.stringify(safe);
-  return json.length > TOOL_ARGUMENTS_PREVIEW_LIMIT ? `${json.slice(0, TOOL_ARGUMENTS_PREVIEW_LIMIT)}…` : json;
-}
+// Kept as a re-export: tests and callers import it from here, and the pure code lives in a
+// module that loads without a database.
+export { previewArguments };
 
 /**
  * Mirror every tool call TrueForge has recorded for this turn into `session_event`, so a
@@ -135,7 +86,7 @@ async function mirrorToolCalls(reportId: string, calls: ObservedToolCall[]): Pro
   } catch (error) {
     console.error(
       `agent session for report ${reportId}: failed to mirror tool-call trace events: ${
-        error instanceof Error ? error.message : String(error)
+        safeErrorText(error)
       }`,
     );
   }
@@ -409,11 +360,21 @@ async function handleAgentDraftedPendingCall(
   call: PendingToolCall,
   input: { capability: string; outcome: string; summary: string; findings: unknown[] },
 ): Promise<string> {
-  const drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
-    outcome: input.outcome,
-    summary: input.summary,
-    findings: input.findings,
-  });
+  let drafted: Awaited<ReturnType<typeof draftVerdictFromPendingCall>>;
+  try {
+    drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
+      outcome: input.outcome,
+      summary: input.summary,
+      findings: input.findings,
+    });
+  } catch (error) {
+    if (!isVerdictIntegrityConflict(error)) throw error;
+    if (shouldAbandonVerdictConflict(lease.attempts ?? 0)) {
+      await abandonVerdictConflict(lease);
+      return lease.id;
+    }
+    throw error;
+  }
   if (!drafted.ok) {
     return refuseUnresolvablePending(lease, `publish_verdict draft refused: ${drafted.reason}`);
   }
@@ -824,12 +785,15 @@ export async function pollOnce(
       opts.requestDeadlineMs,
     );
   } catch (error) {
+    // The harness forgot the session (restart, redeploy, expiry) or a recheck deleted the
+    // superseded one while this lease still polled it. That is infrastructure loss, so the
+    // text says so and never reads as a verdict on the report itself.
     if (isTrueForgeNotFoundError(error)) {
       return finishWithoutApproval(lease, {
         turnStatus: "ERROR",
-        lastError: `TrueForge session or turn was not found: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        lastError: `Live harness session was lost (session or turn not found): ${
+          safeErrorText(error)
+        }. This says nothing about the report itself.`,
       });
     }
     throw error;
@@ -846,7 +810,7 @@ export async function pollOnce(
     await markMirrored(lease, cursor).catch((error: unknown) => {
       console.error(
         `agent session ${lease.id}: failed to persist tool-call mirroring cursor: ${
-          error instanceof Error ? error.message : String(error)
+          safeErrorText(error)
         }`,
       );
     });
@@ -861,7 +825,7 @@ export async function pollOnce(
       if (error instanceof LeaseLostError) throw error;
       console.error(
         `agent session ${lease.id}: failed to persist final summary: ${
-          error instanceof Error ? error.message : String(error)
+          safeErrorText(error)
         }`,
       );
     });
@@ -882,7 +846,7 @@ export async function pollOnce(
       // Never inferred as an approval or a denial: the turn errored, full stop.
       return finishWithoutApproval(lease, {
         turnStatus: "ERROR",
-        lastError: snapshot.message,
+        lastError: safeErrorText(snapshot.message),
       });
 
     case "cancelled":

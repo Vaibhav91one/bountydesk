@@ -919,7 +919,7 @@ test("a missing TrueForge session is marked terminal instead of retried forever"
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "ERROR");
-  assert.match(row.lastError ?? "", /TrueForge session or turn was not found/);
+  assert.match(row.lastError ?? "", /Live harness session was lost/);
   assert.equal(row.leaseOwner, null);
 
   const rep = await reportRow(fixture.reportId);
