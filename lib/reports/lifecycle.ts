@@ -44,8 +44,11 @@ export type NewReport = {
   title: string;
   body: string;
   reporterHandle: string | null;
-  connectedRepositoryId: string;
-  targetProfileId: string;
+  /** The verified reply-to for a non-GitHub channel (email). Null for GitHub. */
+  reporterContact?: string | null;
+  /** Null for a channel with no repository, e.g. email: the report stays analysis-only. */
+  connectedRepositoryId: string | null;
+  targetProfileId: string | null;
 };
 
 /**

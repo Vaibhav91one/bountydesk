@@ -228,6 +228,12 @@ export const report = pgTable(
     title: text("title").notNull(),
     body: text("body").notNull(),
     reporterHandle: text("reporter_handle"),
+    /**
+     * The verified contact to deliver back to, for a channel where the reporter is not a GitHub
+     * actor. For email intake it is the sender address that passed SPF/DKIM at the gateway. Null for
+     * GitHub, whose delivery target is the issue. Delivery (Phase 5) refuses to send without it.
+     */
+    reporterContact: text("reporter_contact"),
     state: reportLifecycleState("state").notNull().default("TRIAGING"),
     connectedRepositoryId: uuid("connected_repository_id").references(
       () => connectedRepository.id,
