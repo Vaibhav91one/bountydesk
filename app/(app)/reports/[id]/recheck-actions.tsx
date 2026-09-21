@@ -105,14 +105,17 @@ export function RecheckActions({
             </DialogDescription>
           </DialogHeader>
           {error ? (
-            <p role="alert" className="text-body text-destructive">
+            <p role="alert" className="text-body text-destructive [overflow-wrap:anywhere]">
               {error}
             </p>
           ) : null}
           <div className="flex justify-end gap-2">
             <Button
               variant="outline"
-              onClick={() => setConfirming(null)}
+              onClick={() => {
+                setConfirming(null);
+                setError(null);
+              }}
               disabled={sending}
             >
               Cancel

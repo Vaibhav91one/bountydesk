@@ -424,7 +424,7 @@ export function ApprovalDialog({
             </p>
           </div>
           {recheckError ? (
-            <p role="alert" className="text-body text-destructive">
+            <p role="alert" className="text-body text-destructive [overflow-wrap:anywhere]">
               {recheckError}
             </p>
           ) : null}

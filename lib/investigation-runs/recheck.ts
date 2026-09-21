@@ -220,6 +220,15 @@ export async function cancelRecheck(
     if (row.status !== "PENDING" && row.status !== "ERROR") {
       return { ok: false, reason: "only a pending or failed re-check can be cancelled" };
     }
+    // Same guard as retry: cancelling an older run would move the report to ANALYSIS_ONLY while
+    // a newer run is still active.
+    const [latest] = await tx
+      .select({ id: investigationRun.id })
+      .from(investigationRun)
+      .where(eq(investigationRun.reportId, reportId))
+      .orderBy(sql`${investigationRun.runNumber} desc`)
+      .limit(1);
+    if (latest?.id !== row.id) return { ok: false, reason: "only the latest re-check can be cancelled" };
 
     await tx
       .update(investigationRun)

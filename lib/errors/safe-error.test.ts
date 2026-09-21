@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { previewArguments } from "@/lib/agent-sessions/poller";
+import { previewArguments } from "@/lib/agent-sessions/preview-arguments";
 import { safeErrorText } from "./safe-error";
 
 test("removes bearer tokens from error messages", () => {

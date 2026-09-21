@@ -80,7 +80,9 @@ export function StatusCard({
           <Fact label="Intake">{repositoryFullName ?? channel}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
             {status.verdict
-              ? `${status.verdict.outcomeLabel} · revision ${status.verdict.revision}`
+              ? status.verdict.superseded
+                ? `Superseded by a re-check · revision ${status.verdict.revision}`
+                : `${status.verdict.outcomeLabel} · revision ${status.verdict.revision}`
               : "Nothing drafted yet"}
           </Fact>
           <Fact label="Recorded events">
