@@ -3,6 +3,7 @@ import { githubWebhookSecret } from "@/lib/env";
 import { parseReproduceCommand, reproductionRequested } from "@/lib/github/commands";
 import { LIFECYCLE_EVENTS, activeRepository, applyLifecycle } from "@/lib/github/lifecycle";
 import { readBoundedBody, verifySignature } from "@/lib/github/webhook";
+import { dismissIntakeJobsForClosedIssue } from "@/lib/intake/dismiss";
 import { enqueue } from "@/lib/jobs/queue";
 
 // node:crypto and a Postgres socket both need the Node runtime, and the streaming edge
@@ -104,6 +105,19 @@ async function handleLifecycle(
 }
 
 async function handleIssue(deliveryId: string, payload: IssuePayload): Promise<Response> {
+  // A closed issue has nothing left to reproduce, so drop any stale intake failure still sitting
+  // in the board strip for it. This does not need the repository to still be connected: it only
+  // clears our own rows, and re-delivery just re-stamps the same timestamp.
+  if (payload.action === "closed") {
+    const repoGithubId = payload.repository?.id;
+    const issueNumber = payload.issue?.number;
+    if (repoGithubId && issueNumber) {
+      const cleared = await dismissIntakeJobsForClosedIssue(repoGithubId, issueNumber);
+      return new Response(`issue closed: cleared ${cleared} intake failure(s)`, { status: 202 });
+    }
+    return new Response("issue closed: no issue or repository to match", { status: 202 });
+  }
+
   // ponytail: only a newly opened issue starts a run. Edits and reopens are report updates,
   // which need reply correlation to be meaningful, and that is deferred past the MVP.
   if (payload.action !== "opened") {

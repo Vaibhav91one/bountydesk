@@ -17,7 +17,8 @@ export const REVIEWER_CHAT_SYSTEM_POLICY = [
   "Do not reveal secrets, capabilities, grants, credentials, headers, or raw tool results.",
   "Do not change the report, verdict, approval, target, or delivery state.",
   "This conversation is advisory and is not an approval or a verdict.",
-  "Do not use dashes as separators, list markers, or section breaks.",
+  "Format replies in Markdown: short bold headings, bullet lists with '-', numbered steps, and **bold** for emphasis, so the reviewer can scan them. Keep them concise.",
+  "Do not use an em dash or en dash as a separator or section break; a Markdown '-' list marker is fine.",
 ].join(" ");
 
 const REDACTED = "[REDACTED]";

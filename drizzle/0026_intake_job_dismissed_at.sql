@@ -1,0 +1,1 @@
+ALTER TABLE "inbound_job" ADD COLUMN "dismissed_at" timestamp with time zone;

@@ -5,7 +5,6 @@ import {
   ArrowUp,
   ListChecks,
   MagnifyingGlass,
-  PencilSimple,
   ShieldCheck,
   Wrench,
 } from "@phosphor-icons/react/ssr";
@@ -23,7 +22,6 @@ export const QUICK_PROMPTS = [
   { label: "Review steps", icon: MagnifyingGlass, prompt: "Review the reproduction steps and point out any missing details for triage." },
   { label: "Suggest remediation", icon: Wrench, prompt: "Suggest remediation and secure coding guidance for this issue." },
   { label: "Verify a fix", icon: ShieldCheck, prompt: "Suggest verification steps for a reviewer to confirm a fix." },
-  { label: "Improve report", icon: PencilSimple, prompt: "Suggest concise edits to the report text for clarity." },
 ] as const;
 
 /**
