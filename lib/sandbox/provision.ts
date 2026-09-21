@@ -482,9 +482,24 @@ async function activateSnapshot(resolvedSnapshotId: string, signal?: AbortSignal
     },
   );
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`snapshot activate for ${resolvedSnapshotId} -> ${response.status} ${body.slice(0, 300)}`);
+    // The status alone: the response body is provider controlled text and does not belong in an
+    // error that is logged and shown to a reviewer.
+    throw new Error(`snapshot activate for ${resolvedSnapshotId} -> ${response.status}`);
   }
+}
+
+/**
+ * getSnapshot has its own timeout but no signal, so a cancelled run would wait it out. Racing the
+ * read against the signal lets the caller stop at once; the read itself finishes on its own.
+ */
+function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
 
 /**
@@ -504,7 +519,7 @@ async function ensureSnapshotActive(
   signal?: AbortSignal,
 ): Promise<SnapshotInfo> {
   throwIfAborted(signal);
-  let info = await getSnapshot(snapshotId);
+  let info = await abortable(getSnapshot(snapshotId), signal);
   throwIfAborted(signal);
 
   let activated = false;
@@ -531,7 +546,7 @@ async function ensureSnapshotActive(
         await activateSnapshot(resolvedId, signal);
       } catch (error) {
         rethrowIfAborted(error, signal);
-        const fresh = await getSnapshot(snapshotId);
+        const fresh = await abortable(getSnapshot(snapshotId), signal);
         throwIfAborted(signal);
         const freshAction = snapshotAction(fresh.state);
         if (freshAction !== "ready" && freshAction !== "wait") throw error;
@@ -539,7 +554,7 @@ async function ensureSnapshotActive(
         continue;
       }
       throwIfAborted(signal);
-      info = await getSnapshot(snapshotId);
+      info = await abortable(getSnapshot(snapshotId), signal);
       throwIfAborted(signal);
       continue;
     }
@@ -549,7 +564,7 @@ async function ensureSnapshotActive(
       );
     }
     await delay(SNAPSHOT_ACTIVATION_POLL_MS, signal);
-    info = await getSnapshot(snapshotId);
+    info = await abortable(getSnapshot(snapshotId), signal);
     throwIfAborted(signal);
   }
 }
