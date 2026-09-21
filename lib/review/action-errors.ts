@@ -1,3 +1,5 @@
+export const RUN_NOT_FOUND = "The re-check run was not found.";
+
 export type RecheckAction = "retry" | "cancel";
 
 export function genericFailure(action: RecheckAction): string {

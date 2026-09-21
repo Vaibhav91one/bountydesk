@@ -26,7 +26,8 @@ import {
   MAX_RECHECK_NOTE_LENGTH,
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
-import { thrownActionError } from "@/lib/review/action-errors";
+import { isReportId } from "@/lib/reports/case";
+import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type ActionResult = { ok: boolean; error?: string };
@@ -344,6 +345,7 @@ export async function requestRecheckAction(
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
   await requireReviewer();
+  if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
   try {
     const result = await retryRecheck(reportId, runId);
     revalidateReportViews(reportId);
@@ -355,6 +357,7 @@ export async function retryRecheckAction(reportId: string, runId: string): Promi
 
 export async function cancelRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
   await requireReviewer();
+  if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
   try {
     const result = await cancelRecheck(reportId, runId);
     revalidateReportViews(reportId);
