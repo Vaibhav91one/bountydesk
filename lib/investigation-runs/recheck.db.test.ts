@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+import { computeContentHash } from "@/lib/verdicts/hash";
+
 /**
  * Retry, cancel and sweep paths run against a real Postgres, because the
  * guarantees under test are the database's: row locks, the unique run number
@@ -307,6 +309,75 @@ test("cancelRecheck cancels the latest of two rechecks", async () => {
   assert.equal(row.status, "CANCELLED");
   assert.equal(await reportStateOf(reportId), "ANALYSIS_ONLY");
   assert.equal((await eventsOf(reportId, "agent.recheck_cancelled")).length, 1);
+});
+
+/** A report with an ANALYSIS_ONLY verdict and, unless asked otherwise, a parked pending tuple. */
+async function seedParkedAnalysisOnly(opts: {
+  state?: ReportState;
+  withPending?: boolean;
+}): Promise<{ reportId: string; verdictId: string }> {
+  const reportId = await seedReport(opts.state ?? "ANALYSIS_ONLY");
+  const payload = `analysis payload ${seq}`;
+  const contentHash = computeContentHash(payload);
+  const [v] = await dbm.db
+    .insert(dbm.verdict)
+    .values({
+      reportId,
+      outcome: "ANALYSIS_ONLY",
+      summary: "summary",
+      payload,
+      contentHash,
+    })
+    .returning({ id: dbm.verdict.id });
+  const withPending = opts.withPending ?? true;
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId,
+    capabilityToken: `cap-recheck-${seq}`,
+    sessionId: `session-recheck-${seq}`,
+    turnStatus: "AWAITING_APPROVAL_HARNESS",
+    pendingThreadId: withPending ? `thread-recheck-${seq}` : null,
+    pendingToolCallId: withPending ? `call-recheck-${seq}` : null,
+    pendingVerdictId: withPending ? v.id : null,
+    pendingApprovedContentHash: withPending ? contentHash : null,
+  });
+  return { reportId, verdictId: v.id };
+}
+
+test("requestRecheck from ANALYSIS_ONLY with a parked verdict opens a guidance run", async () => {
+  const { reportId, verdictId } = await seedParkedAnalysisOnly({});
+
+  const result = await recheck.requestRecheck(reportId, verdictId, "check the auth flow again", "reviewer-1");
+  if (!result.ok) assert.fail(`re-check refused: ${result.reason}`);
+
+  assert.equal(await reportStateOf(reportId), "REPRODUCING");
+  const run = await runRow(result.runId);
+  assert.equal(run.status, "PENDING");
+  assert.equal(run.reason, "REVIEWER_GUIDANCE");
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId))
+    .limit(1);
+  assert.equal(session.pendingVerdictId, null, "the parked tuple is cleared");
+  assert.equal(session.turnStatus, "CANCELLED");
+});
+
+test("requestRecheck from ANALYSIS_ONLY without a parked verdict is refused", async () => {
+  const { reportId, verdictId } = await seedParkedAnalysisOnly({ withPending: false });
+
+  const result = await recheck.requestRecheck(reportId, verdictId, "check the auth flow again", "reviewer-1");
+  assert.ok(!result.ok);
+  assert.match(result.reason, /not the pending one/);
+  assert.equal(await reportStateOf(reportId), "ANALYSIS_ONLY");
+});
+
+test("requestRecheck from DELIVERED is still refused", async () => {
+  const { reportId, verdictId } = await seedParkedAnalysisOnly({ state: "DELIVERED" });
+
+  const result = await recheck.requestRecheck(reportId, verdictId, "check the auth flow again", "reviewer-1");
+  assert.ok(!result.ok);
+  assert.match(result.reason, /only a pending approval/);
 });
 
 test("sweepRecheckRuns fails a stale PENDING run and leaves fresh work alone", async () => {

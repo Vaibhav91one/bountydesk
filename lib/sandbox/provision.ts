@@ -20,7 +20,14 @@
 import { requireSecret } from "@/lib/env";
 import { isValidImageDigest } from "@/lib/targets/validation";
 import { buildMarkerCheck } from "./build-marker";
-import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox } from "./daytona";
+import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox, type SnapshotInfo } from "./daytona";
+import {
+  SNAPSHOT_ACTIVATION_POLL_MS,
+  SNAPSHOT_ACTIVATION_TIMEOUT_MS,
+  activationTimedOut,
+  snapshotAction,
+  snapshotProblem,
+} from "./snapshot-state";
 
 const DAYTONA_API = "https://app.daytona.io/api";
 
@@ -450,6 +457,119 @@ export type ProvisionAuthorization = {
 };
 
 /**
+ * The provider's snapshot record carries an errorReason beside the state, but SnapshotInfo
+ * (lib/sandbox/daytona.ts) does not declare it, so this reads it structurally instead of
+ * widening a type this change does not own. Left as a finding for that file's owner.
+ */
+function snapshotErrorReason(info: SnapshotInfo): string | null {
+  const raw = (info as { errorReason?: unknown }).errorReason;
+  return typeof raw === "string" && raw.trim() ? raw : null;
+}
+
+/**
+ * POST one snapshot back to active. Daytona answers 400 when the snapshot is not inactive,
+ * which is also what a concurrent run sees when it activates the same snapshot between our
+ * read and this call; the caller re-reads on failure and only fails if the snapshot still
+ * needs activation.
+ */
+async function activateSnapshot(resolvedSnapshotId: string, signal?: AbortSignal): Promise<void> {
+  const response = await fetch(
+    `${DAYTONA_API}/snapshots/${encodeURIComponent(resolvedSnapshotId)}/activate`,
+    {
+      method: "POST",
+      headers: { authorization: `Bearer ${requireSecret("DAYTONA_API_KEY")}` },
+      signal: timeoutSignal(signal),
+    },
+  );
+  if (!response.ok) {
+    // The status alone: the response body is provider controlled text and does not belong in an
+    // error that is logged and shown to a reviewer.
+    throw new Error(`snapshot activate for ${resolvedSnapshotId} -> ${response.status}`);
+  }
+}
+
+/**
+ * getSnapshot has its own timeout but no signal, so a cancelled run would wait it out. Racing the
+ * read against the signal lets the caller stop at once; the read itself finishes on its own.
+ */
+function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return work;
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
+/**
+ * Bring one snapshot to active before anything boots from it, healing the parked case.
+ *
+ * Daytona parks an idle snapshot as inactive, and a parked snapshot refuses every
+ * create-from-snapshot call. So an inactive snapshot is activated here (POST
+ * /snapshots/{id}/activate, the same call `daytona snapshot activate` makes) and polled back
+ * to active, bounded by SNAPSHOT_ACTIVATION_TIMEOUT_MS and abort-aware between polls. A
+ * snapshot already active returns after the one read this function already needed, so the
+ * fast path costs nothing extra. Pulling and building states wait; error and build_failed
+ * fail at once with the state and the provider reason named.
+ */
+async function ensureSnapshotActive(
+  snapshotId: string,
+  owner: string,
+  signal?: AbortSignal,
+): Promise<SnapshotInfo> {
+  throwIfAborted(signal);
+  let info = await abortable(getSnapshot(snapshotId), signal);
+  throwIfAborted(signal);
+
+  let activated = false;
+  const startedAt = Date.now();
+  for (;;) {
+    const action = snapshotAction(info.state);
+    if (action === "ready") return info;
+    if (action === "fail") {
+      throw new Error(
+        `snapshot ${snapshotId} for ${owner} is ${snapshotProblem(info.state, snapshotErrorReason(info))}`,
+      );
+    }
+    if (action === "activate") {
+      if (activated) {
+        throw new Error(
+          `snapshot ${snapshotId} for ${owner} is still ${snapshotProblem(info.state, snapshotErrorReason(info))} after activation`,
+        );
+      }
+      activated = true;
+      // Name the resolved id the way createSandbox does, so a display name repointed between
+      // the lookup and this call cannot activate something other than what was just read.
+      const resolvedId = info.id ? info.id : snapshotId;
+      try {
+        await activateSnapshot(resolvedId, signal);
+      } catch (error) {
+        rethrowIfAborted(error, signal);
+        const fresh = await abortable(getSnapshot(snapshotId), signal);
+        throwIfAborted(signal);
+        const freshAction = snapshotAction(fresh.state);
+        if (freshAction !== "ready" && freshAction !== "wait") throw error;
+        info = fresh;
+        continue;
+      }
+      throwIfAborted(signal);
+      info = await abortable(getSnapshot(snapshotId), signal);
+      throwIfAborted(signal);
+      continue;
+    }
+    if (activationTimedOut(startedAt, Date.now())) {
+      throw new Error(
+        `snapshot ${snapshotId} for ${owner} did not become active within ${SNAPSHOT_ACTIVATION_TIMEOUT_MS}ms; last state ${snapshotProblem(info.state, snapshotErrorReason(info))}`,
+      );
+    }
+    await delay(SNAPSHOT_ACTIVATION_POLL_MS, signal);
+    info = await abortable(getSnapshot(snapshotId), signal);
+    throwIfAborted(signal);
+  }
+}
+
+/**
  * Provision one reproduction-grade sandbox from an already-authorized target: pick the image
  * ref, boot from the pinned snapshot, verify egress is blocked, verify the build identity, and
  * wait for the app to answer its own port. Throws ProvisionCouldNotDeployError or
@@ -480,8 +600,13 @@ export async function provisionTarget(
 
   let sandbox: Sandbox | undefined;
   try {
-    const snapshotInfo = await getSnapshot(authorization.snapshotId);
-    throwIfAborted(opts?.signal);
+    // An idle snapshot parks itself as inactive; activate it on demand rather than failing the
+    // run on a state one call fixes. Already active costs just this read.
+    const snapshotInfo = await ensureSnapshotActive(
+      authorization.snapshotId,
+      `target ${authorization.targetProfileId}`,
+      opts?.signal,
+    );
     sandbox = await createSandbox(
       {
         snapshot: authorization.snapshotId,
@@ -755,22 +880,12 @@ async function bootMeshService(
   onInspected: (sandbox: Sandbox) => void,
 ): Promise<Sandbox> {
   const imageRef = imageRefForProfile(svc.imageName, svc.imageDigest);
-  // A snapshot the build step just created can still be materialising ("pulling"); the mesh boots
-  // several of them right after a build, so wait for this one to go active rather than failing the
-  // whole run on a race the next attempt would just retry.
-  let snapshotInfo = await getSnapshot(svc.snapshotId);
-  const activeDeadline = Date.now() + 180_000;
-  while (snapshotInfo.state !== "active" && Date.now() < activeDeadline) {
-    if (["error", "build_failed"].includes(snapshotInfo.state)) {
-      throw new Error(`snapshot ${svc.snapshotId} for ${svc.service} is ${snapshotInfo.state}`);
-    }
-    await delay(3000, signal);
-    snapshotInfo = await getSnapshot(svc.snapshotId);
-  }
+  // A snapshot the build step just created can still be materialising ("pulling"), and an idle
+  // one parks itself as inactive; the mesh boots several of them right after a build, so heal
+  // and wait for this one to go active rather than failing the whole run on a state one call
+  // fixes or a race the next attempt would just retry.
+  const snapshotInfo = await ensureSnapshotActive(svc.snapshotId, `service ${svc.service}`, signal);
   throwIfAborted(signal);
-  if (snapshotInfo.state !== "active") {
-    throw new Error(`snapshot ${svc.snapshotId} for ${svc.service} did not become active`);
-  }
   const sandbox = await createSandbox(
     {
       snapshot: svc.snapshotId,

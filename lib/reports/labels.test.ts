@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ageLabelFor } from "./queue-view";
-import { recheckStatusLabel, shouldShowOutcomeBadge } from "./labels";
+import {
+  recheckStatusLabel,
+  shouldShowOutcomeBadge,
+  stalledFirstRunLabel,
+} from "./labels";
 
 test("a current outcome still badges, except ANALYSIS_ONLY twice", () => {
   assert.equal(shouldShowOutcomeBadge("REPRODUCING", "NOT_REPRODUCED"), true);
@@ -43,6 +47,31 @@ test("a re-check run maps to its card status, anything else to nothing", () => {
   for (const status of ["PENDING", "RUNNING", "ERROR", null]) {
     assert.equal(recheckStatusLabel(status, false), null, `${status} should fall through`);
   }
+});
+
+test("a stalled first run gets a red status hint only in triage", () => {
+  const base = {
+    state: "TRIAGING",
+    jobDeadLettered: false,
+    sessionErrored: false,
+    verdictSuperseded: false,
+  };
+
+  assert.equal(stalledFirstRunLabel({ ...base, jobDeadLettered: true }), "Intake failed");
+  assert.equal(stalledFirstRunLabel({ ...base, sessionErrored: true }), "Investigation stopped");
+  assert.equal(
+    stalledFirstRunLabel({ ...base, jobDeadLettered: true, sessionErrored: true }),
+    "Intake failed",
+  );
+  assert.equal(
+    stalledFirstRunLabel({ ...base, state: "REPRODUCING", jobDeadLettered: true }),
+    null,
+  );
+  assert.equal(
+    stalledFirstRunLabel({ ...base, verdictSuperseded: true, jobDeadLettered: true }),
+    null,
+  );
+  assert.equal(stalledFirstRunLabel(base), null);
 });
 
 test("the server-cut age stays coarse at the same boundaries the board used", () => {

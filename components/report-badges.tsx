@@ -7,6 +7,7 @@ export {
   outcomeLabel,
   recheckStatusLabel,
   reportStateLabel,
+  stalledFirstRunLabel,
   shouldShowOutcomeBadge,
 } from "@/lib/reports/labels";
 

@@ -34,10 +34,13 @@ export function RecheckActions({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const actions = recheckActionsFor(summary);
+  const runId = summary.runId;
 
-  if (actions.length === 0) return null;
+  if (actions.length === 0 || runId === null) return null;
 
   const canRetry = actions.includes("retry");
+  // confirmAction is a hoisted declaration, so TypeScript drops the null check above inside it.
+  const targetRunId: string = runId;
 
   async function confirmAction() {
     if (!confirming || sending) return;
@@ -47,8 +50,8 @@ export function RecheckActions({
     try {
       const answer =
         confirming === "retry"
-          ? await retryRecheckAction(reportId, summary.runId)
-          : await cancelRecheckAction(reportId, summary.runId);
+          ? await retryRecheckAction(reportId, targetRunId)
+          : await cancelRecheckAction(reportId, targetRunId);
 
       if (!answer.ok) {
         setError(recheckFailedAnswerError(answer));

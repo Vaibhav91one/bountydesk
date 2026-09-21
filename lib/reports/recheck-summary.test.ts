@@ -161,16 +161,22 @@ test("a pending run summarizes probes, caps findings, and names the last event t
   assert.ok(!JSON.stringify(summary).includes("call"));
 });
 
-test("no summary without a run row, and none without a verdict", () => {
-  const withVerdictNoRun = caseLiveView(
+test("the initial run summarizes from its verdict without a run row", () => {
+  const view = caseLiveView(
     caseFile({
       latestRun: null,
       verdict: verdictWithFindings(["only"]),
       awaitingVerdictId: "00000000-0000-0000-0000-0000000000v2",
     }),
   );
-  assert.equal(withVerdictNoRun.recheckSummary, null);
 
+  assert.equal(view.recheckSummary?.runId, null);
+  assert.equal(view.recheckSummary?.runNumber, 1);
+  assert.equal(view.recheckSummary?.runStatus, "COMPLETED");
+  assert.equal(view.recheckSummary?.runReason, "INITIAL");
+});
+
+test("there is no summary without a verdict", () => {
   const withRunNoVerdict = caseLiveView(
     caseFile({
       latestRun: {

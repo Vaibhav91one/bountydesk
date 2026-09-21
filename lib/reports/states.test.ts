@@ -50,6 +50,13 @@ test("the analysis packet still goes through the human gate", () => {
   assert.equal(canTransition("ANALYSIS_ONLY", "DELIVERED"), false);
 });
 
+test("a parked analysis-only verdict can be sent back for a re-check", () => {
+  // requestRecheck owns this edge: a reviewer supersedes the parked verdict and the fresh
+  // REVIEWER_GUIDANCE run takes the report back to investigating.
+  assert.equal(canTransition("ANALYSIS_ONLY", "REPRODUCING"), true);
+  assert.equal(canTransition("AWAITING_APPROVAL", "REPRODUCING"), true);
+});
+
 test("approval is the only way into delivery", () => {
   assert.equal(canTransition("AWAITING_APPROVAL", "DELIVERING"), true);
   assert.equal(canTransition("AWAITING_APPROVAL", "DENIED"), true);

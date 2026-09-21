@@ -9,6 +9,7 @@ import {
   ReportStateBadge,
   recheckStatusLabel,
   shouldShowOutcomeBadge,
+  stalledFirstRunLabel,
 } from "@/components/report-badges";
 import { RollingIcon } from "@/components/rolling-icon";
 import { Badge } from "@/components/ui/badge";
@@ -103,13 +104,19 @@ export function Card({
   // A dead handoff never produced a delivery row, so it cannot show up as a failed delivery.
   // Left out, the card reads "Needs review" for a report a reviewer has already answered.
   const stalled = failedDelivery || card.handoffFailed;
-  const running = !stalled && RUNNING.has(card.state);
   const float = driftAt(index);
   // A superseded verdict means a re-check is underway or failed. That outranks the generic
   // running label ("Reproducing" says nothing about the queued run), but not a handoff or
   // delivery failure and never a review the card is still waiting on.
   const recheck = recheckStatusLabel(card.runStatus, card.verdictSuperseded);
   const recheckFailed = card.verdictSuperseded && card.runStatus === "ERROR";
+  const stalledFirstRun = stalledFirstRunLabel({
+    state: card.state,
+    jobDeadLettered: card.jobDeadLettered,
+    sessionErrored: card.sessionErrored,
+    verdictSuperseded: card.verdictSuperseded,
+  });
+  const running = !stalled && !stalledFirstRun && RUNNING.has(card.state);
 
   const status = card.handoffFailed
     ? "Handoff failed"
@@ -119,6 +126,8 @@ export function Card({
       ? "Delivery failed"
     : recheck
       ? recheck
+    : stalledFirstRun
+      ? stalledFirstRun
     : running
       ? RUNNING_LABEL[card.state]
       : card.state === "DELIVERED"
@@ -207,7 +216,10 @@ export function Card({
           {running && !recheckFailed ? (
             <PhaseSpinner phase={phase} />
           ) : (
-            <PhaseDot phase={phase} className={recheckFailed ? "bg-destructive" : undefined} />
+            <PhaseDot
+              phase={phase}
+              className={recheckFailed || stalledFirstRun ? "bg-destructive" : undefined}
+            />
           )}
           {status}
         </span>

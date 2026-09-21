@@ -186,7 +186,11 @@ export function ApprovalDialog({
       />
 
       <DialogContent className="flex h-[85vh] max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
-        <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* overflow-clip clips the sliding track without forming a scroll container, so
+            focusing or positioning the Decide menu cannot set scrollLeft and reveal
+            the chat pane. overflow-hidden looks the same but stays programmatically
+            scrollable. */}
+        <div className="relative min-h-0 flex-1 overflow-clip">
           <div
             className={`absolute inset-0 flex min-h-0 w-[200%] transform-gpu will-change-transform transition-transform duration-300 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none motion-reduce:will-change-auto ${
               chatting ? "-translate-x-1/2" : "translate-x-0"

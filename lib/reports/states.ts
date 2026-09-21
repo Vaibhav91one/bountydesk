@@ -40,10 +40,11 @@ export function isTerminal(state: ReportState): boolean {
 const ALLOWED_TRANSITIONS: Record<ReportState, readonly ReportState[]> = {
   TRIAGING: ["REPRODUCING", "ANALYSIS_ONLY", "OUT_OF_SCOPE"],
   REPRODUCING: ["AWAITING_APPROVAL", "ANALYSIS_ONLY"],
-  ANALYSIS_ONLY: ["AWAITING_APPROVAL", "DELIVERING", "DENIED"],
-  // The only reviewer-driven edge back into REPRODUCING: a supersede (lib/investigation-runs/recheck.ts)
-  // has cleared the pending verdict and opened a fresh run, so the report is investigating again.
-  // Nothing else may take this edge; an approval or denial cannot un-approve a signed verdict.
+  ANALYSIS_ONLY: ["AWAITING_APPROVAL", "DELIVERING", "DENIED", "REPRODUCING"],
+  // The reviewer-driven edges back into REPRODUCING are taken only by a supersede
+  // (lib/investigation-runs/recheck.ts), which has cleared the pending verdict and opened a
+  // fresh run, so the report is investigating again. Nothing else may take these edges;
+  // an approval or denial cannot un-approve a signed verdict.
   AWAITING_APPROVAL: ["DELIVERING", "DENIED", "REPRODUCING"],
   DELIVERING: ["DELIVERED"],
   DELIVERED: [],
