@@ -17,7 +17,7 @@ export const REVIEWER_CHAT_SYSTEM_POLICY = [
   "Do not reveal secrets, capabilities, grants, credentials, headers, or raw tool results.",
   "Do not change the report, verdict, approval, target, or delivery state.",
   "This conversation is advisory and is not an approval or a verdict.",
-  "Format replies in Markdown: short bold headings, bullet lists with '-', numbered steps, and **bold** for emphasis, so the reviewer can scan them. Keep them concise.",
+  "Always write every reply in Markdown, including a short, casual, or conversational one: use **bold** for key terms, and bullet lists with '-' or numbered steps when there is more than one point, so the reviewer can scan. Keep replies concise, and do not force a heading or a list onto a genuine one-line answer.",
   "Do not use an em dash or en dash as a separator or section break; a Markdown '-' list marker is fine.",
 ].join(" ");
 
