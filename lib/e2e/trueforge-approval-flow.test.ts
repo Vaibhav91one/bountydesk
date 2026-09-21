@@ -28,25 +28,18 @@ process.env.TRUEFORGE_API_KEY = "";
 const SECRET = "e2e-approval-flow-secret";
 process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
-// @clerk/nextjs/server pulls in `server-only`, whose guard throws outside a React Server
-// environment (the CI Node runtime hits this even with the Clerk mock below). Neutralize it first.
-mock.module("server-only", { namedExports: {} });
-
-let clerkUser: { id: string; email: string; login: string } | null = null;
-mock.module("@clerk/nextjs/server", {
+// Mock the DAL directly so the test never loads @clerk/nextjs/server (its server-only guard and
+// headers() call have no request scope here). allowVerdict/denyVerdict go through requireReviewer.
+type MockSession = { login: string; email: string; avatarUrl: string | null };
+let session: MockSession | null = null;
+mock.module("@/lib/auth/dal", {
   namedExports: {
-    auth: async () => ({ userId: clerkUser?.id ?? null }),
-    currentUser: async () =>
-      clerkUser
-        ? {
-            id: clerkUser.id,
-            username: clerkUser.login,
-            firstName: null,
-            imageUrl: null,
-            primaryEmailAddress: { emailAddress: clerkUser.email },
-            emailAddresses: [{ emailAddress: clerkUser.email }],
-          }
-        : null,
+    currentSession: async () => session,
+    requireReviewer: async () => {
+      if (session) return session;
+      const { redirect } = await import("next/navigation");
+      redirect("/login");
+    },
   },
 });
 
@@ -93,7 +86,7 @@ after(async () => {
 });
 
 function signIn(): void {
-  clerkUser = { id: "clerk_reviewer", email: REVIEWER_EMAIL, login: "reviewer" };
+  session = { login: "reviewer", email: REVIEWER_EMAIL, avatarUrl: null };
 }
 
 /**

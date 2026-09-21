@@ -9,36 +9,26 @@ import { computeContentHash } from "@/lib/verdicts/hash";
  * database one (row locks, the unique approval_decision/approval_submission indexes), so a
  * mock database would agree with a wrong implementation.
  *
- * allowVerdict and denyVerdict both start with requireReviewer(), which resolves the session
- * from Clerk. Clerk's auth()/currentUser() have no request scope in a plain node:test process, so
- * @clerk/nextjs/server is mocked here with a settable signed-in user. This needs node run with
- * --experimental-test-module-mocks, which is why package.json's test script carries that flag.
+ * allowVerdict and denyVerdict both start with requireReviewer(). The DAL is mocked directly
+ * (rather than Clerk underneath it) so the test never loads @clerk/nextjs/server, whose
+ * server-only guard and headers() call have no request scope in a plain node:test process. This
+ * needs node run with --experimental-test-module-mocks, which package.json's test script carries.
  */
 const REVIEWER_ID = 5150;
 const REVIEWER_EMAIL = "reviewer@bountydesk.test";
-process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
-process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
 
-// @clerk/nextjs/server pulls in `server-only`, whose guard throws outside a React Server
-// environment (the CI Node runtime hits this even with the Clerk mock below). Neutralize it first.
-mock.module("server-only", { namedExports: {} });
-
-let clerkUser: { id: string; email: string; login: string } | null = null;
+type MockSession = { login: string; email: string; avatarUrl: string | null };
+let session: MockSession | null = null;
 let deliverCalls: { deliveryId: string; owner: string }[] = [];
-mock.module("@clerk/nextjs/server", {
+mock.module("@/lib/auth/dal", {
   namedExports: {
-    auth: async () => ({ userId: clerkUser?.id ?? null }),
-    currentUser: async () =>
-      clerkUser
-        ? {
-            id: clerkUser.id,
-            username: clerkUser.login,
-            firstName: null,
-            imageUrl: null,
-            primaryEmailAddress: { emailAddress: clerkUser.email },
-            emailAddresses: [{ emailAddress: clerkUser.email }],
-          }
-        : null,
+    currentSession: async () => session,
+    requireReviewer: async () => {
+      if (session) return session;
+      // Same as the real DAL: a missing session redirects, which throws NEXT_REDIRECT.
+      const { redirect } = await import("next/navigation");
+      redirect("/login");
+    },
   },
 });
 mock.module("next/cache", {
@@ -76,16 +66,15 @@ beforeEach(() => {
   deliverCalls = [];
 });
 
-// The first arg keeps the old shape: REVIEWER_ID maps to the allowlisted email, any other id to an
-// outsider one, so the existing call sites (signIn(REVIEWER_ID, "alice"), signIn(999_999, ...)) and
-// their reviewer/non-reviewer intent carry over to the email allowlist unchanged.
+// The first arg keeps the old shape: REVIEWER_ID is the allowlisted reviewer (the DAL would return
+// a session), any other id is a non-reviewer (the DAL would return null and requireReviewer would
+// redirect), so the existing call sites carry over unchanged.
 function signIn(userId: number, login = "reviewer") {
-  const email = userId === REVIEWER_ID ? REVIEWER_EMAIL : `${login}@outsider.test`;
-  clerkUser = { id: `clerk_${login}`, email, login };
+  session = userId === REVIEWER_ID ? { login, email: REVIEWER_EMAIL, avatarUrl: null } : null;
 }
 
 function signOut() {
-  clerkUser = null;
+  session = null;
 }
 
 let seq = 0;
