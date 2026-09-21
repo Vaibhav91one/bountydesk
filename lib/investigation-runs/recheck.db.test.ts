@@ -271,6 +271,44 @@ test("cancelRecheck refuses a run that is not REVIEWER_GUIDANCE", async () => {
   assert.match(result.reason, /not a re-check run/);
 });
 
+test("cancelRecheck refuses a run that is not the latest", async () => {
+  const reportId = await seedReport("REPRODUCING");
+  const oldRunId = await seedRun(reportId, {
+    runNumber: 2,
+    reason: "REVIEWER_GUIDANCE",
+    status: "ERROR",
+  });
+  await seedRun(reportId, { runNumber: 3, reason: "REVIEWER_GUIDANCE", status: "PENDING" });
+
+  // Parking the report would strand the newer run, so the stale one stays put.
+  const result = await recheck.cancelRecheck(reportId, oldRunId);
+  assert.ok(!result.ok);
+  assert.match(result.reason, /only the latest re-check can be cancelled/);
+
+  const row = await runRow(oldRunId);
+  assert.equal(row.status, "ERROR");
+  assert.equal(await reportStateOf(reportId), "REPRODUCING");
+  assert.equal((await eventsOf(reportId, "agent.recheck_cancelled")).length, 0);
+});
+
+test("cancelRecheck cancels the latest of two rechecks", async () => {
+  const reportId = await seedReport("REPRODUCING");
+  await seedRun(reportId, { runNumber: 2, reason: "REVIEWER_GUIDANCE", status: "ERROR" });
+  const runId = await seedRun(reportId, {
+    runNumber: 3,
+    reason: "REVIEWER_GUIDANCE",
+    status: "PENDING",
+  });
+
+  const result = await recheck.cancelRecheck(reportId, runId);
+  assert.ok(result.ok, `cancel refused: ${result.ok ? "" : result.reason}`);
+
+  const row = await runRow(runId);
+  assert.equal(row.status, "CANCELLED");
+  assert.equal(await reportStateOf(reportId), "ANALYSIS_ONLY");
+  assert.equal((await eventsOf(reportId, "agent.recheck_cancelled")).length, 1);
+});
+
 test("sweepRecheckRuns fails a stale PENDING run and leaves fresh work alone", async () => {
   await drainRuns();
   const now = new Date();

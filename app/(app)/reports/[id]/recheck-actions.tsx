@@ -13,6 +13,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { refreshReportViews } from "@/lib/reports/live-keys";
+import {
+  recheckActionsFor,
+  recheckDialogCopy,
+  recheckFailedAnswerError,
+  recheckThrownError,
+  type RecheckAction,
+} from "@/lib/reports/recheck-actions-view";
 import type { RecheckSummary } from "@/lib/reports/recheck-summary";
 
 export function RecheckActions({
@@ -26,11 +33,11 @@ export function RecheckActions({
   const [confirming, setConfirming] = useState<"retry" | "cancel" | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const actions = recheckActionsFor(summary);
 
-  if (summary.runReason !== "REVIEWER_GUIDANCE") return null;
-  if (summary.runStatus !== "ERROR" && summary.runStatus !== "PENDING") return null;
+  if (actions.length === 0) return null;
 
-  const canRetry = summary.runStatus === "ERROR";
+  const canRetry = actions.includes("retry");
 
   async function confirmAction() {
     if (!confirming || sending) return;
@@ -44,23 +51,25 @@ export function RecheckActions({
           : await cancelRecheckAction(reportId, summary.runId);
 
       if (!answer.ok) {
-        setError(answer.error ?? "The re-check could not be updated.");
+        setError(recheckFailedAnswerError(answer));
         return;
       }
 
       setConfirming(null);
       await refreshReportViews(queryClient, reportId);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "The re-check could not be updated.");
+      setError(recheckThrownError(caught));
     } finally {
       setSending(false);
     }
   }
 
-  function openConfirmation(action: "retry" | "cancel") {
+  function openConfirmation(action: RecheckAction) {
     setError(null);
     setConfirming(action);
   }
+
+  const dialogCopy = confirming ? recheckDialogCopy(confirming) : null;
 
   return (
     <>
@@ -95,14 +104,8 @@ export function RecheckActions({
       >
         <DialogContent showCloseButton={false} className="grid-cols-[minmax(0,1fr)]">
           <DialogHeader>
-            <DialogTitle>
-              {confirming === "retry" ? "Retry this re-check?" : "Cancel this re-check?"}
-            </DialogTitle>
-            <DialogDescription>
-              {confirming === "retry"
-                ? "This puts the failed re-check back in the queue. It does not approve anything."
-                : "This stops waiting on the re-check and moves the report to Analysis only, where a reviewer decides. The earlier verdict stays superseded."}
-            </DialogDescription>
+            <DialogTitle>{dialogCopy?.title}</DialogTitle>
+            <DialogDescription>{dialogCopy?.description}</DialogDescription>
           </DialogHeader>
           {error ? (
             <p role="alert" className="text-body text-destructive [overflow-wrap:anywhere]">

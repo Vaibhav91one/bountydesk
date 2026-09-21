@@ -26,6 +26,7 @@ import {
   MAX_RECHECK_NOTE_LENGTH,
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
+import { thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 export type ActionResult = { ok: boolean; error?: string };
@@ -347,8 +348,8 @@ export async function retryRecheckAction(reportId: string, runId: string): Promi
     const result = await retryRecheck(reportId, runId);
     revalidateReportViews(reportId);
     return result.ok ? { ok: true } : { ok: false, error: result.reason };
-  } catch {
-    return { ok: false, error: "Could not retry the re-check." };
+  } catch (error) {
+    return thrownActionError(error, "retry");
   }
 }
 
@@ -358,7 +359,7 @@ export async function cancelRecheckAction(reportId: string, runId: string): Prom
     const result = await cancelRecheck(reportId, runId);
     revalidateReportViews(reportId);
     return result;
-  } catch {
-    return { ok: false, error: "Could not cancel the re-check." };
+  } catch (error) {
+    return thrownActionError(error, "cancel");
   }
 }

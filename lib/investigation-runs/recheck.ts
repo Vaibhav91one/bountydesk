@@ -164,7 +164,9 @@ export async function retryRecheck(
       .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
       .for("update");
     if (!row) return { ok: false, reason: "re-check run not found" };
-    if (row.reason !== "REVIEWER_GUIDANCE") return { ok: false, reason: "not a re-check run" };
+    // Name the stored reason so a reviewer can tell a backfilled initial run from a wrong id.
+    if (row.reason !== "REVIEWER_GUIDANCE")
+      return { ok: false, reason: `not a re-check run (${row.reason})` };
     if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
     if (row.status !== "ERROR") return { ok: false, reason: "only a failed re-check can be retried" };
     const [latest] = await tx
@@ -215,7 +217,9 @@ export async function cancelRecheck(
       .where(and(eq(investigationRun.id, runId), eq(investigationRun.reportId, reportId)))
       .for("update");
     if (!row) return { ok: false, reason: "re-check run not found" };
-    if (row.reason !== "REVIEWER_GUIDANCE") return { ok: false, reason: "not a re-check run" };
+    // Same context as the retry path above, so both reviewer actions explain the refusal.
+    if (row.reason !== "REVIEWER_GUIDANCE")
+      return { ok: false, reason: `not a re-check run (${row.reason})` };
     if (row.state !== "REPRODUCING") return { ok: false, reason: `report is ${row.state}` };
     if (row.status !== "PENDING" && row.status !== "ERROR") {
       return { ok: false, reason: "only a pending or failed re-check can be cancelled" };
