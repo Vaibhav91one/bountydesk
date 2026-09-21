@@ -1,3 +1,4 @@
+import type { InboundEmail } from "@/lib/email/inbound";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
 
@@ -140,7 +141,37 @@ function parseDelivery(lease: Lease): {
   };
 }
 
+async function parseEmail(lease: Lease): Promise<Lease> {
+  const email = lease.payload as InboundEmail;
+  const sourceRef = `email:${email.messageId}`;
+
+  // No connected repository and no target profile: an email report has nothing bound to reproduce
+  // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
+  // kept as the reply-to for a future outbound delivery.
+  const reportId = await ensureReport({
+    channel: lease.channel,
+    sourceRef,
+    title: email.subject,
+    body: email.text,
+    reporterHandle: email.fromName,
+    reporterContact: email.fromEmail,
+    connectedRepositoryId: null,
+    targetProfileId: null,
+  });
+
+  await recordEvent(
+    reportId,
+    "intake.accepted",
+    { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
+    { idempotencyKey: `${lease.id}:intake.accepted` },
+  );
+
+  return advance(lease, "PARSED", { reportId });
+}
+
 async function parse(lease: Lease): Promise<Lease> {
+  if (lease.channel === "email") return parseEmail(lease);
+
   const { payload, issueNumber, title, body, reporterHandle } = parseDelivery(lease);
 
   // Access is checked again here, not just at intake. A suspension or a repository removal
