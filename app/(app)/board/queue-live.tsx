@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { Column, MASCOT_ON_CARD } from "@/components/queue-board";
+import { IntakeStrip } from "@/components/intake-strip";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { mascotKeyForState } from "@/lib/mascot/catalog";
@@ -32,6 +33,10 @@ export function QueueLive({ initial }: { initial: QueueColumnView[] }) {
 
   const searching = query.trim().length > 0;
   const columns = useMemo(() => searchQueue(live, query), [live, query]);
+
+  // The intake strip watches the same rows the queue does, so it polls on the same beat.
+  // It renders nothing while every delivery has its report, which is the common case.
+  const intakeInterval = listRefetchInterval(live.flatMap((column) => column.cards));
 
   const total = columns.reduce((sum, column) => sum + column.total, 0);
   // An empty board and a search that found nothing read the same in the columns and mean
@@ -71,6 +76,8 @@ export function QueueLive({ initial }: { initial: QueueColumnView[] }) {
           />
         </div>
       </header>
+
+      <IntakeStrip refetchInterval={intakeInterval} />
 
       {empty ? (
         <div className="p-8">

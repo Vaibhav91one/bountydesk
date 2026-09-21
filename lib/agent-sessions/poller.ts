@@ -19,13 +19,16 @@ import {
 import { SCOPE_GUARD_APPROVAL_GATED_TOOLS } from "@/lib/trueforge/agent-config";
 
 import {
+  abandonVerdictConflict,
   assertHeld,
   claim,
+  isVerdictIntegrityConflict,
   LeaseLostError,
   markMirrored,
   recordFinalSummary,
   release,
   renew,
+  shouldAbandonVerdictConflict,
   type AgentSessionLease,
   type AgentSessionReleaseUpdate,
 } from "./queue";
@@ -409,11 +412,21 @@ async function handleAgentDraftedPendingCall(
   call: PendingToolCall,
   input: { capability: string; outcome: string; summary: string; findings: unknown[] },
 ): Promise<string> {
-  const drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
-    outcome: input.outcome,
-    summary: input.summary,
-    findings: input.findings,
-  });
+  let drafted: Awaited<ReturnType<typeof draftVerdictFromPendingCall>>;
+  try {
+    drafted = await draftVerdictFromPendingCall(lease.capabilityToken, {
+      outcome: input.outcome,
+      summary: input.summary,
+      findings: input.findings,
+    });
+  } catch (error) {
+    if (!isVerdictIntegrityConflict(error)) throw error;
+    if (shouldAbandonVerdictConflict(lease.attempts ?? 0)) {
+      await abandonVerdictConflict(lease);
+      return lease.id;
+    }
+    throw error;
+  }
   if (!drafted.ok) {
     return refuseUnresolvablePending(lease, `publish_verdict draft refused: ${drafted.reason}`);
   }
@@ -824,12 +837,15 @@ export async function pollOnce(
       opts.requestDeadlineMs,
     );
   } catch (error) {
+    // The harness forgot the session (restart, redeploy, expiry) or a recheck deleted the
+    // superseded one while this lease still polled it. That is infrastructure loss, so the
+    // text says so and never reads as a verdict on the report itself.
     if (isTrueForgeNotFoundError(error)) {
       return finishWithoutApproval(lease, {
         turnStatus: "ERROR",
-        lastError: `TrueForge session or turn was not found: ${
+        lastError: `Live harness session was lost (session or turn not found): ${
           error instanceof Error ? error.message : String(error)
-        }`,
+        }. This says nothing about the report itself.`,
       });
     }
     throw error;

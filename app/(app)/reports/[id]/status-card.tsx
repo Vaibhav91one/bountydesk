@@ -89,6 +89,14 @@ export function StatusCard({
           </Fact>
         </div>
       </div>
+
+      {/* The harness session can be lost after the draft is stored. The verdict below is
+          still the exact text to approve or deny, and approval needs no live session. */}
+      {status.verdict && status.turnStatus === "ERROR" ? (
+        <p className="border-t border-border/50 px-5 py-3 text-meta text-muted-foreground">
+          The live session is gone, but the drafted verdict still stands for review.
+        </p>
+      ) : null}
     </section>
   );
 }

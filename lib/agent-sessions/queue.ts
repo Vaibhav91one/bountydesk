@@ -1,6 +1,8 @@
 import { and, eq, lte, sql } from "drizzle-orm";
 
 import { agentSession, db, type Executor } from "@/lib/db";
+import { recordEvent } from "@/lib/reports/lifecycle";
+import { VerdictIntegrityError } from "@/lib/verdicts/lifecycle";
 
 /**
  * Local bookkeeping only, never a report state (see lib/db/schema.ts on agentSession).
@@ -20,6 +22,9 @@ export type TurnStatus =
   | "CANCELLED";
 
 const TERMINAL_TURN_STATUSES = ["DONE_NO_ACTION", "ERROR", "CANCELLED"] as const;
+/** Bounds the poison redraft retry: three claims of the same conflict proves it is stable. */
+export const MAX_CONSECUTIVE_CLAIM_FAILURES = 3;
+const VERDICT_CONFLICT_PREFIX = "verdict for report ";
 
 export function isTerminal(status: string): boolean {
   return (TERMINAL_TURN_STATUSES as readonly string[]).includes(status);
@@ -50,6 +55,9 @@ export type AgentSessionLease = {
    * needs to fetch one (see lib/agent-sessions/poller.ts). */
   finalSummary: string | null;
   fence: number;
+  /** Claims so far, incremented by claim(). Optional so older manual leases still typecheck;
+   * claim() always sets it, and the poller treats a missing value as zero. */
+  attempts?: number;
   leaseOwner: string;
 };
 
@@ -92,6 +100,7 @@ export async function claim(
     last_mirrored_event_id: string | null;
     final_summary: string | null;
     fence: string | number;
+    attempts: string | number;
   }>(sql`
     update ${agentSession}
        set lease_owner      = ${owner},
@@ -123,7 +132,8 @@ export async function claim(
               ${agentSession.sandboxIds}                     as sandbox_ids,
               ${agentSession.lastMirroredEventId}           as last_mirrored_event_id,
               ${agentSession.finalSummary}                  as final_summary,
-              ${agentSession.fence}                         as fence
+              ${agentSession.fence}                         as fence,
+              ${agentSession.attempts}                      as attempts
   `);
 
   const row = rows[0];
@@ -149,6 +159,7 @@ export async function claim(
     lastMirroredEventId: row.last_mirrored_event_id,
     finalSummary: row.final_summary,
     fence: Number(row.fence),
+    attempts: Number(row.attempts),
     leaseOwner: owner,
   };
 }
@@ -243,6 +254,56 @@ export type AgentSessionReleaseUpdate = {
   nextPollAt?: Date;
   lastError?: string | null;
 };
+
+/**
+ * End a session stuck redrafting a verdict that conflicts with the stored one. The same
+ * pending call throws the same integrity error on every poll, so without this the daemon
+ * claims and fails it forever. Terminal ERROR stops future claims.
+ */
+export async function abandonVerdictConflict(lease: AgentSessionLease): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(agentSession)
+      .set({
+        turnStatus: "ERROR",
+        lastError: "existing verdict disagreed with the retry payload",
+        leaseOwner: null,
+        leaseExpiresAt: null,
+        updatedAt: new Date(),
+      })
+      .where(heldBy(lease))
+      .returning({ id: agentSession.id });
+    if (!updated) throw new LeaseLostError(lease.id);
+    await recordEvent(
+      lease.reportId,
+      "agent.session_abandoned",
+      { reason: "verdict payload conflict", attempts: lease.attempts ?? 0 },
+      { idempotencyKey: `agent.session_abandoned:${lease.id}:verdict-conflict`, tx },
+    );
+  });
+}
+
+/**
+ * True for a retried draft that conflicts with the stored verdict. Any typed integrity
+ * error counts because the same retry will fail the same way. The message fallback is
+ * narrowed to payload so an unrelated error sharing the prefix still throws.
+ */
+export function isVerdictIntegrityConflict(error: unknown): boolean {
+  return (
+    error instanceof VerdictIntegrityError ||
+    (error instanceof Error &&
+      error.message.startsWith(VERDICT_CONFLICT_PREFIX) &&
+      error.message.includes("already exists and disagrees on payload"))
+  );
+}
+
+/**
+ * Bounded retry for the poison above. Claims increment attempts, so reaching the named
+ * limit means the conflict is stable and the session should be abandoned, not retried.
+ */
+export function shouldAbandonVerdictConflict(attempts: number): boolean {
+  return attempts >= MAX_CONSECUTIVE_CLAIM_FAILURES;
+}
 
 /**
  * A generic fenced update: the poller calls this after every poll attempt, regardless of
