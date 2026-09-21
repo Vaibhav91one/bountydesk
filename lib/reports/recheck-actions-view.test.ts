@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  canOfferRecheck,
   recheckActionsFor,
   recheckDialogCopy,
   recheckFailedAnswerError,
@@ -70,4 +71,11 @@ test("thrown errors use an Error message or the generic fallback", () => {
   assert.equal(recheckThrownError(new Error("network failed")), "network failed");
   assert.equal(recheckThrownError("network failed"), "The re-check could not be updated.");
   assert.equal(recheckThrownError(null), "The re-check could not be updated.");
+});
+
+test("re-check is offered on any outcome except a reproduced one", () => {
+  assert.equal(canOfferRecheck("REPRODUCED"), false);
+  assert.equal(canOfferRecheck("NOT_REPRODUCED"), true);
+  assert.equal(canOfferRecheck("ANALYSIS_ONLY"), true);
+  assert.equal(canOfferRecheck("INCONCLUSIVE"), true);
 });

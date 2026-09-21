@@ -281,6 +281,13 @@ export const inboundJob = pgTable(
       .notNull()
       .defaultNow(),
     lastError: text("last_error"),
+    /**
+     * Set when the intake failure this row represents is no longer worth surfacing: the reporter
+     * closed the issue, or a later job for the same issue succeeded. The board strip hides a
+     * dismissed row. It does not change the job's execution state, so a dead-lettered job stays
+     * dead-lettered for the audit trail.
+     */
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

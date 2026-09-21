@@ -35,7 +35,6 @@ test("the chat is advisory and cannot submit while a request is in flight", () =
     "Review steps",
     "Suggest remediation",
     "Verify a fix",
-    "Improve report",
   ]);
   assert.equal(canSubmitReviewerMessage("Question", false, "ready"), true);
   assert.equal(canSubmitReviewerMessage("Question", true, "ready"), false);

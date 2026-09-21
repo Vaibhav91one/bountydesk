@@ -30,6 +30,7 @@ function row(over: Partial<IntakeJobRow> = {}): IntakeJobRow {
     lastError: null,
     createdAt: new Date(NOW - 6 * 60 * 1000),
     updatedAt: new Date(NOW - 6 * 60 * 1000),
+    dismissedAt: null,
     sourceRef: null,
     repoFullName: null,
     ...over,
@@ -49,6 +50,8 @@ function view(over: Partial<IntakeJobView> = {}): IntakeJobView {
     updatedAt: new Date(NOW - 6 * 60 * 1000).toISOString(),
     ageLabel: "6m",
     label: null,
+    sourceRef: null,
+    dismissedAt: null,
     reason: null,
     ...over,
   };
@@ -97,6 +100,8 @@ test("the mapper keeps the wire shape payload free", () => {
   assert.equal(mapped.deliveryPrefix, "abcdef12");
   assert.equal(mapped.label, "juice-shop #25");
   assert.equal(mapped.reason, "worker died");
+  assert.equal(mapped.sourceRef, "github:123456:issue:25");
+  assert.equal(mapped.dismissedAt, null);
   assert.equal(mapped.receivedAt, new Date(NOW - 6 * 60 * 1000).toISOString());
   assert.equal(mapped.ageLabel, "6m");
   for (const key of ["payload", "title", "body"]) {
@@ -117,6 +122,27 @@ test("finished jobs never show, failed and running ones always do", () => {
   assert.equal(
     shouldShowIntakeJob(view({ state: "SESSION_CREATED" }), NOW),
     true,
+  );
+});
+
+test("a dismissed job never shows, whatever its state", () => {
+  const at = new Date(NOW).toISOString();
+  assert.equal(shouldShowIntakeJob(view({ state: "DEAD_LETTER", dismissedAt: at }), NOW), false);
+  assert.equal(shouldShowIntakeJob(view({ state: "RUNNING", dismissedAt: at }), NOW), false);
+});
+
+test("a newer DONE job for an issue hides its older dead letter", () => {
+  const issue = "github:123456:issue:26";
+  const jobs = [
+    // newest first: the successful re-run, then the old failure for the same issue
+    view({ id: "done", state: "DONE", sourceRef: issue }),
+    view({ id: "dead", state: "DEAD_LETTER", sourceRef: issue }),
+    // an unrelated issue's failure is untouched
+    view({ id: "other", state: "DEAD_LETTER", sourceRef: "github:123456:issue:99" }),
+  ];
+  assert.deepEqual(
+    visibleIntakeJobs(jobs, NOW).map((job) => job.id),
+    ["other"],
   );
 });
 

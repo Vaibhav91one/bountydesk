@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { LoaderGrid, ShimmerLabel, StreamingText } from "./agent-trace";
+import { ChatMarkdown } from "./chat-markdown";
 import { PromptBar, QUICK_PROMPTS } from "./prompt-bar";
 
 export { QUICK_PROMPTS };
@@ -508,9 +509,7 @@ export function AgentChat({
                       }}
                     />
                   ) : (
-                    <p className="whitespace-pre-wrap text-body leading-relaxed text-foreground">
-                      {message.body}
-                    </p>
+                    <ChatMarkdown text={message.body} />
                   )}
                 </div>
               ) : (

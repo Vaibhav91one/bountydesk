@@ -30,6 +30,10 @@ export type IntakeJobView = {
   ageLabel: string;
   /** Short repo and issue pointer, or null when no report is linked yet. */
   label: string | null;
+  /** The exact intake ref, used to group jobs by issue. Null before a report is linked. */
+  sourceRef: string | null;
+  /** Set once the failure is no longer worth showing (issue closed, or a later job succeeded). */
+  dismissedAt: string | null;
   /** Bounded worker error, set only for DEAD_LETTER. */
   reason: string | null;
 };
@@ -46,6 +50,7 @@ export type IntakeJobRow = {
   lastError: string | null;
   createdAt: Date;
   updatedAt: Date;
+  dismissedAt: Date | null;
   sourceRef: string | null;
   repoFullName: string | null;
 };
@@ -129,6 +134,8 @@ export function mapIntakeRow(row: IntakeJobRow, nowMs: number = Date.now()): Int
     updatedAt: row.updatedAt.toISOString(),
     ageLabel: ageLabelFor(row.createdAt, nowMs),
     label: intakeLabelFor(row.sourceRef, row.repoFullName),
+    sourceRef: row.sourceRef,
+    dismissedAt: row.dismissedAt ? row.dismissedAt.toISOString() : null,
     reason: deadLetterReasonFor(row.state, row.lastError),
   };
 }
@@ -140,9 +147,10 @@ export function mapIntakeRow(row: IntakeJobRow, nowMs: number = Date.now()): Int
  * Anything running and anything dead-lettered always shows.
  */
 export function shouldShowIntakeJob(
-  job: Pick<IntakeJobView, "state" | "receivedAt">,
+  job: Pick<IntakeJobView, "state" | "receivedAt" | "dismissedAt">,
   nowMs: number = Date.now(),
 ): boolean {
+  if (job.dismissedAt) return false;
   if (job.state === "DONE") return false;
   if (job.state === "DEAD_LETTER") return true;
   if (job.state === "SESSION_CREATED" || job.state === "RUNNING") return true;
@@ -153,7 +161,20 @@ export function visibleIntakeJobs(
   jobs: IntakeJobView[],
   nowMs: number = Date.now(),
 ): IntakeJobView[] {
-  return jobs.filter((job) => shouldShowIntakeJob(job, nowMs));
+  // A DONE job for an issue is fresh proof that intake works for it, so an older dead-lettered
+  // job for the same issue is stale news and drops out. Rows arrive newest-first, so a DONE seen
+  // here is always newer than a DEAD_LETTER met later in the walk.
+  const succeeded = new Set<string>();
+  const visible: IntakeJobView[] = [];
+  for (const job of jobs) {
+    if (job.state === "DONE") {
+      if (job.sourceRef) succeeded.add(job.sourceRef);
+      continue;
+    }
+    if (job.state === "DEAD_LETTER" && job.sourceRef && succeeded.has(job.sourceRef)) continue;
+    if (shouldShowIntakeJob(job, nowMs)) visible.push(job);
+  }
+  return visible;
 }
 
 /**
@@ -180,6 +201,7 @@ export async function readRecentIntakeJobs(
       lastError: inboundJob.lastError,
       createdAt: inboundJob.createdAt,
       updatedAt: inboundJob.updatedAt,
+      dismissedAt: inboundJob.dismissedAt,
       sourceRef: report.sourceRef,
       repoFullName: connectedRepository.fullName,
     })

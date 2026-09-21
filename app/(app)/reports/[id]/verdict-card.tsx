@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
+import { canOfferRecheck } from "@/lib/reports/recheck-actions-view";
 import { cn } from "@/lib/utils";
 
 import { VerdictBody, VerdictDialog } from "./verdict-dialog";
@@ -311,7 +312,10 @@ export function VerdictCard({
                 <RollingIcon icon={CheckCircle} className="size-4" />
                 Approve
               </DropdownMenuItem>
-              {onRecheck ? (
+              {/* A reproduced verdict is only ever approved or denied. Offering a re-check here
+                  let a weaker follow-up run (e.g. an HTTP-only probe that misses a client-side
+                  sink) supersede it with a NOT_REPRODUCED, which is exactly the flip we don't want. */}
+              {onRecheck && canOfferRecheck(outcome) ? (
                 <DropdownMenuItem
                   onClick={() => onRecheck()}
                   disabled={disabled || rechecking}
