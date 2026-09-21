@@ -455,10 +455,6 @@ The parked surfaces, so a plan knows where they live:
 - Email, upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
   `built: false`). Email and upload share one blocker, the outbound contract above; drive was out
   of scope for the demo rather than merely unbuilt.
-- Guided re-check. The reviewer chat is built (`lib/reviewer-chat`, advisory only, behind
-  `REVIEWER_CHAT_ENABLED`), and Ask to re-check is built (`lib/investigation-runs/recheck.ts`), but
-  the dialog sends a fixed neutral instruction. Passing the reviewer's own chat text as the
-  guidance is open work.
 - The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
 - Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is

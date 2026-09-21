@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import type { Icon } from "@phosphor-icons/react";
 import type { ActiveReport } from "@/lib/reports/queue";
+import { gradientForName } from "@/lib/ui/avatar-gradient";
 import {
   AMBIENT_REFETCH_MS,
   activeReportsQueryKey,
@@ -185,7 +186,10 @@ export function AppSidebar({
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuButton size="lg" className="data-[popup-open]:bg-sidebar-accent">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-brand/20 text-meta text-brand-soft">
+                    <span
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-meta font-medium text-white"
+                      style={{ backgroundImage: gradientForName(reviewer) }}
+                    >
                       {reviewer.slice(0, 1).toUpperCase()}
                     </span>
                     <span className="grid flex-1 text-left leading-tight">
