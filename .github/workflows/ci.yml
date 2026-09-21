@@ -37,6 +37,11 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # Clerk keys are needed at build time (the provider and proxy throw without a publishable
+      # key). These are the development-instance keys; production uses its own.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+      CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+      REVIEWER_EMAILS: ci@bountydesk.test
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
