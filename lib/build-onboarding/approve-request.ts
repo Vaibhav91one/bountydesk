@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import { isReviewer } from "@/lib/auth/reviewers";
+import { isReviewerEmail } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 import { db, targetOnboarding } from "@/lib/db";
 
@@ -19,7 +19,7 @@ export async function approveOnboardingRequest(
   session: Session | null,
   rawRepoId: unknown,
 ): Promise<ApproveResult> {
-  if (!session || !isReviewer(session.userId)) {
+  if (!session || !isReviewerEmail(session.email)) {
     return { ok: false, error: "You are not signed in as a reviewer." };
   }
 

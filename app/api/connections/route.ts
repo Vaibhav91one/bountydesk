@@ -1,5 +1,5 @@
 import { currentSession } from "@/lib/auth/dal";
-import { isReviewer } from "@/lib/auth/reviewers";
+import { isReviewerEmail } from "@/lib/auth/reviewers";
 
 import { connectionRows } from "@/app/(app)/connections/rows";
 
@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  *  same rows the page renders for first paint. */
 export async function GET(): Promise<Response> {
   const session = await currentSession();
-  if (!session || !isReviewer(session.userId)) {
+  if (!session || !isReviewerEmail(session.email)) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 

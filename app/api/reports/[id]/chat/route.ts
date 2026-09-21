@@ -63,7 +63,7 @@ export async function POST(
   try {
     result = await enqueueMessage({
       reportId: id,
-      reviewerId: String(session.userId),
+      reviewerId: session.email,
       ...parsed.data,
     });
   } catch (error) {

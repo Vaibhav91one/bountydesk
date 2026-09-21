@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
+import { useClerk } from "@clerk/nextjs";
 
 import type { Icon } from "@phosphor-icons/react";
 import type { ActiveReport } from "@/lib/reports/queue";
@@ -68,13 +69,17 @@ export const NAV: { href: string; label: string; icon: Icon }[] = [
 
 export function AppSidebar({
   reviewer,
+  avatarUrl = null,
   activeReports = [],
 }: {
   reviewer: string;
+  /** Profile image from the identity provider, or null for the gradient fallback. */
+  avatarUrl?: string | null;
   /** Reports in flight, most urgent first. Empty until there are any. */
   activeReports?: ActiveReport[];
 }) {
   const pathname = usePathname();
+  const { signOut, openUserProfile } = useClerk();
 
   // Only while the list is on screen. It renders under /board and nowhere else (see the
   // SidebarMenuSub below), so polling it from the settings page would be a query per reviewer
@@ -177,21 +182,28 @@ export function AppSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        {/* Sign out is a POST, so the menu item submits a form that sits outside the menu. A
-            menu that unmounts on click cannot contain the form it is trying to submit. */}
-        <form id="sign-out" action="/api/auth/logout" method="post" className="hidden" />
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
                   <SidebarMenuButton size="lg" className="data-[popup-open]:bg-sidebar-accent">
-                    <span
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg text-meta font-medium text-white"
-                      style={{ backgroundImage: gradientForName(reviewer) }}
-                    >
-                      {reviewer.slice(0, 1).toUpperCase()}
-                    </span>
+                    {avatarUrl ? (
+                      <Image
+                        src={avatarUrl}
+                        alt=""
+                        width={32}
+                        height={32}
+                        className="size-8 shrink-0 rounded-lg object-cover"
+                      />
+                    ) : (
+                      <span
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg text-meta font-medium text-white"
+                        style={{ backgroundImage: gradientForName(reviewer) }}
+                      >
+                        {reviewer.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
                     <span className="grid flex-1 text-left leading-tight">
                       <span className="truncate text-body text-foreground">{reviewer}</span>
                       <span className="truncate text-meta text-muted-foreground">Reviewer</span>
@@ -201,7 +213,12 @@ export function AppSidebar({
                 }
               />
               <DropdownMenuContent side="top" align="end" sideOffset={8} className="w-56">
-                <DropdownMenuItem disabled>
+                {/* Opens Clerk's profile, where a Google user connects their GitHub account
+                    (matching email or not) so both sign-ins reach the one reviewer identity. */}
+                <DropdownMenuItem
+                  nativeButton
+                  render={<button type="button" onClick={() => openUserProfile()} />}
+                >
                   <Gear />
                   Account settings
                 </DropdownMenuItem>
@@ -212,7 +229,12 @@ export function AppSidebar({
                 <DropdownMenuSeparator />
                 {/* nativeButton, because the render target really is a <button>: Base UI assumes a
                     non-button and would otherwise add role and aria-disabled on top of one. */}
-                <DropdownMenuItem nativeButton render={<button type="submit" form="sign-out" />}>
+                <DropdownMenuItem
+                  nativeButton
+                  render={
+                    <button type="button" onClick={() => void signOut({ redirectUrl: "/login" })} />
+                  }
+                >
                   <SignOut />
                   Sign out
                 </DropdownMenuItem>

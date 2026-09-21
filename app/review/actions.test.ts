@@ -9,23 +9,26 @@ import { computeContentHash } from "@/lib/verdicts/hash";
  * database one (row locks, the unique approval_decision/approval_submission indexes), so a
  * mock database would agree with a wrong implementation.
  *
- * allowVerdict and denyVerdict both start with requireReviewer(), which reads the session
- * cookie through next/headers. That call has no request scope in a plain node:test process
- * (cookies() throws "called outside a request scope" there), so next/headers is mocked here
- * with a settable cookie value. This needs node run with --experimental-test-module-mocks,
- * which is why package.json's test script carries that flag.
+ * allowVerdict and denyVerdict both start with requireReviewer(). The DAL is mocked directly
+ * (rather than Clerk underneath it) so the test never loads @clerk/nextjs/server, whose
+ * server-only guard and headers() call have no request scope in a plain node:test process. This
+ * needs node run with --experimental-test-module-mocks, which package.json's test script carries.
  */
 const REVIEWER_ID = 5150;
-process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
-process.env.AUTH_SECRET = "b".repeat(32);
+const REVIEWER_EMAIL = "reviewer@bountydesk.test";
 
-let cookieValue: string | undefined;
+type MockSession = { login: string; email: string; avatarUrl: string | null };
+let session: MockSession | null = null;
 let deliverCalls: { deliveryId: string; owner: string }[] = [];
-mock.module("next/headers", {
+mock.module("@/lib/auth/dal", {
   namedExports: {
-    cookies: async () => ({
-      get: (name: string) => (cookieValue ? { name, value: cookieValue } : undefined),
-    }),
+    currentSession: async () => session,
+    requireReviewer: async () => {
+      if (session) return session;
+      // Same as the real DAL: a missing session redirects, which throws NEXT_REDIRECT.
+      const { redirect } = await import("next/navigation");
+      redirect("/login");
+    },
   },
 });
 mock.module("next/cache", {
@@ -45,7 +48,6 @@ mock.module("@/lib/delivery/worker", {
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
 let actions: typeof import("./actions");
-let sessionLib: typeof import("@/lib/auth/session");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -53,7 +55,6 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   actions = await import("./actions");
-  sessionLib = await import("@/lib/auth/session");
 });
 
 after(async () => {
@@ -65,16 +66,15 @@ beforeEach(() => {
   deliverCalls = [];
 });
 
+// The first arg keeps the old shape: REVIEWER_ID is the allowlisted reviewer (the DAL would return
+// a session), any other id is a non-reviewer (the DAL would return null and requireReviewer would
+// redirect), so the existing call sites carry over unchanged.
 function signIn(userId: number, login = "reviewer") {
-  cookieValue = sessionLib.seal({
-    login,
-    userId,
-    expiresAt: Math.floor(Date.now() / 1000) + 3600,
-  });
+  session = userId === REVIEWER_ID ? { login, email: REVIEWER_EMAIL, avatarUrl: null } : null;
 }
 
 function signOut() {
-  cookieValue = undefined;
+  session = null;
 }
 
 let seq = 0;

@@ -9,7 +9,8 @@ import test, { after, before } from "node:test";
  * pass the first assertion on its own, which is exactly the bug worth catching.
  */
 const REVIEWER_ID = 4242;
-process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
+const REVIEWER_EMAIL = "reviewer@bountydesk.test";
+process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
 process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
 process.env.DAYTONA_TARGET_SNAPSHOT_ID = "snapshot-test";
 
@@ -40,8 +41,11 @@ after(async () => {
   await schema?.drop();
 });
 
+// Keeps the old shape: REVIEWER_ID maps to the allowlisted email, any other id to an outsider,
+// so the existing session(REVIEWER_ID) call sites keep meaning "an authorized reviewer".
 function session(userId: number) {
-  return { login: "someone", userId, expiresAt: Math.floor(Date.now() / 1000) + 3600 };
+  const email = userId === REVIEWER_ID ? REVIEWER_EMAIL : `outsider-${userId}@example.com`;
+  return { login: "someone", email, avatarUrl: null };
 }
 
 async function repo({

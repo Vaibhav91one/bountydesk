@@ -1,4 +1,4 @@
-import { isReviewer } from "@/lib/auth/reviewers";
+import { isReviewerEmail } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 import {
   and,
@@ -99,7 +99,7 @@ function authorizeReviewerRepository(
   session: Session | null,
   rawRepoId: unknown,
 ): AuthorizedReviewerRepository {
-  if (!session || !isReviewer(session.userId)) {
+  if (!session || !isReviewerEmail(session.email)) {
     return { ok: false, error: "You are not signed in as a reviewer." };
   }
 

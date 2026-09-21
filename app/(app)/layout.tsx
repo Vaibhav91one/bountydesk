@@ -26,7 +26,11 @@ export default async function ConsoleLayout({ children }: LayoutProps<"/">) {
   return (
     <QueryProvider>
       <SidebarProvider defaultOpen={!collapsed}>
-        <AppSidebar reviewer={session.login} activeReports={activeReports} />
+        <AppSidebar
+          reviewer={session.login}
+          avatarUrl={session.avatarUrl}
+          activeReports={activeReports}
+        />
         <SidebarInset>
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />

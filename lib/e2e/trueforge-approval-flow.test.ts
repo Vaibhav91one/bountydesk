@@ -15,27 +15,36 @@ import type { TrueForgeClient, TurnInput } from "@/lib/trueforge/client";
  * allowVerdict/denyVerdict need requireReviewer(), which reads the session cookie through
  * next/headers; same mock as app/review/actions.test.ts.
  */
+// REVIEWER_ID is the GitHub webhook sender for /reproduce (REVIEWER_GITHUB_IDS); REVIEWER_EMAIL is
+// the dashboard reviewer for approve/deny (REVIEWER_EMAILS). Both are needed because this flow
+// spans a GitHub-issue intake and a dashboard approval.
 const REVIEWER_ID = 5150;
+const REVIEWER_EMAIL = "reviewer@bountydesk.test";
 process.env.REVIEWER_GITHUB_IDS = String(REVIEWER_ID);
-process.env.AUTH_SECRET = "b".repeat(32);
+process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
 process.env.TRUEFORGE_URL = "http://localhost:8790";
 process.env.TRUEFORGE_API_KEY = "";
 
 const SECRET = "e2e-approval-flow-secret";
 process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
-let cookieValue: string | undefined;
-mock.module("next/headers", {
+// Mock the DAL directly so the test never loads @clerk/nextjs/server (its server-only guard and
+// headers() call have no request scope here). allowVerdict/denyVerdict go through requireReviewer.
+type MockSession = { login: string; email: string; avatarUrl: string | null };
+let session: MockSession | null = null;
+mock.module("@/lib/auth/dal", {
   namedExports: {
-    cookies: async () => ({
-      get: (name: string) => (cookieValue ? { name, value: cookieValue } : undefined),
-    }),
+    currentSession: async () => session,
+    requireReviewer: async () => {
+      if (session) return session;
+      const { redirect } = await import("next/navigation");
+      redirect("/login");
+    },
   },
 });
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
-let sessionLib: typeof import("@/lib/auth/session");
 let POST: typeof import("@/app/api/intake/github/route").POST;
 let runOnce: typeof import("@/lib/jobs/worker").runOnce;
 let pollOnce: typeof import("@/lib/agent-sessions/poller").pollOnce;
@@ -54,7 +63,6 @@ before(async () => {
   schema = await createSchema("trueforge_flow");
 
   dbm = await import("@/lib/db");
-  sessionLib = await import("@/lib/auth/session");
   ({ POST } = await import("@/app/api/intake/github/route"));
   ({ runOnce } = await import("@/lib/jobs/worker"));
   ({ pollOnce } = await import("@/lib/agent-sessions/poller"));
@@ -78,11 +86,7 @@ after(async () => {
 });
 
 function signIn(): void {
-  cookieValue = sessionLib.seal({
-    login: "reviewer",
-    userId: REVIEWER_ID,
-    expiresAt: Math.floor(Date.now() / 1000) + 3600,
-  });
+  session = { login: "reviewer", email: REVIEWER_EMAIL, avatarUrl: null };
 }
 
 /**
