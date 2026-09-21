@@ -8,7 +8,9 @@ export function gradientForName(name: string): string {
   for (let i = 0; i < name.length; i += 1) {
     hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
   }
+  // Unsigned shift throughout: a signed `>>` on a hash past 2^31 goes negative, and JS's `%` would
+  // then hand back a negative hue like hsl(-39 …). `>>>` keeps every term non-negative.
   const first = hash % 360;
-  const second = (first + 40 + ((hash >> 8) % 80)) % 360;
+  const second = (first + 40 + ((hash >>> 8) % 80)) % 360;
   return `linear-gradient(135deg, hsl(${first} 70% 55%), hsl(${second} 65% 45%))`;
 }
