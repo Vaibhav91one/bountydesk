@@ -440,7 +440,7 @@ test("a long harness error is trimmed to one line for the row", () => {
 });
 
 function supersededFile(
-  run: { runNumber: number; status: string; reason: string },
+  run: { id: string; runNumber: number; status: string; reason: string },
   overrides: Partial<CaseFile> = {},
 ) {
   // A report just after Ask to re-check: state moved on, the pending tuple is gone, revision 1
@@ -469,7 +469,12 @@ function supersededFile(
 
 test("a queued re-check is its own visible step, not a done investigation", () => {
   const view = caseLiveView(
-    supersededFile({ runNumber: 2, status: "PENDING", reason: "REVIEWER_GUIDANCE" }),
+    supersededFile({
+      id: "00000000-0000-0000-0000-0000000000r2",
+      runNumber: 2,
+      status: "PENDING",
+      reason: "REVIEWER_GUIDANCE",
+    }),
   );
 
   assert.equal(view.steps.length, 5, "the re-check reuses the five rows");
@@ -486,7 +491,12 @@ test("a queued re-check is its own visible step, not a done investigation", () =
 test("a running re-check reads as running with no approval on offer", () => {
   const view = caseLiveView(
     supersededFile(
-      { runNumber: 2, status: "RUNNING", reason: "REVIEWER_GUIDANCE" },
+      {
+        id: "00000000-0000-0000-0000-0000000000r2",
+        runNumber: 2,
+        status: "RUNNING",
+        reason: "REVIEWER_GUIDANCE",
+      },
       { turnStatus: "RUNNING" },
     ),
   );
@@ -504,7 +514,12 @@ test("a stale pending id behind a re-check never reopens approval", () => {
   const v = verdict();
   const view = caseLiveView(
     supersededFile(
-      { runNumber: 2, status: "PENDING", reason: "REVIEWER_GUIDANCE" },
+      {
+        id: "00000000-0000-0000-0000-0000000000r2",
+        runNumber: 2,
+        status: "PENDING",
+        reason: "REVIEWER_GUIDANCE",
+      },
       { awaitingVerdictId: v.id },
     ),
   );
@@ -516,7 +531,12 @@ test("a stale pending id behind a re-check never reopens approval", () => {
 test("a failed re-check names the recorded message as plain text", () => {
   const view = caseLiveView(
     supersededFile(
-      { runNumber: 2, status: "ERROR", reason: "REVIEWER_GUIDANCE" },
+      {
+        id: "00000000-0000-0000-0000-0000000000r2",
+        runNumber: 2,
+        status: "ERROR",
+        reason: "REVIEWER_GUIDANCE",
+      },
       {
         events: [
           toolCallEvent(1),
@@ -544,7 +564,12 @@ test("a failed re-check names the recorded message as plain text", () => {
 
 test("a failed re-check without an event still reads as failed", () => {
   const view = caseLiveView(
-    supersededFile({ runNumber: 3, status: "ERROR", reason: "REVIEWER_GUIDANCE" }),
+    supersededFile({
+      id: "00000000-0000-0000-0000-0000000000r3",
+      runNumber: 3,
+      status: "ERROR",
+      reason: "REVIEWER_GUIDANCE",
+    }),
   );
 
   assert.equal(step(view, "investigation").note, "Re-check failed (run 3)");
@@ -563,7 +588,12 @@ test("an initial run never reads as a re-check", () => {
   });
   const view = caseLiveView({
     ...base,
-    latestRun: { runNumber: 1, status: "AWAITING_APPROVAL", reason: "INITIAL" },
+    latestRun: {
+      id: "00000000-0000-0000-0000-0000000000r1",
+      runNumber: 1,
+      status: "AWAITING_APPROVAL",
+      reason: "INITIAL",
+    },
   });
 
   assert.equal(step(view, "investigation").state, "done");
@@ -585,9 +615,83 @@ test("a guidance run over a current verdict is not a re-check", () => {
   });
   const view = caseLiveView({
     ...base,
-    latestRun: { runNumber: 2, status: "RUNNING", reason: "REVIEWER_GUIDANCE" },
+    latestRun: {
+      id: "00000000-0000-0000-0000-0000000000r2",
+      runNumber: 2,
+      status: "RUNNING",
+      reason: "REVIEWER_GUIDANCE",
+    },
   });
 
   assert.equal(step(view, "investigation").note, "1 step recorded");
   assert.equal(step(view, "verdict").note, "Revision 1");
+});
+
+test("a superseded verdict hides the header outcome badge until the re-check lands", () => {
+  // The board hides the old outcome once a re-check supersedes it. The header must match,
+  // or the same report shows a current answer in one place and history in another.
+  for (const status of ["PENDING", "RUNNING", "ERROR", "CANCELLED"]) {
+    const view = caseLiveView(
+      supersededFile(
+        {
+          id: "00000000-0000-0000-0000-0000000000r2",
+          runNumber: 2,
+          status,
+          reason: "REVIEWER_GUIDANCE",
+        },
+        status === "CANCELLED" ? { state: "ANALYSIS_ONLY" } : {},
+      ),
+    );
+    assert.equal(view.verdict?.superseded, true);
+    assert.equal(view.showOutcomeBadge, false, status);
+  }
+
+  const v = verdict();
+  const current = caseLiveView(
+    caseFile({
+      state: "AWAITING_APPROVAL",
+      verdict: v,
+      verdictHistory: [
+        { id: v.id, revision: 1, outcome: v.outcome, summary: v.summary, createdAt: AT, superseded: false },
+      ],
+      awaitingVerdictId: v.id,
+    }),
+  );
+  assert.equal(current.showOutcomeBadge, true);
+});
+
+test("a cancelled re-check parks the report with no current verdict", () => {
+  // After cancel the report is ANALYSIS_ONLY and the old verdict is dead history.
+  // The lifecycle must name the cancelled run instead of rendering the old revision as done.
+  const view = caseLiveView(
+    supersededFile(
+      {
+        id: "00000000-0000-0000-0000-0000000000r2",
+        runNumber: 2,
+        status: "CANCELLED",
+        reason: "REVIEWER_GUIDANCE",
+      },
+      { state: "ANALYSIS_ONLY" },
+    ),
+  );
+
+  assert.equal(step(view, "investigation").note, "Re-check cancelled (run 2)");
+  assert.equal(step(view, "investigation").state, "skipped");
+  assert.equal(step(view, "verdict").note, "Revision 1 superseded, re-check cancelled");
+  assert.equal(step(view, "verdict").state, "pending");
+  assert.equal(step(view, "approval").note, "Not reached");
+  assert.equal(view.showOutcomeBadge, false);
+});
+
+test("the summary carries the run id the dialog retries or cancels", () => {
+  const runId = "11111111-1111-1111-1111-111111111111";
+  const view = caseLiveView(
+    supersededFile(
+      { id: runId, runNumber: 2, status: "PENDING", reason: "REVIEWER_GUIDANCE" },
+      { state: "REPRODUCING" },
+    ),
+  );
+
+  assert.equal(view.recheckSummary?.runId, runId);
+  assert.equal(view.recheckSummary?.runNumber, 2);
 });

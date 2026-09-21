@@ -34,8 +34,9 @@ test("a re-check run maps to its card status, anything else to nothing", () => {
   assert.equal(recheckStatusLabel("PENDING", true), "Re-check queued");
   assert.equal(recheckStatusLabel("RUNNING", true), "Re-check running");
   assert.equal(recheckStatusLabel("ERROR", true), "Re-check failed");
-  // A finished, cancelled or superseded parent run leaves the generic state label in charge.
-  for (const status of ["AWAITING_APPROVAL", "SUPERSEDED", "DONE", "CANCELLED", null, undefined]) {
+  assert.equal(recheckStatusLabel("CANCELLED", true), "Re-check cancelled");
+  // A finished or superseded parent run leaves the generic state label in charge.
+  for (const status of ["AWAITING_APPROVAL", "SUPERSEDED", "DONE", null, undefined]) {
     assert.equal(recheckStatusLabel(status, true), null, `${status} should fall through`);
   }
   // Without a superseded verdict there is no re-check to report, whatever runs exist.

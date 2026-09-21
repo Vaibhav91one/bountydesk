@@ -177,6 +177,7 @@ test("a list reads handoff and delivery liveness, not just report state", () => 
 
 test("a failed re-check slows the poll instead of asking every 1.5 seconds forever", () => {
   const failed = {
+    runId: "00000000-0000-0000-0000-0000000000r2",
     runNumber: 2,
     runStatus: "ERROR",
     runReason: "REVIEWER_GUIDANCE",

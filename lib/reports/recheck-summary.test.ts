@@ -15,6 +15,7 @@ const LATER = new Date("2026-08-31T12:04:05Z");
 type FileWithRun = CaseFile & {
   latestRun:
     | {
+        id: string;
         runNumber: number;
         status: string;
         reason: string;
@@ -93,7 +94,12 @@ test("a pending run summarizes probes, caps findings, and names the last event t
   const longTitle = "t".repeat(150);
   const view = caseLiveView(
     caseFile({
-      latestRun: { runNumber: 1, status: "AWAITING_APPROVAL", reason: "INITIAL" },
+      latestRun: {
+        id: "00000000-0000-0000-0000-0000000000r1",
+        runNumber: 1,
+        status: "AWAITING_APPROVAL",
+        reason: "INITIAL",
+      },
       verdict: verdictWithFindings([longTitle, "second", "third", "fourth", "fifth", "sixth", "seventh"]),
       awaitingVerdictId: "00000000-0000-0000-0000-0000000000v2",
       events: [
@@ -132,6 +138,7 @@ test("a pending run summarizes probes, caps findings, and names the last event t
 
   const summary = view.recheckSummary;
   assert.ok(summary, "a run with a verdict has a summary");
+  assert.equal(summary.runId, "00000000-0000-0000-0000-0000000000r1");
   assert.equal(summary.runNumber, 1);
   assert.equal(summary.runStatus, "AWAITING_APPROVAL");
   assert.equal(summary.runReason, "INITIAL");
@@ -166,7 +173,12 @@ test("no summary without a run row, and none without a verdict", () => {
 
   const withRunNoVerdict = caseLiveView(
     caseFile({
-      latestRun: { runNumber: 1, status: "AWAITING_APPROVAL", reason: "INITIAL" },
+      latestRun: {
+        id: "00000000-0000-0000-0000-0000000000r1",
+        runNumber: 1,
+        status: "AWAITING_APPROVAL",
+        reason: "INITIAL",
+      },
       verdict: null,
       awaitingVerdictId: null,
     }),
@@ -177,7 +189,12 @@ test("no summary without a run row, and none without a verdict", () => {
 test("no events means zero counts and no last event time", () => {
   const view = caseLiveView(
     caseFile({
-      latestRun: { runNumber: 3, status: "RUNNING", reason: "REVIEWER_GUIDANCE" },
+      latestRun: {
+        id: "00000000-0000-0000-0000-0000000000r3",
+        runNumber: 3,
+        status: "RUNNING",
+        reason: "REVIEWER_GUIDANCE",
+      },
       verdict: verdictWithFindings([]),
       awaitingVerdictId: "00000000-0000-0000-0000-0000000000v2",
       events: [],
@@ -186,6 +203,7 @@ test("no events means zero counts and no last event time", () => {
   );
 
   assert.deepEqual(view.recheckSummary, {
+    runId: "00000000-0000-0000-0000-0000000000r3",
     runNumber: 3,
     runStatus: "RUNNING",
     runReason: "REVIEWER_GUIDANCE",
@@ -206,6 +224,7 @@ test("run timestamps and attempts ride along without changing the summary", () =
   const view = caseLiveView(
     caseFile({
       latestRun: {
+        id: "00000000-0000-0000-0000-0000000000r2",
         runNumber: 2,
         status: "PENDING",
         reason: "REVIEWER_GUIDANCE",
@@ -219,6 +238,7 @@ test("run timestamps and attempts ride along without changing the summary", () =
     }),
   );
 
+  assert.equal(view.recheckSummary?.runId, "00000000-0000-0000-0000-0000000000r2");
   assert.equal(view.recheckSummary?.runNumber, 2);
   assert.equal(view.recheckSummary?.runStatus, "PENDING");
   assert.equal(view.recheckSummary?.runReason, "REVIEWER_GUIDANCE");

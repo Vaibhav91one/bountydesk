@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 
+import { RecheckActions } from "./recheck-actions";
+
 /** One fact. The value is always something the database holds. */
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -35,12 +37,14 @@ export function StatusCard({
   issueUrl,
   channel,
   repositoryFullName,
+  reportId,
 }: {
   status: CaseLiveView;
   issueUrl: string | null;
   /** Header facts that identify the report rather than track it, so they come from the page. */
   channel: string;
   repositoryFullName: string | null;
+  reportId: string;
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-border/50 bg-card">
@@ -96,6 +100,10 @@ export function StatusCard({
         <p className="border-t border-border/50 px-5 py-3 text-meta text-muted-foreground">
           The live session is gone, but the drafted verdict still stands for review.
         </p>
+      ) : null}
+
+      {status.state === "REPRODUCING" && status.recheckSummary ? (
+        <RecheckActions reportId={reportId} summary={status.recheckSummary} />
       ) : null}
     </section>
   );

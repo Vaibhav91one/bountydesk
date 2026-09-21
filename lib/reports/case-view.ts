@@ -269,6 +269,7 @@ function stepMascot(key: string, state: StepState, file: CaseFile): MascotKey {
  * is pure: case.ts owns the database read, this file only branches on what it was given.
  */
 type LifecycleRun = {
+  id: string;
   runNumber: number;
   status: string;
   reason: string;
@@ -308,6 +309,15 @@ function failedRecheck(file: LifecycleFile): NonNullable<LifecycleRun> | null {
   const run = file.latestRun ?? null;
   if (!run || run.reason !== "REVIEWER_GUIDANCE") return null;
   if (run.status !== "ERROR") return null;
+  if (!file.verdict || !isSupersededVerdict(file)) return null;
+  return run;
+}
+
+/** Same gate for a re-check the reviewer stopped. Cancel parks the report with no new verdict. */
+function cancelledRecheck(file: LifecycleFile): NonNullable<LifecycleRun> | null {
+  const run = file.latestRun ?? null;
+  if (!run || run.reason !== "REVIEWER_GUIDANCE") return null;
+  if (run.status !== "CANCELLED") return null;
   if (!file.verdict || !isSupersededVerdict(file)) return null;
   return run;
 }
@@ -362,16 +372,19 @@ function lifecycle(file: LifecycleFile, investigating: boolean, investigationSte
   // "Investigation done" and "Revision 1, done" while nothing is actually decided.
   const recheck = activeRecheck(file);
   const recheckFailed = failedRecheck(file);
+  const recheckCancelled = cancelledRecheck(file);
   const recheckActive = recheck !== null;
-  const recheckOver = recheckFailed !== null;
-  const failureDetail = recheckOver ? recheckFailureDetail(file) : null;
+  const recheckOver = recheckFailed !== null || recheckCancelled !== null;
+  const failureDetail = recheckFailed ? recheckFailureDetail(file) : null;
   const recheckNote = recheck
     ? `Re-check run ${recheck.runNumber} ${recheck.status === "PENDING" ? "queued" : "running"}`
     : recheckFailed
       ? failureDetail
         ? `Re-check failed (run ${recheckFailed.runNumber}): ${failureDetail}`
         : `Re-check failed (run ${recheckFailed.runNumber})`
-      : null;
+      : recheckCancelled
+        ? `Re-check cancelled (run ${recheckCancelled.runNumber})`
+        : null;
 
   // While a re-check owns the report there is nothing to approve: requestRecheck clears the
   // pending tuple, so any awaiting id here would be stale. The row stays "Not reached" until the
@@ -424,11 +437,13 @@ function lifecycle(file: LifecycleFile, investigating: boolean, investigationSte
       note:
         recheck && file.verdict
           ? `Revision ${file.verdict.revision} superseded, re-check ${recheck.status === "PENDING" ? "queued" : "running"}`
-          : recheckOver && file.verdict
+          : recheckFailed && file.verdict
             ? `Revision ${file.verdict.revision} superseded, re-check failed`
-            : file.verdict
-              ? `Revision ${file.verdict.revision}`
-              : "None yet",
+            : recheckCancelled && file.verdict
+              ? `Revision ${file.verdict.revision} superseded, re-check cancelled`
+              : file.verdict
+                ? `Revision ${file.verdict.revision}`
+                : "None yet",
       state:
         recheckActive || recheckOver
           ? ("pending" as const)
@@ -557,6 +572,7 @@ function recheckSummaryFor(
   const last = file.events.length > 0 ? file.events[file.events.length - 1] : null;
 
   return {
+    runId: run.id,
     runNumber: run.runNumber,
     runStatus: run.status,
     runReason: run.reason,
@@ -659,8 +675,11 @@ export function caseLiveView(
     deliveryState,
     verdictOutcome,
     outcomeLabel: verdictOutcome ? outcomeLabel(verdictOutcome) : null,
+    // Same superseded flag the board passes, so a re-check hides the old outcome here too.
     showOutcomeBadge: verdictOutcome
-      ? shouldShowOutcomeBadge(file.state, verdictOutcome)
+      ? shouldShowOutcomeBadge(file.state, verdictOutcome, {
+          superseded: isSupersededVerdict(file),
+        })
       : false,
     approvalDecision: file.approval?.decision ?? null,
     awaitingVerdictId: file.awaitingVerdictId,

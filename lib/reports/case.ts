@@ -70,6 +70,8 @@ export function caseSourceLabel(sourceRef: string, id: string): string {
 
 /** The newest investigation run for a report, if the report has any run rows yet. */
 export type CaseLatestRun = {
+  /** investigation_run id, so the dialog can retry or cancel this exact run. */
+  id: string;
   runNumber: number;
   status: string;
   reason: string;
@@ -134,6 +136,7 @@ export async function readCase(
       // history does not pay for all of it here. Null for reports written before run rows.
       const [latestRun] = await tx
         .select({
+          id: investigationRun.id,
           runNumber: investigationRun.runNumber,
           status: investigationRun.status,
           reason: investigationRun.reason,

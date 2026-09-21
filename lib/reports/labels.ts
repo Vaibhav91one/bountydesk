@@ -67,5 +67,6 @@ export function recheckStatusLabel(
   if (runStatus === "PENDING") return "Re-check queued";
   if (runStatus === "RUNNING") return "Re-check running";
   if (runStatus === "ERROR") return "Re-check failed";
+  if (runStatus === "CANCELLED") return "Re-check cancelled";
   return null;
 }
