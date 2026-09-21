@@ -37,7 +37,7 @@ export function PromptBar({
   onDraftChange,
   onSend,
   onQuickPrompt,
-  sending,
+  busy,
   mode,
   inputRef,
 }: {
@@ -45,11 +45,12 @@ export function PromptBar({
   onDraftChange: (next: string) => void;
   onSend: () => void;
   onQuickPrompt: (prompt: string) => void;
-  sending: boolean;
+  /** A turn is in flight (sending, or the reply is still coming): the composer stays locked. */
+  busy: boolean;
   mode: "loading" | "ready" | "disabled" | "error";
   inputRef: RefObject<HTMLInputElement | null>;
 }) {
-  const canSend = draft.trim().length > 0 && !sending && mode === "ready";
+  const canSend = draft.trim().length > 0 && !busy && mode === "ready";
 
   return (
     <div className="flex flex-col">
@@ -61,7 +62,7 @@ export function PromptBar({
             size="xs"
             variant="outline"
             onClick={() => onQuickPrompt(prompt)}
-            disabled={sending || mode !== "ready"}
+            disabled={busy || mode !== "ready"}
             className="shrink-0"
           >
             <RollingIcon icon={Icon} className="size-3.5" /> {label}
@@ -82,7 +83,7 @@ export function PromptBar({
           onChange={(event) => onDraftChange(event.target.value)}
           placeholder="Ask about this verdict"
           aria-label="Message to Agent Bounty"
-          disabled={sending || mode !== "ready"}
+          disabled={busy || mode !== "ready"}
           className="h-11 min-w-0 flex-1 border-0 bg-transparent px-1 text-body shadow-none focus-visible:border-0 focus-visible:ring-0"
         />
         <Button
@@ -91,10 +92,10 @@ export function PromptBar({
           variant="default"
           aria-label="Send advisory message"
           disabled={!canSend}
-          loading={sending}
+          loading={busy}
           className="size-8 rounded-full"
         >
-          {sending ? null : <ArrowUp weight="bold" className="size-4" />}
+          {busy ? null : <ArrowUp weight="bold" className="size-4" />}
         </Button>
       </form>
     </div>
