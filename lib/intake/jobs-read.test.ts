@@ -156,3 +156,42 @@ test("a dead letter reason never carries a bearer token from the worker's error"
   assert.ok(reason);
   assert.ok(!reason.includes("abc123def456ghi789"));
 });
+
+test("a raw investigation failure becomes one friendly line without the body", () => {
+  const production =
+    'Intake failed: juice-shop #26, Status code: 500 Body: { "error": { "message": "Internal server error" } } (delivery b63ce2e8)';
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", production),
+    "The investigation service returned an error (500)",
+  );
+});
+
+test("a status code maps to the friendly phrase and keeps the code", () => {
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", "Status code: 500"),
+    "The investigation service returned an error (500)",
+  );
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", "upstream Status code: 503 unavailable"),
+    "The investigation service returned an error (503)",
+  );
+});
+
+test("a body marker or inline json never reaches the strip", () => {
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", "worker died\nBody: {\"a\":1}"),
+    "worker died",
+  );
+  assert.equal(deadLetterReasonFor("DEAD_LETTER", 'boom {"a":1}'), "boom");
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", "Status code: 500 Body: Internal server error"),
+    "The investigation service returned an error (500)",
+  );
+});
+
+test("a multiline error stays on its first line with single spacing", () => {
+  assert.equal(
+    deadLetterReasonFor("DEAD_LETTER", "worker   died\nsecond line stays out"),
+    "worker died",
+  );
+});

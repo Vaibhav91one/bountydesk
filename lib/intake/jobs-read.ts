@@ -78,6 +78,25 @@ export function intakeLabelFor(
 }
 
 /**
+ * Cut a worker error down to the part that is safe to show. Upstream failures can append
+ * a response body after a Body marker or as inline JSON, and that tail can repeat webhook
+ * content, so the strip only keeps what comes before it.
+ */
+function cleanWorkerError(value: string): string | null {
+  let head = value;
+  const bodyLine = head.search(/^\s*Body:/im);
+  if (bodyLine !== -1) head = head.slice(0, bodyLine);
+  const brace = head.indexOf("{");
+  if (brace !== -1) head = head.slice(0, brace);
+  head = (head.split(/\r?\n/)[0] ?? "").trim();
+  const midBody = head.search(/\bBody:/i);
+  if (midBody !== -1) head = head.slice(0, midBody);
+  head = head.replace(/\s+/g, " ").trim();
+  if (!head) return null;
+  return head;
+}
+
+/**
  * The worker's own error, trimmed and bounded, and only for dead-lettered jobs. Other
  * states carry no reason because there is nothing wrong to explain yet.
  */
@@ -87,9 +106,13 @@ export function deadLetterReasonFor(
 ): string | null {
   if (state !== "DEAD_LETTER") return null;
   // The worker's error can echo upstream text, so secrets are stripped before it reaches a browser.
-  const text = lastError ? redactReviewerText(lastError).trim() : "";
-  if (!text) return null;
-  return text.length > REASON_MAX ? text.slice(0, REASON_MAX) : text;
+  const redacted = lastError ? redactReviewerText(lastError).trim() : "";
+  if (!redacted) return null;
+  const cleaned = cleanWorkerError(redacted);
+  if (!cleaned) return null;
+  const status = cleaned.match(/Status code:\s*(\d{3})/i);
+  if (status) return `The investigation service returned an error (${status[1]})`;
+  return cleaned.length > REASON_MAX ? cleaned.slice(0, REASON_MAX) : cleaned;
 }
 
 /** One joined row into the wire shape. Pure, so it is testable without a database. */

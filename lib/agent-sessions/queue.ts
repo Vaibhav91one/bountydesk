@@ -58,6 +58,8 @@ export type AgentSessionLease = {
   /** Claims so far, incremented by claim(). Optional so older manual leases still typecheck;
    * claim() always sets it, and the poller treats a missing value as zero. */
   attempts?: number;
+  /** The earliest reliable session timestamp, used to bound an open turn. */
+  createdAt?: Date;
   leaseOwner: string;
 };
 
@@ -101,6 +103,7 @@ export async function claim(
     final_summary: string | null;
     fence: string | number;
     attempts: string | number;
+    created_at: Date | string;
   }>(sql`
     update ${agentSession}
        set lease_owner      = ${owner},
@@ -133,7 +136,8 @@ export async function claim(
               ${agentSession.lastMirroredEventId}           as last_mirrored_event_id,
               ${agentSession.finalSummary}                  as final_summary,
               ${agentSession.fence}                         as fence,
-              ${agentSession.attempts}                      as attempts
+              ${agentSession.attempts}                      as attempts,
+              ${agentSession.createdAt}                     as created_at
   `);
 
   const row = rows[0];
@@ -160,6 +164,8 @@ export async function claim(
     finalSummary: row.final_summary,
     fence: Number(row.fence),
     attempts: Number(row.attempts),
+    // A raw query can hand a timestamp back as text, so it is coerced instead of assumed.
+    createdAt: row.created_at instanceof Date ? row.created_at : new Date(row.created_at),
     leaseOwner: owner,
   };
 }

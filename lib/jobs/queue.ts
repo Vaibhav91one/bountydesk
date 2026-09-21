@@ -2,6 +2,8 @@ import { and, eq, lte, or, sql } from "drizzle-orm";
 
 import { db, inboundJob, type Executor } from "@/lib/db";
 
+import { backoffMs } from "./backoff";
+
 export type JobExecutionState = (typeof inboundJob.state.enumValues)[number];
 export type IntakeChannel = (typeof inboundJob.channel.enumValues)[number];
 
@@ -261,6 +263,8 @@ const DEADLINE_GRACE_PREFIX = "tick deadline grace used: ";
 export async function releaseAfterDeadline(lease: Lease, error: string): Promise<void> {
   const gracePattern = `${DEADLINE_GRACE_PREFIX}%`;
   const graceError = `${DEADLINE_GRACE_PREFIX}${error}`;
+  // Lease attempts still hold the pre-release count, which is what the delay is scheduled from.
+  const backoffSecs = Math.max(1, Math.floor(backoffMs(lease.attempts) / 1000));
   const updated = await db
     .update(inboundJob)
     .set({
@@ -284,9 +288,7 @@ export async function releaseAfterDeadline(lease: Lease, error: string): Promise
         then ${graceError}
         else ${error}
       end`,
-      nextAttemptAt: sql`now() + make_interval(
-        secs => least(power(2, ${inboundJob.attempts})::int, 300)
-      )`,
+      nextAttemptAt: sql`now() + make_interval(secs => ${backoffSecs})`,
       updatedAt: new Date(),
     })
     .where(heldBy(lease))
@@ -350,10 +352,15 @@ export async function complete(lease: Lease): Promise<void> {
  * Release a failed job for retry, or bury it once it has burned through its attempts.
  *
  * The state is left where it was so the next attempt resumes from the step that failed rather
- * than redoing the ones that succeeded. Backoff is exponential on the attempt count, capped,
- * so a persistently broken delivery backs off instead of spinning.
+ * than redoing the ones that succeeded. The retry delay comes from backoffMs() and is stored
+ * on next_attempt_at, which claim() already gates on alongside the lease. The lease itself is
+ * cleared, so the sweeper leaves a waiting row alone: its released branch only matches rows
+ * whose lease expiry is in the past, and a null lease never matches. Keeping the delay on
+ * next_attempt_at needs no schema change and keeps the lease columns meaning crash recovery.
  */
 export async function fail(lease: Lease, error: string): Promise<void> {
+  // Lease attempts still hold the pre-release count, which is what the delay is scheduled from.
+  const backoffSecs = Math.max(1, Math.floor(backoffMs(lease.attempts) / 1000));
   const updated = await db.execute<{ id: string }>(sql`
     update ${inboundJob}
        set state = case
@@ -364,9 +371,7 @@ export async function fail(lease: Lease, error: string): Promise<void> {
            lease_owner      = null,
            lease_expires_at = null,
            last_error       = ${error},
-           next_attempt_at  = now() + make_interval(
-             secs => least(power(2, ${inboundJob.attempts})::int, 300)
-           ),
+           next_attempt_at  = now() + make_interval(secs => ${backoffSecs}),
            updated_at       = now()
      where ${inboundJob.id}         = ${lease.id}
        and ${inboundJob.leaseOwner} = ${lease.owner}
