@@ -22,7 +22,7 @@ const DIALOG_COPY: Record<RecheckAction, RecheckDialogCopy> = {
 };
 
 export function recheckActionsFor(summary: RecheckSummary): RecheckAction[] {
-  if (summary.runReason !== "REVIEWER_GUIDANCE") return [];
+  if (summary.runReason !== "REVIEWER_GUIDANCE" || summary.runId === null) return [];
   if (summary.runStatus === "ERROR") return ["retry", "cancel"];
   if (summary.runStatus === "PENDING") return ["cancel"];
   return [];

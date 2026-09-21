@@ -259,7 +259,7 @@ export async function cancelRecheck(
  * Supersede the pending verdict and open a fresh REVIEWER_GUIDANCE run, in one transaction:
  *
  * - lock report, agent_session, and verdict rows;
- * - refuse anything but AWAITING_APPROVAL with a pending tuple matching this exact verdict;
+ * - refuse anything but AWAITING_APPROVAL or ANALYSIS_ONLY with a parked verdict matching this exact one;
  * - recompute the payload hash server-side, never trust the caller's copy;
  * - refuse a verdict that already has a decision or a supersession row;
  * - insert the supersession link, clear the pending tuple, transition to REPRODUCING.
@@ -318,7 +318,9 @@ export async function requestRecheck(
       .for("update");
     if (!v) return { ok: false, reason: "verdict not found for this report" };
 
-    if (reportRow.state !== "AWAITING_APPROVAL") {
+    // An ANALYSIS_ONLY report still holds a parked verdict awaiting review, so it can be
+    // superseded the same way. Without the pending tuple below it is refused as not pending.
+    if (reportRow.state !== "AWAITING_APPROVAL" && reportRow.state !== "ANALYSIS_ONLY") {
       return { ok: false, reason: `report is ${reportRow.state}; only a pending approval can be superseded` };
     }
     if (!session.pendingVerdictId || session.pendingVerdictId !== v.id) {

@@ -70,3 +70,21 @@ export function recheckStatusLabel(
   if (runStatus === "CANCELLED") return "Re-check cancelled";
   return null;
 }
+
+/** A first-run failure must not describe a report whose latest verdict belongs to a re-check. */
+export function stalledFirstRunLabel({
+  state,
+  jobDeadLettered,
+  sessionErrored,
+  verdictSuperseded,
+}: {
+  state: string;
+  jobDeadLettered: boolean;
+  sessionErrored: boolean;
+  verdictSuperseded: boolean;
+}): string | null {
+  if (state !== "TRIAGING" || verdictSuperseded) return null;
+  if (jobDeadLettered) return "Intake failed";
+  if (sessionErrored) return "Investigation stopped";
+  return null;
+}

@@ -53,6 +53,27 @@ async function seedReport(
   return row.id;
 }
 
+async function seedDeadLetteredJob(reportId: string): Promise<void> {
+  issues += 1;
+  await dbm.db.insert(dbm.inboundJob).values({
+    channel: "github",
+    deliveryId: `dead-letter-${issues}`,
+    payload: { source: "test" },
+    reportId,
+    state: "DEAD_LETTER",
+  });
+}
+
+async function seedErroredSession(reportId: string): Promise<void> {
+  issues += 1;
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId,
+    capabilityToken: `errored-session-token-${issues}`,
+    sessionId: `errored-session-${issues}`,
+    turnStatus: "ERROR",
+  });
+}
+
 async function seedDeliveredVerdict(
   reportId: string,
   outcome: import("./queue").VerdictOutcome = "REPRODUCED",
@@ -251,6 +272,29 @@ test("a report with no target and no verdict reads as exactly that", async () =>
   assert.equal(card.outcome, null);
   assert.equal(card.eventCount, 0);
   assert.equal(card.awaitingVerdictId, null);
+  assert.equal(card.jobDeadLettered, false);
+  assert.equal(card.sessionErrored, false);
+});
+
+test("the board and index expose first-run intake and session failures", async () => {
+  const intakeFailed = await seedReport("TRIAGING");
+  await seedDeadLetteredJob(intakeFailed);
+  const sessionFailed = await seedReport("TRIAGING");
+  await seedErroredSession(sessionFailed);
+
+  const cardRows = (await queue.listQueue()).flatMap((column) => column.cards);
+  const intakeCard = cardRows.find((card) => card.id === intakeFailed);
+  const sessionCard = cardRows.find((card) => card.id === sessionFailed);
+  assert.ok(intakeCard);
+  assert.ok(sessionCard);
+  assert.equal(intakeCard.jobDeadLettered, true);
+  assert.equal(intakeCard.sessionErrored, false);
+  assert.equal(sessionCard.jobDeadLettered, false);
+  assert.equal(sessionCard.sessionErrored, true);
+
+  const indexRows = await queue.listAllReports();
+  assert.equal(indexRows.find((row) => row.id === intakeFailed)?.jobDeadLettered, true);
+  assert.equal(indexRows.find((row) => row.id === sessionFailed)?.sessionErrored, true);
 });
 
 test("the card carries the latest verdict revision, not the first", async () => {

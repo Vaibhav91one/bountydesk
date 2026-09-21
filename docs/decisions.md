@@ -660,6 +660,11 @@ old verdict row is never edited: `verdict_supersession` is a separate immutable 
 `appendVerdictRevision` (not `ensureInitialVerdict`) writes the fresh run's draft as revision
 N+1 with its own content hash.
 
+`ANALYSIS_ONLY` later gained the same edge back to `REPRODUCING`. An analysis only verdict
+means the agent could not verify, which is exactly when a reviewer asks for a re-check, so the
+Decide menu offers it there too. The parked pending tuple is still required, so a report that
+reached `ANALYSIS_ONLY` without one is refused.
+
 Three gates close on a superseded verdict, all tested:
 
 - `decide()` (app/review/actions.ts) refuses to approve or deny it, even a replay of an earlier

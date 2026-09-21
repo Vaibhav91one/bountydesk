@@ -26,6 +26,11 @@ function summary(overrides: Partial<RecheckSummary> = {}): RecheckSummary {
   };
 }
 
+test("a summary without a run id has no retry or cancel actions", () => {
+  assert.deepEqual(recheckActionsFor(summary({ runId: null, runStatus: "ERROR" })), []);
+  assert.deepEqual(recheckActionsFor(summary({ runId: null, runStatus: "PENDING" })), []);
+});
+
 test("re-check action buttons follow the run reason and status", () => {
   assert.deepEqual(recheckActionsFor(summary({ runStatus: "ERROR" })), ["retry", "cancel"]);
   assert.deepEqual(recheckActionsFor(summary({ runStatus: "PENDING" })), ["cancel"]);

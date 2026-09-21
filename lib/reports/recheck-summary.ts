@@ -3,8 +3,8 @@
  * the report page already loads plus investigation_run, bounded, and rendered as plain text.
  */
 export type RecheckSummary = {
-  /** The investigation_run id the dialog retries or cancels. */
-  runId: string;
+  /** The investigation_run id the dialog retries or cancels, or null for the initial run. */
+  runId: string | null;
   runNumber: number;
   runStatus: string;
   runReason: string;

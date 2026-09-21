@@ -51,6 +51,10 @@ export type QueueCard = {
    * outcome beside the new state.
    */
   verdictSuperseded: boolean;
+  /** An intake job exhausted its attempts, so the first run cannot start from this delivery. */
+  jobDeadLettered: boolean;
+  /** The first agent session stopped with an error while the report is still in triage. */
+  sessionErrored: boolean;
   /**
    * The newest investigation run's status, or null for reports written before run rows.
    * Read so the card can say what the re-check is doing; it never decides anything.
@@ -127,6 +131,14 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
           limit 1
         )
       )`,
+      jobDeadLettered: sql<boolean>`exists (
+        select 1 from inbound_job j
+        where j.report_id = ${report.id} and j.state = 'DEAD_LETTER'
+      )`,
+      sessionErrored: sql<boolean>`exists (
+        select 1 from agent_session s
+        where s.report_id = ${report.id} and s.turn_status = 'ERROR'
+      )`,
       // The newest run, whatever its reason. Bounded to one row on the report predicate, so
       // a report with a long re-check history does not pay for all of it here.
       runStatus: sql<string | null>`(
@@ -200,6 +212,8 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     // The raw value stays in the query; the card just does not hand it to badges.
     outcome: row.verdictSuperseded ? null : row.outcome,
     verdictSuperseded: row.verdictSuperseded,
+    jobDeadLettered: row.jobDeadLettered,
+    sessionErrored: row.sessionErrored,
     runStatus: row.runStatus,
     deliveryState: row.deliveryState,
     handoffFailed: row.handoffFailed,
@@ -389,6 +403,14 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
           limit 1
         )
       )`,
+      jobDeadLettered: sql<boolean>`exists (
+        select 1 from inbound_job j
+        where j.report_id = ${report.id} and j.state = 'DEAD_LETTER'
+      )`,
+      sessionErrored: sql<boolean>`exists (
+        select 1 from agent_session s
+        where s.report_id = ${report.id} and s.turn_status = 'ERROR'
+      )`,
       // Same newest-run status as the board read, for the same re-check wording.
       runStatus: sql<string | null>`(
         select r.status from investigation_run r
@@ -469,6 +491,8 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     // until the re-check drafts its replacement.
     outcome: row.verdictSuperseded ? null : row.outcome,
     verdictSuperseded: row.verdictSuperseded,
+    jobDeadLettered: row.jobDeadLettered,
+    sessionErrored: row.sessionErrored,
     runStatus: row.runStatus,
     deliveryState: row.deliveryState,
     handoffFailed: row.handoffFailed,

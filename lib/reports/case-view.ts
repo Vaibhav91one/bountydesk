@@ -129,7 +129,7 @@ export type CaseLiveView = {
   approvalDecision: string | null;
   awaitingVerdictId: string | null;
   /** What the re-check dialog shows about the run being superseded. Null when there is no
-   * run row or no verdict to summarize, and the dialog falls back to its default text. */
+   * verdict to summarize, and the dialog falls back to its default text. */
   recheckSummary: RecheckSummary | null;
 
   target: { name: string; imageDigest: string } | null;
@@ -534,10 +534,11 @@ function caseStateLabel(file: CaseFile, deliveryState: string | null): string {
 /**
  * What the re-check dialog shows about the run being superseded.
  *
- * Null when there is no run row or no verdict, so the dialog falls back to its default
- * text. Only plain counts and truncated titles cross into the view, never argument previews
- * or sandbox output: reviewer text and sandbox output are untrusted, and must never select
- * a target, tool or scope.
+ * Null when there is no verdict, so the dialog falls back to its default text. When the initial
+ * run has no investigation row yet, the summary uses the stable initial-run details and a null
+ * run id. Only plain counts and truncated titles cross into the view, never argument previews or
+ * sandbox output: reviewer text and sandbox output are untrusted, and must never select a target,
+ * tool or scope.
  */
 function recheckSummaryFor(
   file: CaseFile & {
@@ -545,11 +546,17 @@ function recheckSummaryFor(
   },
   investigationSteps: number,
 ): RecheckSummary | null {
-  // latestRun is optional so pure fixtures built before run rows existed still typecheck.
-  // Missing counts as no run.
+  // latestRun is optional because the initial investigation gets its row lazily when a re-check
+  // is requested. The verdict still gives the dialog a useful account of that first run.
   const run = file.latestRun ?? null;
   const current = file.verdict;
-  if (!run || !current) return null;
+  if (!current) return null;
+  const summaryRun = run ?? {
+    id: null,
+    runNumber: 1,
+    status: "COMPLETED",
+    reason: "INITIAL",
+  };
 
   // Mirrored tool-call events carry the tool name on data. Both target probes count as one
   // capability from a reviewer's view; an exact list keeps an unknown tool name out of the count.
@@ -572,10 +579,10 @@ function recheckSummaryFor(
   const last = file.events.length > 0 ? file.events[file.events.length - 1] : null;
 
   return {
-    runId: run.id,
-    runNumber: run.runNumber,
-    runStatus: run.status,
-    runReason: run.reason,
+    runId: summaryRun.id,
+    runNumber: summaryRun.runNumber,
+    runStatus: summaryRun.status,
+    runReason: summaryRun.reason,
     verdictRevision: current.revision,
     outcome: current.outcome,
     probeCount,
