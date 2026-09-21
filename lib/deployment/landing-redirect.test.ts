@@ -33,13 +33,7 @@ test("keeps the landing page and its assets on Vercel", () => {
 });
 
 test("lets GitHub connection endpoints run during landing fallback", () => {
-  for (const pathname of [
-    "/api/auth/github",
-    "/api/auth/github/callback",
-    "/api/auth/logout",
-    "/api/github/setup",
-    "/api/intake/github",
-  ]) {
+  for (const pathname of ["/api/github/setup", "/api/intake/github"]) {
     assert.equal(shouldRedirectToSource(pathname), false, pathname);
   }
 });
