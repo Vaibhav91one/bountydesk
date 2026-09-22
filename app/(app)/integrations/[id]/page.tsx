@@ -13,7 +13,7 @@ import { canManageReviewers, listReviewers, type ReviewerEntry } from "@/lib/aut
 import { formatStamp } from "@/lib/format";
 import { listConnections } from "@/lib/github/connections";
 import { findIntegration, INTEGRATIONS, type IntegrationIcon } from "../catalog";
-import { EmailReviewers } from "../email-reviewers";
+import { ManageEmailAccess } from "../manage-email-access";
 
 import { ManageAccess, type AccessInstallation } from "./manage-access";
 
@@ -149,6 +149,10 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 </Button>
               </>
             ) : null}
+
+            {/* Email intake authorizes by the reviewer allowlist, so its access is managed here,
+                the way GitHub's is. One button, one dialog, the whole flow inside it. */}
+            {isEmail ? <ManageEmailAccess reviewers={reviewers} canManage={canManage} /> : null}
           </div>
         </div>
 
@@ -157,18 +161,6 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
 
       <div className="grid gap-8 p-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-7">
-          {isEmail ? (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-heading text-foreground">Reviewers</h2>
-              <p className="max-w-3xl text-body text-muted-foreground">
-                Who may sign in to operate BountyDesk and whose email reports are triaged. An owner
-                adds an address, the person enters the one-time code mailed to it, and only then is
-                it authorized. Owners are set in the environment.
-              </p>
-              <EmailReviewers entries={reviewers} canManage={canManage} />
-            </section>
-          ) : null}
-
           {integration.sections.map((section) => (
             <section key={section.title} className="flex flex-col gap-3">
               <h2 className="text-heading text-foreground">{section.title}</h2>

@@ -11,7 +11,7 @@ export type ReviewerActionResult = { ok: true; message?: string } | { ok: false;
 /**
  * Every reviewer mutation is owner-only. requireReviewer proves a reviewer session, and the
  * canManage check is the second gate that keeps an added member from managing the list. A server
- * action arrives as its own POST, so the checks live here, not only in the layout guard.
+ * action arrives as its own request, so the checks live here, not only in the layout guard.
  */
 async function requireOwnerEmail(): Promise<string | null> {
   const session = await requireReviewer();
@@ -19,20 +19,13 @@ async function requireOwnerEmail(): Promise<string | null> {
 }
 
 /**
- * Add a reviewer, or resend the code to a pending one. Both are the same step: create or refresh
+ * Connect an email, or resend the code to a pending one. Both are the same step: create or refresh
  * the pending row and mail a fresh code. The row is not authorized until the code is entered.
  */
-export async function sendCodeAction(
-  _previous: ReviewerActionResult | null,
-  formData: FormData,
-): Promise<ReviewerActionResult> {
+export async function connectEmail(email: string): Promise<ReviewerActionResult> {
   const owner = await requireOwnerEmail();
   if (!owner) return { ok: false, error: "Only an owner can add reviewers." };
-
-  const email = formData.get("email");
-  if (typeof email !== "string" || email.trim().length === 0) {
-    return { ok: false, error: "Enter an email address." };
-  }
+  if (email.trim().length === 0) return { ok: false, error: "Enter an email address." };
 
   let result;
   try {
@@ -49,46 +42,30 @@ export async function sendCodeAction(
   try {
     await sendVerificationEmail(email.trim().toLowerCase(), result.code);
   } catch {
-    // The row is saved as pending; the send is what failed. Say so, and leave Resend to retry.
     revalidatePath("/integrations/email");
-    return { ok: false, error: "The address was added, but the code email failed to send. Try Resend." };
+    return { ok: false, error: "The address was added, but the code email failed to send. Try again." };
   }
 
   revalidatePath("/integrations/email");
-  return { ok: true, message: "Code sent. Enter it below once it arrives." };
+  return { ok: true };
 }
 
 /** Confirm a pending reviewer with the code that was mailed to them. */
-export async function verifyReviewerAction(
-  _previous: ReviewerActionResult | null,
-  formData: FormData,
-): Promise<ReviewerActionResult> {
+export async function verifyEmail(email: string, code: string): Promise<ReviewerActionResult> {
   const owner = await requireOwnerEmail();
   if (!owner) return { ok: false, error: "Only an owner can verify reviewers." };
-
-  const email = formData.get("email");
-  const code = formData.get("code");
-  if (typeof email !== "string" || typeof code !== "string") {
-    return { ok: false, error: "Enter the six-digit code." };
-  }
 
   const result = await verifyCode(email, code);
   if (!result.ok) return result;
 
   revalidatePath("/integrations/email");
-  return { ok: true, message: "Verified." };
+  return { ok: true };
 }
 
 /** Remove a reviewer, pending or verified. An env owner cannot be removed here. */
-export async function removeReviewerAction(
-  _previous: ReviewerActionResult | null,
-  formData: FormData,
-): Promise<ReviewerActionResult> {
+export async function disconnectEmail(email: string): Promise<ReviewerActionResult> {
   const owner = await requireOwnerEmail();
   if (!owner) return { ok: false, error: "Only an owner can remove reviewers." };
-
-  const email = formData.get("email");
-  if (typeof email !== "string") return { ok: false, error: "No address given." };
 
   try {
     await removeReviewer(email);
