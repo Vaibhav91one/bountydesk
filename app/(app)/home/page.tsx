@@ -19,15 +19,17 @@ export const metadata = { title: "Home · BountyDesk" };
 /**
  * Report sources, in the order they are likely to matter.
  *
- * `state` is what is true today: GitHub is the only one wired. developer-icons carries no
- * Google Drive, so OneDrive stands in for the brand, and a folder is not a brand at all so it
- * comes from Phosphor.
+ * `state` is what is true today: GitHub and email are wired, the other two are not. `live` is
+ * for a channel that is on as soon as it is built, with no per-account connection to count;
+ * GitHub is the exception, since it is only really on once an installation exists.
+ * developer-icons carries no Google Drive, so OneDrive stands in for the brand, and a folder is
+ * not a brand at all so it comes from Phosphor.
  */
 const INTEGRATIONS = [
-  { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected" },
-  { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon" },
-  { key: "email", name: "Email", icon: Gmail, state: "coming soon" },
-  { key: "upload", name: "File upload", icon: Folder, state: "coming soon" },
+  { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected", live: false },
+  { key: "email", name: "Email", icon: Gmail, state: "accepting reports", live: true },
+  { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon", live: false },
+  { key: "upload", name: "File upload", icon: Folder, state: "coming soon", live: false },
 ] as const;
 
 export default async function HomePage() {
@@ -84,7 +86,7 @@ export default async function HomePage() {
 
           <ul className="flex flex-1 flex-wrap content-center items-center gap-2.5">
             {INTEGRATIONS.map((source) => {
-              const connected = source.key === "github" && live.length > 0;
+              const connected = source.key === "github" ? live.length > 0 : source.live;
               return (
                 <li
                   key={source.key}
