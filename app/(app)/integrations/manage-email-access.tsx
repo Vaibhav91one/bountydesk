@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { Gmail } from "developer-icons";
-import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Trash } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Plus, Trash } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
@@ -21,13 +21,16 @@ import type { ReviewerEntry } from "@/lib/auth/reviewers";
 import { connectEmail, disconnectEmail, verifyEmail } from "./reviewer-actions";
 import { OtpInput } from "./otp-input";
 
-type Step = "choice" | "input" | "code";
+type Step = "list" | "input" | "code";
 
 /**
  * Manage who may operate BountyDesk by email, all inside one dialog, styled like the GitHub
- * access dialog on its own page. The choice screen offers the signed-in address in one click or
- * a field for another one; either way a code is mailed and entered before the row is authorized.
- * Everything is owner-only, and every action re-checks that server-side.
+ * access dialog on its own page.
+ *
+ * The signed-in owner is listed rather than offered as something to connect: an owner is
+ * authorized by REVIEWER_EMAILS, so there is nothing to verify and nothing this dialog could
+ * remove without locking the account out. Connecting is therefore always another address, which
+ * is mailed a code and becomes a removable member once the code is entered.
  */
 export function ManageEmailAccess({
   reviewers,
@@ -39,7 +42,7 @@ export function ManageEmailAccess({
   ownerEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<Step>("choice");
+  const [step, setStep] = useState<Step>("list");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +52,7 @@ export function ManageEmailAccess({
   const members = reviewers.filter((entry) => entry.role === "member");
 
   function reset() {
-    setStep("choice");
+    setStep("list");
     setEmail("");
     setCode("");
     setError(null);
@@ -61,8 +64,8 @@ export function ManageEmailAccess({
     if (!next) reset();
   }
 
-  // Mail a code to `target` and move to the code step. An address that is already an owner or a
-  // verified member has nothing to verify, so it returns to the choice screen with a note.
+  // Mail a code to `target` and move to the code step. An address with nothing left to verify,
+  // an owner or an already-verified member, returns to the list with a note instead.
   function send(target: string) {
     setError(null);
     setNotice(null);
@@ -121,77 +124,66 @@ export function ManageEmailAccess({
         </DialogHeader>
 
         <div className="flex flex-1 flex-col gap-5 p-6">
-          {step === "choice" ? (
+          {step === "list" ? (
             <>
               {notice ? <p className="text-meta text-emerald-400">{notice}</p> : null}
 
-              {members.length > 0 ? (
-                <ul className="flex flex-col rounded-md border border-border/50 bg-background px-4">
-                  {members.map((member) => (
-                    <li
-                      key={member.email}
-                      className="flex items-center justify-between gap-3 border-b border-border/50 py-3 last:border-b-0"
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate text-body text-foreground">{member.email}</span>
-                        {member.verified ? (
-                          <Check weight="bold" aria-label="Verified" className="size-4 shrink-0 text-emerald-500" />
-                        ) : (
-                          <span className="shrink-0 text-meta text-muted-foreground">Pending verification</span>
-                        )}
-                      </span>
-                      {canManage ? (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          disabled={pending}
-                          onClick={() => remove(member.email)}
-                          aria-label={`Remove ${member.email}`}
-                        >
-                          <RollingIcon icon={Trash} className="size-4" />
-                        </Button>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
+              <ul className="flex flex-col rounded-md border border-border/50 bg-background px-4">
+                {canManage ? (
+                  <li className="flex items-center justify-between gap-3 border-b border-border/50 py-3 last:border-b-0">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-body text-foreground">{ownerEmail}</span>
+                      <Check weight="bold" aria-label="Verified" className="size-4 shrink-0 text-emerald-500" />
+                    </span>
+                    <span className="shrink-0 text-meta text-muted-foreground">Owner, set in the environment</span>
+                  </li>
+                ) : null}
+
+                {members.map((member) => (
+                  <li
+                    key={member.email}
+                    className="flex items-center justify-between gap-3 border-b border-border/50 py-3 last:border-b-0"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-body text-foreground">{member.email}</span>
+                      {member.verified ? (
+                        <Check weight="bold" aria-label="Verified" className="size-4 shrink-0 text-emerald-500" />
+                      ) : (
+                        <span className="shrink-0 text-meta text-muted-foreground">Pending verification</span>
+                      )}
+                    </span>
+                    {canManage ? (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={pending}
+                        onClick={() => remove(member.email)}
+                        aria-label={`Remove ${member.email}`}
+                      >
+                        <RollingIcon icon={Trash} className="size-4" />
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+
+              {error ? <p className="text-meta text-destructive">{error}</p> : null}
 
               {canManage ? (
-                <>
-                  <Button className="w-full" disabled={pending} onClick={() => send(ownerEmail)}>
-                    {pending ? (
-                      <CircleNotch className="animate-spin" />
-                    ) : (
-                      <RollingIcon icon={Gmail} className="size-4" />
-                    )}
-                    <span className="truncate">Continue with {ownerEmail}</span>
-                  </Button>
-
-                  <div className="flex items-center gap-3 text-meta text-muted-foreground">
-                    <span className="h-px flex-1 bg-border/50" />
-                    Or
-                    <span className="h-px flex-1 bg-border/50" />
-                  </div>
-
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    disabled={pending}
-                    onClick={() => {
-                      setEmail("");
-                      setError(null);
-                      setNotice(null);
-                      setStep("input");
-                    }}
-                  >
-                    Continue with another email
-                  </Button>
-                  {error ? <p className="text-meta text-destructive">{error}</p> : null}
-                </>
-              ) : members.length === 0 ? (
-                <p className="flex flex-1 items-center justify-center text-center text-body text-muted-foreground">
-                  No email is connected, and only an owner can connect one.
-                </p>
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={pending}
+                  onClick={() => {
+                    setEmail("");
+                    setError(null);
+                    setNotice(null);
+                    setStep("input");
+                  }}
+                >
+                  <RollingIcon icon={Plus} className="size-4" />
+                  Connect another email
+                </Button>
               ) : null}
             </>
           ) : null}
@@ -218,7 +210,7 @@ export function ManageEmailAccess({
               </label>
               {error ? <p className="text-meta text-destructive">{error}</p> : null}
               <div className="flex items-center justify-between gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setStep("list")}>
                   <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                 </Button>
                 <Button type="submit" disabled={pending}>
@@ -247,7 +239,7 @@ export function ManageEmailAccess({
                 <OtpInput value={code} onChange={setCode} onComplete={submitCode} />
                 {error ? <p className="text-meta text-destructive">{error}</p> : null}
                 <div className="flex items-center justify-between gap-2 self-stretch">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("list")}>
                     <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={() => send(email)}>

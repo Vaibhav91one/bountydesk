@@ -118,14 +118,15 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
               <Icon className="size-5" />
             </span>
             <h1 className="text-title text-foreground">{integration.name}</h1>
-            {integration.built ? (
-              installed ? (
-                <Badge variant="success">Installed</Badge>
-              ) : (
-                <Badge variant="outline">Not installed</Badge>
-              )
-            ) : (
+            {!integration.built ? (
               <Badge variant="outline">Coming soon</Badge>
+            ) : isEmail ? (
+              // Email has no installation to count: intake is live as soon as the channel is built.
+              <Badge variant="success">Accepting reports</Badge>
+            ) : installed ? (
+              <Badge variant="success">Installed</Badge>
+            ) : (
+              <Badge variant="outline">Not installed</Badge>
             )}
           </div>
 
@@ -209,6 +210,14 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                     )}
                   </Detail>
                 ) : null}
+              </>
+            ) : isEmail ? (
+              <>
+                <Detail label="Status">Accepting reports</Detail>
+                <Detail label="Reviewers">
+                  {reviewers.filter((entry) => entry.verified).length} verified
+                </Detail>
+                <Detail label="Delivery">Not wired yet</Detail>
               </>
             ) : (
               <Detail label="Status">Coming soon</Detail>

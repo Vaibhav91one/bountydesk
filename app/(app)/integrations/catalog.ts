@@ -82,15 +82,15 @@ export const INTEGRATIONS: Integration[] = [
     tagline: "Report intake by email, with no GitHub connection needed.",
     icon: "gmail",
     developer: "BountyDesk",
-    built: false,
+    built: true,
     sections: [
       {
         title: "Overview",
         body: "A report arrives as an email and is triaged without any GitHub connection. Intake and reproduction are separate: a report with no bound target profile stops at analysis only, whichever channel it came in through.",
       },
       {
-        title: "Why it is not built",
-        body: "Outbound needs a verified recipient identity and a transport receipt before a delivery attempt may be recorded. Until those exist, a report from this channel must never reach DELIVERED, so the channel is designed rather than half-shipped.",
+        title: "What is not wired yet",
+        body: "Intake runs: a mail from an authorised sender becomes a report and is triaged. Replying the verdict back does not, because outbound needs a verified recipient identity and a transport receipt before a delivery attempt may be recorded. Until those exist a report from this channel is reviewed in the console and never reaches DELIVERED.",
       },
       {
         title: "What the design already fixes",
