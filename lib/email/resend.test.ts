@@ -52,6 +52,16 @@ test("fetchInboundBody rethrows a network failure with context so the retry is l
   }
 });
 
+test("fetchInboundBody rethrows unparseable JSON with context", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  stubFetch(() => new Response("<html>not json</html>", { status: 200 }));
+  try {
+    await assert.rejects(fetchInboundBody("abc-123"), /abc-123 returned unparseable JSON/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("fetchInboundBody tolerates a missing text or html field", async () => {
   process.env.RESEND_API_KEY = "re_test_key";
   stubFetch(() => new Response(JSON.stringify({ text: "only text" }), { status: 200 }));

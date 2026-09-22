@@ -41,7 +41,14 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
     );
   }
 
-  const payload = (await response.json()) as { text?: unknown; html?: unknown };
+  let payload: { text?: unknown; html?: unknown };
+  try {
+    payload = (await response.json()) as { text?: unknown; html?: unknown };
+  } catch (cause) {
+    // A 2xx with a body that is not JSON should not surface as a bare SyntaxError. Same context as
+    // the other failure paths so the worker's retry is legible.
+    throw new Error(`resend receiving fetch for ${resendEmailId} returned unparseable JSON`, { cause });
+  }
   return {
     text: typeof payload.text === "string" ? payload.text : "",
     html: typeof payload.html === "string" ? payload.html : "",
