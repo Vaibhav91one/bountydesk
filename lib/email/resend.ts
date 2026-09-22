@@ -20,12 +20,20 @@ export type InboundBody = {
  * request with no recognizable agent with a 1010 block before it reaches the API.
  */
 export async function fetchInboundBody(resendEmailId: string): Promise<InboundBody> {
-  const response = await fetch(`${RESEND_API}/emails/receiving/${resendEmailId}`, {
-    headers: {
-      authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
-      "user-agent": "bountydesk-worker",
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${RESEND_API}/emails/receiving/${resendEmailId}`, {
+      headers: {
+        authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
+        "user-agent": "bountydesk-worker",
+      },
+    });
+  } catch (cause) {
+    // A network-level failure (DNS, connection reset) rejects here rather than returning a
+    // response. Rethrow with the same context as the non-2xx path so the retry the worker takes
+    // is legible in the logs instead of a bare "fetch failed".
+    throw new Error(`resend receiving fetch for ${resendEmailId} failed to connect`, { cause });
+  }
 
   if (!response.ok) {
     throw new Error(

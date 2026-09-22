@@ -40,6 +40,18 @@ test("fetchInboundBody throws on a non-2xx so the job retries", async () => {
   }
 });
 
+test("fetchInboundBody rethrows a network failure with context so the retry is legible", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  globalThis.fetch = (async () => {
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  try {
+    await assert.rejects(fetchInboundBody("abc-123"), /abc-123 failed to connect/);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("fetchInboundBody tolerates a missing text or html field", async () => {
   process.env.RESEND_API_KEY = "re_test_key";
   stubFetch(() => new Response(JSON.stringify({ text: "only text" }), { status: 200 }));
