@@ -33,7 +33,13 @@ export const currentSession = cache(async (): Promise<Session | null> => {
   // isReviewerEmail(session.email) checks consistent.
   const verified = user.emailAddresses.filter((e) => e.verification?.status === "verified");
   const candidates = (verified.length ? verified : user.emailAddresses).map((e) => e.emailAddress);
-  const reviewerEmail = candidates.find((email) => isReviewerEmail(email));
+  let reviewerEmail: string | undefined;
+  for (const email of candidates) {
+    if (await isReviewerEmail(email)) {
+      reviewerEmail = email;
+      break;
+    }
+  }
   if (!reviewerEmail) return null;
 
   const login = user.username ?? user.firstName ?? reviewerEmail;

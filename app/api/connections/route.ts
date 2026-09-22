@@ -9,7 +9,7 @@ export const runtime = "nodejs";
  *  same rows the page renders for first paint. */
 export async function GET(): Promise<Response> {
   const session = await currentSession();
-  if (!session || !isReviewerEmail(session.email)) {
+  if (!session || !(await isReviewerEmail(session.email))) {
     return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 

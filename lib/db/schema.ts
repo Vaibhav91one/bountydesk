@@ -218,6 +218,29 @@ export const targetProfile = pgTable(
 );
 
 /** The human-facing report. Its state is the report lifecycle, never job execution. */
+/**
+ * Reviewers added from the dashboard, on top of the REVIEWER_EMAILS env allowlist.
+ *
+ * The env list is the bootstrap: those addresses are the owners, always authorized and always
+ * able to manage this table, and they are never stored here. A row here is a member an owner
+ * added later, authorized to operate the dashboard and to have their email reports triaged, but
+ * not to manage the list. Keeping owners in the env and members in the database means the
+ * database can be wiped without locking everyone out, and no dashboard action can remove the
+ * people who bootstrap access. Emails are stored lowercased so the unique index is the
+ * case-insensitive check.
+ */
+export const reviewer = pgTable(
+  "reviewer",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    /** The owner who added this member. Null only for a row seeded outside the dashboard. */
+    addedByEmail: text("added_by_email"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("reviewer_email_key").on(t.email)],
+);
+
 export const report = pgTable(
   "report",
   {

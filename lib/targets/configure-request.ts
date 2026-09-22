@@ -31,14 +31,15 @@ type AuthorizedReviewerRepository = { ok: true; repoId: number } | { ok: false; 
  * reviewer session, a real repository id, and a fully-configured artifact to pin against.
  * Kept in one place so the two mutations cannot drift apart on what "authorized" means.
  */
-function authorizeTargetRequest(
+async function authorizeTargetRequest(
   session: Session | null,
   rawRepoId: unknown,
   rawTargetName: unknown = DEFAULT_TARGET_NAME,
-):
+): Promise<
   | ({ ok: true; repoId: number; targetName: string } & TargetPin)
-  | { ok: false; error: string } {
-  const authorizedRepository = authorizeReviewerRepository(session, rawRepoId);
+  | { ok: false; error: string }
+> {
+  const authorizedRepository = await authorizeReviewerRepository(session, rawRepoId);
   if (!authorizedRepository.ok) return authorizedRepository;
 
   const targetName = typeof rawTargetName === "string" && rawTargetName.length > 0
@@ -95,11 +96,11 @@ function authorizeTargetRequest(
   };
 }
 
-function authorizeReviewerRepository(
+async function authorizeReviewerRepository(
   session: Session | null,
   rawRepoId: unknown,
-): AuthorizedReviewerRepository {
-  if (!session || !isReviewerEmail(session.email)) {
+): Promise<AuthorizedReviewerRepository> {
+  if (!session || !(await isReviewerEmail(session.email))) {
     return { ok: false, error: "You are not signed in as a reviewer." };
   }
 
@@ -119,7 +120,7 @@ async function targetNameForRotation(
   | ({ ok: true; targetName: string } & Exclude<AuthorizedReviewerRepository, { ok: false }>)
   | { ok: false; error: string }
 > {
-  const authorizedRepository = authorizeReviewerRepository(session, rawRepoId);
+  const authorizedRepository = await authorizeReviewerRepository(session, rawRepoId);
   if (!authorizedRepository.ok) return authorizedRepository;
 
   if (typeof rawTargetName === "string" && rawTargetName.length > 0) {
@@ -178,7 +179,7 @@ export async function configureRepositoryRequest(
   rawRepoId: unknown,
   rawTargetName?: unknown,
 ): Promise<ConfigureResult> {
-  const authorized = authorizeTargetRequest(session, rawRepoId, rawTargetName);
+  const authorized = await authorizeTargetRequest(session, rawRepoId, rawTargetName);
   if (!authorized.ok) return authorized;
 
   try {
@@ -206,7 +207,7 @@ export async function rotateRepositoryTargetRequest(
   const rotationTarget = await targetNameForRotation(session, rawRepoId, rawTargetName);
   if (!rotationTarget.ok) return rotationTarget;
 
-  const authorized = authorizeTargetRequest(session, rawRepoId, rotationTarget.targetName);
+  const authorized = await authorizeTargetRequest(session, rawRepoId, rotationTarget.targetName);
   if (!authorized.ok) return authorized;
 
   try {
