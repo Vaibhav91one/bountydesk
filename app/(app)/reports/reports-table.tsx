@@ -168,8 +168,8 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         <div className="flex flex-col items-start gap-3 rounded-xl border border-border/50 bg-card p-8">
           <h2 className="text-heading text-foreground">No reports yet</h2>
           <p className="max-w-2xl text-body text-muted-foreground">
-            Nothing has arrived. A report enters through a connected repository&rsquo;s issues,
-            and the other two channels, email and upload, are designed and not built.
+            Nothing has arrived. A report enters through a connected repository&rsquo;s issues, or
+            by email from an authorised sender. Upload is designed and not built.
           </p>
           <Link
             href="/integrations"

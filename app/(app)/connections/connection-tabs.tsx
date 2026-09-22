@@ -1,6 +1,7 @@
 "use client";
 
 import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { startTransition, useState } from "react";
 import { Eye, Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
@@ -86,6 +87,45 @@ export type RepositoryRow = {
  * panel would read as a loading failure, and a panel that described the feature without the
  * caveat would read as a promise.
  */
+/**
+ * A tab for a channel that is wired and has its access managed somewhere else.
+ *
+ * Email has no repository table to show: what decides whether a report is accepted is the
+ * sender allowlist, and that lives on the channel's own integration page, so this points there
+ * rather than duplicating the list.
+ */
+function LiveChannel({
+  icon,
+  title,
+  body,
+  href,
+  action,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+  href: string;
+  action: string;
+}) {
+  return (
+    <div className="flex flex-col items-start gap-4 rounded-xl border border-border/50 bg-card p-8">
+      <span className="flex size-12 items-center justify-center rounded-xl border border-border/50 bg-background">
+        {icon}
+      </span>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-heading text-foreground">{title}</h2>
+          <Badge variant="success">Accepting reports</Badge>
+        </div>
+        <p className="max-w-2xl text-body text-muted-foreground">{body}</p>
+      </div>
+      <Button size="sm" variant="outline" nativeButton={false} render={<Link href={href} />}>
+        {action}
+      </Button>
+    </div>
+  );
+}
+
 function Unbuilt({
   icon,
   title,
@@ -282,11 +322,14 @@ export function ConnectionTabs({
       </TabsContent>
 
       <TabsContent value="email">
-        <Unbuilt
+        <LiveChannel
           icon={<Gmail className="size-6" />}
           title="Email"
-          body="Reports sent to a BountyDesk address become reports here, with no GitHub connection
-            involved. The route does not exist yet, so nothing arrives this way today."
+          body="A mail from an authorised sender becomes a report and is triaged, with no GitHub
+            connection involved. There is no target profile behind this channel, so a report from it
+            stops at analysis only. Which senders are authorised is managed on the integration page."
+          href="/integrations/email"
+          action="Manage senders"
         />
       </TabsContent>
 
