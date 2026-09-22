@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireReviewer } from "@/lib/auth/dal";
+import { addReviewer, canManageReviewers, removeReviewer } from "@/lib/auth/reviewers";
 import { resolveApiKey, WELL_KNOWN_PROVIDER_TYPES } from "@/lib/trueforge/desired";
 import {
   applyManaged,
@@ -161,6 +162,59 @@ export async function applyManagedResources(
     await applyManaged([scope.data]);
   } catch (error) {
     return { ok: false, error: harnessError(error) };
+  }
+
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+/**
+ * Add or remove a reviewer. Only an owner (someone on the REVIEWER_EMAILS env allowlist) may
+ * change the list: requireReviewer proves a reviewer session, and the canManage check is the
+ * second gate that keeps an added member from adding others. A server action arrives as its own
+ * POST, so both checks have to be here, not only in the (app) layout guard.
+ */
+export async function addReviewerAction(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!canManageReviewers(session.email)) {
+    return { ok: false, error: "Only an owner can change the reviewer list." };
+  }
+
+  const email = formData.get("email");
+  if (typeof email !== "string" || email.trim().length === 0) {
+    return { ok: false, error: "Enter an email address." };
+  }
+
+  try {
+    // addReviewer validates the shape and lowercases, and no-ops an address already an owner.
+    await addReviewer(email, session.email);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not add that address." };
+  }
+
+  revalidatePath("/settings");
+  return { ok: true };
+}
+
+export async function removeReviewerAction(
+  _previous: ActionResult | null,
+  formData: FormData,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!canManageReviewers(session.email)) {
+    return { ok: false, error: "Only an owner can change the reviewer list." };
+  }
+
+  const email = formData.get("email");
+  if (typeof email !== "string") return { ok: false, error: "No address given." };
+
+  try {
+    await removeReviewer(email);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not remove that address." };
   }
 
   revalidatePath("/settings");

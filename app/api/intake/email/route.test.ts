@@ -22,6 +22,16 @@ mock.module("@/lib/jobs/queue", {
   },
 });
 
+// isReviewerEmail is async and hits the database for a non-owner; the allowlist's own behaviour is
+// covered in lib/auth/reviewers.test.ts. Here it is stubbed so the route test proves only the
+// wiring: signature, then gate, then enqueue, with no database.
+mock.module("@/lib/auth/reviewers", {
+  namedExports: {
+    isReviewerEmail: async (email: string | null | undefined) =>
+      email?.trim().toLowerCase() === "allowed@example.com",
+  },
+});
+
 let POST: typeof import("./route").POST;
 
 before(async () => {

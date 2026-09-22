@@ -19,7 +19,7 @@ export async function approveOnboardingRequest(
   session: Session | null,
   rawRepoId: unknown,
 ): Promise<ApproveResult> {
-  if (!session || !isReviewerEmail(session.email)) {
+  if (!session || !(await isReviewerEmail(session.email))) {
     return { ok: false, error: "You are not signed in as a reviewer." };
   }
 

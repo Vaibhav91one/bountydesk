@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
   // this gate every stranger's message becomes a report the triage agent runs on. The allowlist is
   // the same one that authorizes the dashboard, checked here on the verified sender. A stranger is
   // dropped, not errored: 202 so Resend stops retrying, no queue row, no triage.
-  if (!isReviewerEmail(email.fromEmail)) {
+  if (!(await isReviewerEmail(email.fromEmail))) {
     return new Response("ignored: sender not authorized", { status: 202 });
   }
 
