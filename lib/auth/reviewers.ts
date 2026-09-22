@@ -139,8 +139,10 @@ export async function startVerification(
   if (!normalized || !EMAIL_SHAPE.test(normalized)) {
     throw new Error(`"${email}" is not a valid email address`);
   }
+  // An owner is already authorized through the env, so connecting their address is not an error,
+  // it is a no-op: there is nothing to verify. An owner adding their own email lands here.
   if (reviewerEmails().has(normalized)) {
-    throw new Error("that address is already an owner, set in REVIEWER_EMAILS");
+    return { status: "already_verified" };
   }
 
   const [existing] = await db
