@@ -31,11 +31,18 @@ export function verifyResendWebhook(rawBody: string, headers: SvixHeaders): Rese
 export type InboundEmail = {
   /** The provider message id, used as the report's idempotency key and delivery id. */
   messageId: string;
+  /**
+   * Resend's own id for the received message, distinct from `messageId` (the RFC Message-ID).
+   * The webhook payload carries the metadata but not the body, so the worker fetches the body
+   * with `GET /emails/receiving/{resendEmailId}`. Null if the event omitted it.
+   */
+  resendEmailId: string | null;
   /** The verified sender address, lowercased. This is the reply-to for a future outbound delivery. */
   fromEmail: string;
   /** A display name if the From header carried one. */
   fromName: string | null;
   subject: string;
+  /** From the webhook, which omits the body; the worker replaces it with the fetched body. */
   text: string;
 };
 
@@ -84,6 +91,7 @@ export function parseInboundEmail(event: ResendWebhookEvent): InboundEmail | nul
 
   return {
     messageId,
+    resendEmailId: firstString(data.email_id, data.id) || null,
     fromEmail: email,
     fromName: name,
     subject: firstString(data.subject) || "(no subject)",

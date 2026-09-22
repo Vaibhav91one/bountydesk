@@ -22,6 +22,20 @@ test("a From with a display name splits into a lowercased address and name", () 
   assert.equal(email?.messageId, "m1");
 });
 
+test("the Resend email id is captured separately from the RFC message id", () => {
+  // Mirrors the real payload: message_id is the RFC id (idempotency), email_id is Resend's own id
+  // (used to fetch the body). They must not be conflated.
+  const email = parseInboundEmail(
+    received({ from: "a@b.com", message_id: "<x@mail.gmail.com>", email_id: "f6a0c446-1234", text: "hi" }),
+  );
+  assert.equal(email?.messageId, "<x@mail.gmail.com>");
+  assert.equal(email?.resendEmailId, "f6a0c446-1234");
+});
+
+test("resendEmailId is null when the event carries no Resend id", () => {
+  assert.equal(parseInboundEmail(received({ from: "a@b.com", message_id: "m7" }))?.resendEmailId, null);
+});
+
 test("a bare address and an object From both resolve", () => {
   assert.equal(parseInboundEmail(received({ from: "bare@example.com", message_id: "m2" }))?.fromEmail, "bare@example.com");
   assert.equal(
