@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { Gmail } from "developer-icons";
 import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Trash } from "@phosphor-icons/react/ssr";
 
+import { RollingIcon } from "@/components/rolling-icon";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -147,7 +148,7 @@ export function ManageEmailAccess({
                           onClick={() => remove(member.email)}
                           aria-label={`Remove ${member.email}`}
                         >
-                          <Trash />
+                          <RollingIcon icon={Trash} className="size-4" />
                         </Button>
                       ) : null}
                     </li>
@@ -158,7 +159,11 @@ export function ManageEmailAccess({
               {canManage ? (
                 <>
                   <Button className="w-full" disabled={pending} onClick={() => send(ownerEmail)}>
-                    {pending ? <CircleNotch className="animate-spin" /> : <Gmail />}
+                    {pending ? (
+                      <CircleNotch className="animate-spin" />
+                    ) : (
+                      <RollingIcon icon={Gmail} className="size-4" />
+                    )}
                     <span className="truncate">Continue with {ownerEmail}</span>
                   </Button>
 
@@ -214,10 +219,14 @@ export function ManageEmailAccess({
               {error ? <p className="text-meta text-destructive">{error}</p> : null}
               <div className="flex items-center justify-between gap-2">
                 <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
-                  <ArrowLeft /> Back
+                  <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                 </Button>
                 <Button type="submit" disabled={pending}>
-                  {pending ? <CircleNotch className="animate-spin" /> : <PaperPlaneTilt />}
+                  {pending ? (
+                    <CircleNotch className="animate-spin" />
+                  ) : (
+                    <RollingIcon icon={PaperPlaneTilt} className="size-4" />
+                  )}
                   {pending ? "Sending…" : "Send code"}
                 </Button>
               </div>
@@ -239,10 +248,10 @@ export function ManageEmailAccess({
                 {error ? <p className="text-meta text-destructive">{error}</p> : null}
                 <div className="flex items-center justify-between gap-2 self-stretch">
                   <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
-                    <ArrowLeft /> Back
+                    <RollingIcon icon={ArrowLeft} className="size-4" /> Back
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={() => send(email)}>
-                    <PaperPlaneTilt /> Resend code
+                    <RollingIcon icon={PaperPlaneTilt} className="size-4" /> Resend code
                   </Button>
                 </div>
               </div>
