@@ -1,4 +1,5 @@
 import type { InboundEmail } from "@/lib/email/inbound";
+import { fetchInboundBody } from "@/lib/email/resend";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
 
@@ -145,6 +146,13 @@ async function parseEmail(lease: Lease): Promise<Lease> {
   const email = lease.payload as InboundEmail;
   const sourceRef = `email:${email.messageId}`;
 
+  // The webhook carries no body, so pull it here rather than at intake. A fetch failure throws and
+  // the job retries, which is why this runs before ensureReport: a report is created only once its
+  // body is in hand, never as an empty shell. Prefer the plain-text part; fall back to HTML when a
+  // sender emits HTML only.
+  const fetched = email.resendEmailId ? await fetchInboundBody(email.resendEmailId) : null;
+  const body = fetched?.text || fetched?.html || email.text;
+
   // No connected repository and no target profile: an email report has nothing bound to reproduce
   // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
   // kept as the reply-to for a future outbound delivery.
@@ -152,7 +160,7 @@ async function parseEmail(lease: Lease): Promise<Lease> {
     channel: lease.channel,
     sourceRef,
     title: email.subject,
-    body: email.text,
+    body,
     reporterHandle: email.fromName,
     reporterContact: email.fromEmail,
     connectedRepositoryId: null,
