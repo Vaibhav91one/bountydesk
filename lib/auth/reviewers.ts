@@ -72,6 +72,8 @@ export type ReviewerEntry = {
   role: "owner" | "member";
   /** True for an owner; for a member, true once the one-time code has been entered. */
   verified: boolean;
+  /** A pending member with a code that has been mailed and not yet expired, awaiting entry. */
+  codeOutstanding: boolean;
   addedByEmail: string | null;
   createdAt: Date | null;
 };
@@ -83,10 +85,12 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
     email,
     role: "owner",
     verified: true,
+    codeOutstanding: false,
     addedByEmail: null,
     createdAt: null,
   }));
 
+  const now = Date.now();
   const rows = await db.select().from(reviewer).orderBy(reviewer.email);
   const memberEntries: ReviewerEntry[] = rows
     // An address that is both env owner and a stale db row shows once, as an owner.
@@ -95,6 +99,11 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
       email: row.email,
       role: "member",
       verified: row.verifiedAt !== null,
+      codeOutstanding:
+        row.verifiedAt === null &&
+        row.codeHash !== null &&
+        row.codeExpiresAt !== null &&
+        row.codeExpiresAt.getTime() > now,
       addedByEmail: row.addedByEmail,
       createdAt: row.createdAt,
     }));
