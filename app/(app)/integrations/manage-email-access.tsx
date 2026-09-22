@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { Gmail } from "developer-icons";
-import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Plus, Trash } from "@phosphor-icons/react/ssr";
+import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Trash } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -20,24 +20,27 @@ import type { ReviewerEntry } from "@/lib/auth/reviewers";
 import { connectEmail, disconnectEmail, verifyEmail } from "./reviewer-actions";
 import { OtpInput } from "./otp-input";
 
-type Step = "list" | "email" | "code";
+type Step = "form" | "code";
 
 /**
  * Manage who may operate BountyDesk by email, all inside one dialog, styled like the GitHub
- * access dialog on its own page. The list is the resting state; adding an email runs inline
- * through an address, the code mailed to it, and a verified row. Everything here is owner-only,
- * and every action re-checks that server-side.
+ * access dialog on its own page. The connect field is the resting state, defaulted to the
+ * signed-in address so an owner can continue with the email GitHub or Google gave them, or type
+ * another; a verified row appears once the mailed code is entered. Everything is owner-only, and
+ * every action re-checks that server-side.
  */
 export function ManageEmailAccess({
   reviewers,
   canManage,
+  ownerEmail,
 }: {
   reviewers: ReviewerEntry[];
   canManage: boolean;
+  ownerEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<Step>("list");
-  const [email, setEmail] = useState("");
+  const [step, setStep] = useState<Step>("form");
+  const [email, setEmail] = useState(ownerEmail);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -45,8 +48,8 @@ export function ManageEmailAccess({
   const members = reviewers.filter((entry) => entry.role === "member");
 
   function reset() {
-    setStep("list");
-    setEmail("");
+    setStep("form");
+    setEmail(ownerEmail);
     setCode("");
     setError(null);
   }
@@ -54,12 +57,6 @@ export function ManageEmailAccess({
   function onOpenChange(next: boolean) {
     setOpen(next);
     if (!next) reset();
-  }
-
-  function startConnect() {
-    setEmail("");
-    setError(null);
-    setStep("email");
   }
 
   function send() {
@@ -116,22 +113,9 @@ export function ManageEmailAccess({
         </DialogHeader>
 
         <div className="flex flex-1 flex-col gap-5 p-6">
-          {step === "list" ? (
-            members.length === 0 ? (
-              canManage ? (
-                <div className="flex flex-1 items-center justify-center">
-                  <Button onClick={startConnect}>
-                    <Gmail />
-                    Connect your email
-                  </Button>
-                </div>
-              ) : (
-                <p className="flex flex-1 items-center justify-center text-center text-body text-muted-foreground">
-                  No email is connected, and only an owner can connect one.
-                </p>
-              )
-            ) : (
-              <>
+          {step === "form" ? (
+            <>
+              {members.length > 0 ? (
                 <ul className="flex flex-col rounded-md border border-border/50 bg-background px-4">
                   {members.map((member) => (
                     <li
@@ -160,45 +144,39 @@ export function ManageEmailAccess({
                     </li>
                   ))}
                 </ul>
+              ) : null}
 
-                {error ? <p className="text-meta text-destructive">{error}</p> : null}
-
-                {canManage ? (
-                  <Button variant="outline" className="self-start" onClick={startConnect}>
-                    <Plus />
-                    Add another email
+              {canManage ? (
+                <form
+                  className="flex flex-col gap-3"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    send();
+                  }}
+                >
+                  <Button type="submit" disabled={pending}>
+                    {pending ? <CircleNotch className="animate-spin" /> : <Gmail />}
+                    {pending ? "Sending…" : "Continue with email"}
                   </Button>
-                ) : null}
-              </>
-            )
-          ) : null}
-
-          {step === "email" ? (
-            <form
-              className="flex flex-col gap-3"
-              onSubmit={(event) => {
-                event.preventDefault();
-                send();
-              }}
-            >
-              <label className="flex flex-col gap-1.5">
-                <span className="text-meta text-muted-foreground">Email address</span>
-                <Input
-                  type="email"
-                  required
-                  autoFocus
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="reviewer@example.com"
-                  className="h-11 border-border/50 text-body"
-                />
-              </label>
-              {error ? <p className="text-meta text-destructive">{error}</p> : null}
-              <Button type="submit" className="self-end" disabled={pending}>
-                {pending ? <CircleNotch className="animate-spin" /> : <PaperPlaneTilt />}
-                {pending ? "Sending…" : "Send code"}
-              </Button>
-            </form>
+                  <label className="flex flex-col gap-1.5">
+                    <span className="text-meta text-muted-foreground">Email address</span>
+                    <Input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(event) => setEmail(event.target.value)}
+                      placeholder="reviewer@example.com"
+                      className="h-11 border-border/50 text-body"
+                    />
+                  </label>
+                  {error ? <p className="text-meta text-destructive">{error}</p> : null}
+                </form>
+              ) : members.length === 0 ? (
+                <p className="flex flex-1 items-center justify-center text-center text-body text-muted-foreground">
+                  No email is connected, and only an owner can connect one.
+                </p>
+              ) : null}
+            </>
           ) : null}
 
           {step === "code" ? (
@@ -215,7 +193,7 @@ export function ManageEmailAccess({
                 <OtpInput value={code} onChange={setCode} onComplete={submitCode} />
                 {error ? <p className="text-meta text-destructive">{error}</p> : null}
                 <div className="flex items-center justify-between gap-2 self-stretch">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("email")}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("form")}>
                     <ArrowLeft /> Back
                   </Button>
                   <Button type="button" variant="ghost" size="sm" onClick={send}>

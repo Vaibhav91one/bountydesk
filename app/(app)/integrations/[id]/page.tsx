@@ -151,8 +151,11 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
             ) : null}
 
             {/* Email intake authorizes by the reviewer allowlist, so its access is managed here,
-                the way GitHub's is. One button, one dialog, the whole flow inside it. */}
-            {isEmail ? <ManageEmailAccess reviewers={reviewers} canManage={canManage} /> : null}
+                the way GitHub's is. One button, one dialog, the whole flow inside it. The signed-in
+                email is passed so the connect field can default to it. */}
+            {isEmail ? (
+              <ManageEmailAccess reviewers={reviewers} canManage={canManage} ownerEmail={session.email} />
+            ) : null}
           </div>
         </div>
 
