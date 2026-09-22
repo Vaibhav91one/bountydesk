@@ -53,9 +53,10 @@ export default async function IntegrationsPage() {
     {
       id: "email",
       name: "Email",
-      detail: "Report intake by email. Coming soon.",
+      // Intake is live; replying the verdict back is the half that is still not wired.
+      detail: "Report intake by email. Accepting reports, no delivery back yet.",
       icon: "gmail",
-      installed: false,
+      installed: true,
       action: { kind: "link", href: "/integrations/email", label: "View" },
     },
     {
