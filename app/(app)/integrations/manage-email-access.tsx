@@ -20,14 +20,13 @@ import type { ReviewerEntry } from "@/lib/auth/reviewers";
 import { connectEmail, disconnectEmail, verifyEmail } from "./reviewer-actions";
 import { OtpInput } from "./otp-input";
 
-type Step = "form" | "code";
+type Step = "choice" | "input" | "code";
 
 /**
  * Manage who may operate BountyDesk by email, all inside one dialog, styled like the GitHub
- * access dialog on its own page. The connect field is the resting state, defaulted to the
- * signed-in address so an owner can continue with the email GitHub or Google gave them, or type
- * another; a verified row appears once the mailed code is entered. Everything is owner-only, and
- * every action re-checks that server-side.
+ * access dialog on its own page. The choice screen offers the signed-in address in one click or
+ * a field for another one; either way a code is mailed and entered before the row is authorized.
+ * Everything is owner-only, and every action re-checks that server-side.
  */
 export function ManageEmailAccess({
   reviewers,
@@ -39,19 +38,21 @@ export function ManageEmailAccess({
   ownerEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<Step>("form");
-  const [email, setEmail] = useState(ownerEmail);
+  const [step, setStep] = useState<Step>("choice");
+  const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const members = reviewers.filter((entry) => entry.role === "member");
 
   function reset() {
-    setStep("form");
-    setEmail(ownerEmail);
+    setStep("choice");
+    setEmail("");
     setCode("");
     setError(null);
+    setNotice(null);
   }
 
   function onOpenChange(next: boolean) {
@@ -59,16 +60,21 @@ export function ManageEmailAccess({
     if (!next) reset();
   }
 
-  function send() {
+  // Mail a code to `target` and move to the code step. An address that is already an owner or a
+  // verified member has nothing to verify, so it returns to the choice screen with a note.
+  function send(target: string) {
     setError(null);
+    setNotice(null);
+    setEmail(target);
     startTransition(async () => {
-      const result = await connectEmail(email);
+      const result = await connectEmail(target);
       if (!result.ok) {
         setError(result.error);
         return;
       }
       if (result.message) {
         reset();
+        setNotice(result.message);
         return;
       }
       setCode("");
@@ -91,6 +97,7 @@ export function ManageEmailAccess({
 
   function remove(target: string) {
     setError(null);
+    setNotice(null);
     startTransition(async () => {
       const result = await disconnectEmail(target);
       if (!result.ok) setError(result.error);
@@ -113,8 +120,10 @@ export function ManageEmailAccess({
         </DialogHeader>
 
         <div className="flex flex-1 flex-col gap-5 p-6">
-          {step === "form" ? (
+          {step === "choice" ? (
             <>
+              {notice ? <p className="text-meta text-emerald-400">{notice}</p> : null}
+
               {members.length > 0 ? (
                 <ul className="flex flex-col rounded-md border border-border/50 bg-background px-4">
                   {members.map((member) => (
@@ -147,36 +156,72 @@ export function ManageEmailAccess({
               ) : null}
 
               {canManage ? (
-                <form
-                  className="flex flex-col gap-3"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    send();
-                  }}
-                >
-                  <Button type="submit" disabled={pending}>
+                <>
+                  <Button className="w-full" disabled={pending} onClick={() => send(ownerEmail)}>
                     {pending ? <CircleNotch className="animate-spin" /> : <Gmail />}
-                    {pending ? "Sending…" : "Continue with email"}
+                    <span className="truncate">Continue with {ownerEmail}</span>
                   </Button>
-                  <label className="flex flex-col gap-1.5">
-                    <span className="text-meta text-muted-foreground">Email address</span>
-                    <Input
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="reviewer@example.com"
-                      className="h-11 border-border/50 text-body"
-                    />
-                  </label>
+
+                  <div className="flex items-center gap-3 text-meta text-muted-foreground">
+                    <span className="h-px flex-1 bg-border/50" />
+                    Or
+                    <span className="h-px flex-1 bg-border/50" />
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    disabled={pending}
+                    onClick={() => {
+                      setEmail("");
+                      setError(null);
+                      setNotice(null);
+                      setStep("input");
+                    }}
+                  >
+                    Continue with another email
+                  </Button>
                   {error ? <p className="text-meta text-destructive">{error}</p> : null}
-                </form>
+                </>
               ) : members.length === 0 ? (
                 <p className="flex flex-1 items-center justify-center text-center text-body text-muted-foreground">
                   No email is connected, and only an owner can connect one.
                 </p>
               ) : null}
             </>
+          ) : null}
+
+          {step === "input" ? (
+            <form
+              className="flex flex-col gap-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                send(email);
+              }}
+            >
+              <label className="flex flex-col gap-1.5">
+                <span className="text-meta text-muted-foreground">Email address</span>
+                <Input
+                  type="email"
+                  required
+                  autoFocus
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="reviewer@example.com"
+                  className="h-11 border-border/50 text-body"
+                />
+              </label>
+              {error ? <p className="text-meta text-destructive">{error}</p> : null}
+              <div className="flex items-center justify-between gap-2">
+                <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
+                  <ArrowLeft /> Back
+                </Button>
+                <Button type="submit" disabled={pending}>
+                  {pending ? <CircleNotch className="animate-spin" /> : <PaperPlaneTilt />}
+                  {pending ? "Sending…" : "Send code"}
+                </Button>
+              </div>
+            </form>
           ) : null}
 
           {step === "code" ? (
@@ -193,10 +238,10 @@ export function ManageEmailAccess({
                 <OtpInput value={code} onChange={setCode} onComplete={submitCode} />
                 {error ? <p className="text-meta text-destructive">{error}</p> : null}
                 <div className="flex items-center justify-between gap-2 self-stretch">
-                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("form")}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setStep("choice")}>
                     <ArrowLeft /> Back
                   </Button>
-                  <Button type="button" variant="ghost" size="sm" onClick={send}>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => send(email)}>
                     <PaperPlaneTilt /> Resend code
                   </Button>
                 </div>
