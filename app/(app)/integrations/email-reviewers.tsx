@@ -176,7 +176,9 @@ export function EmailReviewers({
                         ? entry.addedByEmail
                           ? `Verified, added by ${entry.addedByEmail}`
                           : "Verified"
-                        : "Pending, code sent to this address"}
+                        : entry.codeOutstanding
+                          ? "Pending, a code was mailed to this address"
+                          : "Pending, no active code. Send one to verify."}
                   </span>
                 </div>
 

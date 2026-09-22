@@ -122,17 +122,32 @@ test("removing a member revokes access; an owner cannot be removed here", async 
   await assert.rejects(mod.removeReviewer(OWNER), /cannot be removed/);
 });
 
-test("listReviewers marks role and verification", async () => {
+test("listReviewers marks role, verification and whether a code is outstanding", async () => {
   process.env.REVIEWER_EMAILS = OWNER;
   const verified = "listed-verified@example.com";
   const pending = "listed-pending@example.com";
+  const noCode = "listed-nocode@example.com";
   await mod.verifyCode(verified, await code(verified));
   await code(pending);
+  // A pending row with no code, like a member migrated from before verification existed.
+  await dbm.db.insert(dbm.reviewer).values({ email: noCode, addedByEmail: OWNER });
+
   const list = await mod.listReviewers();
   assert.equal(list[0].role, "owner");
   assert.equal(list[0].verified, true);
-  assert.equal(list.find((r) => r.email === verified)?.verified, true);
-  assert.equal(list.find((r) => r.email === pending)?.verified, false);
+  assert.equal(list[0].codeOutstanding, false);
+
+  const v = list.find((r) => r.email === verified);
+  assert.equal(v?.verified, true);
+  assert.equal(v?.codeOutstanding, false);
+
+  const p = list.find((r) => r.email === pending);
+  assert.equal(p?.verified, false);
+  assert.equal(p?.codeOutstanding, true);
+
+  const n = list.find((r) => r.email === noCode);
+  assert.equal(n?.verified, false);
+  assert.equal(n?.codeOutstanding, false, "no code means nothing was mailed");
 });
 
 test("only owners may manage; the GitHub id allowlist is unchanged", () => {
