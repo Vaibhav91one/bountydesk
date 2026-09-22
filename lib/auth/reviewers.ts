@@ -1,4 +1,6 @@
-import { db, eq, reviewer } from "@/lib/db";
+import crypto from "node:crypto";
+
+import { and, db, eq, isNotNull, reviewer } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
 
 /**
@@ -47,9 +49,10 @@ export function isOwnerEmail(email: string | null | undefined): boolean {
 export const canManageReviewers = isOwnerEmail;
 
 /**
- * Dashboard and intake authorization: is this an owner or an added member? Async because a member
+ * Dashboard and intake authorization: is this an owner or a verified member? Async because a member
  * lives in the database. Owners short-circuit, so the env allowlist still answers without a query
- * and a database outage never locks an owner out.
+ * and a database outage never locks an owner out. A member counts only once verified_at is set: a
+ * pending row, added but not yet confirmed by its one-time code, authorizes nothing.
  */
 export async function isReviewerEmail(email: string | null | undefined): Promise<boolean> {
   const normalized = normalize(email);
@@ -59,7 +62,7 @@ export async function isReviewerEmail(email: string | null | undefined): Promise
   const [row] = await db
     .select({ email: reviewer.email })
     .from(reviewer)
-    .where(eq(reviewer.email, normalized))
+    .where(and(eq(reviewer.email, normalized), isNotNull(reviewer.verifiedAt)))
     .limit(1);
   return Boolean(row);
 }
@@ -67,16 +70,19 @@ export async function isReviewerEmail(email: string | null | undefined): Promise
 export type ReviewerEntry = {
   email: string;
   role: "owner" | "member";
+  /** True for an owner; for a member, true once the one-time code has been entered. */
+  verified: boolean;
   addedByEmail: string | null;
   createdAt: Date | null;
 };
 
-/** The full allowlist for the settings screen: env owners first, then added members. */
+/** The full allowlist for the management screen: env owners first, then added members. */
 export async function listReviewers(): Promise<ReviewerEntry[]> {
   const owners = reviewerEmails();
   const ownerEntries: ReviewerEntry[] = [...owners].map((email) => ({
     email,
     role: "owner",
+    verified: true,
     addedByEmail: null,
     createdAt: null,
   }));
@@ -88,6 +94,7 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
     .map((row) => ({
       email: row.email,
       role: "member",
+      verified: row.verifiedAt !== null,
       addedByEmail: row.addedByEmail,
       createdAt: row.createdAt,
     }));
@@ -96,21 +103,119 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
 }
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CODE_TTL_MS = 10 * 60 * 1000;
+const MAX_CODE_ATTEMPTS = 5;
 
-/** Add a member. Idempotent, and a no-op for an address that is already an env owner. */
-export async function addReviewer(email: string, addedByEmail: string): Promise<void> {
+function hashCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+export type StartVerificationResult =
+  | { status: "code_sent"; code: string }
+  | { status: "already_verified" };
+
+/**
+ * Begin verifying a member. Creates or refreshes the pending row and returns a fresh one-time code
+ * for the caller to mail; the row stores only the hash. An address that is already an env owner is
+ * rejected (owners are set in the env), and one that is already a verified member is a no-op.
+ *
+ * The code is returned rather than sent here so this stays a pure database function: the Resend
+ * send, its failure modes and its rate limit belong to the action that calls this.
+ */
+export async function startVerification(
+  email: string,
+  addedByEmail: string,
+): Promise<StartVerificationResult> {
   const normalized = normalize(email);
   if (!normalized || !EMAIL_SHAPE.test(normalized)) {
     throw new Error(`"${email}" is not a valid email address`);
   }
-  if (reviewerEmails().has(normalized)) return;
+  if (reviewerEmails().has(normalized)) {
+    throw new Error("that address is already an owner, set in REVIEWER_EMAILS");
+  }
+
+  const [existing] = await db
+    .select({ verifiedAt: reviewer.verifiedAt })
+    .from(reviewer)
+    .where(eq(reviewer.email, normalized))
+    .limit(1);
+  if (existing?.verifiedAt) return { status: "already_verified" };
+
+  // A leading zero is a valid code, so keep it a fixed-width string rather than a number.
+  const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+  const values = {
+    email: normalized,
+    addedByEmail: normalize(addedByEmail),
+    codeHash: hashCode(code),
+    codeExpiresAt: new Date(Date.now() + CODE_TTL_MS),
+    codeAttempts: 0,
+    verifiedAt: null,
+  };
   await db
     .insert(reviewer)
-    .values({ email: normalized, addedByEmail: normalize(addedByEmail) })
-    .onConflictDoNothing({ target: reviewer.email });
+    .values(values)
+    .onConflictDoUpdate({
+      target: reviewer.email,
+      set: {
+        codeHash: values.codeHash,
+        codeExpiresAt: values.codeExpiresAt,
+        codeAttempts: 0,
+      },
+    });
+
+  return { status: "code_sent", code };
 }
 
-/** Remove a member. An env owner cannot be removed here, only by editing REVIEWER_EMAILS. */
+export type VerifyResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Confirm a member with the code that was mailed to them. A correct code within its window sets
+ * verified_at and clears the code. A wrong code spends one of a small number of attempts; an
+ * expired code or an exhausted attempt count is refused and asks for a new code. The stored hash is
+ * compared in constant time, which is cheap insurance even though the attempt cap already bounds
+ * guessing.
+ */
+export async function verifyCode(email: string, code: string): Promise<VerifyResult> {
+  const normalized = normalize(email);
+  if (!normalized) return { ok: false, error: "No address given." };
+  const submitted = code.trim();
+  if (!/^\d{6}$/.test(submitted)) return { ok: false, error: "Enter the six-digit code." };
+
+  const [row] = await db
+    .select()
+    .from(reviewer)
+    .where(eq(reviewer.email, normalized))
+    .limit(1);
+  if (!row || !row.codeHash || !row.codeExpiresAt) {
+    return { ok: false, error: "There is no pending code for that address. Send a new one." };
+  }
+  if (row.verifiedAt) return { ok: true };
+  if (row.codeExpiresAt.getTime() < Date.now()) {
+    return { ok: false, error: "That code has expired. Send a new one." };
+  }
+  if (row.codeAttempts >= MAX_CODE_ATTEMPTS) {
+    return { ok: false, error: "Too many attempts. Send a new code." };
+  }
+
+  const expected = Buffer.from(row.codeHash, "hex");
+  const actual = Buffer.from(hashCode(submitted), "hex");
+  const matches = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  if (!matches) {
+    await db
+      .update(reviewer)
+      .set({ codeAttempts: row.codeAttempts + 1 })
+      .where(eq(reviewer.email, normalized));
+    return { ok: false, error: "That code is not correct." };
+  }
+
+  await db
+    .update(reviewer)
+    .set({ verifiedAt: new Date(), codeHash: null, codeExpiresAt: null, codeAttempts: 0 })
+    .where(eq(reviewer.email, normalized));
+  return { ok: true };
+}
+
+/** Remove a member (pending or verified). An env owner cannot be removed here. */
 export async function removeReviewer(email: string): Promise<void> {
   const normalized = normalize(email);
   if (!normalized) return;

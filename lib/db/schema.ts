@@ -223,11 +223,12 @@ export const targetProfile = pgTable(
  *
  * The env list is the bootstrap: those addresses are the owners, always authorized and always
  * able to manage this table, and they are never stored here. A row here is a member an owner
- * added later, authorized to operate the dashboard and to have their email reports triaged, but
- * not to manage the list. Keeping owners in the env and members in the database means the
- * database can be wiped without locking everyone out, and no dashboard action can remove the
- * people who bootstrap access. Emails are stored lowercased so the unique index is the
- * case-insensitive check.
+ * added later. A member is authorized only once they have proved control of the address: the
+ * owner adds it, Resend mails a one-time code, and `verified_at` is set when that code is
+ * entered. Until then the row is pending and authorizes nothing. Keeping owners in the env and
+ * members in the database means the database can be wiped without locking everyone out, and no
+ * dashboard action can remove the people who bootstrap access. Emails are stored lowercased so
+ * the unique index is the case-insensitive check.
  */
 export const reviewer = pgTable(
   "reviewer",
@@ -236,6 +237,13 @@ export const reviewer = pgTable(
     email: text("email").notNull(),
     /** The owner who added this member. Null only for a row seeded outside the dashboard. */
     addedByEmail: text("added_by_email"),
+    /** When the one-time code was entered. Null means pending: the row authorizes nothing yet. */
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    /** SHA-256 of the outstanding code, never the code itself. Null once verified or unset. */
+    codeHash: text("code_hash"),
+    codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
+    /** Wrong tries against the outstanding code, so a guessing attempt runs out rather than looping. */
+    codeAttempts: integer("code_attempts").notNull().default(0),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("reviewer_email_key").on(t.email)],
