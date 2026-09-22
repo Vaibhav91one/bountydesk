@@ -57,6 +57,8 @@ const delivery = (overrides: Partial<NonNullable<CaseLiveView["delivery"]>>) => 
   maxAttempts: 8,
   lastError: null,
   target: "issues/18",
+  requiresHumanReview: false,
+  deliveredAt: null,
   ...overrides,
 });
 
@@ -99,6 +101,14 @@ test("a delivery stops being watched once it has run out of attempts", () => {
     delivery: delivery({ state: "FAILED", attempts: 8, maxAttempts: 8 }),
   });
   assert.equal(caseRefetchInterval(exhausted), false, "nothing will pick this row up again");
+
+  // The other dead end: claim() skips a held row, so it stops with attempts to spare and the
+  // counter cannot show it. A bounce and a deauthorised recipient both land here.
+  const held = view({
+    state: "DELIVERING",
+    delivery: delivery({ state: "FAILED", attempts: 1, maxAttempts: 8, requiresHumanReview: true }),
+  });
+  assert.equal(caseRefetchInterval(held), false, "a held row needs a person, not a poll");
 });
 
 test("tool-call detail is only fetched while the agent is working", () => {
@@ -144,13 +154,7 @@ test("a handoff that ran out of attempts stops the poll", () => {
   const delivered = view({
     state: "DELIVERING",
     handoff: handoff({ state: "FAILED", attempts: 8 }),
-    delivery: {
-      state: "SENT",
-      attempts: 1,
-      maxAttempts: 8,
-      lastError: null,
-      target: "issues/18",
-    },
+    delivery: delivery({ state: "SENT", attempts: 1 }),
   });
   assert.equal(caseRefetchInterval(delivered), 1500);
 });

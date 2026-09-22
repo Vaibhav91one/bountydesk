@@ -5,6 +5,11 @@ import test, { after, before } from "node:test";
 // No DB dependency, so this is safe to import before createSchema sets DATABASE_SCHEMA.
 import { computeContentHash } from "@/lib/verdicts/hash";
 
+// The email channel resolves its destination through the allowlist, so pin the owner here
+// rather than inheriting whatever .env.local happens to hold.
+const REPORTER = "reporter@bountydesk.test";
+process.env.REVIEWER_EMAILS = REPORTER;
+
 /**
  * Real Postgres is required: the point of this suite is that the check constraints and the
  * unique index on approval_decision.verdict_id are what make "no approval, no publish" hold,
@@ -40,7 +45,8 @@ async function seedFixture(
   opts: {
     approval?: "none" | "approved" | "denied" | "stale";
     tamperPayloadAfterDecision?: boolean;
-    channel?: "github" | "manual";
+    channel?: "github" | "manual" | "email";
+    reporterContact?: string | null;
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
     state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
   } = {},
@@ -52,10 +58,21 @@ async function seedFixture(
     .insert(dbm.report)
     .values({
       channel: opts.channel ?? "github",
-      sourceRef: opts.channel === "manual" ? `manual:${n}` : `github:1:issue:${n}`,
+      sourceRef:
+        opts.channel === "manual"
+          ? `manual:${n}`
+          : opts.channel === "email"
+            ? `email:<msg-${n}@mail.example>`
+            : `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
       state: opts.state ?? "AWAITING_APPROVAL",
+      reporterContact:
+        opts.channel === "email"
+          ? opts.reporterContact === undefined
+            ? REPORTER
+            : opts.reporterContact
+          : null,
     })
     .returning({ id: dbm.report.id });
 
@@ -238,6 +255,53 @@ test("an approved NOT_REPRODUCED verdict publishes", async () => {
   assert.deepEqual(result, { ok: true });
   assert.equal(await deliveryCount(fixture.verdictId), 1);
   assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an approved email report is queued to the reporter's verified address", async () => {
+  const fixture = await seedFixture({ approval: "approved", channel: "email" });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ target: dbm.outboundDelivery.target })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  // The destination comes from the verified sender, never from the report's source reference.
+  assert.equal(delivery.target, REPORTER);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an email report with no verified contact stays approvable rather than stranded", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: null,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, false);
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  // Refused before the transition, so a human can still act on it.
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
+});
+
+test("an email report whose sender lost authorization is refused, and nothing is queued", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: "gone@example.test",
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "gone@example.test is no longer an authorised address",
+  });
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
 });
 
 test("a non-GitHub report is not moved into the GitHub delivery queue", async () => {

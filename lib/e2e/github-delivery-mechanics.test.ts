@@ -154,6 +154,11 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   let postedBody: string | undefined;
   const deliveryId = await deliverOnce("e2e-delivery", {
     deps: {
+      // The GitHub arm must never reach the mail transport; a throw here turns the
+      // required dep into an assertion rather than dead scaffolding.
+      sendEmail: async () => {
+        throw new Error("github delivery must not send mail");
+      },
       githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => ({ token: "fake-installation-token", expiresAt: new Date().toISOString() }),
@@ -199,6 +204,11 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
   // A retry finds nothing left to claim: the row is SENT, not PENDING.
   const secondAttempt = await deliverOnce("e2e-delivery-retry", {
     deps: {
+      // The GitHub arm must never reach the mail transport; a throw here turns the
+      // required dep into an assertion rather than dead scaffolding.
+      sendEmail: async () => {
+        throw new Error("github delivery must not send mail");
+      },
       githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => {

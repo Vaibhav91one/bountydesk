@@ -292,6 +292,12 @@ export async function readCase(
               maxAttempts: outboundDelivery.maxAttempts,
               lastError: outboundDelivery.lastError,
               target: outboundDelivery.target,
+              // The two columns that separate "still working" from "waiting on a person".
+              // A held row is excluded from claim(), so its attempt counter has stopped for
+              // good; and a transport whose acceptance is not a receipt leaves delivered_at
+              // null while the provider makes its mind up.
+              requiresHumanReview: outboundDelivery.requiresHumanReview,
+              deliveredAt: outboundDelivery.deliveredAt,
             })
             .from(outboundDelivery)
             .where(eq(outboundDelivery.verdictId, latest.id))

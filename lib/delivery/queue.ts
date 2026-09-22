@@ -315,17 +315,26 @@ export async function releaseUnstarted(lease: DeliveryLease): Promise<void> {
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
-/** Mark a delivery sent and drop the lease. Accepts a transaction so the caller can commit
- * this alongside the report's DELIVERING -> DELIVERED move as one unit. */
+/**
+ * Mark a delivery sent and drop the lease. Accepts a transaction so the caller can commit this
+ * alongside the report's DELIVERING -> DELIVERED move as one unit.
+ *
+ * `confirmed` is what keeps `delivered_at` honest across two transports that mean different
+ * things by a 2xx. GitHub's 201 is the receipt, so the column is stamped here. A provider that
+ * only accepts the message leaves it null until its own receipt arrives, which makes
+ * `state = 'SENT' and delivered_at is null` the queryable "sent, still waiting to hear" state
+ * rather than something nobody can see.
+ */
 export async function markSent(
   lease: DeliveryLease,
   tx: Executor = db,
+  confirmed = true,
 ): Promise<void> {
   const updated = await tx
     .update(outboundDelivery)
     .set({
       state: "SENT",
-      deliveredAt: new Date(),
+      ...(confirmed ? { deliveredAt: new Date() } : {}),
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: null,
@@ -380,6 +389,13 @@ export async function failPermanently(
   lease: DeliveryLease,
   error: string,
   tx: Executor = db,
+  /**
+   * Also flag the row for a human. Set it for a refusal the evidence does not explain on its
+   * own: a recipient that lost authorization, or a send we cannot prove did not already go out.
+   * It is one UPDATE with the state change rather than a second fenced write, because the lease
+   * is released here and a follow-up write would no longer hold it.
+   */
+  requiresHumanReview = false,
 ): Promise<void> {
   const updated = await tx
     .update(outboundDelivery)
@@ -388,6 +404,7 @@ export async function failPermanently(
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: error,
+      ...(requiresHumanReview ? { requiresHumanReview: true } : {}),
       updatedAt: new Date(),
     })
     .where(heldBy(lease))
@@ -432,4 +449,62 @@ export async function sweepExpiredLeases(): Promise<{
   `);
 
   return { released: released.length, failed: failed.length };
+}
+
+/**
+ * Run one network operation while keeping the lease alive under it.
+ *
+ * The renewal timer is the point: a send can outlive the lease, and a worker that lost its lease
+ * must stop rather than keep writing over whoever owns the row now. A failed renewal aborts the
+ * in-flight request and rejects with LeaseLostError. Lives here rather than beside the transports
+ * because it is lease machinery, and both channel arms need it.
+ */
+export async function runWithHeartbeat<T>(
+  lease: DeliveryLease,
+  leaseSeconds: number,
+  operation: (signal: AbortSignal) => Promise<T>,
+  outerSignal?: AbortSignal,
+): Promise<T> {
+  const controller = new AbortController();
+  const signal = outerSignal
+    ? AbortSignal.any([controller.signal, outerSignal])
+    : controller.signal;
+  const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let renewal = Promise.resolve();
+  let rejectLeaseLoss!: (reason: unknown) => void;
+  const leaseLoss = new Promise<never>((_, reject) => {
+    rejectLeaseLoss = reject;
+  });
+  let rejectAbort!: (reason: unknown) => void;
+  const aborted = new Promise<never>((_, reject) => {
+    rejectAbort = reject;
+  });
+  const onAbort = () => rejectAbort(signal.reason);
+  if (signal.aborted) onAbort();
+  else signal.addEventListener("abort", onAbort, { once: true });
+
+  const heartbeat = () => {
+    renewal = renew(lease, leaseSeconds)
+      .then(() => {
+        if (!stopped) timer = setTimeout(heartbeat, intervalMs);
+      })
+      .catch((error: unknown) => {
+        controller.abort(error);
+        rejectLeaseLoss(error);
+      });
+  };
+
+  timer = setTimeout(heartbeat, intervalMs);
+  try {
+    const result = await Promise.race([operation(signal), leaseLoss, aborted]);
+    if (signal.aborted) throw signal.reason;
+    return result;
+  } finally {
+    stopped = true;
+    signal.removeEventListener("abort", onAbort);
+    if (timer) clearTimeout(timer);
+    await renewal.catch(() => undefined);
+  }
 }

@@ -211,6 +211,13 @@
       "when": 1790080765952,
       "tag": "0029_sudden_changeling",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790092852368,
+      "tag": "0030_wonderful_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

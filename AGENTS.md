@@ -446,15 +446,20 @@ This is only about the ones held for time. The production deferrals in `docs/dec
 scope decisions, not the time-box, and stay deferred there.
 
 What the end of the window does not change is the safety invariants, which were never about the
-schedule. Email and upload still record no `DeliveryAttempt` and reach no `DELIVERED` until their
-verified-recipient and transport-receipt contracts exist. Every verdict is still human-approved,
-which no phase ever turns off. Those hold whether or not there is time on the clock.
+schedule. No channel records a `DeliveryAttempt` or reaches `DELIVERED` without a verified
+recipient and a transport receipt. Email now satisfies both: the recipient is the address that
+passed inbound SPF/DKIM, re-checked against the allowlist at send time, and the receipt is
+Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an accepted send
+earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload has neither
+half yet and so still stops short of delivery. Every verdict is still human-approved, which no
+phase ever turns off. Those hold whether or not there is time on the clock.
 
 The parked surfaces, so a plan knows where they live:
 
-- Email, upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
-  `built: false`). Email and upload share one blocker, the outbound contract above; drive was out
-  of scope for the demo rather than merely unbuilt.
+- Upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
+  `built: false`). Upload is blocked on the outbound contract above; drive was out of scope for
+  the demo rather than merely unbuilt. Email is built in both directions: intake through
+  `app/api/intake/email/route.ts` and the reply through `lib/delivery/email.ts`.
 - The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
 - Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is

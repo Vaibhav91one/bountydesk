@@ -150,6 +150,9 @@ export type CaseLiveView = {
     maxAttempts: number;
     lastError: string | null;
     target: string;
+    requiresHumanReview: boolean;
+    /** Null until the transport confirms receipt, which for email is a separate webhook. */
+    deliveredAt: string | null;
   } | null;
   handoff: CaseFile["handoff"];
 
@@ -360,6 +363,17 @@ function lifecycle(file: LifecycleFile, investigating: boolean, investigationSte
   const deliveryExhausted =
     deliveryFailed && (file.delivery?.attempts ?? 0) >= (file.delivery?.maxAttempts ?? 0);
 
+  // The other way an outbox row stops for good, and the one a counter cannot show: claim()
+  // skips a row flagged for review, so a bounce or a recipient that lost authorization sits at
+  // one attempt out of eight and never moves. Reading "retrying (1/8)" there is worse than
+  // reading nothing, because it tells a reviewer to wait for something that will not happen.
+  const deliveryHeld = file.delivery?.requiresHumanReview === true;
+
+  // Accepted by the transport but not yet confirmed by it. Only email can be here: GitHub's 201
+  // is the receipt, so its rows are stamped the moment they are sent.
+  const deliveryAwaitingReceipt =
+    file.delivery?.state === "SENT" && file.delivery.deliveredAt === null;
+
   const handoff = file.handoff;
   const handoffDead = handoffExhausted(file);
   // A denial posts nothing, so the delivery row must never read as in flight for
@@ -477,13 +491,17 @@ function lifecycle(file: LifecycleFile, investigating: boolean, investigationSte
       label: "Delivery",
       note: denied
         ? "Denied, nothing posted"
-        : deliveryExhausted
-          ? `failed after ${file.delivery?.attempts} attempts`
-          : deliveryFailed
-            ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
-            : file.delivery
-              ? file.delivery.state.toLowerCase()
-              : approvalBlocked
+        : deliveryHeld
+          ? `held for review: ${file.delivery?.lastError ?? "the send was refused"}`
+          : deliveryExhausted
+            ? `failed after ${file.delivery?.attempts} attempts`
+            : deliveryFailed
+              ? `failed, retrying (${file.delivery?.attempts}/${file.delivery?.maxAttempts})`
+              : deliveryAwaitingReceipt
+                ? "sent, waiting for the delivery receipt"
+                : file.delivery
+                  ? file.delivery.state.toLowerCase()
+                  : approvalBlocked
                 ? "Not enqueued"
                 : // No delivery row yet. On the harness-backed path that is not necessarily "not
                   // started": the handoff has to reach TrueForge and come back through
@@ -491,7 +509,7 @@ function lifecycle(file: LifecycleFile, investigating: boolean, investigationSte
                   // leaves this step honestly reporting "Not enqueued" forever.
                   handoffNote(handoff) ?? "Not enqueued",
       state:
-        denied || deliveryFailed || handoffDead
+        denied || deliveryFailed || deliveryHeld || handoffDead
           ? ("skipped" as const)
           : // A re-check owns the report, so a stale handoff must not read as in flight.
             approvalBlocked && !file.delivery
@@ -743,7 +761,9 @@ export function caseLiveView(
         }
       : null,
 
-    delivery: file.delivery,
+    delivery: file.delivery
+      ? { ...file.delivery, deliveredAt: file.delivery.deliveredAt?.toISOString() ?? null }
+      : null,
     handoff: file.handoff,
 
     steps,

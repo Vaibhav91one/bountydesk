@@ -91,3 +91,113 @@ export async function sendVerificationEmail(to: string, code: string): Promise<v
     throw new Error(`resend send to ${to} failed: ${response.status} ${detail.slice(0, 200)}`);
   }
 }
+
+/**
+ * Verdicts are sent from the address the reporter already wrote to, not from no-reply, so that
+ * hitting reply lands somewhere a human reads rather than a black hole.
+ */
+const VERDICT_FROM = "BountyDesk <reports@mail.bountydesk.vaibhav.quest>";
+
+/**
+ * How a failed send should be treated by the delivery worker.
+ *
+ * `transient` goes back on the retry backoff. `permanent` is refused for good. `mismatch` is the
+ * one worth naming separately: it means this idempotency key was already used with a different
+ * body, so either the payload changed after approval or two different verdicts collided on one
+ * key. Retrying cannot fix it and issuing a fresh key would mail the reporter twice, so it stops
+ * and asks for a human.
+ */
+export type SendDisposition = "transient" | "permanent" | "mismatch";
+
+export class ResendSendError extends Error {
+  readonly disposition: SendDisposition;
+  readonly status: number | null;
+
+  constructor(message: string, disposition: SendDisposition, status: number | null) {
+    super(message);
+    this.name = "ResendSendError";
+    this.disposition = disposition;
+    this.status = status;
+  }
+}
+
+/** Resend's machine-readable name for the two different 409s. */
+function dispositionFor(status: number, body: string): SendDisposition {
+  if (status === 409) {
+    // Another worker holds this key right now: safe to come back later, never a duplicate.
+    return body.includes("concurrent_idempotent_requests") ? "transient" : "mismatch";
+  }
+  if (status === 408 || status === 429 || status >= 500) return "transient";
+  return "permanent";
+}
+
+/**
+ * Mail an approved verdict to a reporter.
+ *
+ * `idempotencyKey` is what makes a retry safe: email cannot be read back the way a GitHub issue
+ * can, so Resend deduplicating on this key is the only thing standing between a crash mid-send and
+ * a reporter receiving the same verdict twice. It holds the key for 24 hours and refuses a reuse
+ * that carries a different body, which is why every field here must be a pure function of the
+ * approved payload: a timestamp or an attempt counter in the body would turn a safe replay into a
+ * mismatch.
+ */
+export async function sendVerdictEmail(opts: {
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
+  idempotencyKey: string;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}): Promise<{ id: string }> {
+  let response: Response;
+  try {
+    response = await fetch(`${RESEND_API}/emails`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
+        "content-type": "application/json",
+        "user-agent": "bountydesk-worker",
+        "idempotency-key": opts.idempotencyKey,
+      },
+      body: JSON.stringify({
+        from: VERDICT_FROM,
+        to: [opts.to],
+        subject: opts.subject,
+        text: opts.text,
+        html: opts.html,
+        ...(opts.headers ? { headers: opts.headers } : {}),
+      }),
+      signal: opts.signal,
+    });
+  } catch {
+    // DNS, reset connection, abort: nothing reached Resend, or we cannot tell. Retryable.
+    throw new ResendSendError(`resend send to ${opts.to} failed to connect`, "transient", null);
+  }
+
+  const raw = await response.text().catch(() => "");
+  if (!response.ok) {
+    throw new ResendSendError(
+      `resend send to ${opts.to} failed: ${response.status} ${raw.slice(0, 300)}`,
+      dispositionFor(response.status, raw),
+      response.status,
+    );
+  }
+
+  let id: unknown;
+  try {
+    id = (JSON.parse(raw) as { id?: unknown }).id;
+  } catch {
+    id = undefined;
+  }
+  if (typeof id !== "string" || id.length === 0) {
+    // Accepted but unidentifiable: without an id nothing can correlate the delivery receipt, and
+    // a retry would be a second mail. Refuse rather than guess.
+    throw new ResendSendError(
+      `resend accepted the send to ${opts.to} but returned no message id`,
+      "permanent",
+      response.status,
+    );
+  }
+  return { id };
+}
