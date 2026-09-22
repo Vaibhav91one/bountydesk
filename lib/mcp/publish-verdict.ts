@@ -19,6 +19,7 @@ import {
   type Executor,
 } from "@/lib/db";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
+import { isReviewerEmail } from "@/lib/auth/reviewers";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
@@ -581,17 +582,48 @@ export async function enqueueApprovedVerdictDelivery(
   }
 
   const [reportRow] = await tx
-    .select({ channel: report.channel, sourceRef: report.sourceRef, state: report.state })
+    .select({
+      channel: report.channel,
+      sourceRef: report.sourceRef,
+      state: report.state,
+      reporterContact: report.reporterContact,
+    })
     .from(report)
     .where(eq(report.id, verdictRow.reportId))
     .limit(1);
 
   if (!reportRow) return { ok: false, reason: "report not found" };
-  if (reportRow.channel !== "github") {
+
+  // The destination is decided here, once, and frozen on the outbox row. The worker re-checks it
+  // against the report at send time, so a destination that moves after approval is refused rather
+  // than followed. Refusing before the DELIVERING transition leaves a report that cannot be
+  // delivered still approvable, rather than stranding it mid-delivery.
+  let deliveryTarget: string;
+  if (reportRow.channel === "github") {
+    if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid GitHub delivery target" };
+    }
+    deliveryTarget = reportRow.sourceRef;
+  } else if (reportRow.channel === "email") {
+    const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
+    // The verified-recipient half of the delivery contract: no address that passed inbound
+    // SPF/DKIM means there is nobody we can prove we are replying to, so no outbox row exists.
+    if (!contact) {
+      return { ok: false, reason: "report has no verified reporter contact to deliver to" };
+    }
+    if (!/^email:.+/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid email delivery target" };
+    }
+    // Intake only accepts mail from an allowlisted sender, so this address was authorised when
+    // the report was created. Re-reading it here refuses early, before the report moves to
+    // DELIVERING, if it has been removed since. The worker checks again at send time; this one
+    // is about not stranding the report, that one is about not mailing the wrong person.
+    if (!(await isReviewerEmail(contact))) {
+      return { ok: false, reason: `${contact} is no longer an authorised address` };
+    }
+    deliveryTarget = contact;
+  } else {
     return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
-  }
-  if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
-    return { ok: false, reason: "invalid GitHub delivery target" };
   }
 
   const canDeliver =
@@ -606,7 +638,7 @@ export async function enqueueApprovedVerdictDelivery(
       reportId: verdictRow.reportId,
       verdictId: verdictRow.id,
       idempotencyKey: `verdict:${verdictRow.id}`,
-      target: reportRow.sourceRef,
+      target: deliveryTarget,
       // The hash this write commits to is the one the caller just verified, not a second,
       // unverified read of the same column: a `verdict` row is immutable, so the two should
       // always agree, but the outbox must never bind to a value nobody checked the moment

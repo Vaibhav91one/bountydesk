@@ -200,6 +200,8 @@ test("a delivery still retrying counts its attempts, and one that gave up says s
         maxAttempts: 8,
         lastError: "502 from GitHub",
         target: "issues/18",
+        requiresHumanReview: false,
+        deliveredAt: null,
       },
     }),
   );
@@ -216,10 +218,56 @@ test("a delivery still retrying counts its attempts, and one that gave up says s
         maxAttempts: 8,
         lastError: "502 from GitHub",
         target: "issues/18",
+        requiresHumanReview: false,
+        deliveredAt: null,
       },
     }),
   );
   assert.equal(exhausted.steps.at(-1)?.note, "failed after 8 attempts");
+});
+
+test("a delivery held for review says so, rather than counting attempts nothing will spend", () => {
+  const held = caseLiveView(
+    caseFile({
+      state: "DELIVERING",
+      verdict: verdict(),
+      delivery: {
+        state: "FAILED",
+        attempts: 1,
+        maxAttempts: 8,
+        lastError: "Permanent / General / mailbox does not exist",
+        target: "reporter@example.test",
+        requiresHumanReview: true,
+        deliveredAt: null,
+      },
+    }),
+  );
+  // "failed, retrying (1/8)" would be the old answer here, and it would be a lie: claim() skips
+  // a held row, so those seven attempts are never spent.
+  assert.equal(
+    step(held, "delivery").note,
+    "held for review: Permanent / General / mailbox does not exist",
+  );
+  assert.equal(step(held, "delivery").state, "skipped");
+});
+
+test("a send the transport has not confirmed yet reads as waiting, not as delivered", () => {
+  const awaiting = caseLiveView(
+    caseFile({
+      state: "DELIVERING",
+      verdict: verdict(),
+      delivery: {
+        state: "SENT",
+        attempts: 1,
+        maxAttempts: 8,
+        lastError: null,
+        target: "reporter@example.test",
+          requiresHumanReview: false,
+        deliveredAt: null,
+      },
+    }),
+  );
+  assert.equal(step(awaiting, "delivery").note, "sent, waiting for the delivery receipt");
 });
 
 test("a delivered report is done, and the outcome badge is not repeated", () => {
@@ -234,6 +282,9 @@ test("a delivered report is done, and the outcome badge is not repeated", () => 
         maxAttempts: 8,
         lastError: null,
         target: "issues/18",
+        requiresHumanReview: false,
+        // A GitHub 201 is itself the receipt, so a sent row is confirmed in the same write.
+        deliveredAt: AT,
       },
     }),
   );
@@ -397,6 +448,9 @@ test("once a delivery exists the handoff has done its job and stops being the st
         maxAttempts: 8,
         lastError: null,
         target: "issues/18",
+        requiresHumanReview: false,
+        // A GitHub 201 is itself the receipt, so a sent row is confirmed in the same write.
+        deliveredAt: AT,
       },
     }),
   );

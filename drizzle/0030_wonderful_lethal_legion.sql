@@ -1,0 +1,2 @@
+ALTER TABLE "outbound_delivery" ADD COLUMN "provider_message_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "outbound_delivery_provider_message_id_key" ON "outbound_delivery" USING btree ("provider_message_id") WHERE "outbound_delivery"."provider_message_id" is not null;

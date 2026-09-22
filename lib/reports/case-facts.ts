@@ -84,6 +84,17 @@ export type CaseFile = {
     maxAttempts: number;
     lastError: string | null;
     target: string;
+    /**
+     * Set when a refusal needs a person. claim() skips these rows, so the attempt counter has
+     * stopped for good and "retrying" would be a lie however many attempts are left.
+     */
+    requiresHumanReview: boolean;
+    /**
+     * When the transport confirmed receipt, which is not the same as when we sent. GitHub's 201
+     * is itself the receipt so this is stamped at send; email waits for its delivered webhook,
+     * and until then the row is SENT with this still null.
+     */
+    deliveredAt: Date | null;
   } | null;
   /**
    * Whether the reviewer's decision ever reached the harness.

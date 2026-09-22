@@ -32,6 +32,20 @@ mock.module("@/lib/auth/reviewers", {
   },
 });
 
+// The receipt path's own behaviour is covered in lib/email/receipts.test.ts against a real
+// database. Here it is stubbed so this test proves only the dispatch: which handler a signed
+// event reaches, and that an unsigned one reaches neither.
+const receipted: string[] = [];
+mock.module("@/lib/email/receipts", {
+  namedExports: {
+    isDeliveryEvent: (type: string) => type.startsWith("email.") && type !== "email.received",
+    applyDeliveryReceipt: async (event: { type: string }) => {
+      receipted.push(event.type);
+      return { handled: true, reportId: "r", note: "ok" };
+    },
+  },
+});
+
 let POST: typeof import("./route").POST;
 
 before(async () => {
@@ -40,13 +54,18 @@ before(async () => {
 
 beforeEach(() => {
   enqueued.length = 0;
+  receipted.length = 0;
 });
 
 function signedRequest(from: string) {
-  const body = JSON.stringify({
+  return signedBody({
     type: "email.received",
     data: { from, message_id: `<${Math.random()}@mail.gmail.com>`, email_id: "eid-1", subject: "XSS", text: "steps" },
   });
+}
+
+function signedBody(payload: unknown) {
+  const body = JSON.stringify(payload);
   const id = `msg_${Math.random().toString(36).slice(2)}`;
   const timestamp = new Date();
   const signature = new Webhook(SECRET).sign(id, timestamp, body);
@@ -86,4 +105,27 @@ test("an unsigned message is rejected before the allowlist is consulted", async 
   );
   assert.equal(res.status, 401);
   assert.equal(enqueued.length, 0);
+});
+
+test("a signed delivery receipt goes to the receipt handler, never to intake", async () => {
+  const res = await POST(
+    signedBody({ type: "email.delivered", data: { email_id: "re_1", to: ["someone@example.com"] } }),
+  );
+  assert.equal(res.status, 202);
+  assert.deepEqual(receipted, ["email.delivered"]);
+  // A receipt is mail we sent ourselves, so it must not be run through the sender allowlist or
+  // turned into a report.
+  assert.equal(enqueued.length, 0);
+});
+
+test("an unsigned delivery receipt is rejected before anything is applied", async () => {
+  const res = await POST(
+    new Request("https://app.example/api/intake/email", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "email.delivered", data: { email_id: "re_forged" } }),
+    }),
+  );
+  assert.equal(res.status, 401);
+  assert.equal(receipted.length, 0);
 });

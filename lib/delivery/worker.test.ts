@@ -201,6 +201,11 @@ function makeFakeDeps(
 ) {
   const calls = { mintToken: 0, listComments: 0, postComment: 0 };
   const deps: import("./worker").DeliveryDeps = {
+    // The GitHub arm must never reach the mail transport; a throw here turns the
+    // required dep into an assertion rather than dead scaffolding.
+    sendEmail: async () => {
+      throw new Error("github delivery must not send mail");
+    },
     githubAppId: 123456,
     hashContent: fakeHash,
     mintToken: async () => {

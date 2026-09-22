@@ -11,8 +11,8 @@ import {
 } from "@/lib/db";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { transition } from "@/lib/reports/lifecycle";
-import type { IssueComment } from "@/lib/github/comment";
 
+import { emailArm } from "./email";
 import {
   claim,
   claimById,
@@ -21,9 +21,10 @@ import {
   LeaseLostError,
   markSent,
   releaseUnstarted,
-  renew,
+  runWithHeartbeat,
   type DeliveryLease,
 } from "./queue";
+import type { ArmOutcome, DeliveryArm, DeliveryDeps } from "./arm";
 
 /**
  * Response bodies and error strings are stored for incident review. Unbounded text from a
@@ -39,35 +40,12 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** The injectable boundary keeps GitHub calls deterministic in worker tests. */
-export type DeliveryDeps = {
-  githubAppId: number;
-  hashContent: (payload: string) => string;
-  mintToken: (
-    installationId: number,
-    repoId: number,
-    opts?: { signal?: AbortSignal },
-  ) => Promise<{ token: string; expiresAt: string }>;
-  postComment: (opts: {
-    token: string;
-    fullName: string;
-    issueNumber: number;
-    body: string;
-    signal?: AbortSignal;
-  }) => Promise<{ id: number }>;
-  listComments: (opts: {
-    token: string;
-    fullName: string;
-    issueNumber: number;
-    signal?: AbortSignal;
-  }) => Promise<IssueComment[]>;
-};
-
 async function defaultDeps(): Promise<DeliveryDeps> {
-  const [hash, appAuth, comment] = await Promise.all([
+  const [hash, appAuth, comment, resend] = await Promise.all([
     import("@/lib/verdicts/hash"),
     import("@/lib/github/app-auth"),
     import("@/lib/github/comment"),
+    import("@/lib/email/resend"),
   ]);
 
   return {
@@ -76,61 +54,8 @@ async function defaultDeps(): Promise<DeliveryDeps> {
     mintToken: appAuth.mintInstallationToken,
     postComment: comment.postIssueComment,
     listComments: comment.listIssueComments,
+    sendEmail: resend.sendVerdictEmail,
   };
-}
-
-async function runWithHeartbeat<T>(
-  lease: DeliveryLease,
-  leaseSeconds: number,
-  operation: (signal: AbortSignal) => Promise<T>,
-  outerSignal?: AbortSignal,
-): Promise<T> {
-  const controller = new AbortController();
-  const signal = outerSignal
-    ? AbortSignal.any([controller.signal, outerSignal])
-    : controller.signal;
-  const intervalMs = Math.max(50, Math.floor((leaseSeconds * 1000) / 3));
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let renewal = Promise.resolve();
-  let rejectLeaseLoss!: (reason: unknown) => void;
-  const leaseLoss = new Promise<never>((_, reject) => {
-    rejectLeaseLoss = reject;
-  });
-  let rejectAbort!: (reason: unknown) => void;
-  const aborted = new Promise<never>((_, reject) => {
-    rejectAbort = reject;
-  });
-  const onAbort = () => rejectAbort(signal.reason);
-  if (signal.aborted) onAbort();
-  else signal.addEventListener("abort", onAbort, { once: true });
-
-  const heartbeat = () => {
-    renewal = renew(lease, leaseSeconds)
-      .then(() => {
-        if (!stopped) timer = setTimeout(heartbeat, intervalMs);
-      })
-      .catch((error: unknown) => {
-        controller.abort(error);
-        rejectLeaseLoss(error);
-      });
-  };
-
-  timer = setTimeout(heartbeat, intervalMs);
-  try {
-    const result = await Promise.race([
-      operation(signal),
-      leaseLoss,
-      aborted,
-    ]);
-    if (signal.aborted) throw signal.reason;
-    return result;
-  } finally {
-    stopped = true;
-    signal.removeEventListener("abort", onAbort);
-    if (timer) clearTimeout(timer);
-    await renewal.catch(() => undefined);
-  }
 }
 
 async function recordAttempt(
@@ -159,6 +84,7 @@ async function refuseDelivery(
   lease: DeliveryLease,
   message: string,
   startedAt: Date = new Date(),
+  hold = false,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await recordAttempt(
@@ -168,12 +94,140 @@ async function refuseDelivery(
       startedAt,
       tx,
     );
-    await failPermanently(lease, message, tx);
+    // A hold is for a refusal a human has to look at rather than one the evidence explains on
+    // its own: an address that lost authorization, or a send we cannot prove did not already go
+    // out. requires_human_review also takes the row out of claim()'s reach for good.
+    await failPermanently(lease, message, tx, hold);
   });
 }
 
 /** `report.source_ref` for a GitHub-channel report, e.g. "github:123456:issue:482". */
 const GITHUB_SOURCE_REF = /^github:(\d+):issue:(\d+)$/;
+
+/**
+ * Post the verdict as an issue comment.
+ *
+ * Unchanged from before there was a channel seam: the destination is resolved from the report's
+ * installation and repository, the grant is re-checked live before a token is minted, and the
+ * issue's own comments are read back so a crashed attempt cannot post twice. That read-back is
+ * exactly what email cannot do, which is why the email arm has to buy the same safety another way.
+ */
+const githubArm: DeliveryArm = async (ctx, d) => {
+  const { lease } = ctx;
+
+  const [row] = await db
+    .select({
+      installationId: githubInstallation.installationId,
+      repoId: connectedRepository.repoId,
+      fullName: connectedRepository.fullName,
+    })
+    .from(report)
+    .leftJoin(
+      connectedRepository,
+      eq(report.connectedRepositoryId, connectedRepository.id),
+    )
+    .leftJoin(
+      githubInstallation,
+      eq(connectedRepository.installationId, githubInstallation.id),
+    )
+    .where(eq(report.id, ctx.report.id))
+    .limit(1);
+
+  const sourceMatch = ctx.report.sourceRef.match(GITHUB_SOURCE_REF);
+
+  if (!row || !row.installationId || !row.repoId || !row.fullName || !sourceMatch) {
+    return {
+      kind: "refused",
+      message: `report ${ctx.report.id} has no bound GitHub repository or an unparseable source ref`,
+    };
+  }
+
+  const installationId = row.installationId;
+  const repoId = row.repoId;
+  const issueNumber = Number(sourceMatch[2]);
+  const sourceRepoId = Number(sourceMatch[1]);
+
+  if (
+    lease.target !== ctx.report.sourceRef ||
+    !Number.isSafeInteger(sourceRepoId) ||
+    sourceRepoId !== repoId ||
+    !Number.isSafeInteger(issueNumber) ||
+    issueNumber <= 0
+  ) {
+    return {
+      kind: "refused",
+      message: `delivery ${lease.id} target does not match report ${ctx.report.id}`,
+    };
+  }
+
+  // Refusal is checked before minting a token: an installation can be suspended, or a
+  // repository removed or archived, between approval and this attempt, and that check must
+  // never be skipped in favour of "we already have a token so let's just try".
+  const repository = await activeRepository(installationId, repoId);
+  if (!repository) {
+    return {
+      kind: "refused",
+      message: `repository ${row.fullName} is no longer connected (suspended, deleted, removed, or missing a target profile); a human has to reconnect it`,
+    };
+  }
+
+  const result = await runWithHeartbeat(
+    lease,
+    ctx.leaseSeconds,
+    async (signal) => {
+      const { token } = await d.mintToken(installationId, repoId, { signal });
+      const comments = await d.listComments({
+        token,
+        fullName: repository.fullName,
+        issueNumber,
+        signal,
+      });
+
+      if (
+        comments.some(
+          (comment) =>
+            comment.body === ctx.payload &&
+            comment.authorType === "Bot" &&
+            comment.githubAppId === d.githubAppId,
+        )
+      )
+        return { kind: "replayed" } as const;
+
+      const posted = await d.postComment({
+        token,
+        fullName: repository.fullName,
+        issueNumber,
+        body: ctx.payload,
+        signal,
+      });
+      return { kind: "posted", posted } as const;
+    },
+    ctx.signal,
+  );
+
+  // Crash recovery: the comment already went out on a prior attempt that died before the
+  // worker could commit SENT/DELIVERED. Posting again would duplicate it.
+  if (result.kind === "replayed") {
+    return {
+      kind: "replayed",
+      note: "marker already present on the issue; treating as already delivered, no comment posted",
+      completesReport: true,
+    };
+  }
+
+  // A 201 from GitHub means the comment exists on the issue: acceptance is the receipt.
+  return {
+    kind: "sent",
+    responseStatus: 201,
+    responseBody: JSON.stringify(result.posted),
+    completesReport: true,
+  };
+};
+
+const ARMS: Partial<Record<"github" | "email" | "manual", DeliveryArm>> = {
+  github: githubArm,
+  email: emailArm,
+};
 
 /**
  * Drive one outbox row as far as its lease allows.
@@ -302,142 +356,80 @@ async function deliverClaimed(
       return lease.id;
     }
 
-    const [target] = await db
+    // Channel-agnostic from here: which transport carries the bytes is the arm's business, but
+    // every channel shares the requirement that the report is still mid-delivery. A report that
+    // moved on (cancelled, or already delivered by an earlier attempt) must not receive a late
+    // send.
+    const [reportRow] = await db
       .select({
+        channel: report.channel,
         sourceRef: report.sourceRef,
+        title: report.title,
         state: report.state,
-        installationId: githubInstallation.installationId,
-        repoId: connectedRepository.repoId,
-        fullName: connectedRepository.fullName,
+        reporterContact: report.reporterContact,
       })
       .from(report)
-      .leftJoin(
-        connectedRepository,
-        eq(report.connectedRepositoryId, connectedRepository.id),
-      )
-      .leftJoin(
-        githubInstallation,
-        eq(connectedRepository.installationId, githubInstallation.id),
-      )
       .where(eq(report.id, lease.reportId))
       .limit(1);
 
-    const sourceMatch = target?.sourceRef.match(GITHUB_SOURCE_REF);
-
-    if (
-      !target ||
-      !target.installationId ||
-      !target.repoId ||
-      !target.fullName ||
-      !sourceMatch
-    ) {
-      const message = `report ${lease.reportId} has no bound GitHub repository or an unparseable source ref`;
-      await refuseDelivery(lease, message);
+    if (!reportRow) {
+      await refuseDelivery(lease, `report ${lease.reportId} no longer exists`, startedAt);
       return lease.id;
     }
 
-    const installationId = target.installationId;
-    const repoId = target.repoId;
-
-    if (target.state !== "DELIVERING") {
-      const message = `report ${lease.reportId} is ${target.state}, not DELIVERING`;
-      await refuseDelivery(lease, message);
-      return lease.id;
-    }
-
-    const issueNumber = Number(sourceMatch[2]);
-    const sourceRepoId = Number(sourceMatch[1]);
-
-    if (
-      lease.target !== target.sourceRef ||
-      !Number.isSafeInteger(sourceRepoId) ||
-      sourceRepoId !== repoId ||
-      !Number.isSafeInteger(issueNumber) ||
-      issueNumber <= 0
-    ) {
-      const message = `delivery ${lease.id} target does not match report ${lease.reportId}`;
-      await refuseDelivery(lease, message);
-      return lease.id;
-    }
-
-    // Refusal is checked before minting a token: an installation can be suspended, or a
-    // repository removed or archived, between approval and this attempt, and that check must
-    // never be skipped in favour of "we already have a token so let's just try".
-    const repository = await activeRepository(installationId, repoId);
-    if (!repository) {
-      const message = `repository ${target.fullName} is no longer connected (suspended, deleted, removed, or missing a target profile); a human has to reconnect it`;
+    if (reportRow.state !== "DELIVERING") {
+      const message = `report ${lease.reportId} is ${reportRow.state}, not DELIVERING`;
       await refuseDelivery(lease, message, startedAt);
       return lease.id;
     }
 
-    const result = await runWithHeartbeat(
-      lease,
-      leaseSeconds,
-      async (signal) => {
-        const { token } = await d.mintToken(installationId, repoId, { signal });
-        const comments = await d.listComments({
-          token,
-          fullName: repository.fullName,
-          issueNumber,
-          signal,
-        });
-
-        if (
-          comments.some(
-            (comment) =>
-              comment.body === verdictRow.payload &&
-              comment.authorType === "Bot" &&
-              comment.githubAppId === d.githubAppId,
-          )
+    const arm = ARMS[reportRow.channel];
+    const outcome: ArmOutcome = arm
+      ? await arm(
+          {
+            lease,
+            payload: verdictRow.payload,
+            report: {
+              id: lease.reportId,
+              channel: reportRow.channel,
+              sourceRef: reportRow.sourceRef,
+              title: reportRow.title,
+              reporterContact: reportRow.reporterContact,
+            },
+            leaseSeconds,
+            startedAt,
+            signal,
+          },
+          d,
         )
-          return { kind: "replayed" } as const;
+      : { kind: "refused", message: `unsupported delivery channel: ${reportRow.channel}` };
 
-        const posted = await d.postComment({
-          token,
-          fullName: repository.fullName,
-          issueNumber,
-          body: verdictRow.payload,
-          signal,
-        });
-        return { kind: "posted", posted } as const;
-      },
-      signal,
-    );
-
-    if (result.kind === "replayed") {
-      // Crash recovery: the comment already went out on a prior attempt that died before
-      // this worker could commit SENT/DELIVERED. Posting again would duplicate the comment,
-      // so this path never reaches postComment.
-      await db.transaction(async (tx) => {
-        await recordAttempt(
-          lease.id,
-          lease.attempts,
-          {
-            error:
-              "marker already present on the issue; treating as already delivered, no comment posted",
-          },
-          startedAt,
-          tx,
-        );
-        await markSent(lease, tx);
-        await transition(lease.reportId, "DELIVERING", "DELIVERED", tx);
-      });
-    } else {
-      await db.transaction(async (tx) => {
-        await recordAttempt(
-          lease.id,
-          lease.attempts,
-          {
-            responseStatus: 201,
-            responseBody: truncate(JSON.stringify(result.posted)),
-          },
-          startedAt,
-          tx,
-        );
-        await markSent(lease, tx);
-        await transition(lease.reportId, "DELIVERING", "DELIVERED", tx);
-      });
+    if (outcome.kind === "refused") {
+      await refuseDelivery(lease, outcome.message, startedAt, outcome.hold ?? false);
+      return lease.id;
     }
+
+    await db.transaction(async (tx) => {
+      await recordAttempt(
+        lease.id,
+        lease.attempts,
+        outcome.kind === "replayed"
+          ? { error: outcome.note }
+          : {
+              responseStatus: outcome.responseStatus,
+              responseBody: truncate(outcome.responseBody),
+            },
+        startedAt,
+        tx,
+      );
+      // Only a transport whose acceptance is itself the receipt completes the report, and the
+      // same flag decides whether delivered_at may be stamped now. Email earns SENT with a null
+      // delivered_at and waits for its delivered webhook; see ArmOutcome.
+      await markSent(lease, tx, outcome.completesReport);
+      if (outcome.completesReport) {
+        await transition(lease.reportId, "DELIVERING", "DELIVERED", tx);
+      }
+    });
     return lease.id;
   } catch (err) {
     if (err instanceof LeaseLostError) return lease.id;
@@ -465,3 +457,4 @@ async function deliverClaimed(
 }
 
 export type { DeliveryLease };
+export type { ArmOutcome, DeliveryArm, DeliveryContext, DeliveryDeps } from "./arm";

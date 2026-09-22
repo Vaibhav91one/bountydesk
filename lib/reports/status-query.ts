@@ -97,6 +97,10 @@ export function caseRefetchInterval(status: CaseLiveView): number | false {
     return false;
   }
 
+  // The same dead end reached the other way: claim() skips a row flagged for review, so it
+  // stops with attempts to spare. Without this the page polls a row nothing will ever move.
+  if (status.delivery?.requiresHumanReview) return false;
+
   // The decision never reached the harness and has no attempts left. Nothing produces a
   // delivery row from here, so the report stays non-terminal forever and the poll below would
   // ask about it every 1.5 seconds for as long as the tab is open.

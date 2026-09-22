@@ -610,6 +610,16 @@ export const outboundDelivery = pgTable(
      * thing and GitHub receive another.
      */
     approvedContentHash: text("approved_content_hash").notNull(),
+    /**
+     * The transport's own id for what we sent, written straight after the send returns.
+     *
+     * GitHub does not need this: a retry can list the issue's comments and recognise its own
+     * post. Email cannot read a mailbox back, so this column is the record that bytes already
+     * went out. A non-null value on a freshly claimed row means skip the send. It is also what
+     * a provider's delivery webhook is correlated on, which is why the partial unique index
+     * matters: one provider message can never map to two deliveries.
+     */
+    providerMessageId: text("provider_message_id"),
     requiresHumanReview: boolean("requires_human_review")
       .notNull()
       .default(false),
@@ -636,6 +646,9 @@ export const outboundDelivery = pgTable(
     uniqueIndex("outbound_delivery_automatic_target_key")
       .on(t.verdictId, t.target)
       .where(sql`${t.requiresHumanReview} = false`),
+    uniqueIndex("outbound_delivery_provider_message_id_key")
+      .on(t.providerMessageId)
+      .where(sql`${t.providerMessageId} is not null`),
     index("outbound_delivery_state_idx").on(t.state),
     index("outbound_delivery_claim_idx").on(t.state, t.nextAttemptAt),
     index("outbound_delivery_lease_idx").on(t.leaseExpiresAt),
