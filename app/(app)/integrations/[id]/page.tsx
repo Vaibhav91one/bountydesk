@@ -9,9 +9,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
 import { appListingUrl, installationSettingsUrl, installUrl } from "@/lib/auth/oauth";
+import { canManageReviewers, listReviewers, type ReviewerEntry } from "@/lib/auth/reviewers";
 import { formatStamp } from "@/lib/format";
 import { listConnections } from "@/lib/github/connections";
 import { findIntegration, INTEGRATIONS, type IntegrationIcon } from "../catalog";
+import { EmailReviewers } from "../email-reviewers";
 
 import { ManageAccess, type AccessInstallation } from "./manage-access";
 
@@ -63,9 +65,15 @@ function Out({ href, children }: { href: string; children: React.ReactNode }) {
  * rather than being filled in to make the panel look finished.
  */
 export default async function IntegrationPage({ params }: { params: Promise<{ id: string }> }) {
-  await requireReviewer();
+  const session = await requireReviewer();
   const integration = findIntegration((await params).id);
   if (!integration) notFound();
+
+  // Email intake is authorized by the reviewer allowlist, so this is where the allowlist is
+  // managed, the way GitHub's access is managed from its own page.
+  const isEmail = integration.id === "email";
+  const reviewers: ReviewerEntry[] = isEmail ? await listReviewers() : [];
+  const canManage = isEmail && canManageReviewers(session.email);
 
   const Icon = ICONS[integration.icon];
   // Only GitHub has anything installed to read. The other three have no connection model at
@@ -149,6 +157,18 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
 
       <div className="grid gap-8 p-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-7">
+          {isEmail ? (
+            <section className="flex flex-col gap-3">
+              <h2 className="text-heading text-foreground">Reviewers</h2>
+              <p className="max-w-3xl text-body text-muted-foreground">
+                Who may sign in to operate BountyDesk and whose email reports are triaged. An owner
+                adds an address, the person enters the one-time code mailed to it, and only then is
+                it authorized. Owners are set in the environment.
+              </p>
+              <EmailReviewers entries={reviewers} canManage={canManage} />
+            </section>
+          ) : null}
+
           {integration.sections.map((section) => (
             <section key={section.title} className="flex flex-col gap-3">
               <h2 className="text-heading text-foreground">{section.title}</h2>

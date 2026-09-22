@@ -1,9 +1,7 @@
 import { requireReviewer } from "@/lib/auth/dal";
-import { canManageReviewers, listReviewers } from "@/lib/auth/reviewers";
 import { readHarness } from "@/lib/trueforge/harness";
 
 import { HarnessTabs } from "./harness-tabs";
-import { ReviewersPanel } from "./reviewers-panel";
 
 export const metadata = { title: "Settings · BountyDesk" };
 
@@ -18,9 +16,8 @@ export const metadata = { title: "Settings · BountyDesk" };
  * shows five explanations instead of a blank page.
  */
 export default async function SettingsPage() {
-  const session = await requireReviewer();
-  const [snapshot, reviewers] = await Promise.all([readHarness(), listReviewers()]);
-  const canManage = canManageReviewers(session.email);
+  await requireReviewer();
+  const snapshot = await readHarness();
 
   return (
     <main className="flex flex-1 flex-col">
@@ -32,8 +29,7 @@ export default async function SettingsPage() {
         </p>
       </header>
 
-      <div className="flex flex-col gap-6 p-8">
-        <ReviewersPanel entries={reviewers} canManage={canManage} />
+      <div className="p-8">
         <HarnessTabs snapshot={snapshot} />
       </div>
     </main>

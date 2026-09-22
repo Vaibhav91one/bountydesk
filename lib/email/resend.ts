@@ -54,3 +54,40 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
     html: typeof payload.html === "string" ? payload.html : "",
   };
 }
+
+/**
+ * The address BountyDesk sends from. mail.bountydesk.vaibhav.quest is the domain verified for
+ * sending in Resend; a no-reply mailbox on it is enough for a transactional code, and nothing
+ * reads replies to it.
+ */
+const VERIFICATION_FROM = "BountyDesk <no-reply@mail.bountydesk.vaibhav.quest>";
+
+/**
+ * Mail a reviewer their one-time verification code.
+ *
+ * This is a transactional send, not a verdict delivery: it carries no report content and creates no
+ * DeliveryAttempt, so the verified-recipient and transport-receipt contract that gates verdict
+ * delivery does not apply. A non-2xx throws so the action can tell the owner the code did not go
+ * out, rather than leaving them waiting for a mail that never sent.
+ */
+export async function sendVerificationEmail(to: string, code: string): Promise<void> {
+  const response = await fetch(`${RESEND_API}/emails`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
+      "content-type": "application/json",
+      "user-agent": "bountydesk-app",
+    },
+    body: JSON.stringify({
+      from: VERIFICATION_FROM,
+      to: [to],
+      subject: `Your BountyDesk verification code: ${code}`,
+      text: `Your BountyDesk reviewer verification code is ${code}.\n\nIt expires in 10 minutes. If you did not expect this, you can ignore this email.`,
+    }),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`resend send to ${to} failed: ${response.status} ${detail.slice(0, 200)}`);
+  }
+}
