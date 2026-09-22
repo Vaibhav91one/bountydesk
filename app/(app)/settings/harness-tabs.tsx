@@ -14,6 +14,7 @@ import {
   PlugsConnected,
   FileText,
   Robot,
+  Users,
   WarningCircle,
 } from "@phosphor-icons/react/ssr";
 
@@ -33,9 +34,12 @@ import { cn } from "@/lib/utils";
 import type { Drift } from "@/lib/trueforge/desired";
 import type { HarnessSnapshot, Section } from "@/lib/trueforge/harness";
 
+import type { ReviewerEntry } from "@/lib/auth/reviewers";
+
 import { Empty, Panel, Row } from "./panel";
 import { applyManagedResources, type ActionResult } from "./actions";
 import { ModelProviderForm } from "./model-provider-form";
+import { ReviewersList } from "./reviewers-list";
 import { SandboxForm } from "./sandbox-form";
 
 /**
@@ -59,11 +63,22 @@ function brandFor(provider: { name: string; type: string }) {
  * One route, five tabs. Not five routes: each section already carries its own error, so
  * splitting them would buy nothing the read model does not give, at five times the files.
  */
-export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
+export function HarnessTabs({
+  snapshot,
+  reviewers,
+  canManageReviewers,
+}: {
+  snapshot: HarnessSnapshot;
+  reviewers: ReviewerEntry[];
+  canManageReviewers: boolean;
+}) {
   return (
-    <Tabs defaultValue="models" className="gap-6">
+    <Tabs defaultValue="reviewers" className="gap-6">
       <div className="overflow-x-auto border-b border-border/50 pb-1.5">
         <TabsList variant="line" className="w-max justify-start gap-6">
+          <TabsTrigger value="reviewers" className="flex-none">
+            <Users /> Reviewers
+          </TabsTrigger>
           <TabsTrigger value="models" className="flex-none">
             <Brain /> Models
           </TabsTrigger>
@@ -81,6 +96,15 @@ export function HarnessTabs({ snapshot }: { snapshot: HarnessSnapshot }) {
           </TabsTrigger>
         </TabsList>
       </div>
+
+      <TabsContent value="reviewers" className="flex flex-col gap-4">
+        <Panel
+          title="Reviewers"
+          detail="Who may sign in to operate BountyDesk and whose email reports are triaged. Owners are set in the environment; members are added here."
+        >
+          <ReviewersList entries={reviewers} canManage={canManageReviewers} />
+        </Panel>
+      </TabsContent>
 
       <TabsContent value="models" className="flex flex-col gap-4">
         <Panel

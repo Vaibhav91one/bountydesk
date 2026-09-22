@@ -3,7 +3,6 @@ import { canManageReviewers, listReviewers } from "@/lib/auth/reviewers";
 import { readHarness } from "@/lib/trueforge/harness";
 
 import { HarnessTabs } from "./harness-tabs";
-import { ReviewersPanel } from "./reviewers-panel";
 
 export const metadata = { title: "Settings · BountyDesk" };
 
@@ -27,14 +26,13 @@ export default async function SettingsPage() {
       <header className="flex flex-col gap-1 border-b border-border/50 px-8 py-7">
         <h1 className="text-title text-foreground">Settings</h1>
         <p className="text-meta text-muted-foreground">
-          What the TrueForge instance behind this console is configured with, and what
-          BountyDesk registers on it.
+          Who may operate BountyDesk, and what the TrueForge instance behind this console is
+          configured with.
         </p>
       </header>
 
       <div className="flex flex-col gap-6 p-8">
-        <ReviewersPanel entries={reviewers} canManage={canManage} />
-        <HarnessTabs snapshot={snapshot} />
+        <HarnessTabs snapshot={snapshot} reviewers={reviewers} canManageReviewers={canManage} />
       </div>
     </main>
   );
