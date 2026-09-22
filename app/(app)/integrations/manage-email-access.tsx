@@ -2,7 +2,8 @@
 
 import { useState, useTransition } from "react";
 
-import { ArrowLeft, Check, CircleNotch, EnvelopeSimple, PaperPlaneTilt, Plus, Trash } from "@phosphor-icons/react/ssr";
+import { Gmail } from "developer-icons";
+import { ArrowLeft, Check, CircleNotch, PaperPlaneTilt, Plus, Trash } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,7 +24,7 @@ type Step = "list" | "email" | "code";
 
 /**
  * Manage who may operate BountyDesk by email, all inside one dialog, styled like the GitHub
- * access dialog on its own page. The list is the resting state; "Connect your email" runs inline
+ * access dialog on its own page. The list is the resting state; adding an email runs inline
  * through an address, the code mailed to it, and a verified row. Everything here is owner-only,
  * and every action re-checks that server-side.
  */
@@ -101,12 +102,12 @@ export function ManageEmailAccess({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={<Button size="sm" variant="outline">Manage access</Button>} />
+      <DialogTrigger render={<Button size="sm">Manage access</Button>} />
 
-      <DialogContent className="no-scrollbar max-h-[85vh] gap-0 overflow-y-auto p-0 sm:max-w-xl">
+      <DialogContent className="no-scrollbar flex max-h-[85vh] flex-col gap-0 overflow-y-auto p-0 sm:max-w-xl sm:min-h-[520px]">
         <DialogHeader className="items-center gap-3 border-b border-border/50 p-6 text-center">
           <span className="flex size-12 items-center justify-center rounded-full bg-background">
-            <EnvelopeSimple className="size-6" />
+            <Gmail className="size-6" />
           </span>
           <DialogTitle>Reviewers</DialogTitle>
           <DialogDescription>
@@ -114,18 +115,18 @@ export function ManageEmailAccess({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5 p-6">
+        <div className="flex flex-1 flex-col gap-5 p-6">
           {step === "list" ? (
             members.length === 0 ? (
               canManage ? (
-                <div className="flex justify-center py-4">
+                <div className="flex flex-1 items-center justify-center">
                   <Button onClick={startConnect}>
-                    <EnvelopeSimple />
+                    <Gmail />
                     Connect your email
                   </Button>
                 </div>
               ) : (
-                <p className="py-4 text-center text-body text-muted-foreground">
+                <p className="flex flex-1 items-center justify-center text-center text-body text-muted-foreground">
                   No email is connected, and only an owner can connect one.
                 </p>
               )
@@ -165,7 +166,7 @@ export function ManageEmailAccess({
                 {canManage ? (
                   <Button variant="outline" className="self-start" onClick={startConnect}>
                     <Plus />
-                    Connect another email
+                    Add another email
                   </Button>
                 ) : null}
               </>
@@ -193,21 +194,16 @@ export function ManageEmailAccess({
                 />
               </label>
               {error ? <p className="text-meta text-destructive">{error}</p> : null}
-              <div className="flex items-center justify-between gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={reset}>
-                  <ArrowLeft /> Back
-                </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending ? <CircleNotch className="animate-spin" /> : <PaperPlaneTilt />}
-                  {pending ? "Sending…" : "Send code"}
-                </Button>
-              </div>
+              <Button type="submit" className="self-end" disabled={pending}>
+                {pending ? <CircleNotch className="animate-spin" /> : <PaperPlaneTilt />}
+                {pending ? "Sending…" : "Send code"}
+              </Button>
             </form>
           ) : null}
 
           {step === "code" ? (
             pending ? (
-              <div className="flex flex-col items-center gap-3 py-6">
+              <div className="flex flex-1 flex-col items-center justify-center gap-3">
                 <CircleNotch className="size-8 animate-spin text-muted-foreground" />
                 <p className="text-body text-muted-foreground">Verifying…</p>
               </div>

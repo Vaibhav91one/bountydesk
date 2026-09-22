@@ -103,9 +103,10 @@ test("resending invalidates the previous code", async () => {
   assert.equal((await mod.verifyCode(member, second)).ok, true);
 });
 
-test("an owner cannot be added, and an already-verified address is a no-op", async () => {
+test("adding an owner or an already-verified address is a no-op, not an error", async () => {
   process.env.REVIEWER_EMAILS = OWNER;
-  await assert.rejects(mod.startVerification(OWNER, OWNER), /already an owner/);
+  // An owner is already authorized, so connecting their own address just reports already-verified.
+  assert.deepEqual(await mod.startVerification(OWNER, OWNER), { status: "already_verified" });
 
   const member = "verified@example.com";
   await mod.verifyCode(member, await code(member));
