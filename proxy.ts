@@ -2,8 +2,8 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
 import {
-  SOURCE_URL,
   landingRedirectEnabled,
+  landingRedirectTarget,
   shouldRedirectToSource,
 } from "@/lib/deployment/landing-redirect";
 
@@ -17,7 +17,10 @@ export const proxy = clerkMiddleware((_auth, request) => {
     landingRedirectEnabled() &&
     shouldRedirectToSource(request.nextUrl.pathname, request.headers.get("host"))
   ) {
-    return NextResponse.redirect(SOURCE_URL, 302);
+    return NextResponse.redirect(
+      landingRedirectTarget(request.nextUrl.pathname, request.nextUrl.search),
+      302,
+    );
   }
   return NextResponse.next();
 });
