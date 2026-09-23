@@ -68,7 +68,8 @@ export type CaseFile = {
    * remediation), captured by the poller. Null until a turn produces one. Rendered as text, never
    * HTML, and never the outbound comment. */
   finalSummary: string | null;
-  target: { name: string; imageDigest: string } | null;
+  /** The bound reproduction target. `id` is what the picker matches its current selection on. */
+  target: { id: string; name: string; imageDigest: string } | null;
   /** The Daytona sandbox this session's investigation actually ran against, if one was
    * provisioned. Null when no target was bound or provisioning never happened, which is most
    * reports today. Read from agent_session, where the driver records it. */

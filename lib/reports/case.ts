@@ -106,6 +106,7 @@ export async function readCase(
           createdAt: report.createdAt,
           updatedAt: report.updatedAt,
           repositoryFullName: connectedRepository.fullName,
+          targetProfileId: targetProfile.id,
           targetName: targetProfile.name,
           targetDigest: targetProfile.imageDigest,
         })
@@ -360,8 +361,14 @@ export async function readCase(
           : null,
         reporterUrl: login ? `https://github.com/${login}` : null,
         reporterAvatarUrl: login ? `https://github.com/${login}.png?size=64` : null,
-        target: row.targetName
-          ? { name: row.targetName, imageDigest: row.targetDigest ?? "" }
+        // Keyed on the profile id rather than the name: it is the join's primary key, so it is
+        // present exactly when the join matched, and target_profile.name is NOT NULL beside it.
+        target: row.targetProfileId
+          ? {
+              id: row.targetProfileId,
+              name: row.targetName ?? "",
+              imageDigest: row.targetDigest ?? "",
+            }
           : null,
         verdict: latest ?? null,
         latestRun: latestRun ?? null,

@@ -138,7 +138,8 @@ export type CaseLiveView = {
    * verdict to summarize, and the dialog falls back to its default text. */
   recheckSummary: RecheckSummary | null;
 
-  target: { name: string; imageDigest: string } | null;
+  /** The bound reproduction target. `id` is what the picker matches its current selection on. */
+  target: { id: string; name: string; imageDigest: string } | null;
   sandbox: { id: string; appPort: number | null } | null;
   finalSummary: string | null;
   destination: string;

@@ -6,6 +6,7 @@ import { SandboxDiagram } from "@/components/sandbox-diagram";
 import { Badge } from "@/components/ui/badge";
 import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
+import type { TargetProfileOption } from "@/lib/targets/bind";
 import {
   caseRefetchInterval,
   caseStatusQueryKey,
@@ -64,11 +65,13 @@ export function CaseView({
   initial,
   issueUrl,
   repositoryFullName,
+  targetProfiles,
 }: {
   reportId: string;
   initial: CaseLiveView;
   issueUrl: string | null;
   repositoryFullName: string | null;
+  targetProfiles: TargetProfileOption[];
 }) {
   const { data: status = initial } = useQuery({
     queryKey: caseStatusQueryKey(reportId),
@@ -91,6 +94,7 @@ export function CaseView({
         status={status}
         issueUrl={issueUrl}
         repositoryFullName={repositoryFullName}
+        targetProfiles={targetProfiles}
         reportId={reportId}
       />
 
