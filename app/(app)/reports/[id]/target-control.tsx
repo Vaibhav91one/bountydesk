@@ -83,7 +83,14 @@ export function TargetControl({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={choice} onValueChange={setChoice} disabled={pending}>
+        {/* items is what teaches the trigger to print the profile's name rather than the uuid it
+            is storing: without it the reviewer reads back an id, not the target they chose. */}
+        <Select
+          items={profiles.map((profile) => ({ label: profile.name, value: profile.id }))}
+          value={choice}
+          onValueChange={setChoice}
+          disabled={pending}
+        >
           <SelectTrigger size="sm" className="min-w-40">
             <SelectValue placeholder="None bound" />
           </SelectTrigger>
