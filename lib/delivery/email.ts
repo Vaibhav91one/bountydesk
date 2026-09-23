@@ -1,6 +1,7 @@
 import { and, db, eq, outboundDelivery, sql } from "@/lib/db";
 import { isReviewerEmail } from "@/lib/auth/reviewers";
-import { ResendSendError } from "@/lib/email/resend";
+import { EMAIL_ASSET_ORIGIN, ResendSendError } from "@/lib/email/resend";
+import { renderVerdictEmail } from "@/lib/email/markup";
 
 import type { DeliveryArm } from "./arm";
 import { LeaseLostError, runWithHeartbeat } from "./queue";
@@ -22,32 +23,18 @@ export function emailSubject(title: string): string {
   return `Re: ${cleaned || "your report"}`;
 }
 
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 /**
  * Render the approved payload as an HTML part.
  *
- * Escape-and-`<pre>`, never a markdown renderer. The payload carries agent-authored text, and a
- * renderer would turn that into live markup in a mailbox that sanitises nothing. GitHub gets away
- * with markdown only because GitHub sanitises on render. The one exception is the delivery marker,
- * which is put back as raw HTML so it stays a real comment: invisible to the reader, still present
- * exactly once for anyone auditing what was sent.
+ * The payload is markdown and it is now laid out as markdown: headings, findings with a severity
+ * chip, lists and code. What does not change is the safety property. The payload carries
+ * agent-authored text that can echo prompt-injection content off an untrusted target, and the
+ * renderer in lib/email/markup.ts emits every raw-markup node as escaped text, so nothing the
+ * agent wrote can become live markup in a mailbox that sanitises nothing. The one deliberate
+ * exception is still the delivery marker, put back as a real comment so an audit can count it.
  */
 export function emailHtml(payload: string, verdictId: string): string {
-  const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
-  const escapedMarker = escapeHtml(marker);
-  const escaped = escapeHtml(payload);
-  if (escaped.split(escapedMarker).length !== 2) {
-    throw new Error(`delivery marker for ${verdictId} did not survive HTML escaping`);
-  }
-  const body = escaped.replace(escapedMarker, marker);
-  return (
-    `<pre style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px">` +
-    body +
-    `</pre>`
-  );
+  return renderVerdictEmail(payload, verdictId, EMAIL_ASSET_ORIGIN);
 }
 
 /**
