@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   githubInstallation,
+  isNull,
   report,
   targetProfile,
   type Executor,
@@ -107,11 +108,13 @@ export async function bindTarget(
     }
 
     const [profile] = await tx
-      .select({ id: targetProfile.id, name: targetProfile.name })
+      .select({ id: targetProfile.id, name: targetProfile.name, retiredAt: targetProfile.retiredAt })
       .from(targetProfile)
       .where(eq(targetProfile.id, profileId))
       .limit(1);
     if (!profile) return { ok: false, reason: "target profile not found" };
+    // The picker hides retired profiles, but a stale page can still post one.
+    if (profile.retiredAt) return { ok: false, reason: `${profile.name} is retired` };
 
     // A profile owned by a repository whose grant is already revoked would bind fine and then
     // refuse every definitive verdict, which reads as the feature being broken. Say so now.
@@ -166,5 +169,6 @@ export async function listTargetProfiles(): Promise<TargetProfileOption[]> {
       imageDigest: targetProfile.imageDigest,
     })
     .from(targetProfile)
+    .where(isNull(targetProfile.retiredAt))
     .orderBy(targetProfile.name);
 }

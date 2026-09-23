@@ -211,6 +211,14 @@ export const targetProfile = pgTable(
     buildRecipeDigest: text("build_recipe_digest"),
     resolvedCommitSha: text("resolved_commit_sha"),
     sourceArchiveDigest: text("source_archive_digest"),
+    /**
+     * When the profile stopped being a target a reviewer may choose. Null means it is live. A
+     * retired profile stays as a row because reports and runs already reference it, but the
+     * target picker hides it and bindTarget refuses it: a retired profile whose snapshot is gone
+     * would bind cleanly and then fail at sandbox provisioning. Before this existed, retirement
+     * was a suffix in the name, which nothing checked.
+     */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -213,6 +213,23 @@ test("the picker lists built profiles with the digest that identifies the image"
   assert.ok(found.imageDigest, "a profile with no digest is not something to reproduce against");
 });
 
+test("a retired profile is neither offered nor bindable", async () => {
+  const { profile } = await seedProfile();
+  await dbm.db
+    .update(dbm.targetProfile)
+    .set({ retiredAt: new Date() })
+    .where(dbm.eq(dbm.targetProfile.id, profile.id));
+
+  const listed = await bind.listTargetProfiles();
+  assert.equal(listed.find((p) => p.id === profile.id), undefined);
+
+  // A page loaded before the retirement can still post the id.
+  const reportId = await seedEmailReport();
+  const result = await bind.bindTarget(reportId, profile.id, "reviewer");
+  assert.equal(result.ok, false);
+  assert.equal((await readReport(reportId)).targetProfileId, null);
+});
+
 test("binding is what opens the verdict gate, and revoking closes it again", async () => {
   // The point of the whole feature. assertVerdictInsertAllowed is unchanged; this shows a report
   // going from "only ANALYSIS_ONLY is permitted here" to a definitive outcome being allowed,

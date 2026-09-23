@@ -102,6 +102,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // Only a report with no bound target can use these, and only a reviewer sees this page at all.
   // Read here rather than in the client component so a browser never asks what targets exist.
   const targetProfiles = file && !file.target ? await listTargetProfiles() : [];
+  // Where the report came from, which is not always the repository on the row. A GitHub report
+  // was filed on that repository. An email report only carries one after a reviewer binds a
+  // target, and then it names the target's owner so a revoked grant can still stop the report;
+  // printing it as the source would say the email was filed on GitHub.
+  const intakeRepository = file?.channel === "github" ? file.repositoryFullName : null;
   if (!file) notFound();
 
   const initial = caseLiveView(file);
@@ -154,10 +159,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
               <External href={file.issueUrl}>{file.sourceLabel}</External>
 
-              {file.repositoryFullName ? (
+              {intakeRepository ? (
                 <>
                   <span>in</span>
-                  <External href={file.repositoryUrl}>{file.repositoryFullName}</External>
+                  <External href={file.repositoryUrl}>{intakeRepository}</External>
                 </>
               ) : null}
             </p>
@@ -172,6 +177,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         initial={initial}
         issueUrl={file.issueUrl}
         repositoryFullName={file.repositoryFullName}
+        intakeRepository={intakeRepository}
         targetProfiles={targetProfiles}
       />
     </main>

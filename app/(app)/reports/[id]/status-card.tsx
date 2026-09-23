@@ -39,15 +39,15 @@ export function StatusCard({
   status,
   issueUrl,
   targetProfiles,
-  repositoryFullName,
+  intakeRepository,
   reportId,
 }: {
   status: CaseLiveView;
   issueUrl: string | null;
   /** Built target profiles, for a report that arrived without one. Read on the server. */
   targetProfiles: TargetProfileOption[];
-  /** Header facts that identify the report rather than track it, so they come from the page. */
-  repositoryFullName: string | null;
+  /** Where the report was filed: the repository for a GitHub report, null for any other channel. */
+  intakeRepository: string | null;
   reportId: string;
 }) {
   return (
@@ -83,7 +83,7 @@ export function StatusCard({
           <Fact label="Bound target">
             <TargetControl reportId={reportId} status={status} profiles={targetProfiles} />
           </Fact>
-          <Fact label="Intake">{repositoryFullName ?? channelLabel(status.channel)}</Fact>
+          <Fact label="Intake">{intakeRepository ?? channelLabel(status.channel)}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
             {status.verdict
               ? status.verdict.superseded

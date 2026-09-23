@@ -65,12 +65,16 @@ export function CaseView({
   initial,
   issueUrl,
   repositoryFullName,
+  intakeRepository,
   targetProfiles,
 }: {
   reportId: string;
   initial: CaseLiveView;
   issueUrl: string | null;
+  /** The repository the target belongs to. Drawn in the sandbox diagram. */
   repositoryFullName: string | null;
+  /** Where the report was filed: the repository for a GitHub report, null for any other channel. */
+  intakeRepository: string | null;
   targetProfiles: TargetProfileOption[];
 }) {
   const { data: status = initial } = useQuery({
@@ -93,7 +97,7 @@ export function CaseView({
       <StatusCard
         status={status}
         issueUrl={issueUrl}
-        repositoryFullName={repositoryFullName}
+        intakeRepository={intakeRepository}
         targetProfiles={targetProfiles}
         reportId={reportId}
       />
