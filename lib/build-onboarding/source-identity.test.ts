@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isCommitSha, sourceIdentityDigest } from "./source-identity";
+import { isCommitSha, resolveRepositoryLineage, sourceIdentityDigest } from "./source-identity";
 
 test("commit identity accepts only full SHA values", () => {
   assert.equal(isCommitSha("a".repeat(40)), true);
@@ -53,4 +53,30 @@ test("the recipe digest changes with each identity input", () => {
 
   // A mutable ref is refused outright rather than hashed into a stable-looking identity.
   assert.throws(() => sourceIdentityDigest({ ...base, resolvedCommitSha: "HEAD" }), /full commit SHA/);
+});
+
+const reply = (body: unknown, status = 200) =>
+  (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+
+test("a fork reports its parent and the root of its chain", async () => {
+  assert.deepEqual(
+    await resolveRepositoryLineage(
+      "me/NodeGoat",
+      reply({ fork: true, parent: { full_name: "OWASP/NodeGoat" }, source: { full_name: "OWASP/NodeGoat" } }),
+    ),
+    { parent: "OWASP/NodeGoat", source: "OWASP/NodeGoat" },
+  );
+});
+
+test("a repository that is not a fork has no lineage, and malformed names are dropped", async () => {
+  assert.deepEqual(await resolveRepositoryLineage("me/app", reply({ fork: false })), { parent: null, source: null });
+  assert.deepEqual(
+    await resolveRepositoryLineage("me/app", reply({ fork: true, parent: { full_name: "../../etc" }, source: {} })),
+    { parent: null, source: null },
+  );
+});
+
+test("a GitHub error or an invalid name throws, for the caller to log and carry on", async () => {
+  await assert.rejects(resolveRepositoryLineage("me/app", reply({}, 404)), /404/);
+  await assert.rejects(resolveRepositoryLineage("not a name", reply({})), /invalid/);
 });
