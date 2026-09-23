@@ -82,6 +82,7 @@ test("workflow inlined config matches .pr_agent.toml", async () => {
     ["publish_output_no_suggestions", /publish_output_no_suggestions: 'true'/, /publish_output_no_suggestions\s*=\s*true/],
     ["enable_relevant_theory", /enable_relevant_theory: 'true'/, /enable_relevant_theory\s*=\s*true/],
     ["suggestion_preference", /suggestion_preference: 'diff'/, /suggestion_preference\s*=\s*"diff"/],
+    ["pr_reviewer help text off", /pr_reviewer\.enable_help_text: 'false'/, /Tool usage guide" block is noise on every review\.\nenable_help_text\s*=\s*false/],
   ];
   for (const [label, wfRe, tomlRe] of pairs) {
     assert.match(workflow, wfRe, `workflow inlined ${label} should match`);
