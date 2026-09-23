@@ -49,7 +49,14 @@ export function ConnectGuide({
   const repoHref = fork ? `/connections?repo=${encodeURIComponent(fork)}` : "/connections";
 
   const onboardNote: Record<string, React.ReactNode> = {
-    onboarding: "Onboarding is building the fork in a sandbox. This takes a few minutes.",
+    onboarding: progress?.retrying ? (
+      <>
+        Onboarding is building the fork, and its last attempt failed, so it will retry:{" "}
+        <span className="text-destructive">{progress.retrying}</span>
+      </>
+    ) : (
+      "Onboarding is building the fork in a sandbox. This takes a few minutes."
+    ),
     "awaiting-approval": "Onboarding proposed how to run it. Approve the manifest to create the target.",
     failed: <span className="text-destructive">Onboarding failed: {progress?.reason ?? "no reason recorded"}.</span>,
     unsupported: (

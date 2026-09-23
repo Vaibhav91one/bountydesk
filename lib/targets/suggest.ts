@@ -78,7 +78,23 @@ export type MentionProgress = {
   repoFullName: string | null;
   /** Why onboarding stopped, for failed and unsupported. */
   reason: string | null;
+  /** The last error of an onboarding attempt that will be retried, so "building" is never shown over a failing build. */
+  retrying: string | null;
 };
+
+const MAX_REASON = 240;
+
+/**
+ * An onboarding error as a person reads it. Provider errors arrive as "POST /x -> 400 {json}", and
+ * the part worth reading is the JSON's message; everything is capped so one long stack trace cannot
+ * fill the dialog. Shown as text, never markup.
+ */
+export function readableOnboardingError(error: string | null): string | null {
+  if (!error) return null;
+  const message = error.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)/)?.[1];
+  const text = (message ?? error).replace(/\s+/g, " ").trim();
+  return text.length > MAX_REASON ? `${text.slice(0, MAX_REASON - 1)}…` : text;
+}
 
 export type TargetSuggestion = {
   /** Linked repositories whose connected repository, or fork, has a live grant and a built target. */
@@ -153,7 +169,7 @@ export async function suggestTargets(body: string): Promise<TargetSuggestion> {
     }
   };
   const reasonOf = (row: Row, status: MentionStatus): string | null => {
-    if (status === "failed") return row.onboardingError;
+    if (status === "failed") return readableOnboardingError(row.onboardingError);
     if (status !== "unsupported") return null;
     if (!row.onboardingState) return "It was connected but not onboarded, which is what happens to a private repository.";
     return (row.buildPlan as { reason?: string } | null)?.reason ?? null;
@@ -170,7 +186,7 @@ export async function suggestTargets(body: string): Promise<TargetSuggestion> {
       .sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status));
     const best = candidates[0];
     if (!best || best.status === "not-connected") {
-      return { name, status: "not-connected", repoFullName: null, reason: null };
+      return { name, status: "not-connected", repoFullName: null, reason: null, retrying: null };
     }
     if (best.status === "ready" && best.row.profileId && best.row.profileName) {
       matched.push({
@@ -180,7 +196,13 @@ export async function suggestTargets(body: string): Promise<TargetSuggestion> {
         mention: name,
       });
     }
-    return { name, status: best.status, repoFullName: best.row.fullName, reason: reasonOf(best.row, best.status) };
+    return {
+      name,
+      status: best.status,
+      repoFullName: best.row.fullName,
+      reason: reasonOf(best.row, best.status),
+      retrying: best.status === "onboarding" ? readableOnboardingError(best.row.onboardingError) : null,
+    };
   });
 
   const unconnected = progress.filter((p) => p.status !== "ready").map((p) => p.name);
