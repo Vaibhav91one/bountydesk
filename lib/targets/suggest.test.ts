@@ -31,16 +31,16 @@ test("reads owner/repo from plain text and from an HTML href", () => {
     suggest.repositoryMentions(
       'See https://github.com/Vaibhav91one/juice-shop/tree/v17.3.0/routes and <a href="https://www.github.com/acme/api">here</a>.',
     ),
-    ["vaibhav91one/juice-shop", "acme/api"],
+    ["Vaibhav91one/juice-shop", "acme/api"],
   );
 });
 
-test("strips .git, trailing punctuation, and folds case and duplicates", () => {
+test("strips .git and trailing punctuation, and keeps the first spelling of a name", () => {
   assert.deepEqual(
     suggest.repositoryMentions(
       "clone github.com/Acme/Api.git, or github.com/acme/api. Also http://github.com/ACME/API/issues/3",
     ),
-    ["acme/api"],
+    ["Acme/Api"],
   );
 });
 
@@ -111,6 +111,9 @@ test("a live connected repository with a built target is suggested, matched case
   );
   assert.deepEqual(result.matched, [{ profileId: profile.id, profileName: profile.name, fullName }]);
   assert.deepEqual(result.unconnected, ["nobody/here"]);
+  // Something is unconnected, so the reviewer is told where to add it: the seeded installations.
+  assert.ok(result.connectLinks.length > 0);
+  assert.ok(result.connectLinks.every((link) => link.href.startsWith("https://github.com/")));
 });
 
 test("a repository whose grant or target is not usable is never suggested", async () => {
@@ -118,10 +121,14 @@ test("a repository whose grant or target is not usable is never suggested", asyn
     const { fullName } = await seedRepo(shape);
     const result = await suggest.suggestTargets(`https://github.com/${fullName}`);
     assert.deepEqual(result.matched, [], shape);
-    assert.deepEqual(result.unconnected, [fullName.toLowerCase()], shape);
+    assert.deepEqual(result.unconnected, [fullName], shape);
   }
 });
 
 test("a body with no links costs no query and suggests nothing", async () => {
-  assert.deepEqual(await suggest.suggestTargets("no links here"), { matched: [], unconnected: [] });
+  assert.deepEqual(await suggest.suggestTargets("no links here"), {
+    matched: [],
+    unconnected: [],
+    connectLinks: [],
+  });
 });
