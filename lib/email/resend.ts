@@ -99,6 +99,17 @@ export async function sendVerificationEmail(to: string, code: string): Promise<v
 const VERDICT_FROM = "BountyDesk <reports@mail.bountydesk.vaibhav.quest>";
 
 /**
+ * Where the verdict email's images are served from.
+ *
+ * A constant rather than APP_BASE_URL on purpose, twice over. The body has to be a pure function
+ * of the payload, because Resend refuses a retry that reuses an idempotency key with different
+ * bytes, and an origin that varies between the app and the worker would do exactly that. And the
+ * worker is a separate deployment with its own environment: APP_BASE_URL is not in it, and a var
+ * the worker silently lacks is how the last live run burned five delivery attempts.
+ */
+export const EMAIL_ASSET_ORIGIN = "https://app.bountydesk.vaibhav.quest";
+
+/**
  * How a failed send should be treated by the delivery worker.
  *
  * `transient` goes back on the retry backoff. `permanent` is refused for good. `mismatch` is the
