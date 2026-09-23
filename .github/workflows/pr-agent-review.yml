@@ -55,7 +55,7 @@ jobs:
           pr_reviewer.require_tests_review: 'false'
           pr_reviewer.require_security_review: 'false'
           pr_reviewer.require_ticket_analysis_review: 'false'
-          pr_reviewer.enable_help_text: 'true'
+          pr_reviewer.enable_help_text: 'false'
           pr_reviewer.enable_relevant_theory: 'true'
           pr_reviewer.suggestion_preference: 'diff'
           pr_description.enable_pr_description: 'false'
