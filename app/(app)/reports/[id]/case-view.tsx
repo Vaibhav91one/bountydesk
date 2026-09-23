@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import type { TargetProfileOption } from "@/lib/targets/bind";
+import type { TargetSuggestion } from "@/lib/targets/suggest";
 import {
   caseRefetchInterval,
   caseStatusQueryKey,
@@ -67,6 +68,7 @@ export function CaseView({
   repositoryFullName,
   intakeRepository,
   targetProfiles,
+  suggestion,
 }: {
   reportId: string;
   initial: CaseLiveView;
@@ -76,6 +78,7 @@ export function CaseView({
   /** Where the report was filed: the repository for a GitHub report, null for any other channel. */
   intakeRepository: string | null;
   targetProfiles: TargetProfileOption[];
+  suggestion: TargetSuggestion | null;
 }) {
   const { data: status = initial } = useQuery({
     queryKey: caseStatusQueryKey(reportId),
@@ -100,6 +103,7 @@ export function CaseView({
         intakeRepository={intakeRepository}
         repositoryFullName={repositoryFullName}
         targetProfiles={targetProfiles}
+        suggestion={suggestion}
         reportId={reportId}
       />
 
