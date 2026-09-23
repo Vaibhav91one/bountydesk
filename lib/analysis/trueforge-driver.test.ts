@@ -753,8 +753,15 @@ test("run() tears down every mesh sandbox when it loses the turn race", async ()
     },
   });
   let meshCalls = 0;
+  // Hold each caller in provisioning until both are there. Without it the first caller can commit
+  // its turn before the second reaches the pre-check, and then only one provisions. The timeout
+  // turns a regression into a failed assertion rather than a hung test.
+  let arrive!: () => void;
+  const bothArrived = new Promise<void>((resolve) => (arrive = resolve));
   const fakeMesh = async () => {
     meshCalls += 1;
+    if (meshCalls === 2) arrive();
+    await Promise.race([bothArrived, new Promise((resolve) => setTimeout(resolve, 5000))]);
     return {
       sandboxId: `race-app-${meshCalls}`,
       appPort: 3000,
@@ -767,10 +774,11 @@ test("run() tears down every mesh sandbox when it loses the turn race", async ()
   await Promise.all([d.run(context(reportId)), d.run(context(reportId))]);
 
   assert.equal(meshCalls, 2, "both callers provision before the lock settles the race");
-  assert.deepEqual(
-    [...deleteSandboxCalls].sort(),
-    ["race-app-2", "race-db-2"],
-    "the losing attempt tears down its own group, dependencies included",
+  // Either caller can take the row lock first, so the loser is whichever group was deleted.
+  const deleted = [...deleteSandboxCalls].sort();
+  assert.ok(
+    ["1", "2"].some((n) => JSON.stringify(deleted) === JSON.stringify([`race-app-${n}`, `race-db-${n}`])),
+    `the losing attempt tears down its own group, dependencies included; deleted ${JSON.stringify(deleted)}`,
   );
 });
 

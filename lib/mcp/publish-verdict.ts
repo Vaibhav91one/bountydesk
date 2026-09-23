@@ -254,10 +254,27 @@ async function persistAgentDraftedVerdict(
     .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
     .where(eq(report.id, reportId))
     .limit(1);
-  const targetRef =
+  let targetRef =
     targetRow?.imageName && targetRow.imageDigest
       ? { imageName: targetRow.imageName, imageDigest: targetRow.imageDigest }
       : null;
+
+  // The poller replays a parked publish_verdict call on every poll, and ensureInitialVerdict
+  // proves the replay is the same draft by comparing re-rendered bytes. The target line is the
+  // one part of those bytes that comes from the report rather than the draft, and a reviewer can
+  // bind a target after the draft was written. Re-render the replay the way it was drafted: if
+  // the stored revision is exactly this draft rendered with no target, it predates the bind.
+  // Only a byte-exact match of our own rendering qualifies, so a different draft still fails.
+  if (targetRef) {
+    const [stored] = await tx
+      .select({ payload: verdict.payload })
+      .from(verdict)
+      .where(and(eq(verdict.reportId, reportId), eq(verdict.revision, 1)))
+      .limit(1);
+    if (stored && stored.payload === buildAgentDraftedPayload(verdictId, draft, null)) {
+      targetRef = null;
+    }
+  }
 
   const payload = buildAgentDraftedPayload(verdictId, draft, targetRef);
   const row = await ensureInitialVerdict(

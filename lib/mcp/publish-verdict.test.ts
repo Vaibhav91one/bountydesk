@@ -874,3 +874,65 @@ test("publishVerdict refuses an approved verdict that a re-check has superseded"
   assert.equal(await deliveryCount(fixture.verdictId), 0, "nothing may be enqueued for dead text");
   assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL", "the report is not disturbed");
 });
+
+test("a draft replayed after a target was bound still matches the verdict it produced", async () => {
+  // Reproduces report 4c7c9bfa. The poller replays a parked publish_verdict call on every poll,
+  // and each replay re-renders the payload to prove it is the same draft. The re-render reads the
+  // report's target, so binding one after the draft (bindTarget) added a "## Target image" block
+  // the stored verdict never had, the bytes no longer matched, and the session was abandoned
+  // with "existing verdict disagreed with the retry payload".
+  const fixture = await seedDraftableReport();
+  const draft = {
+    outcome: "ANALYSIS_ONLY" as const,
+    summary: "Drafted before any target was bound.",
+    findings: [],
+  };
+
+  const first = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, draft);
+  assert.equal(first.ok, true);
+  const verdictId = (first as { verdictId: string }).verdictId;
+  const [before] = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.id, verdictId));
+  assert.equal(before.payload.includes("## Target image"), false);
+
+  const target = await seedTargetWithGrant();
+  await dbm.db
+    .update(dbm.report)
+    .set({ targetProfileId: target.targetProfileId, connectedRepositoryId: target.connectedRepositoryId })
+    .where(dbm.eq(dbm.report.id, fixture.reportId));
+
+  const replay = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, draft);
+  assert.deepEqual(replay, { ok: true, verdictId });
+
+  // The stored verdict is untouched: it still describes what was drafted, with no target line.
+  const [after] = await dbm.db.select().from(dbm.verdict).where(dbm.eq(dbm.verdict.id, verdictId));
+  assert.equal(after.payload, before.payload);
+  assert.equal(after.contentHash, before.contentHash);
+});
+
+test("a genuinely different draft after a bind is still refused", async () => {
+  // The fix accepts only a byte-exact match of what was already drafted. A second draft that
+  // differs is two conclusions for one run, and that must keep failing loudly.
+  const fixture = await seedDraftableReport();
+  const first = await publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+    outcome: "ANALYSIS_ONLY",
+    summary: "The first conclusion.",
+    findings: [],
+  });
+  assert.equal(first.ok, true);
+
+  const target = await seedTargetWithGrant();
+  await dbm.db
+    .update(dbm.report)
+    .set({ targetProfileId: target.targetProfileId, connectedRepositoryId: target.connectedRepositoryId })
+    .where(dbm.eq(dbm.report.id, fixture.reportId));
+
+  await assert.rejects(
+    () =>
+      publishVerdictModule.draftVerdictFromPendingCall(fixture.capability, {
+        outcome: "ANALYSIS_ONLY",
+        summary: "A different conclusion.",
+        findings: [],
+      }),
+    (error: Error) => error.name === "VerdictIntegrityError",
+  );
+});
