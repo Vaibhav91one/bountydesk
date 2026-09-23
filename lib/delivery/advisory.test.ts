@@ -229,6 +229,7 @@ test("GitHub refusing the advisory fails for good, an outage is retried later", 
   await advisory.requestOwnerAdvisory(refused.reportId, "r");
   await advisory.adviseOnce({ deps: fakeGitHub({ createError: { status: 403 } }).deps });
   assert.equal((await row(refused.reportId)).state, "FAILED");
+  assert.match((await row(refused.reportId)).lastError ?? "", /has not granted "Repository security advisories: write"/);
 
   // Once the owner accepts the permission, a reviewer can ask again and it goes through.
   assert.deepEqual(await advisory.requestOwnerAdvisory(refused.reportId, "r"), { ok: true });

@@ -206,10 +206,17 @@ export async function adviseOnce(opts: { signal?: AbortSignal; deps?: AdvisoryDe
     // 403 and 404 are GitHub saying no: the installation has not accepted the advisories
     // permission, or private vulnerability reporting is off for the repository. Retrying
     // does not change either, a person does.
+    // 403 is what an installation that has not accepted the permission gets, and it is the
+    // one a reviewer can act on, so it says what to do; GitHub's own text follows for detail.
     outcome =
-      status === 403 || status === 404 || status === 422
-        ? { state: "FAILED", error: `GitHub refused the advisory (${status}): ${message}` }
-        : { state: "RETRY", error: message };
+      status === 403
+        ? {
+            state: "FAILED",
+            error: `The GitHub App installation has not granted "Repository security advisories: write". Accept it on the installation, then try again. (${message})`,
+          }
+        : status === 404 || status === 422
+          ? { state: "FAILED", error: `GitHub refused the advisory (${status}): ${message}` }
+          : { state: "RETRY", error: message };
   }
 
   const failedForGood = outcome.state === "RETRY" && claimed.attempts >= MAX_ATTEMPTS;
