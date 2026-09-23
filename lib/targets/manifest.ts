@@ -171,12 +171,15 @@ function validateScopeRules(value: unknown): void {
 export function reviewableManifest(raw: unknown): TargetManifest {
   const manifest = raw as TargetManifest & {
     config?: { baseUrl?: string; readinessPath?: string };
-    provisioning?: { readinessPath?: string };
+    provisioning?: { readinessPath?: string; startCommand?: string };
   };
+  // The start command is what launches the container, so a reviewer must see it before approving.
+  const startCommand = manifest.startCommand ?? manifest.provisioning?.startCommand;
   return {
     ...manifest,
     baseUrl: manifest.baseUrl ?? manifest.config?.baseUrl ?? "",
     readinessPath:
       manifest.readinessPath ?? manifest.config?.readinessPath ?? manifest.provisioning?.readinessPath ?? "",
+    ...(startCommand ? { startCommand } : {}),
   };
 }

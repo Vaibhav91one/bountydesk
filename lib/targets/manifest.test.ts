@@ -71,6 +71,9 @@ test("a proposed manifest's nested runtime is shown to the reviewer, and flat fi
   assert.equal(provisioningOnly.readinessPath, "/ready");
   assert.equal(provisioningOnly.baseUrl, "");
 
+  const started = reviewableManifest({ name: "x", provisioning: { startCommand: "npm start" } });
+  assert.equal(started.startCommand, "npm start");
+
   const flat = reviewableManifest({ name: "x", baseUrl: "http://a", readinessPath: "/h", config: { baseUrl: "http://b" } });
   assert.equal(flat.baseUrl, "http://a");
   assert.equal(flat.readinessPath, "/h");
