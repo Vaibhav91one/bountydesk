@@ -387,10 +387,30 @@ export async function assertSandboxGone(id: string): Promise<void> {
  * hold, and the id travels in every message because whoever handles this needs something to
  * reconcile with.
  */
+let GONE_ATTEMPTS = 10;
+let GONE_POLL_MS = 3000;
+
+/** Test hook: make the teardown wait short. */
+export function setTeardownPollForTests(attempts: number, pollMs: number): void {
+  GONE_ATTEMPTS = attempts;
+  GONE_POLL_MS = pollMs;
+}
+
 async function destroyRejected(id: string, reason: string): Promise<never> {
   try {
     await deleteSandbox(id);
-    await assertSandboxGone(id);
+    // Daytona deletes asynchronously: straight after the DELETE the sandbox still reads as
+    // destroying. Give it a bounded wait for the 404 that proves it gone, rather than reporting a
+    // teardown that is merely in progress as one that could not be confirmed.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await assertSandboxGone(id);
+        break;
+      } catch (error) {
+        if (attempt >= GONE_ATTEMPTS) throw error;
+        await new Promise((resolve) => setTimeout(resolve, GONE_POLL_MS));
+      }
+    }
   } catch (error) {
     throw new UnsafeSandboxSpec(
       `sandbox ${id} ${reason} AND could not be confirmed destroyed (${
@@ -515,9 +535,22 @@ const TIER_POLICY_REFUSAL = /cannot be overridden at the sandbox level/i;
 
 // A host on no package, git, registry or provider list. Reaching it means egress is open.
 const OFF_POLICY_PROBE_URL = "https://example.com/";
-// curl exit codes that mean the request was blocked: DNS failure, refused, timed out, TLS or
-// empty reply from a filtering proxy, or an HTTP error page from one (-f makes that exit 22).
-const BLOCKED_CURL_EXITS = new Set([6, 7, 22, 28, 35, 52, 56]);
+// Exit codes that mean the request was blocked, per tool. curl: DNS failure, refused, timed out,
+// TLS or empty reply from a filtering proxy, or an HTTP error page from one (-f makes that 22).
+// wget: BusyBox reports every failure as 1; GNU wget uses 4 (network), 5 (TLS), 8 (server error).
+const BLOCKED_EXITS: Record<string, Set<number>> = {
+  curl: new Set([6, 7, 22, 28, 35, 52, 56]),
+  wget: new Set([1, 4, 5, 8]),
+};
+// The build base image is not guaranteed to carry curl (the DinD base does not), so the probe uses
+// whichever of curl or wget exists and reports which. Neither present is reported as "none".
+const OFF_POLICY_PROBE = [
+  "if command -v curl >/dev/null 2>&1; then",
+  `  curl -fsS -m 8 -o /dev/null ${OFF_POLICY_PROBE_URL}; echo "TOOL=curl EXIT=$?";`,
+  "elif command -v wget >/dev/null 2>&1; then",
+  `  wget -q -T 8 -O /dev/null ${OFF_POLICY_PROBE_URL}; echo "TOOL=wget EXIT=$?";`,
+  `else echo "TOOL=none EXIT=127"; fi`,
+].join(" ");
 
 export async function createBuildSandbox(
   spec: BuildSandboxSpec,
@@ -598,6 +631,7 @@ export async function createBuildSandbox(
  */
 async function assertOrganizationEgressRestricted(sandbox: Sandbox): Promise<Sandbox> {
   let current = sandbox;
+  let tool = "none";
   let probeExit = -1;
   try {
     const deadline = Date.now() + 120_000;
@@ -608,7 +642,13 @@ async function assertOrganizationEgressRestricted(sandbox: Sandbox): Promise<San
       await new Promise((resolve) => setTimeout(resolve, 2000));
       current = await getSandbox(current.id);
     }
-    probeExit = (await execute(current, `curl -fsS -m 8 -o /dev/null ${OFF_POLICY_PROBE_URL}`, 20)).exitCode;
+    // Single-quoted so the outer shell hands $? through untouched; the probe has no single quotes.
+    const output = (await execute(current, `sh -c '${OFF_POLICY_PROBE}'`, 20)).result;
+    const reported = output.match(/TOOL=(curl|wget|none) EXIT=(\d+)/);
+    if (reported) {
+      tool = reported[1];
+      probeExit = Number(reported[2]);
+    }
   } catch (error) {
     // The caller only starts cleaning up once this returns, so a sandbox whose egress could not be
     // checked for any reason is destroyed here rather than left running until its TTL.
@@ -617,14 +657,14 @@ async function assertOrganizationEgressRestricted(sandbox: Sandbox): Promise<San
       `could not verify its egress is restricted (${error instanceof Error ? error.message : String(error)})`,
     );
   }
-  if (!BLOCKED_CURL_EXITS.has(probeExit)) {
-    // Exit 0 is open egress; anything else (127, a missing curl) means it could not be checked.
-    // Both fail closed.
+  if (!BLOCKED_EXITS[tool]?.has(probeExit)) {
+    // Exit 0 is open egress; anything else (no tool, no parseable report, an unexpected exit)
+    // means it could not be checked. Both fail closed.
     await destroyRejected(
       current.id,
       probeExit === 0
         ? `reached ${OFF_POLICY_PROBE_URL} under the organization policy, so egress is not restricted`
-        : `could not verify its egress is restricted (probe exited ${probeExit})`,
+        : `could not verify its egress is restricted (${tool} probe exited ${probeExit})`,
     );
   }
   return current;

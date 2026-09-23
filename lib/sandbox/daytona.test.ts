@@ -10,6 +10,7 @@ import {
   UnsafeSandboxSpec,
   assertSafeSpec,
   createBuildSandbox,
+  setTeardownPollForTests,
   createSnapshot,
   assertSandboxGone,
   assertSnapshotImage,
@@ -597,8 +598,11 @@ function fakeBuildDaytona(opts: {
   probeExit?: number;
   refusal?: string;
   probeFails?: boolean;
+  tool?: "curl" | "wget" | "none";
+  /** How many status reads after the DELETE still find the sandbox, before it reads as gone. */
+  goneAfter?: number;
 }) {
-  const seen = { creates: [] as Record<string, unknown>[], probes: 0, deleted: false };
+  const seen = { creates: [] as Record<string, unknown>[], probes: 0, deleted: false, readsAfterDelete: 0 };
   const stub = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? "GET";
@@ -619,13 +623,17 @@ function fakeBuildDaytona(opts: {
     if (url.includes("/process/execute")) {
       seen.probes += 1;
       if (opts.probeFails) return json({ message: "toolbox unavailable" }, 502);
-      return json({ exitCode: opts.probeExit ?? 6, result: "" });
+      const tool = opts.tool ?? "curl";
+      return json({ exitCode: 0, result: `TOOL=${tool} EXIT=${tool === "none" ? 127 : (opts.probeExit ?? 6)}\n` });
     }
     if (url.includes("/sandbox/sb-1") && method === "DELETE") {
       seen.deleted = true;
       return new Response(null, { status: 204 });
     }
-    if (url.includes("/sandbox/sb-1")) return seen.deleted ? json({ message: "not found" }, 404) : json({ id: "sb-1", state: "started" });
+    if (url.includes("/sandbox/sb-1")) {
+      if (seen.deleted && seen.readsAfterDelete++ >= (opts.goneAfter ?? 0)) return json({ message: "not found" }, 404);
+      return json({ id: "sb-1", state: seen.deleted ? "destroying" : "started" });
+    }
     return json({ message: `unexpected ${method} ${url}` }, 500);
   }) as typeof fetch;
   return { stub, seen };
@@ -659,12 +667,12 @@ test("on a restricted tier the build falls back to the organization policy after
 });
 
 test("a fallback sandbox that can reach the open internet, or cannot be checked, is destroyed", async () => {
-  for (const probeExit of [0, 127]) {
-    const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeExit });
+  for (const [tool, probeExit] of [["curl", 0], ["wget", 0], ["none", 127], ["curl", 2]] as const) {
+    const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeExit, tool });
     await withFetch(stub, async () => {
-      await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), UnsafeSandboxSpec, String(probeExit));
+      await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), UnsafeSandboxSpec, `${tool} ${probeExit}`);
     });
-    assert.equal(seen.deleted, true, String(probeExit));
+    assert.equal(seen.deleted, true, `${tool} ${probeExit}`);
   }
 });
 
@@ -682,4 +690,25 @@ test("a fallback sandbox whose egress probe errors is destroyed, not left to its
     await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /could not verify its egress/);
   });
   assert.equal(seen.deleted, true);
+});
+
+test("an image without curl is probed with wget, and a blocked wget passes", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "restricted", tool: "wget", probeExit: 1 });
+  await withFetch(stub, async () => {
+    const sandbox = await createBuildSandbox(buildSpec, ["registry.npmjs.org"]);
+    assert.equal(sandbox.egressPolicy, "organization-policy");
+  });
+  assert.equal(seen.deleted, false);
+});
+
+test("a rejected sandbox that is still destroying is waited for, then reported confirmed gone", async () => {
+  setTeardownPollForTests(5, 1);
+  try {
+    const { stub } = fakeBuildDaytona({ tier: "restricted", tool: "curl", probeExit: 0, goneAfter: 2 });
+    await withFetch(stub, async () => {
+      await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /destroyed and confirmed gone/);
+    });
+  } finally {
+    setTeardownPollForTests(10, 3000);
+  }
 });
