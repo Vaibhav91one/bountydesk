@@ -70,7 +70,9 @@ async function owningRepository(
 }
 
 /** The same conditions hasActiveRepositoryGrant applies, asked before binding instead of after. */
-function grantIsLive(repo: OwningRepository): boolean {
+export function grantIsLive(
+  repo: Pick<OwningRepository, "active" | "archivedAt" | "installationSuspendedAt" | "installationDeletedAt">,
+): boolean {
   return (
     repo.active &&
     repo.archivedAt === null &&
