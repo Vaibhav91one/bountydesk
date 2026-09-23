@@ -40,7 +40,10 @@ export function TargetControl({
 }) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
-  const [choice, setChoice] = useState<string>("");
+  // Null until a reviewer picks, never pre-filled with the first profile. Binding authorises
+  // execution against a target, so it should take a deliberate choice rather than one click on a
+  // default someone did not notice. null is also base-ui's own "nothing selected".
+  const [choice, setChoice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   if (status.target) {
@@ -80,7 +83,7 @@ export function TargetControl({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex flex-wrap items-center gap-2">
-        <Select value={choice} onValueChange={(value) => setChoice(value ?? "")} disabled={pending}>
+        <Select value={choice} onValueChange={setChoice} disabled={pending}>
           <SelectTrigger size="sm" className="min-w-40">
             <SelectValue placeholder="None bound" />
           </SelectTrigger>
