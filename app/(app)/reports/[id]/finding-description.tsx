@@ -37,24 +37,59 @@ export function FindingDescription({
           );
         }
 
-        if (block.kind === "steps") {
+        if (block.kind === "steps" || block.kind === "bullets") {
+          const ordered = block.kind === "steps";
+          const List = ordered ? "ol" : "ul";
           return (
             // Numbered by the list, not by the text: the markers were stripped, so a run that
-            // started at "2)" because the agent miscounted still reads in order.
-            <ol key={index} className="flex flex-col gap-1.5 pl-1">
-              {block.items.map((item, step) => (
-                <li key={step} className="flex gap-2.5">
-                  <span className="mt-0.5 w-5 shrink-0 text-meta tabular-nums text-muted-foreground">
-                    {step + 1}.
+            // started at "2)" because the agent miscounted still reads in order. Bullets get a
+            // dot instead, because they are not an order to follow.
+            <List key={index} className="flex flex-col gap-1.5 pl-1">
+              {block.items.map((item, item_index) => (
+                <li key={item_index} className="flex gap-2.5">
+                  <span
+                    aria-hidden={ordered ? undefined : "true"}
+                    className={cn(
+                      "mt-0.5 shrink-0 text-meta text-muted-foreground",
+                      ordered ? "w-5 tabular-nums" : "w-2",
+                    )}
+                  >
+                    {ordered ? `${item_index + 1}.` : "•"}
                   </span>
-                  {/* break-all rather than break-words: a step is usually a request line, and a
-                      URL with a payload in it has no spaces to break at. */}
-                  <span className="min-w-0 flex-1 font-mono text-meta break-all text-foreground">
+                  {/* Prose, wrapped at spaces. This used to be monospace with break-all, which
+                      is right for a bare request line and wrong for the sentences the agent
+                      actually writes: it broke words mid-token ("insta nce"). A genuine request
+                      line belongs in a fenced block, which is the branch below. */}
+                  <span className="min-w-0 flex-1 break-words text-body leading-relaxed text-foreground">
                     {item}
                   </span>
                 </li>
               ))}
-            </ol>
+            </List>
+          );
+        }
+
+        if (block.kind === "code") {
+          return (
+            // The one place monospace belongs, and the one place break-all is right: a URL with
+            // a payload in it genuinely has no spaces to break at.
+            <pre
+              key={index}
+              className="min-w-0 overflow-x-auto rounded-md bg-muted/50 px-3 py-2 font-mono text-meta wrap-anywhere whitespace-pre-wrap text-foreground"
+            >
+              {block.text}
+            </pre>
+          );
+        }
+
+        if (block.kind === "labelled") {
+          return (
+            <p key={index} className="break-words text-body leading-relaxed text-foreground">
+              {/* The lead-in the agent writes constantly ("Impact: ..."). Giving it weight is
+                  what stops it disappearing into the middle of the paragraph. */}
+              <span className="font-medium text-foreground">{block.label}: </span>
+              {block.text}
+            </p>
           );
         }
 
