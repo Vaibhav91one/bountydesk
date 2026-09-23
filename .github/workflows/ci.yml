@@ -71,6 +71,8 @@ jobs:
         run: node --test .github/scripts/pr-agent-policy.test.mjs
       - name: Verify PR Agent verifier tests
         run: node --test .github/scripts/verify-pr-agent-review.test.mjs
+      - name: Verify Claude review policy tests
+        run: node --test .github/scripts/claude-review-policy.test.mjs
       - name: Test
         run: npm run test --if-present
       - name: Build

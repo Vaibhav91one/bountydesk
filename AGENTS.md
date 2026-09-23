@@ -141,6 +141,14 @@ API retries, and keeps the current limitations there.
 The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
 change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
 
+A second advisory reviewer, the `Claude review` workflow, runs beside PR-Agent while the two are
+compared. It reviews when a pull request opens and when a member comments `/review`, and it is not
+a required check. It holds the same line on review policy: the workflow runs from the default
+branch, the default branch is checked out as the working tree, and the pull request's files are
+read only as data from `pr-head/`. It has read tools and `gh pr` only. Its setup and guards are in
+[`docs/claude-review.md`](docs/claude-review.md), and `.github/scripts/claude-review-policy.test.mjs`
+fails CI if one of them is loosened.
+
 Material AI assistance may be disclosed generically in a PR description, for example, `AI
 tooling assisted with implementation; a human reviewed the diff.` Do not name or tag Claude or
 another bot, add a co-author trailer, or add generated-credit language.
