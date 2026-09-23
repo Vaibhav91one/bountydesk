@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseTargetManifest, targetDefinitionFromManifest } from "./manifest";
+import { parseTargetManifest, reviewableManifest, targetDefinitionFromManifest } from "./manifest";
 
 test("a target manifest becomes a platform target definition", () => {
   const definition = parseTargetManifest(
@@ -56,4 +56,22 @@ test("a target manifest rejects non-loopback or overbroad authority", () => {
   ]) {
     assert.throws(() => targetDefinitionFromManifest(bad), /target manifest/);
   }
+});
+
+test("a proposed manifest's nested runtime is shown to the reviewer, and flat fields win", () => {
+  const nested = reviewableManifest({
+    name: "nodegoat",
+    config: { baseUrl: "http://localhost:4000", readinessPath: "/" },
+    provisioning: { readinessPath: "/login" },
+  });
+  assert.equal(nested.baseUrl, "http://localhost:4000");
+  assert.equal(nested.readinessPath, "/");
+
+  const provisioningOnly = reviewableManifest({ name: "x", provisioning: { readinessPath: "/ready" } });
+  assert.equal(provisioningOnly.readinessPath, "/ready");
+  assert.equal(provisioningOnly.baseUrl, "");
+
+  const flat = reviewableManifest({ name: "x", baseUrl: "http://a", readinessPath: "/h", config: { baseUrl: "http://b" } });
+  assert.equal(flat.baseUrl, "http://a");
+  assert.equal(flat.readinessPath, "/h");
 });
