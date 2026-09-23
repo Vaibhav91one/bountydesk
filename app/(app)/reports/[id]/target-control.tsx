@@ -7,6 +7,13 @@ import { useQueryClient } from "@tanstack/react-query";
 import { bindTargetAction, requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -59,7 +66,7 @@ export function TargetControl({
     return (
       <div className="flex min-w-0 flex-col gap-1.5">
         <span className="truncate text-body text-foreground">{status.target.name}</span>
-        <ReproduceButton reportId={reportId} status={status} />
+        <ReproduceButton reportId={reportId} status={status} targetName={status.target.name} />
       </div>
     );
   }
@@ -143,10 +150,21 @@ const TERMINAL = ["DELIVERED", "DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"]
  * a legal move, and the continuation worker re-reads the target when it claims the job. The
  * difference from a re-check is when it is offered and what it is called, not the machinery.
  */
-function ReproduceButton({ reportId, status }: { reportId: string; status: CaseLiveView }) {
+function ReproduceButton({
+  reportId,
+  status,
+  targetName,
+}: {
+  reportId: string;
+  status: CaseLiveView;
+  targetName: string;
+}) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Reproducing executes against the target, so it asks first, in the same in-app confirmation
+  // the approve, deny and re-check actions use.
+  const [confirming, setConfirming] = useState(false);
 
   // Only a report parked on an analysis-only verdict. requestRecheck refuses anything else, and
   // a NOT_REPRODUCED report keeps "Ask to re-check" on the verdict card instead.
@@ -168,16 +186,39 @@ function ReproduceButton({ reportId, status }: { reportId: string; status: CaseL
         setError(result.error ?? "Could not start a reproduction run.");
         return;
       }
+      setConfirming(false);
       refreshReportViews(queryClient, reportId);
     });
   }
 
   return (
     <div className="flex flex-col gap-1">
-      <Button size="sm" variant="outline" onClick={reproduce} disabled={pending}>
-        {pending ? "Starting…" : "Reproduce"}
+      <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
+        Reproduce
       </Button>
-      {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
+      <Dialog open={confirming} onOpenChange={(next) => !pending && setConfirming(next)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Reproduce against {targetName}?</DialogTitle>
+            <DialogDescription>
+              Agent Bounty starts {targetName} from its pinned image in an isolated sandbox and
+              probes only that target. The run ends in a new verdict that waits for your approval;
+              nothing reaches the reporter until you sign it.
+            </DialogDescription>
+          </DialogHeader>
+          {error ? (
+            <span className="whitespace-normal break-words text-meta text-destructive">{error}</span>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirming(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={reproduce} loading={pending} disabled={pending}>
+              Reproduce
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
