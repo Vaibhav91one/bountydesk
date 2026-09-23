@@ -39,6 +39,7 @@ function caseFile(overrides: Partial<CaseFile> = {}): CaseFile {
     approval: null,
     delivery: null,
     handoff: null,
+    ownerAdvisory: null,
     awaitingVerdictId: null,
     events: [],
     artifacts: [],

@@ -162,6 +162,7 @@ export type CaseLiveView = {
     deliveredAt: string | null;
   } | null;
   handoff: CaseFile["handoff"];
+  ownerAdvisory: CaseFile["ownerAdvisory"];
 
   steps: LifecycleStepView[];
   artifacts: CaseArtifactView[];
@@ -773,6 +774,7 @@ export function caseLiveView(
       ? { ...file.delivery, deliveredAt: file.delivery.deliveredAt?.toISOString() ?? null }
       : null,
     handoff: file.handoff,
+    ownerAdvisory: file.ownerAdvisory,
 
     steps,
     storageConfigured: isStorageConfigured(),

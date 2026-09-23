@@ -10,6 +10,7 @@ import {
   eq,
   investigationRun,
   outboundDelivery,
+  ownerAdvisory,
   report,
   sessionEvent,
   targetProfile,
@@ -304,6 +305,16 @@ export async function readCase(
             .where(eq(outboundDelivery.verdictId, latest.id))
         : [];
 
+      // At most one per report (owner_advisory_report_key).
+      const [advisory] = await tx
+        .select({
+          state: ownerAdvisory.state,
+          htmlUrl: ownerAdvisory.htmlUrl,
+          lastError: ownerAdvisory.lastError,
+        })
+        .from(ownerAdvisory)
+        .where(eq(ownerAdvisory.reportId, id));
+
       const events = await tx
         .select({
           seq: sessionEvent.seq,
@@ -375,6 +386,7 @@ export async function readCase(
         verdictHistory,
         approval: decision ?? null,
         delivery: dispatch ?? null,
+        ownerAdvisory: advisory ?? null,
         // The retry ceiling is a module constant rather than a column on this table, unlike
         // outbound_delivery. Resolved here so the derived view can compare against it without
         // importing the queue, which would drag the connection pool into a pure module.

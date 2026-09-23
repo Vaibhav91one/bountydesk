@@ -45,6 +45,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     approval: null,
     delivery: null,
     handoff: null,
+    ownerAdvisory: null,
     steps: [],
     artifacts: [],
     storageConfigured: true,

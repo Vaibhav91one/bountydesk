@@ -98,6 +98,7 @@ export function CaseView({
         status={status}
         issueUrl={issueUrl}
         intakeRepository={intakeRepository}
+        repositoryFullName={repositoryFullName}
         targetProfiles={targetProfiles}
         reportId={reportId}
       />

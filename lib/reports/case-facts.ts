@@ -78,6 +78,8 @@ export type CaseFile = {
   /** Every revision on record, newest first. Length 0 for a report with no verdict yet. */
   verdictHistory: CaseVerdictHistoryEntry[];
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
+  /** The private draft advisory opened on the repository after an email delivery, if any. */
+  ownerAdvisory: { state: string; htmlUrl: string | null; lastError: string | null } | null;
   delivery: {
     state: string;
     attempts: number;

@@ -46,6 +46,7 @@ export const INTEGRATIONS: Integration[] = [
         bullets: [
           "Metadata, read. Repository name, visibility and archive state, which is how a renamed or archived repository stops being admissible.",
           "Issues, read and write. Read to accept a report, write to post the comment a reviewer approved.",
+          "Repository security advisories, read and write. For an emailed report reproduced against this repository, a reviewer can open a private draft advisory so the owner hears of it without it being public.",
         ],
       },
       {

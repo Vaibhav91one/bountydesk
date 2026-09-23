@@ -15,6 +15,7 @@ import {
   verdictSupersession,
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
+import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import {
   cancelRecheck,
@@ -368,6 +369,25 @@ export async function bindTargetAction(
     return { ok: true };
   } catch (error) {
     return thrownActionError(error, "bind");
+  }
+}
+
+/**
+ * Ask the Zerops worker to open a private draft advisory on the report's repository.
+ *
+ * Records the request only. The worker holds the App key, re-checks the grant and the approved
+ * hash when it sends, and never sends anything but the verdict the reporter already received.
+ */
+export async function requestOwnerAdvisoryAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  try {
+    const result = await requestOwnerAdvisory(reportId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    revalidateReportViews(reportId);
+    return { ok: true };
+  } catch (error) {
+    return thrownActionError(error, "notify");
   }
 }
 
