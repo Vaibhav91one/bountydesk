@@ -147,6 +147,7 @@ async function seedFork(opts: {
   via?: "parent" | "source";
   stage: "ready" | "PENDING_BUILD" | "AWAITING_APPROVAL" | "FAILED" | "UNSUPPORTED" | "never";
   revoked?: boolean;
+  lastError?: string;
 }) {
   forkSeq += 1;
   const n = 700 + forkSeq;
@@ -180,7 +181,7 @@ async function seedFork(opts: {
       repoFullName: fullName,
       sourceRef: `https://github.com/${fullName}.git`,
       state: opts.stage,
-      lastError: opts.stage === "FAILED" ? "build timed out" : null,
+      lastError: opts.stage === "FAILED" ? "build timed out" : (opts.lastError ?? null),
       buildPlan: opts.stage === "UNSUPPORTED" ? { strategy: "not-flattenable", reason: "needs MongoDB" } : null,
     });
   }
@@ -197,7 +198,9 @@ test("a connected fork stands in for the upstream the report links, by parent or
       [{ profileId: profile!.id, profileName: profile!.name, fullName, mention: upstream }],
       via,
     );
-    assert.deepEqual(result.progress, [{ name: upstream, status: "ready", repoFullName: fullName, reason: null }]);
+    assert.deepEqual(result.progress, [
+      { name: upstream, status: "ready", repoFullName: fullName, reason: null, retrying: null },
+    ]);
     assert.deepEqual(result.unconnected, []);
   }
 });
@@ -215,7 +218,11 @@ test("each onboarding stage of a connected fork is reported, with the reason whe
     const result = await suggest.suggestTargets(`https://github.com/${upstream}`);
     assert.deepEqual(result.matched, [], stage);
     assert.deepEqual(result.unconnected, [upstream], stage);
-    assert.deepEqual(result.progress, [{ name: upstream, status, repoFullName: fullName, reason }], stage);
+    assert.deepEqual(
+      result.progress,
+      [{ name: upstream, status, repoFullName: fullName, reason, retrying: null }],
+      stage,
+    );
   }
 
   // Connected but never onboarded is what a private repository looks like.
@@ -231,6 +238,26 @@ test("a revoked fork is not connected, whatever target it once had", async () =>
   const result = await suggest.suggestTargets("https://github.com/Revoked-Up/app");
   assert.deepEqual(result.matched, []);
   assert.deepEqual(result.progress, [
-    { name: "Revoked-Up/app", status: "not-connected", repoFullName: null, reason: null },
+    { name: "Revoked-Up/app", status: "not-connected", repoFullName: null, reason: null, retrying: null },
   ]);
+});
+
+test("a build that failed and will retry says so, and provider errors read as their message", async () => {
+  const { fullName } = await seedFork({
+    upstream: "Retry-Up/app",
+    stage: "PENDING_BUILD",
+    lastError: 'POST /sandbox -> 400 {"statusCode":400,"message":"Network access is restricted and cannot be overridden at the sandbox level."}',
+  });
+  const [progress] = (await suggest.suggestTargets("https://github.com/Retry-Up/app")).progress;
+  assert.equal(progress.status, "onboarding");
+  assert.equal(progress.repoFullName, fullName);
+  assert.equal(progress.retrying, "Network access is restricted and cannot be overridden at the sandbox level.");
+});
+
+test("readable onboarding errors are capped and fall back to the raw text", () => {
+  assert.equal(suggest.readableOnboardingError(null), null);
+  assert.equal(suggest.readableOnboardingError("build timed out\n  at step"), "build timed out at step");
+  const long = suggest.readableOnboardingError("x".repeat(500));
+  assert.equal(long?.length, 240);
+  assert.ok(long?.endsWith("…"));
 });
