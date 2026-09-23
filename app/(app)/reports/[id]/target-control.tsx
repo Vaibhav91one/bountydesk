@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -15,6 +16,7 @@ import {
 import { refreshReportViews } from "@/lib/reports/live-keys";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import type { TargetProfileOption } from "@/lib/targets/bind";
+import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 /**
  * The bound target, and what a reviewer can do about it.
@@ -32,18 +34,25 @@ export function TargetControl({
   reportId,
   status,
   profiles,
+  suggestion,
 }: {
   reportId: string;
   status: CaseLiveView;
   /** Built target profiles, read server-side. A reviewer never types a target. */
   profiles: TargetProfileOption[];
+  /** Targets matched from the repository links in an email report's body. */
+  suggestion: TargetSuggestion | null;
 }) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
-  // Null until a reviewer picks, never pre-filled with the first profile. Binding authorises
-  // execution against a target, so it should take a deliberate choice rather than one click on a
-  // default someone did not notice. null is also base-ui's own "nothing selected".
-  const [choice, setChoice] = useState<string | null>(null);
+  // Binding authorises execution against a target, so it never happens without a click on Bind,
+  // and the picker is never pre-filled with an arbitrary first profile. The one exception is a
+  // target matched from a link in the report, and that choice is labelled with the link it came
+  // from, so it cannot be a default nobody noticed. null is base-ui's own "nothing selected".
+  const suggested =
+    suggestion?.matched.find((match) => profiles.some((profile) => profile.id === match.profileId)) ??
+    null;
+  const [choice, setChoice] = useState<string | null>(suggested?.profileId ?? null);
   const [error, setError] = useState<string | null>(null);
 
   if (status.target) {
@@ -106,6 +115,19 @@ export function TargetControl({
           {pending ? "Binding…" : "Bind"}
         </Button>
       </div>
+      {suggested && choice === suggested.profileId ? (
+        <span className="text-meta text-muted-foreground">
+          Suggested because the report links {suggested.fullName}.
+        </span>
+      ) : null}
+      {suggestion?.unconnected.map((name) => (
+        <span key={name} className="text-meta text-muted-foreground">
+          The report links {name}, which has no connected target.{" "}
+          <Link href="/integrations" className="text-foreground underline-offset-4 hover:underline">
+            Connect it
+          </Link>
+        </span>
+      ))}
       {error ? <span className="text-meta text-destructive">{error}</span> : null}
     </div>
   );

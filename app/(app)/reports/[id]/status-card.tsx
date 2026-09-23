@@ -9,6 +9,7 @@ import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import { channelLabel } from "@/lib/reports/channel-copy";
 import type { TargetProfileOption } from "@/lib/targets/bind";
+import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 import { RecheckActions } from "./recheck-actions";
 import { TargetControl } from "./target-control";
@@ -39,6 +40,7 @@ export function StatusCard({
   status,
   issueUrl,
   targetProfiles,
+  suggestion,
   intakeRepository,
   reportId,
 }: {
@@ -46,6 +48,8 @@ export function StatusCard({
   issueUrl: string | null;
   /** Built target profiles, for a report that arrived without one. Read on the server. */
   targetProfiles: TargetProfileOption[];
+  /** Targets read off the repository links in an unbound email report. */
+  suggestion: TargetSuggestion | null;
   /** Where the report was filed: the repository for a GitHub report, null for any other channel. */
   intakeRepository: string | null;
   reportId: string;
@@ -81,7 +85,9 @@ export function StatusCard({
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <Fact label="Status">{status.stateLabel}</Fact>
           <Fact label="Bound target">
-            <TargetControl reportId={reportId} status={status} profiles={targetProfiles} />
+            <TargetControl reportId={reportId} status={status} profiles={targetProfiles}
+              suggestion={suggestion}
+            />
           </Fact>
           <Fact label="Intake">{intakeRepository ?? channelLabel(status.channel)}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>

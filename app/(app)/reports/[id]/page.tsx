@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { requireReviewer } from "@/lib/auth/dal";
 import { isReportId, readCase } from "@/lib/reports/case";
 import { listTargetProfiles } from "@/lib/targets/bind";
+import { suggestTargets } from "@/lib/targets/suggest";
 import { caseLiveView } from "@/lib/reports/case-view";
 
 import { CaseApproval } from "./case-approval";
@@ -102,6 +103,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // Only a report with no bound target can use these, and only a reviewer sees this page at all.
   // Read here rather than in the client component so a browser never asks what targets exist.
   const targetProfiles = file && !file.target ? await listTargetProfiles() : [];
+  // A GitHub report already names its repository, so only an unbound email report is read for
+  // links. The body is the reporter's text and only picks which option the picker opens on.
+  const suggestion =
+    file && !file.target && file.channel === "email" ? await suggestTargets(file.body) : null;
   // Where the report came from, which is not always the repository on the row. A GitHub report
   // was filed on that repository. An email report only carries one after a reviewer binds a
   // target, and then it names the target's owner so a revoked grant can still stop the report;
@@ -179,6 +184,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         repositoryFullName={file.repositoryFullName}
         intakeRepository={intakeRepository}
         targetProfiles={targetProfiles}
+        suggestion={suggestion}
       />
     </main>
   );
