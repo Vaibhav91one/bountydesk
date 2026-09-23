@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState, useSyncExternalStore } from "react";
 import { Warning } from "@phosphor-icons/react/ssr";
 
 import { FilterTable, type TableRow } from "@/components/filter-table";
@@ -12,6 +12,14 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  clampSheetWidth,
+  setSheetWidth,
+  sheetWidthServerSnapshot,
+  sheetWidthSnapshot,
+  storeSheetWidth,
+  subscribeSheetWidth,
+} from "@/lib/findings/sheet-width";
 import type { Finding } from "@/lib/mcp/publish-verdict";
 
 import { FindingDescription } from "./finding-description";
@@ -45,6 +53,45 @@ const COLUMNS = [
   { key: "severity", label: "Severity", width: "0.7fr", align: "center" as const },
 ];
 
+/**
+ * The left edge of the sheet, dragged to widen it.
+ *
+ * Pointer capture rather than window listeners: the pointer leaves this 4px strip on the first
+ * move, and without capture the drag would end there. `onCommit` fires once at the end so the
+ * stored width is written on release, not on every frame.
+ */
+function ResizeHandle({
+  onResize,
+  onCommit,
+}: {
+  onResize: (clientX: number) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the finding panel"
+      onPointerDown={(event) => {
+        // Only the primary button, and never a touch scroll that happens to start here.
+        if (event.button !== 0) return;
+        event.preventDefault();
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        onResize(event.clientX);
+      }}
+      onPointerUp={(event) => {
+        if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        onCommit();
+      }}
+      className="absolute inset-y-0 left-0 z-20 hidden w-1.5 cursor-col-resize touch-none bg-transparent transition-colors hover:bg-border sm:block"
+    />
+  );
+}
+
 export function FindingsPanel({
   findings,
   findingsArtifactId,
@@ -56,6 +103,23 @@ export function FindingsPanel({
   // The row a reviewer opened, or none. base-ui's Dialog gives the sheet its focus trap,
   // Escape-to-close and aria wiring, so this component only decides which finding it shows.
   const [selected, setSelected] = useState<Finding | null>(null);
+
+  // The width belongs to localStorage and to a pointer drag, not to React, so it is read as an
+  // external store. That also means the first paint already has the remembered width instead of
+  // rendering the default and jumping.
+  const width = useSyncExternalStore(
+    subscribeSheetWidth,
+    sheetWidthSnapshot,
+    sheetWidthServerSnapshot,
+  );
+
+  // The sheet is pinned to the right edge, so its width is the distance from the pointer to it.
+  const onResize = useCallback((clientX: number) => {
+    setSheetWidth(clampSheetWidth(window.innerWidth - clientX, window.innerWidth));
+  }, []);
+
+  // Written once on release rather than on every frame of the drag.
+  const onCommit = useCallback(() => storeSheetWidth(sheetWidthSnapshot()), []);
 
   if (findings.length === 0) {
     return (
@@ -94,8 +158,15 @@ export function FindingsPanel({
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         {/* Wider than the repository panel next door: a finding carries reproduction steps, and
-            a request line with a payload in it wrapped four times at that width. */}
-        <SheetContent side="right" className="no-scrollbar gap-0 overflow-y-auto sm:max-w-2xl">
+            a request line with a payload in it wrapped four times at that width. The width is
+            an inline style rather than a class because the viewer can drag it; max-w-none is
+            what stops the primitive's own cap from winning. */}
+        <SheetContent
+          side="right"
+          style={{ width }}
+          className="no-scrollbar gap-0 overflow-y-auto sm:max-w-none"
+        >
+          <ResizeHandle onResize={onResize} onCommit={onCommit} />
           {selected ? (
             <>
               <SheetHeader className="gap-3 border-b border-border/50 p-6">
