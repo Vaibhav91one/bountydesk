@@ -158,13 +158,17 @@ export function FindingsPanel({
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
         {/* Wider than the repository panel next door: a finding carries reproduction steps, and
-            a request line with a payload in it wrapped four times at that width. The width is
-            an inline style rather than a class because the viewer can drag it; max-w-none is
-            what stops the primitive's own cap from winning. */}
+            a request line with a payload in it wrapped four times at that width.
+
+            Both width and maxWidth are inline, and maxWidth is the load-bearing one. The
+            primitive caps itself with `data-[side=right]:sm:max-w-sm`, whose class-plus-attribute
+            selector outranks any plain utility class, so a `sm:max-w-none` on this element loses
+            and the panel stays at 384px however wide the inline width is. An inline style beats
+            every stylesheet rule, which is the only override that actually holds here. */}
         <SheetContent
           side="right"
-          style={{ width }}
-          className="no-scrollbar gap-0 overflow-y-auto sm:max-w-none"
+          style={{ width, maxWidth: width }}
+          className="no-scrollbar gap-0 overflow-y-auto"
         >
           <ResizeHandle onResize={onResize} onCommit={onCommit} />
           {selected ? (
