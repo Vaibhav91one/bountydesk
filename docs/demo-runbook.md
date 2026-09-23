@@ -181,6 +181,27 @@ Run these in order on the demo machine. Keep each long-running process in its ow
 
 ---
 
+## Pausing a delivery that is retrying
+
+A delivery whose send keeps failing burns one of its eight attempts per retry, and once they are
+gone the row is `FAILED` and needs a human anyway. When the cause is config you are in the middle
+of fixing, stop the bleeding first:
+
+```sql
+update outbound_delivery set requires_human_review = true where id = '<id>';
+```
+
+`claim()` excludes a held row outright and nothing in the worker clears that flag, so it holds for
+as long as you need. Undo it with `requires_human_review = false, attempts = 0, next_attempt_at =
+now()` once the fix is live.
+
+Do not try to pause by pushing `next_attempt_at` into the future. `claim()` does honour it and the
+sweeper never touches it, but if the row is leased at that moment the in-flight attempt finishes and
+`fail()` overwrites `next_attempt_at` with its own backoff, so the pause silently disappears. Seen
+on 2026-09-22, where a row kept climbing through attempts 3, 4 and 5 after being "paused".
+
+---
+
 ## Pre-warm checklist (do 30 min before — this prevents most live-demo deaths)
 
 - [ ] Connected fork **built at the pinned commit** and the snapshot id recorded; Daytona sandbox **provisioned and warm**; target image **pre-pulled** (no cold-start on stage).

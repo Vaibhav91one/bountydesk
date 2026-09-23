@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
+import { draftViewerSubtitle } from "@/lib/reports/channel-copy";
 
 import { FindingDescription } from "./finding-description";
 
@@ -100,6 +101,7 @@ export function VerdictDialog({
   payload,
   payloadArtifactId,
   findingsArtifactId,
+  channel,
 }: {
   outcomeLabel: string;
   revision: number;
@@ -111,6 +113,8 @@ export function VerdictDialog({
   payloadArtifactId: string | null;
   /** The stored findings file, when one exists. */
   findingsArtifactId?: string | null;
+  /** Decides whether the subtitle calls this a comment on an issue or a reply to the reporter. */
+  channel: string;
 }) {
   // The payload and its stored artifact id are what the dialog is about; both stay in props so
   // this component keeps describing the same verdict as the artifacts panel beside it.
@@ -136,7 +140,7 @@ export function VerdictDialog({
             </span>
           </DialogTitle>
           <DialogDescription>
-            The full comment as it will read on the issue, drafted by Agent Bounty.
+            {draftViewerSubtitle(channel)}
           </DialogDescription>
         </DialogHeader>
 

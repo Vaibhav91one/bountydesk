@@ -20,6 +20,7 @@ import { allowVerdict, denyVerdict, requestRecheckAction, type ActionResult } fr
 import { MAX_RECHECK_NOTE_LENGTH } from "@/lib/investigation-runs/recheck-guidance";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
+import { approveConsequence } from "@/lib/reports/channel-copy";
 import { applyDecisionOptimistically, refreshReportViews } from "@/lib/reports/live-keys";
 import type { RecheckSummary } from "@/lib/reports/recheck-summary";
 
@@ -51,6 +52,7 @@ export function ApprovalDialog({
   summary,
   revision,
   destination,
+  channel,
   findings,
   speaker,
   speakerScope,
@@ -69,6 +71,8 @@ export function ApprovalDialog({
   summary: string;
   revision: number;
   destination: string;
+  /** Picks the wording for where an approved verdict goes. */
+  channel: string;
   /** What the agent's own investigation found, beyond the summary. May be empty. */
   findings: Finding[];
   speaker: MascotKey;
@@ -242,6 +246,7 @@ export function ApprovalDialog({
                       revision={revision}
                       contentHash={contentHash}
                       destination={destination}
+                      channel={channel}
                       speaker={speaker}
                       speakerScope={speakerScope}
                       onChat={() => setChatting(true)}
@@ -313,7 +318,7 @@ export function ApprovalDialog({
           </DialogTitle>
           <DialogDescription>
             {confirming === "allow"
-              ? "This posts the drafted comment to the issue as the agent's verdict. This action cannot be undone."
+              ? approveConsequence(channel)
               : "This closes the case on BountyDesk. The chat reason (if any) is not sent to the reporter. This action cannot be undone."}
           </DialogDescription>
         </DialogHeader>

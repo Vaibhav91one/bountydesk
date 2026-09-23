@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { MascotKey } from "@/lib/mascot/catalog";
 import type { Finding } from "@/lib/mcp/publish-verdict";
+import { draftPrompt, draftRecordLabel } from "@/lib/reports/channel-copy";
 import { canOfferRecheck } from "@/lib/reports/recheck-actions-view";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +68,7 @@ export function VerdictCard({
   revision,
   contentHash,
   destination,
+  channel,
   speaker,
   speakerScope = "speaker",
   onChat,
@@ -92,6 +94,8 @@ export function VerdictCard({
   revision: number;
   contentHash: string;
   destination: string;
+  /** Decides whether this reads as a comment on an issue or a reply to the reporter. */
+  channel: string;
   /** Agent Bounty. The comment is what it drafted, so it says so. */
   speaker: MascotKey;
   speakerScope?: string;
@@ -124,7 +128,7 @@ export function VerdictCard({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="flex flex-wrap items-center gap-2">
             <span className="text-body font-medium text-foreground">
-              {approve ? "Post this comment to the issue?" : "The comment on record"}
+              {approve ? draftPrompt(channel) : draftRecordLabel(channel)}
             </span>
             {superseded ? (
               <Badge variant="outline">Superseded by a re-check</Badge>
@@ -136,6 +140,7 @@ export function VerdictCard({
               inline below, because that dialog is where the exact text is approved. */}
           {!approve ? (
             <VerdictDialog
+              channel={channel}
               outcomeLabel={outcomeLabel}
               revision={revision}
               summary={summary}

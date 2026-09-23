@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { phaseOf } from "@/lib/reports/columns";
 import type { QueueCardView, QueueColumnView } from "@/lib/reports/queue-view";
+import { deliveredLabel } from "@/lib/reports/channel-copy";
 import type { MascotKey } from "@/lib/mascot/catalog";
 
 /**
@@ -131,7 +132,7 @@ export function Card({
     : running
       ? RUNNING_LABEL[card.state]
       : card.state === "DELIVERED"
-        ? "Comment delivered"
+        ? deliveredLabel(card.channel)
       : card.outcome
         ? "Verdict drafted"
         : "No verdict yet";

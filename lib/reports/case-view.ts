@@ -104,6 +104,12 @@ export type CaseLiveView = {
   phase: string;
   stateLabel: string;
   updatedAt: string;
+  /**
+   * Which way this report came in, and therefore where an approved verdict goes: a comment on a
+   * GitHub issue, or a reply to the reporter's own address. The approval surfaces word themselves
+   * off this, so a reviewer signing an email verdict is not told it will be posted to an issue.
+   */
+  channel: string;
 
   mascotKey: MascotKey;
   investigating: boolean;
@@ -686,6 +692,7 @@ export function caseLiveView(
     phase: phaseOf(file.state),
     stateLabel: caseStateLabel(file, deliveryState),
     updatedAt: file.updatedAt.toISOString(),
+    channel: file.channel,
 
     mascotKey: mascotKeyForState(file.state),
     investigating,

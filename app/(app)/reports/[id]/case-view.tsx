@@ -63,13 +63,11 @@ export function CaseView({
   reportId,
   initial,
   issueUrl,
-  channel,
   repositoryFullName,
 }: {
   reportId: string;
   initial: CaseLiveView;
   issueUrl: string | null;
-  channel: string;
   repositoryFullName: string | null;
 }) {
   const { data: status = initial } = useQuery({
@@ -92,7 +90,6 @@ export function CaseView({
       <StatusCard
         status={status}
         issueUrl={issueUrl}
-        channel={channel}
         repositoryFullName={repositoryFullName}
         reportId={reportId}
       />
@@ -153,6 +150,7 @@ export function CaseView({
           revision={status.verdict.revision}
           contentHash={status.verdict.contentHash}
           destination={status.destination}
+          channel={status.channel}
           speaker="awaiting-approval"
           speakerScope="record-speaker"
           superseded={status.verdict.superseded}
