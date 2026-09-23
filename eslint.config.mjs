@@ -13,6 +13,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "videos/**",
+    // Vendored from upstream and kept byte-for-byte (see its VENDORED.md). It is CommonJS, so our
+    // TypeScript rules reject its require() calls; rewriting it to pass them would quietly fork it.
+    "skills/security-audit/**",
   ]),
 ]);
 

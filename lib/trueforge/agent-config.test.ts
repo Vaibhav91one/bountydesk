@@ -21,6 +21,8 @@ const EXPECTED_SKILL_NAMES = [
   "bountydesk-firmware",
   "bountydesk-mobile",
   "bountydesk-demo-targets",
+  // Vendored from Cloudflare (skills/security-audit/VENDORED.md), steered to guidance mode.
+  "bountydesk-security-audit",
 ];
 
 test("the BountyDesk agent preloads the approval-gated publish_verdict and probe_target_write tools", () => {
@@ -54,7 +56,7 @@ test("the BountyDesk agent starts provisioned-target contact through probe_targe
   assert.match(agentDefinition.manifest.instructions, /Do not call scope_check for the target name/);
 });
 
-test("the BountyDesk agent wires in exactly the 11 report skills, each backed by a real SKILL.md", () => {
+test("the BountyDesk agent wires in exactly the 12 report skills, each backed by a real SKILL.md", () => {
   const skills = agentDefinition.manifest.skills.map((skill) => skill.name);
   assert.deepEqual([...skills].sort(), [...EXPECTED_SKILL_NAMES].sort());
 
@@ -98,4 +100,32 @@ test("the MCP connector points at the authenticated publish-verdict route", () =
       headers: { Authorization: "Bearer mcp-secret" },
     },
   });
+});
+
+test("with no authorized target the agent still may not touch anything, only analyse", () => {
+  // The instruction used to say "stop there", which kept the agent off an unauthorized target and
+  // also kept it from analysing the report at all. Only the second half was dropped. These pin the
+  // first half, because it is the safety property: no target means no probe of any kind.
+  const instructions = agentDefinition.manifest.instructions;
+  assert.match(
+    instructions,
+    /no target is authorized[^.]*do not call scope_check, probe_target, or probe_target_write/,
+  );
+  assert.match(instructions, /publish_verdict will refuse a REPRODUCED or NOT_REPRODUCED draft/);
+  // And the analysis it now does is reasoning over the report text, not execution.
+  assert.match(instructions, /bountydesk-security-audit in guidance mode/);
+  assert.match(instructions, /Draft ANALYSIS_ONLY from the report text alone/);
+});
+
+test("the vendored audit skill is steered to guidance mode, never the full audit", () => {
+  // Upstream's full-audit mode runs six phases with parallel sub-agents over a whole repository
+  // and writes artifacts. On one report, gpt-5-mini and a 60-iteration limit, that spends the
+  // whole budget before reaching the report. The description is what the agent reads to decide.
+  const content = readFileSync(
+    path.join(process.cwd(), "skills", "security-audit", "SKILL.md"),
+    "utf8",
+  );
+  assert.equal(parseFrontmatterName(content), "bountydesk-security-audit");
+  assert.match(content, /GUIDANCE MODE ONLY/);
+  assert.match(content, /Never run the six-phase full audit/);
 });
