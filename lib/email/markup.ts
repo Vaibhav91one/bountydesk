@@ -8,12 +8,11 @@ import type { Nodes, PhrasingContent, RootContent } from "mdast";
  * hash-bound: a reviewer approved those exact bytes, so this only decides how they are shown.
  *
  * Safety here is structural rather than a sanitizer pass. The payload carries agent-authored
- * prose, which can echo prompt-injection content off an untrusted target, and the live payload on
- * report 911fb70b contains a working `<img src=x onerror=alert(1)>` in a sentence rather than in a
- * code fence. mdast represents raw markup as `html` nodes carrying their source text, and this
- * renderer emits those as escaped text. There is therefore no path from agent text to live markup,
- * which is the same guarantee the old escaped `<pre>` had, and the reason not to reach for a
- * markdown library that passes HTML through or for `rehype-raw` plus a sanitizer.
+ * prose, which can echo prompt-injection content off an untrusted target, including a working
+ * `<img src=x onerror=alert(1)>` in a sentence rather than a code fence. mdast represents raw
+ * markup as `html` nodes carrying their source text, and this renderer emits those as escaped
+ * text, so there is no path from agent text to live markup. That is the reason not to reach for a
+ * markdown library that passes HTML through, or for `rehype-raw` plus a sanitizer.
  *
  * Every byte out is a pure function of the bytes in. Resend holds an idempotency key for 24 hours
  * and refuses a reuse that carries a different body, so a timestamp or a counter anywhere in here

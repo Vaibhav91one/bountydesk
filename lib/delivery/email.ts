@@ -26,12 +26,12 @@ export function emailSubject(title: string): string {
 /**
  * Render the approved payload as an HTML part.
  *
- * The payload is markdown and it is now laid out as markdown: headings, findings with a severity
- * chip, lists and code. What does not change is the safety property. The payload carries
- * agent-authored text that can echo prompt-injection content off an untrusted target, and the
- * renderer in lib/email/markup.ts emits every raw-markup node as escaped text, so nothing the
- * agent wrote can become live markup in a mailbox that sanitises nothing. The one deliberate
- * exception is still the delivery marker, put back as a real comment so an audit can count it.
+ * The payload is markdown and is laid out as markdown: headings, findings with a severity chip,
+ * lists and code. It carries agent-authored text that can echo prompt-injection content off an
+ * untrusted target, and the renderer in lib/email/markup.ts emits every raw-markup node as
+ * escaped text, so nothing the agent wrote can become live markup in a mailbox that sanitises
+ * nothing. The one deliberate
+ * exception is the delivery marker, put back as a real comment so an audit can count it.
  */
 export function emailHtml(payload: string, verdictId: string): string {
   return renderVerdictEmail(payload, verdictId, EMAIL_ASSET_ORIGIN);
