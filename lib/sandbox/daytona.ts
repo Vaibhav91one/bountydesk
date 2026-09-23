@@ -501,10 +501,28 @@ export type BuildSandboxSpec = {
   labels?: Record<string, string>;
 };
 
+/**
+ * How a build sandbox's egress is limited. `allow-list` is ours: only the hosts the build needs.
+ * `organization-policy` is Daytona's own restricted-tier list (package registries, git hosts,
+ * container registries, AI and cloud endpoints), used only when the account's tier refuses a
+ * per-sandbox allow-list, and only after proving the sandbox cannot reach anything off that list.
+ */
+export type BuildEgressPolicy = "allow-list" | "organization-policy";
+
+// Daytona's refusal when the organization's tier fixes the network policy (Tier 1 and 2). Matched
+// on the message, not just the 400, so no other bad request is ever retried without an allow-list.
+const TIER_POLICY_REFUSAL = /cannot be overridden at the sandbox level/i;
+
+// A host on no package, git, registry or provider list. Reaching it means egress is open.
+const OFF_POLICY_PROBE_URL = "https://example.com/";
+// curl exit codes that mean the request was blocked: DNS failure, refused, timed out, TLS or
+// empty reply from a filtering proxy, or an HTTP error page from one (-f makes that exit 22).
+const BLOCKED_CURL_EXITS = new Set([6, 7, 22, 28, 35, 52, 56]);
+
 export async function createBuildSandbox(
   spec: BuildSandboxSpec,
   egressAllowList: string[],
-): Promise<Sandbox> {
+): Promise<Sandbox & { egressPolicy: BuildEgressPolicy }> {
   const hosts = egressAllowList.map((h) => h.trim()).filter(Boolean);
   if (hosts.length === 0) {
     // Fail closed. A build sandbox with no allow-list is either a misconfiguration or an attempt
@@ -542,14 +560,65 @@ export async function createBuildSandbox(
     labels: { ...spec.labels, [PURPOSE_LABEL]: BUILD_PURPOSE },
   };
 
-  const created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
+  let egressPolicy: BuildEgressPolicy = "allow-list";
+  let created: Sandbox;
+  try {
+    created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(body) });
+  } catch (error) {
+    if (!(error instanceof DaytonaError) || error.status !== 400 || !TIER_POLICY_REFUSAL.test(error.message)) {
+      throw error;
+    }
+    // The tier fixes egress at the organization level and refuses ours. Build under that policy
+    // instead, and prove below that it really is restricted before anything runs in the sandbox.
+    const { domainAllowList: _refused, ...withoutAllowList } = body;
+    void _refused;
+    created = await call<Sandbox>("/sandbox", { method: "POST", body: JSON.stringify(withoutAllowList) });
+    egressPolicy = "organization-policy";
+  }
   if (typeof created.id !== "string" || !created.id) {
     throw new DaytonaError(`build provisioning returned no sandbox id: ${JSON.stringify(created).slice(0, 200)}`);
   }
   if (created.public !== false) {
     await destroyRejected(created.id, created.public === true ? "came up public" : "did not report whether it is public");
   }
-  return created;
+  if (egressPolicy === "organization-policy") {
+    console.warn(
+      `build sandbox ${created.id} uses Daytona's organization egress policy: the account's tier refused a per-sandbox allow-list`,
+    );
+    return { ...(await assertOrganizationEgressRestricted(created)), egressPolicy };
+  }
+  return { ...created, egressPolicy };
+}
+
+/**
+ * Prove a build sandbox without our allow-list still cannot reach the open internet, and destroy
+ * it if it can. The fallback trusts Daytona's tier policy only after seeing it hold: were the
+ * account ever on a tier with open egress while still returning the refusal, this is what keeps
+ * customer code from running with it.
+ */
+async function assertOrganizationEgressRestricted(sandbox: Sandbox): Promise<Sandbox> {
+  const deadline = Date.now() + 120_000;
+  let current = sandbox;
+  while (current.state !== "started") {
+    if (["error", "build_failed", "destroyed"].includes(current.state) || Date.now() > deadline) {
+      await destroyRejected(current.id, `never started (last state ${current.state})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    current = await getSandbox(current.id);
+  }
+
+  const probe = await execute(current, `curl -fsS -m 8 -o /dev/null ${OFF_POLICY_PROBE_URL}`, 20);
+  if (!BLOCKED_CURL_EXITS.has(probe.exitCode)) {
+    // Exit 0 is open egress; anything else (127, a missing curl) means it could not be checked.
+    // Both fail closed.
+    await destroyRejected(
+      current.id,
+      probe.exitCode === 0
+        ? `reached ${OFF_POLICY_PROBE_URL} under the organization policy, so egress is not restricted`
+        : `could not verify its egress is restricted (probe exited ${probe.exitCode})`,
+    );
+  }
+  return current;
 }
 
 /**
