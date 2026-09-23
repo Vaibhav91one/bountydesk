@@ -597,25 +597,34 @@ export async function createBuildSandbox(
  * customer code from running with it.
  */
 async function assertOrganizationEgressRestricted(sandbox: Sandbox): Promise<Sandbox> {
-  const deadline = Date.now() + 120_000;
   let current = sandbox;
-  while (current.state !== "started") {
-    if (["error", "build_failed", "destroyed"].includes(current.state) || Date.now() > deadline) {
-      await destroyRejected(current.id, `never started (last state ${current.state})`);
+  let probeExit = -1;
+  try {
+    const deadline = Date.now() + 120_000;
+    while (current.state !== "started") {
+      if (["error", "build_failed", "destroyed"].includes(current.state) || Date.now() > deadline) {
+        throw new Error(`never started (last state ${current.state})`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      current = await getSandbox(current.id);
     }
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    current = await getSandbox(current.id);
+    probeExit = (await execute(current, `curl -fsS -m 8 -o /dev/null ${OFF_POLICY_PROBE_URL}`, 20)).exitCode;
+  } catch (error) {
+    // The caller only starts cleaning up once this returns, so a sandbox whose egress could not be
+    // checked for any reason is destroyed here rather than left running until its TTL.
+    await destroyRejected(
+      sandbox.id,
+      `could not verify its egress is restricted (${error instanceof Error ? error.message : String(error)})`,
+    );
   }
-
-  const probe = await execute(current, `curl -fsS -m 8 -o /dev/null ${OFF_POLICY_PROBE_URL}`, 20);
-  if (!BLOCKED_CURL_EXITS.has(probe.exitCode)) {
+  if (!BLOCKED_CURL_EXITS.has(probeExit)) {
     // Exit 0 is open egress; anything else (127, a missing curl) means it could not be checked.
     // Both fail closed.
     await destroyRejected(
       current.id,
-      probe.exitCode === 0
+      probeExit === 0
         ? `reached ${OFF_POLICY_PROBE_URL} under the organization policy, so egress is not restricted`
-        : `could not verify its egress is restricted (probe exited ${probe.exitCode})`,
+        : `could not verify its egress is restricted (probe exited ${probeExit})`,
     );
   }
   return current;

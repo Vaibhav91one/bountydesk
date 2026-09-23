@@ -592,7 +592,12 @@ test("createSnapshot refuses a digest-pinned image name", async () => {
  * A fake Daytona for the build-sandbox fallback: `tier` decides whether a per-sandbox allow-list
  * is refused, and `probeExit` is what the off-policy curl inside the sandbox exits with.
  */
-function fakeBuildDaytona(opts: { tier: "open" | "restricted"; probeExit?: number; refusal?: string }) {
+function fakeBuildDaytona(opts: {
+  tier: "open" | "restricted";
+  probeExit?: number;
+  refusal?: string;
+  probeFails?: boolean;
+}) {
   const seen = { creates: [] as Record<string, unknown>[], probes: 0, deleted: false };
   const stub = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
@@ -613,6 +618,7 @@ function fakeBuildDaytona(opts: { tier: "open" | "restricted"; probeExit?: numbe
     }
     if (url.includes("/process/execute")) {
       seen.probes += 1;
+      if (opts.probeFails) return json({ message: "toolbox unavailable" }, 502);
       return json({ exitCode: opts.probeExit ?? 6, result: "" });
     }
     if (url.includes("/sandbox/sb-1") && method === "DELETE") {
@@ -668,4 +674,12 @@ test("any other refusal is not retried without the allow-list", async () => {
     await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /snapshot is not active/);
   });
   assert.equal(seen.creates.length, 1);
+});
+
+test("a fallback sandbox whose egress probe errors is destroyed, not left to its TTL", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeFails: true });
+  await withFetch(stub, async () => {
+    await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /could not verify its egress/);
+  });
+  assert.equal(seen.deleted, true);
 });
