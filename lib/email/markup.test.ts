@@ -163,3 +163,38 @@ test("a payload with an unrecognised outcome keeps its heading rather than losin
   const html = renderVerdictEmail(payload("## Outcome: SOMETHING_NEW\n\nbody"), VERDICT_ID, ORIGIN);
   assert.ok(html.includes("Outcome: SOMETHING_NEW"));
 });
+
+test("a list nested inside a list item keeps its items, which are the reproduction commands", () => {
+  // The exact shape the agent wrote on report 4c7c9bfa: numbered steps, with the URLs to open
+  // and the console command indented under a step as a nested list. These were silently dropped
+  // from the HTML part, so the reader got "for example:" followed by nothing.
+  const html = renderPayloadRows(
+    [
+      "1) In the address bar, navigate to the search route, for example:",
+      "   - /#/search?q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E",
+      "   - /#/search?q=%3Csvg%20onload%3Dalert(document.domain)%3E",
+      "2) As an alternative, open the console and run:",
+      "   - location.hash = '#/search?q=' + encodeURIComponent('<img src=x onerror=alert(1)>')",
+    ].join("\n"),
+  );
+
+  assert.ok(html.includes("%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E"), "first example URL");
+  assert.ok(html.includes("%3Csvg%20onload%3Dalert(document.domain)%3E"), "second example URL");
+  assert.ok(html.includes("location.hash"), "the console command");
+  // Nested, not flattened: an inner list sits inside an outer list item.
+  assert.match(html, /<li[^>]*>[^]*<ul[^>]*>[^]*<li[^>]*>/);
+});
+
+test("markup inside a nested list item is still text", () => {
+  // Recursing must not open a path around the escaping: the nested item above carries a live
+  // payload, and it has to reach the reader as characters.
+  const html = renderPayloadRows("- outer\n   - <img src=x onerror=alert(1)>\n");
+  assert.ok(!html.includes("<img src=x"), "a nested item's markup became live");
+  assert.ok(html.includes("&lt;img src=x onerror=alert(1)&gt;"));
+});
+
+test("a code block inside a list item is kept and escaped", () => {
+  const html = renderPayloadRows("1. run this:\n\n   ```\n   <b>curl</b> /x\n   ```\n");
+  assert.ok(html.includes("&lt;b&gt;curl&lt;/b&gt; /x"));
+  assert.ok(!html.includes("<b>curl</b>"));
+});

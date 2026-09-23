@@ -1,5 +1,5 @@
 import { fromMarkdown } from "mdast-util-from-markdown";
-import type { Nodes, PhrasingContent, RootContent } from "mdast";
+import type { BlockContent, DefinitionContent, List, Nodes, PhrasingContent, RootContent } from "mdast";
 
 /**
  * The approved verdict payload, rendered as an email body.
@@ -123,20 +123,8 @@ function block(node: RootContent): string {
     }
     case "paragraph":
       return `<tr><td><p style="${P}">${inline(node.children)}</p></td></tr>`;
-    case "list": {
-      const tag = node.ordered ? "ol" : "ul";
-      const items = node.children
-        .map(
-          (item) =>
-            `<li style="margin:0 0 6px;font-size:15px;line-height:1.6;color:${C.body}">${item.children
-              .map((child) =>
-                child.type === "paragraph" ? inline(child.children) : blockText(child),
-              )
-              .join(" ")}</li>`,
-        )
-        .join("");
-      return `<tr><td><${tag} style="margin:0 0 14px;padding-left:22px">${items}</${tag}></td></tr>`;
-    }
+    case "list":
+      return `<tr><td>${listMarkup(node)}</td></tr>`;
     case "code":
       return `<tr><td><pre style="margin:0 0 14px;padding:12px 14px;background:${C.panel};border-radius:6px;font-family:${MONO};font-size:13px;line-height:1.5;color:${C.ink};white-space:pre-wrap;word-break:break-word">${escapeHtml(node.value)}</pre></td></tr>`;
     case "blockquote":
@@ -151,7 +139,49 @@ function block(node: RootContent): string {
   }
 }
 
-/** Fallback for a node inside a list item that is not a paragraph. */
+/**
+ * A list, and everything nested in it.
+ *
+ * Separate from `block` because a list inside a list item cannot be wrapped in the table row
+ * `block` puts round everything at the top level. It recurses on purpose: the agent writes
+ * reproduction steps as a numbered list with the exact URLs and console commands indented under
+ * a step as a nested list, and those are the part of the finding a reader actually needs.
+ */
+function listMarkup(node: List, depth = 0): string {
+  const tag = node.ordered ? "ol" : "ul";
+  const items = node.children
+    .map(
+      (item) =>
+        `<li style="margin:0 0 6px;font-size:15px;line-height:1.6;color:${C.body}">${item.children
+          .map((child) => listItemChild(child, depth))
+          .join(" ")}</li>`,
+    )
+    .join("");
+  const spacing = depth === 0 ? "margin:0 0 14px" : "margin:6px 0 0";
+  return `<${tag} style="${spacing};padding-left:22px">${items}</${tag}>`;
+}
+
+/**
+ * One child of a list item. A nested list, a code block and a quote each keep their own markup
+ * here, because flattening them to inline text is what silently dropped a nested list's items: a
+ * list's children are list items, not phrasing content, so inline() had nothing it could render.
+ */
+function listItemChild(child: BlockContent | DefinitionContent, depth: number): string {
+  switch (child.type) {
+    case "paragraph":
+      return inline(child.children);
+    case "list":
+      return listMarkup(child, depth + 1);
+    case "code":
+      return `<pre style="margin:6px 0 0;padding:10px 12px;background:${C.panel};border-radius:6px;font-family:${MONO};font-size:13px;line-height:1.5;color:${C.ink};white-space:pre-wrap;word-break:break-word">${escapeHtml(child.value)}</pre>`;
+    case "html":
+      return escapeHtml(child.value);
+    default:
+      return blockText(child);
+  }
+}
+
+/** Fallback for a node inside a list item that is not one of the kinds above. */
 function blockText(node: Nodes): string {
   if ("children" in node && Array.isArray(node.children)) {
     return inline(node.children as PhrasingContent[]);
