@@ -84,7 +84,7 @@ export function OwnerAdvisoryControl({
     <div className="flex min-w-0 flex-col gap-1.5">
       {/* A failed send can be asked for again once whatever GitHub refused is fixed. */}
       {advisory?.state === "FAILED" ? (
-        <span className="text-meta text-destructive">
+        <span className="whitespace-normal break-words text-meta text-destructive">
           {advisory.lastError ?? "Could not open the advisory."}
         </span>
       ) : null}
@@ -115,7 +115,7 @@ export function OwnerAdvisoryControl({
             {status.verdict?.payload}
           </pre>
           {error ? (
-            <span className="text-meta text-destructive">{error}</span>
+            <span className="whitespace-normal break-words text-meta text-destructive">{error}</span>
           ) : null}
           <DialogFooter>
             <Button size="sm" onClick={notify} disabled={pending}>

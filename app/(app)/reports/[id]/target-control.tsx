@@ -116,19 +116,19 @@ export function TargetControl({
         </Button>
       </div>
       {suggested && choice === suggested.profileId ? (
-        <span className="text-meta text-muted-foreground">
+        <span className="whitespace-normal break-words text-meta text-muted-foreground">
           Suggested because the report links {suggested.fullName}.
         </span>
       ) : null}
       {suggestion?.unconnected.map((name) => (
-        <span key={name} className="text-meta text-muted-foreground">
+        <span key={name} className="whitespace-normal break-words text-meta text-muted-foreground">
           The report links {name}, which has no connected target.{" "}
           <Link href="/integrations" className="text-foreground underline-offset-4 hover:underline">
             Connect it
           </Link>
         </span>
       ))}
-      {error ? <span className="text-meta text-destructive">{error}</span> : null}
+      {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
   );
 }
@@ -177,7 +177,7 @@ function ReproduceButton({ reportId, status }: { reportId: string; status: CaseL
       <Button size="sm" variant="outline" onClick={reproduce} disabled={pending}>
         {pending ? "Starting…" : "Reproduce"}
       </Button>
-      {error ? <span className="text-meta text-destructive">{error}</span> : null}
+      {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
   );
 }
