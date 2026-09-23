@@ -749,3 +749,10 @@ test("the summary carries the run id the dialog retries or cancels", () => {
   assert.equal(view.recheckSummary?.runId, runId);
   assert.equal(view.recheckSummary?.runNumber, 2);
 });
+
+test("the live view carries the channel, so the approval copy can name where a verdict goes", () => {
+  // Without this the components under CaseApproval cannot tell a GitHub report from an email one,
+  // which is how "post this comment to the issue" ended up on a working email path.
+  assert.equal(caseLiveView(caseFile({ channel: "github" })).channel, "github");
+  assert.equal(caseLiveView(caseFile({ channel: "email" })).channel, "email");
+});

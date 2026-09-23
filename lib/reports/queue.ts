@@ -41,6 +41,8 @@ export type QueueCard = {
   sourceLabel: string;
   /** null means no reproduction target is bound, so this report cannot be reproduced. */
   targetName: string | null;
+  /** Which way it came in. The card's delivered line names a comment or a reply off this. */
+  channel: string;
   state: ReportState;
   /** The latest revision's outcome. null means no verdict has been drafted yet. */
   outcome: VerdictOutcome | null;
@@ -109,6 +111,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
       id: report.id,
       title: report.title,
       sourceRef: report.sourceRef,
+      channel: report.channel,
       state: report.state,
       updatedAt: report.updatedAt,
       targetName: targetProfile.name,
@@ -205,6 +208,7 @@ async function cardsFor(states: ReportState[], tx: Executor): Promise<QueueCard[
     id: row.id,
     title: row.title,
     sourceLabel: sourceLabel(row.sourceRef, row.id),
+    channel: row.channel,
     targetName: row.targetName,
     state: row.state,
     // The display outcome, not the stored one. A superseded verdict is still the latest row,
@@ -485,6 +489,7 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
     id: row.id,
     title: row.title,
     sourceLabel: sourceLabel(row.sourceRef, row.id),
+    channel: row.channel,
     targetName: row.targetName,
     state: row.state,
     // Display outcome, same rule as the board read above: a superseded latest verdict hides

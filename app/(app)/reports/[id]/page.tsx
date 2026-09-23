@@ -167,7 +167,6 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         reportId={file.id}
         initial={initial}
         issueUrl={file.issueUrl}
-        channel={file.channel}
         repositoryFullName={file.repositoryFullName}
       />
     </main>

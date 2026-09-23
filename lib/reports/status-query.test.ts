@@ -22,6 +22,7 @@ function view(overrides: Partial<CaseLiveView> = {}): CaseLiveView {
     phase: "triaging",
     stateLabel: "Triaging",
     updatedAt: "2026-08-31T12:00:00.000Z",
+    channel: "github",
     mascotKey: "ingest",
     investigating: false,
     turnStatus: null,

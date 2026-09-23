@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { formatStamp } from "@/lib/format";
 import type { CaseLiveView } from "@/lib/reports/case-view";
+import { channelLabel } from "@/lib/reports/channel-copy";
 
 import { RecheckActions } from "./recheck-actions";
 
@@ -35,14 +36,12 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export function StatusCard({
   status,
   issueUrl,
-  channel,
   repositoryFullName,
   reportId,
 }: {
   status: CaseLiveView;
   issueUrl: string | null;
   /** Header facts that identify the report rather than track it, so they come from the page. */
-  channel: string;
   repositoryFullName: string | null;
   reportId: string;
 }) {
@@ -77,7 +76,7 @@ export function StatusCard({
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <Fact label="Status">{status.stateLabel}</Fact>
           <Fact label="Bound target">{status.target?.name ?? "None bound"}</Fact>
-          <Fact label="Intake">{repositoryFullName ?? channel}</Fact>
+          <Fact label="Intake">{repositoryFullName ?? channelLabel(status.channel)}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
             {status.verdict
               ? status.verdict.superseded
