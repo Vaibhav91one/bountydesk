@@ -1,8 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Info } from "@phosphor-icons/react/ssr";
 
 import { bindTargetAction, requestRecheckAction } from "@/app/review/actions";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { refreshReportViews } from "@/lib/reports/live-keys";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import type { TargetProfileOption } from "@/lib/targets/bind";
 import type { TargetSuggestion } from "@/lib/targets/suggest";
+
+import { ConnectGuide } from "./connect-guide";
 
 /**
  * The bound target, and what a reviewer can do about it.
@@ -55,7 +58,8 @@ export function TargetControl({
   // Binding authorises execution against a target, so it never happens without a click on Bind,
   // and the picker is never pre-filled with an arbitrary first profile. The one exception is a
   // target matched from a link in the report, and that choice is labelled with the link it came
-  // from, so it cannot be a default nobody noticed. null is base-ui's own "nothing selected".
+  // from (in a tooltip beside the picker), so it cannot be a default nobody noticed. null is
+  // base-ui's own "nothing selected".
   const suggested =
     suggestion?.matched.find((match) => profiles.some((profile) => profile.id === match.profileId)) ??
     null;
@@ -71,16 +75,21 @@ export function TargetControl({
     );
   }
 
-  // Nothing to pick from is a deployment fact, not a reviewer's problem to solve here.
-  if (profiles.length === 0) {
-    return <span className="truncate text-body text-foreground">None bound</span>;
-  }
-
   // A report on its way out, or already closed, is not one to bind. bindTarget refuses these
   // server-side too; this only keeps the control from inviting an action that cannot work.
   const bindable = status.state !== "DELIVERING" && !TERMINAL.includes(status.state);
   if (!bindable) {
     return <span className="truncate text-body text-foreground">None bound</span>;
+  }
+
+  // Nothing to pick from. The report may still name a repository that could become a target.
+  if (profiles.length === 0) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="truncate text-body text-foreground">None bound</span>
+        {suggestion?.unconnected.length ? <ConnectGuide suggestion={suggestion} /> : null}
+      </div>
+    );
   }
 
   function bind() {
@@ -118,23 +127,27 @@ export function TargetControl({
             ))}
           </SelectContent>
         </Select>
+        {suggested && choice === suggested.profileId ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span
+                  className="inline-flex text-muted-foreground"
+                  aria-label={`Suggested because the report links ${suggested.fullName}`}
+                />
+              }
+            >
+              <Info className="size-4" />
+            </TooltipTrigger>
+            <TooltipContent>Suggested because the report links {suggested.fullName}</TooltipContent>
+          </Tooltip>
+        ) : null}
         <Button size="sm" onClick={bind} disabled={!choice || pending}>
           {pending ? "Binding…" : "Bind"}
         </Button>
+        {/* Nothing matched, so the report names a repository we cannot reproduce against yet. */}
+        {!suggested && suggestion?.unconnected.length ? <ConnectGuide suggestion={suggestion} /> : null}
       </div>
-      {suggested && choice === suggested.profileId ? (
-        <span className="whitespace-normal break-words text-meta text-muted-foreground">
-          Suggested because the report links {suggested.fullName}.
-        </span>
-      ) : null}
-      {suggestion?.unconnected.map((name) => (
-        <span key={name} className="whitespace-normal break-words text-meta text-muted-foreground">
-          The report links {name}, which has no connected target.{" "}
-          <Link href="/integrations" className="text-foreground underline-offset-4 hover:underline">
-            Connect it
-          </Link>
-        </span>
-      ))}
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
   );

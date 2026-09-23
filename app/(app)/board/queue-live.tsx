@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { Column, MASCOT_ON_CARD } from "@/components/queue-board";
-import { IntakeStrip } from "@/components/intake-strip";
+import { IntakeFailures } from "@/components/intake-failures";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { mascotKeyForState } from "@/lib/mascot/catalog";
@@ -63,6 +63,7 @@ export function QueueLive({ initial }: { initial: QueueColumnView[] }) {
       <header className="flex flex-wrap items-center gap-3 border-b border-border/50 px-8 py-7">
         <h1 className="text-title text-foreground">Review queue</h1>
         <Badge variant="outline">{total}</Badge>
+        <IntakeFailures refetchInterval={intakeInterval} />
 
         <div className="relative ml-auto w-full max-w-xs">
           <MagnifyingGlass className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -76,8 +77,6 @@ export function QueueLive({ initial }: { initial: QueueColumnView[] }) {
           />
         </div>
       </header>
-
-      <IntakeStrip refetchInterval={intakeInterval} />
 
       {empty ? (
         <div className="p-8">
