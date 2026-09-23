@@ -169,12 +169,23 @@ export const connectedRepository = pgTable(
     active: boolean("active").notNull().default(true),
     /** Repository archive state, tracked apart from the grant so neither overwrites the other. */
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    /**
+     * The repository this one was forked from, and the root of its fork chain, as GitHub reports
+     * them. Null for a repository that is not a fork, or one onboarding has not read yet. An email
+     * names the upstream project, while the connected repository is usually a fork of it, so these
+     * are what let a report's link find the fork's target. Display and matching only: nothing
+     * about access or scope is decided from them.
+     */
+    parentFullName: text("parent_full_name"),
+    sourceFullName: text("source_full_name"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     uniqueIndex("connected_repository_repo_id_key").on(t.repoId),
     index("connected_repository_installation_idx").on(t.installationId),
+    index("connected_repository_parent_idx").on(sql`lower(${t.parentFullName})`),
+    index("connected_repository_source_idx").on(sql`lower(${t.sourceFullName})`),
   ],
 );
 

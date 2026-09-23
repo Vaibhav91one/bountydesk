@@ -126,6 +126,7 @@ function deps(over: Partial<OnboardDeps>): OnboardDeps {
     // build agent, the behaviour these tests exercise. Tests of the review's own routing override it.
     runSandboxabilityReview: async () => ({ verdict: "unsure", reason: "" }),
     resolveCommit: async () => "a".repeat(40),
+    resolveLineage: async () => ({ parent: null, source: null }),
     provision: async () => ({ sandboxId: "sbx-verify", appPort: 3000 }),
     teardown: async () => {},
     leaseSeconds: 60,

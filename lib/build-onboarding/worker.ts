@@ -1,4 +1,4 @@
-import { db, eq, targetOnboarding } from "@/lib/db";
+import { connectedRepository, db, eq, targetOnboarding } from "@/lib/db";
 import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest } from "@/lib/targets/manifest";
@@ -14,7 +14,7 @@ import type { TrueForgeClient } from "@/lib/trueforge/client";
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
 import { classify, rawSourceReader } from "./classify";
 import { knownTargetHints } from "./known-target-hints";
-import { resolveRepositoryCommit } from "./source-identity";
+import { resolveRepositoryCommit, resolveRepositoryLineage, type RepositoryLineage } from "./source-identity";
 import { runOnboardingAgent, type RunOnboardingAgentInput } from "./onboarding-agent";
 import {
   runSandboxabilityReview,
@@ -57,6 +57,7 @@ export type OnboardDeps = {
   classify?: (repoFullName: string, resolvedCommitSha?: string) => Promise<BuildPlan>;
   /** Resolve the server-owned repository ref to an immutable commit before source reads/builds. */
   resolveCommit?: (repoFullName: string, sourceRef: string) => Promise<string>;
+  resolveLineage?: (repoFullName: string) => Promise<RepositoryLineage>;
   /** Run the onboarding agent for a repo the deterministic classifier could not flatten. Injectable so
    *  tests exercise the ladder without a live TrueForge turn; defaults to the real agent turn, which
    *  writes its result onto the row's build_plan. */
@@ -112,6 +113,7 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         // not-flattenable lands in UNSUPPORTED with the reason, an honest resting state a reviewer
         // reads, not a retried failure.
         await setOnboardingProgress(lease.id, "reading the repository").catch(() => undefined);
+        await recordLineage(lease.repoId, lease.repoFullName, deps.resolveLineage ?? resolveRepositoryLineage);
         if (!lease.resolvedCommitSha) {
           const resolveCommit = deps.resolveCommit ?? resolveRepositoryCommit;
           const resolvedCommitSha = await withHeartbeat(lease, leaseSeconds, deps.signal, () =>
@@ -526,5 +528,26 @@ async function withHeartbeat<T>(
     stopped = true;
     if (timer) clearTimeout(timer);
     await renewal.catch(() => undefined);
+  }
+}
+
+/**
+ * Record which repository this one was forked from, so an email that links the upstream project
+ * finds the fork's target. It is a convenience for matching, never a condition of onboarding, so
+ * any failure is logged and onboarding carries on.
+ */
+async function recordLineage(
+  repoId: number,
+  repoFullName: string,
+  resolve: (repoFullName: string) => Promise<RepositoryLineage>,
+): Promise<void> {
+  try {
+    const { parent, source } = await resolve(repoFullName);
+    await db
+      .update(connectedRepository)
+      .set({ parentFullName: parent, sourceFullName: source, updatedAt: new Date() })
+      .where(eq(connectedRepository.repoId, repoId));
+  } catch (error) {
+    console.warn(`could not record the fork lineage of ${repoFullName}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

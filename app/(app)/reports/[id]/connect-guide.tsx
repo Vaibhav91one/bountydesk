@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
@@ -11,10 +10,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import type { StepState } from "@/lib/reports/case-view";
-import type { TargetSuggestion } from "@/lib/targets/suggest";
+import type { MentionProgress, TargetSuggestion } from "@/lib/targets/suggest";
 import { cn } from "@/lib/utils";
 
 import { StepBadge } from "./lifecycle-step";
@@ -29,16 +27,45 @@ import { StepBadge } from "./lifecycle-step";
  * starts onboarding), approve its manifest. Forking is a link to GitHub's own fork page rather
  * than an API call, because creating a repository would need a far wider grant than the App has.
  */
-export function ConnectGuide({ suggestion }: { suggestion: TargetSuggestion }) {
-  const [open, setOpen] = useState(false);
-  const upstream = suggestion.unconnected[0];
-  if (!upstream) return null;
+export function ConnectGuide({
+  upstream,
+  progress,
+  connectLinks,
+  open,
+  onOpenChange,
+}: {
+  upstream: string;
+  /** Where the linked repository stands now, re-read while the guide is open. */
+  progress: MentionProgress | null;
+  connectLinks: TargetSuggestion["connectLinks"];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const status = progress?.status ?? "not-connected";
+  const connected = status !== "not-connected";
+  const ready = status === "ready";
+  const stopped = status === "failed" || status === "unsupported";
+  const fork = progress?.repoFullName ?? null;
+  const repoHref = fork ? `/connections?repo=${encodeURIComponent(fork)}` : "/connections";
+
+  const onboardNote: Record<string, React.ReactNode> = {
+    onboarding: "Onboarding is building the fork in a sandbox. This takes a few minutes.",
+    "awaiting-approval": "Onboarding proposed how to run it. Approve the manifest to create the target.",
+    failed: <span className="text-destructive">Onboarding failed: {progress?.reason ?? "no reason recorded"}.</span>,
+    unsupported: (
+      <span className="text-destructive">
+        It cannot be onboarded: {progress?.reason ?? "no reason recorded"}. This report stays analysis only.
+      </span>
+    ),
+  };
 
   const steps: { state: StepState; title: string; body: React.ReactNode }[] = [
     {
-      state: "current",
+      state: connected ? "done" : "current",
       title: "Fork it",
-      body: (
+      body: connected ? (
+        fork && fork.toLowerCase() !== upstream.toLowerCase() ? `Forked as ${fork}.` : `${upstream} is connected.`
+      ) : (
         <>
           Fork {upstream} into an account BountyDesk is installed on.{" "}
           <ExternalLink href={`https://github.com/${upstream}/fork`}>Fork on GitHub</ExternalLink>
@@ -46,48 +73,51 @@ export function ConnectGuide({ suggestion }: { suggestion: TargetSuggestion }) {
       ),
     },
     {
-      state: "pending",
+      state: connected ? "done" : "pending",
       title: "Add the fork to BountyDesk",
-      body: (
+      body: connected ? (
+        `${fork} is connected, and onboarding has started.`
+      ) : (
         <>
           Give the App access to the fork. Onboarding starts on its own once it is added.{" "}
-          {suggestion.connectLinks.map((link) => (
+          {connectLinks.map((link) => (
             <ExternalLink key={link.href} href={link.href}>
-              {suggestion.connectLinks.length > 1 ? `Manage ${link.account}` : "Manage repositories"}
+              {connectLinks.length > 1 ? `Manage ${link.account}` : "Manage repositories"}
             </ExternalLink>
           ))}
         </>
       ),
     },
     {
-      state: "pending",
+      state: ready ? "done" : stopped ? "skipped" : connected ? "current" : "pending",
       title: "Approve its manifest",
-      body: (
+      body: ready ? (
+        "The target is built and approved."
+      ) : (
         <>
-          BountyDesk builds the fork in a sandbox and proposes how to run it. A reviewer approves it on{" "}
-          <Link href="/connections" className="text-foreground underline-offset-4 hover:underline">
-            Connections
+          {onboardNote[status] ?? "BountyDesk builds the fork in a sandbox and proposes how to run it."}{" "}
+          <Link href={repoHref} className="text-foreground underline-offset-4 hover:underline">
+            Open on Connections
           </Link>
-          .
         </>
       ),
     },
     {
-      state: "pending",
+      state: ready ? "current" : "pending",
       title: "Bind and reproduce",
-      body: "The new target appears here, already selected. Bind it, then Reproduce.",
+      body: "The new target appears in the picker, already selected. Bind it, then Reproduce.",
     },
   ];
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" variant="outline">Connect</Button>} />
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
+        {/* Right padding keeps the description clear of the dialog's close button. */}
+        <DialogHeader className="pr-10">
           <DialogTitle>Reproduce against {upstream}</DialogTitle>
           <DialogDescription>
-            BountyDesk only reproduces against repositories that are connected and onboarded, so this
-            report can be analysed but not reproduced yet.
+            BountyDesk only reproduces against repositories that are connected and onboarded. Each step
+            below updates on its own as it completes.
           </DialogDescription>
         </DialogHeader>
         <ol className="flex flex-col">
@@ -103,16 +133,23 @@ export function ConnectGuide({ suggestion }: { suggestion: TargetSuggestion }) {
                 <span
                   className={cn(
                     "text-body font-medium",
-                    step.state === "pending" ? "text-muted-foreground" : "text-foreground",
+                    step.state === "pending" || step.state === "skipped" ? "text-muted-foreground" : "text-foreground",
                   )}
                 >
                   {step.title}
                 </span>
-                <span className="text-meta text-muted-foreground">{step.body}</span>
+                <span className="break-words text-meta text-muted-foreground">{step.body}</span>
               </div>
             </li>
           ))}
         </ol>
+        {ready ? (
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => onOpenChange(false)}>
+              Close and bind
+            </Button>
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

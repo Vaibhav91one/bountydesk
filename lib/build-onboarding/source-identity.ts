@@ -26,6 +26,36 @@ export async function resolveRepositoryCommit(repoFullName: string, sourceRef: s
   return sha.toLowerCase();
 }
 
+export type RepositoryLineage = { parent: string | null; source: string | null };
+
+const FULL_NAME = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
+/**
+ * Which repository this one was forked from, and the root of that chain, read anonymously like
+ * the commit above (onboarding only reads public repositories). A report usually names the
+ * upstream project, not the fork that was connected, and these names are how its link finds the
+ * fork. Only well-formed names are kept, since the result is stored and later matched on.
+ */
+export async function resolveRepositoryLineage(
+  repoFullName: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<RepositoryLineage> {
+  if (!FULL_NAME.test(repoFullName)) throw new Error("cannot read lineage for an invalid repository name");
+  const response = await fetchImpl(`https://api.github.com/repos/${repoFullName}`, {
+    headers: { accept: "application/vnd.github+json", "user-agent": "bountydesk-onboarding" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`could not read ${repoFullName}: GitHub returned ${response.status}`);
+  const repo = (await response.json()) as {
+    fork?: unknown;
+    parent?: { full_name?: unknown };
+    source?: { full_name?: unknown };
+  };
+  const name = (value: unknown) => (typeof value === "string" && FULL_NAME.test(value) ? value : null);
+  if (repo.fork !== true) return { parent: null, source: null };
+  return { parent: name(repo.parent?.full_name), source: name(repo.source?.full_name) };
+}
+
 export type SourceIdentityInput = {
   repoFullName: string;
   resolvedCommitSha: string;

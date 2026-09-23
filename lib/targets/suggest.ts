@@ -6,7 +6,9 @@ import {
   githubInstallation,
   inArray,
   isNull,
+  or,
   sql,
+  targetOnboarding,
   targetProfile,
 } from "@/lib/db";
 import { installUrl } from "@/lib/auth/oauth";
@@ -59,11 +61,32 @@ export function repositoryMentions(text: string): string[] {
   return [...found.values()];
 }
 
+/** How far a linked repository is from being something a report can be reproduced against. */
+export type MentionStatus =
+  | "ready"
+  | "onboarding"
+  | "awaiting-approval"
+  | "failed"
+  | "unsupported"
+  | "not-connected";
+
+export type MentionProgress = {
+  /** The link as the report spelled it. */
+  name: string;
+  status: MentionStatus;
+  /** The connected repository standing in for it: itself, or a fork of it. Null when none. */
+  repoFullName: string | null;
+  /** Why onboarding stopped, for failed and unsupported. */
+  reason: string | null;
+};
+
 export type TargetSuggestion = {
-  /** Linked repositories that are connected, granted, and own a built target. */
-  matched: { profileId: string; profileName: string; fullName: string }[];
+  /** Linked repositories whose connected repository, or fork, has a live grant and a built target. */
+  matched: { profileId: string; profileName: string; fullName: string; mention: string }[];
   /** Linked repositories BountyDesk holds no usable target for, as the report spelled them. */
   unconnected: string[];
+  /** Where each linked repository stands, in the order the report mentioned them. */
+  progress: MentionProgress[];
   /**
    * Where a reviewer adds a repository to the App: one link per live installation, or the
    * install page when there is none. Only filled when something is unconnected.
@@ -71,41 +94,97 @@ export type TargetSuggestion = {
   connectLinks: { account: string; href: string }[];
 };
 
+// Most advanced first: when a link matches several connected repositories (the project itself
+// and a fork, say), the one closest to a reproduction is the one worth showing.
+const RANK: MentionStatus[] = ["ready", "awaiting-approval", "onboarding", "failed", "unsupported", "not-connected"];
+
 export async function suggestTargets(body: string): Promise<TargetSuggestion> {
   const mentions = repositoryMentions(body);
-  if (mentions.length === 0) return { matched: [], unconnected: [], connectLinks: [] };
+  if (mentions.length === 0) return { matched: [], unconnected: [], progress: [], connectLinks: [] };
   const keys = mentions.map((name) => name.toLowerCase());
 
+  // A repository stands in for a link when it is the linked repository, or a fork whose parent
+  // or fork-chain root is. The link only ever selects among rows the server already holds.
   const rows = await db
     .select({
       fullName: connectedRepository.fullName,
+      parentFullName: connectedRepository.parentFullName,
+      sourceFullName: connectedRepository.sourceFullName,
       active: connectedRepository.active,
       archivedAt: connectedRepository.archivedAt,
       installationSuspendedAt: githubInstallation.suspendedAt,
       installationDeletedAt: githubInstallation.deletedAt,
       profileId: targetProfile.id,
       profileName: targetProfile.name,
+      profileRetiredAt: targetProfile.retiredAt,
+      onboardingState: targetOnboarding.state,
+      onboardingError: targetOnboarding.lastError,
+      buildPlan: targetOnboarding.buildPlan,
     })
     .from(connectedRepository)
     .innerJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
-    .innerJoin(targetProfile, eq(connectedRepository.targetProfileId, targetProfile.id))
+    .leftJoin(targetProfile, eq(connectedRepository.targetProfileId, targetProfile.id))
+    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
     .where(
-      and(
+      or(
         inArray(sql`lower(${connectedRepository.fullName})`, keys),
-        isNull(targetProfile.retiredAt),
+        inArray(sql`lower(${connectedRepository.parentFullName})`, keys),
+        inArray(sql`lower(${connectedRepository.sourceFullName})`, keys),
       ),
     );
 
-  const live = rows.filter(grantIsLive);
-  const matched = keys.flatMap((key) =>
-    live
-      .filter((row) => row.fullName.toLowerCase() === key)
-      .map(({ profileId, profileName, fullName }) => ({ profileId, profileName, fullName })),
-  );
-  const unconnected = mentions.filter(
-    (name) => !matched.some((m) => m.fullName.toLowerCase() === name.toLowerCase()),
-  );
-  return { matched, unconnected, connectLinks: unconnected.length ? await connectLinks() : [] };
+  type Row = (typeof rows)[number];
+  const statusOf = (row: Row): MentionStatus => {
+    // A revoked, archived or suspended grant is as good as not connected: it cannot be bound.
+    if (!grantIsLive(row)) return "not-connected";
+    if (row.profileId && !row.profileRetiredAt) return "ready";
+    switch (row.onboardingState) {
+      case "AWAITING_APPROVAL":
+        return "awaiting-approval";
+      case "FAILED":
+        return "failed";
+      case "UNSUPPORTED":
+        return "unsupported";
+      case null:
+        // Connected but never onboarded, which is what happens to a private repository.
+        return "unsupported";
+      default:
+        return "onboarding";
+    }
+  };
+  const reasonOf = (row: Row, status: MentionStatus): string | null => {
+    if (status === "failed") return row.onboardingError;
+    if (status !== "unsupported") return null;
+    if (!row.onboardingState) return "It was connected but not onboarded, which is what happens to a private repository.";
+    return (row.buildPlan as { reason?: string } | null)?.reason ?? null;
+  };
+
+  const matched: TargetSuggestion["matched"] = [];
+  const progress: MentionProgress[] = mentions.map((name) => {
+    const key = name.toLowerCase();
+    const candidates = rows
+      .filter((row) =>
+        [row.fullName, row.parentFullName, row.sourceFullName].some((n) => n?.toLowerCase() === key),
+      )
+      .map((row) => ({ row, status: statusOf(row) }))
+      .sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status));
+    const best = candidates[0];
+    if (!best || best.status === "not-connected") {
+      return { name, status: "not-connected", repoFullName: null, reason: null };
+    }
+    if (best.status === "ready" && best.row.profileId && best.row.profileName) {
+      matched.push({
+        profileId: best.row.profileId,
+        profileName: best.row.profileName,
+        fullName: best.row.fullName,
+        mention: name,
+      });
+    }
+    return { name, status: best.status, repoFullName: best.row.fullName, reason: reasonOf(best.row, best.status) };
+  });
+
+  const unconnected = progress.filter((p) => p.status !== "ready").map((p) => p.name);
+  return { matched, unconnected, progress, connectLinks: unconnected.length ? await connectLinks() : [] };
 }
 
 async function connectLinks(): Promise<TargetSuggestion["connectLinks"]> {

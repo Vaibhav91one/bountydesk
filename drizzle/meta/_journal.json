@@ -232,6 +232,13 @@
       "when": 1790176018307,
       "tag": "0032_conscious_lockjaw",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790184807240,
+      "tag": "0033_aberrant_onslaught",
+      "breakpoints": true
     }
   ]
 }

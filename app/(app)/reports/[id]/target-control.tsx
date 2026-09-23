@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info } from "@phosphor-icons/react/ssr";
 
 import { bindTargetAction, requestRecheckAction } from "@/app/review/actions";
@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { refreshReportViews } from "@/lib/reports/live-keys";
+import { fetchLive } from "@/lib/reports/status-query";
 import type { CaseLiveView } from "@/lib/reports/case-view";
 import type { TargetProfileOption } from "@/lib/targets/bind";
 import type { TargetSuggestion } from "@/lib/targets/suggest";
@@ -43,8 +44,8 @@ import { ConnectGuide } from "./connect-guide";
 export function TargetControl({
   reportId,
   status,
-  profiles,
-  suggestion,
+  profiles: initialProfiles,
+  suggestion: initialSuggestion,
 }: {
   reportId: string;
   status: CaseLiveView;
@@ -55,6 +56,21 @@ export function TargetControl({
 }) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
+  // Re-read while the report names a repository that is not ready yet, so a fork that finishes
+  // onboarding appears in the picker, already selected, without a reload.
+  const waiting = !status.target && (initialSuggestion?.unconnected.length ?? 0) > 0;
+  const { data } = useQuery({
+    queryKey: ["report-targets", reportId],
+    queryFn: () =>
+      fetchLive<{ profiles: TargetProfileOption[]; suggestion: TargetSuggestion | null }>(
+        `/api/reports/${reportId}/targets`,
+      ),
+    initialData: { profiles: initialProfiles, suggestion: initialSuggestion },
+    refetchInterval: (query) =>
+      waiting && (query.state.data?.suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false,
+  });
+  const { profiles, suggestion } = data;
+  const [guideFor, setGuideFor] = useState<string | null>(null);
   // Binding authorises execution against a target, so it never happens without a click on Bind,
   // and the picker is never pre-filled with an arbitrary first profile. The one exception is a
   // target matched from a link in the report, and that choice is labelled with the link it came
@@ -63,8 +79,22 @@ export function TargetControl({
   const suggested =
     suggestion?.matched.find((match) => profiles.some((profile) => profile.id === match.profileId)) ??
     null;
-  const [choice, setChoice] = useState<string | null>(suggested?.profileId ?? null);
+  // What the reviewer picked, else the suggestion. Derived rather than seeded once, so a target
+  // that becomes ready while the page is open is selected too.
+  const [picked, setChoice] = useState<string | null>(null);
+  const choice = picked ?? suggested?.profileId ?? null;
   const [error, setError] = useState<string | null>(null);
+
+  const guide =
+    guideFor && suggestion ? (
+      <ConnectGuide
+        upstream={guideFor}
+        progress={suggestion.progress.find((p) => p.name === guideFor) ?? null}
+        connectLinks={suggestion.connectLinks}
+        open
+        onOpenChange={(next) => !next && setGuideFor(null)}
+      />
+    ) : null;
 
   if (status.target) {
     return (
@@ -87,7 +117,10 @@ export function TargetControl({
     return (
       <div className="flex flex-wrap items-center gap-2">
         <span className="truncate text-body text-foreground">None bound</span>
-        {suggestion?.unconnected.length ? <ConnectGuide suggestion={suggestion} /> : null}
+        {suggestion?.unconnected.length ? (
+          <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
+        ) : null}
+        {guide}
       </div>
     );
   }
@@ -139,17 +172,32 @@ export function TargetControl({
             >
               <Info className="size-4" />
             </TooltipTrigger>
-            <TooltipContent>Suggested because the report links {suggested.fullName}</TooltipContent>
+            <TooltipContent>
+              {suggested.fullName.toLowerCase() === suggested.mention.toLowerCase()
+                ? `Suggested because the report links ${suggested.fullName}`
+                : `Suggested because the report links ${suggested.mention}, and its fork ${suggested.fullName} is connected`}
+            </TooltipContent>
           </Tooltip>
         ) : null}
         <Button size="sm" onClick={bind} disabled={!choice || pending}>
           {pending ? "Binding…" : "Bind"}
         </Button>
         {/* Nothing matched, so the report names a repository we cannot reproduce against yet. */}
-        {!suggested && suggestion?.unconnected.length ? <ConnectGuide suggestion={suggestion} /> : null}
+        {!suggested && suggestion?.unconnected.length ? (
+          <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
+        ) : null}
       </div>
+      {guide}
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
+  );
+}
+
+function ConnectButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button size="sm" variant="outline" onClick={onClick}>
+      Connect
+    </Button>
   );
 }
 
