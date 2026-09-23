@@ -587,3 +587,99 @@ test("createSnapshot refuses a digest-pinned image name", async () => {
     UnsafeSandboxSpec,
   );
 });
+
+/**
+ * A fake Daytona for the build-sandbox fallback: `tier` decides whether a per-sandbox allow-list
+ * is refused, and `probeExit` is what the off-policy curl inside the sandbox exits with.
+ */
+function fakeBuildDaytona(opts: {
+  tier: "open" | "restricted";
+  probeExit?: number;
+  refusal?: string;
+  probeFails?: boolean;
+}) {
+  const seen = { creates: [] as Record<string, unknown>[], probes: 0, deleted: false };
+  const stub = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    if (url.includes("/snapshots/")) {
+      return json({ id: "snap-1", name: "base-dind", imageName: null, state: "active", cpu: 2, mem: 4, disk: 20 });
+    }
+    if (url.endsWith("/sandbox") && method === "POST") {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      seen.creates.push(body);
+      if (opts.tier === "restricted" && "domainAllowList" in body) {
+        return json(
+          { statusCode: 400, message: opts.refusal ?? "Network access is restricted and cannot be overridden at the sandbox level. Remove domainAllowList from the request." },
+          400,
+        );
+      }
+      return json({ id: "sb-1", state: "started", public: false, toolboxProxyUrl: "https://proxy.test/toolbox", networkBlockAll: false, networkAllowList: null, domainAllowList: body.domainAllowList ?? null, snapshot: "snap-1", runnerId: null, sandboxClass: null });
+    }
+    if (url.includes("/process/execute")) {
+      seen.probes += 1;
+      if (opts.probeFails) return json({ message: "toolbox unavailable" }, 502);
+      return json({ exitCode: opts.probeExit ?? 6, result: "" });
+    }
+    if (url.includes("/sandbox/sb-1") && method === "DELETE") {
+      seen.deleted = true;
+      return new Response(null, { status: 204 });
+    }
+    if (url.includes("/sandbox/sb-1")) return seen.deleted ? json({ message: "not found" }, 404) : json({ id: "sb-1", state: "started" });
+    return json({ message: `unexpected ${method} ${url}` }, 500);
+  }) as typeof fetch;
+  return { stub, seen };
+}
+
+const buildSpec = { snapshot: "base-dind", cpu: 2, memoryGb: 4, diskGb: 20, ttlMinutes: 30 };
+
+test("a build sandbox keeps its own allow-list whenever the tier allows one", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "open" });
+  await withFetch(stub, async () => {
+    const sandbox = await createBuildSandbox(buildSpec, ["registry.npmjs.org", "github.com"]);
+    assert.equal(sandbox.egressPolicy, "allow-list");
+  });
+  assert.equal(seen.creates.length, 1);
+  assert.equal(seen.creates[0].domainAllowList, "registry.npmjs.org,github.com");
+  assert.equal(seen.probes, 0);
+});
+
+test("on a restricted tier the build falls back to the organization policy after proving egress is closed", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeExit: 6 });
+  await withFetch(stub, async () => {
+    const sandbox = await createBuildSandbox(buildSpec, ["registry.npmjs.org"]);
+    assert.equal(sandbox.egressPolicy, "organization-policy");
+  });
+  assert.equal(seen.creates.length, 2);
+  assert.equal("domainAllowList" in seen.creates[1], false);
+  // Never widened to block-all false with anything else changed.
+  assert.equal(seen.creates[1].networkBlockAll, false);
+  assert.equal(seen.probes, 1);
+  assert.equal(seen.deleted, false);
+});
+
+test("a fallback sandbox that can reach the open internet, or cannot be checked, is destroyed", async () => {
+  for (const probeExit of [0, 127]) {
+    const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeExit });
+    await withFetch(stub, async () => {
+      await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), UnsafeSandboxSpec, String(probeExit));
+    });
+    assert.equal(seen.deleted, true, String(probeExit));
+  }
+});
+
+test("any other refusal is not retried without the allow-list", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "restricted", refusal: "snapshot is not active" });
+  await withFetch(stub, async () => {
+    await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /snapshot is not active/);
+  });
+  assert.equal(seen.creates.length, 1);
+});
+
+test("a fallback sandbox whose egress probe errors is destroyed, not left to its TTL", async () => {
+  const { stub, seen } = fakeBuildDaytona({ tier: "restricted", probeFails: true });
+  await withFetch(stub, async () => {
+    await assert.rejects(createBuildSandbox(buildSpec, ["registry.npmjs.org"]), /could not verify its egress/);
+  });
+  assert.equal(seen.deleted, true);
+});
