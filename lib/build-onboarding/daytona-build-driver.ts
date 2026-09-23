@@ -171,6 +171,12 @@ export function createDaytonaBuildDriver(): BuildDriver {
         },
         allowList,
       );
+      // Recorded at the top of the stored build log, so a reviewer approving the manifest can see
+      // when a build ran under Daytona's organization policy instead of this plan's allow-list.
+      const egressNote =
+        sandbox.egressPolicy === "organization-policy"
+          ? "[egress] Daytona organization policy: this account's tier refused a per-sandbox allow-list, and the sandbox was checked to have no open internet.\n\n"
+          : "";
 
       try {
         await run(sandbox, `git clone --no-checkout ${shellArg(cloneUrl)} /work/source`);
@@ -185,7 +191,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
         // A mesh builds one image per service and registers one snapshot each, so it owns the whole
         // push-and-register flow rather than the single-image path below.
         if (plan.strategy === "compose-mesh") {
-          return await buildMesh(sandbox, plan, {
+          const mesh = await buildMesh(sandbox, plan, {
             ghcrNamespace,
             pushToken,
             slug,
@@ -193,6 +199,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
             resolvedCommitSha,
             sourceArchiveDigest: input.sourceArchiveDigest,
           });
+          return { ...mesh, buildLog: `${egressNote}${mesh.buildLog}` };
         }
 
         const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
@@ -225,7 +232,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
           imageDigest: digest,
           snapshotId: snapshot.id,
           dockerfileText,
-          buildLog,
+          buildLog: `${egressNote}${buildLog}`,
           buildMarker,
           buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest, {
             repoFullName: input.repoFullName,
