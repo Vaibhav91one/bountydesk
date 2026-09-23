@@ -52,7 +52,7 @@ test("the manifest enables sandbox and dynamic sub-agents", () => {
 });
 
 test("the BountyDesk agent starts provisioned-target contact through probe_target", () => {
-  assert.match(agentDefinition.manifest.instructions, /Start by calling probe_target with method GET and path \//);
+  assert.match(agentDefinition.manifest.instructions, /Then call probe_target with method GET and path \//);
   assert.match(agentDefinition.manifest.instructions, /Do not call scope_check for the target name/);
 });
 
@@ -113,7 +113,8 @@ test("with no authorized target the agent still may not touch anything, only ana
   );
   assert.match(instructions, /publish_verdict will refuse a REPRODUCED or NOT_REPRODUCED draft/);
   // And the analysis it now does is reasoning over the report text, not execution.
-  assert.match(instructions, /bountydesk-security-audit in guidance mode/);
+  assert.match(instructions, /bountydesk-security-audit\/ATTACK-CLASSES\.md/);
+  assert.match(instructions, /in guidance mode, never as a full audit/);
   assert.match(instructions, /Draft ANALYSIS_ONLY from the report text alone/);
 });
 
@@ -128,4 +129,21 @@ test("the vendored audit skill is steered to guidance mode, never the full audit
   assert.equal(parseFrontmatterName(content), "bountydesk-security-audit");
   assert.match(content, /GUIDANCE MODE ONLY/);
   assert.match(content, /Never run the six-phase full audit/);
+});
+
+test("every skill file the instructions tell the agent to read exists in the repo", () => {
+  // TrueForge only shows the model a skill's name and description, and gpt-5-mini never opened a
+  // skill it was merely told to "load". The instructions now name exact files to cat, so a renamed
+  // file would leave the agent reading nothing while the run carried on as if it had.
+  const instructions = agentDefinition.manifest.instructions;
+  const paths = [...instructions.matchAll(/\/opt\/tf\/skills\/bountydesk-([a-z-]+)\/([A-Z-]+\.md)/g)];
+  assert.ok(paths.length >= 3, "the recon, validation and audit files are named explicitly");
+  for (const [whole, dirName, file] of paths) {
+    const local = path.join(process.cwd(), "skills", dirName, file);
+    assert.doesNotThrow(() => readFileSync(local), `${whole} has no ${local}`);
+  }
+  // Recon and validation come before the first probe, not after it.
+  assert.ok(
+    instructions.indexOf("bountydesk-recon/SKILL.md") < instructions.indexOf("call probe_target with method GET and path /"),
+  );
 });
