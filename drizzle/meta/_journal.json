@@ -225,6 +225,13 @@
       "when": 1790160386563,
       "tag": "0031_curved_war_machine",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790176018307,
+      "tag": "0032_conscious_lockjaw",
+      "breakpoints": true
     }
   ]
 }

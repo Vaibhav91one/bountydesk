@@ -25,6 +25,7 @@ import { sweepExpiredLeases as sweepApprovalSubmissions } from "@/lib/approval-s
 import { submitApprovalOnce } from "@/lib/approval-submission/worker";
 import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
+import { adviseOnce } from "@/lib/delivery/advisory";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
 import { onboardOnce } from "@/lib/build-onboarding/worker";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
@@ -207,6 +208,14 @@ async function main(): Promise<void> {
       claimOnce: (signal) =>
         deliverOnce(deliveryOwner, { leaseSeconds: LEASE_SECONDS, signal }),
       sweepOnce: sweepDeliveries,
+      claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+    },
+    {
+      // Rare and after delivery. No sweeper: claiming pushes next_attempt_at forward, so a row
+      // whose worker died is simply claimable again once that passes.
+      name: "owner-advisory",
+      claimOnce: (signal) => adviseOnce({ signal }),
+      sweepOnce: async () => null,
       claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
     },
     {

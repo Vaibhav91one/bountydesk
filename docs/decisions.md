@@ -216,6 +216,12 @@ Both scenarios run against the one pinned image; Scenario 2 is Backup C in the r
 
 **Minimum permissions (MVP):** **Metadata: read** (auto) + **Issues: read & write**. Explicitly **NOT** contents / actions / deployments / secrets / workflows / admin.
 
+Amended 2026-09-23: **Repository security advisories: read & write** is added so a reproduced
+email report can reach the repository's owner. After the verdict is delivered to the reporter, a
+reviewer can open a private draft advisory carrying that same approved verdict. A public issue
+was rejected because it would disclose a working reproduction before a fix. An installation that
+has not accepted the new permission gets a refused send with the reason shown, not a fallback.
+
 Amended 2026-08-27: the dynamic tier in Q20 downloads connected public repositories
 anonymously, with no source token, and the demo fork is public. Contents: read is required for
 private source. The intended private-repository policy accepts and triages a signed issue, then

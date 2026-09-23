@@ -12,6 +12,7 @@ import type { TargetProfileOption } from "@/lib/targets/bind";
 import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 import { RecheckActions } from "./recheck-actions";
+import { OwnerAdvisoryControl } from "./owner-advisory-control";
 import { TargetControl } from "./target-control";
 
 /** One fact. The value is always something the database holds. */
@@ -42,6 +43,7 @@ export function StatusCard({
   targetProfiles,
   suggestion,
   intakeRepository,
+  repositoryFullName,
   reportId,
 }: {
   status: CaseLiveView;
@@ -52,6 +54,8 @@ export function StatusCard({
   suggestion: TargetSuggestion | null;
   /** Where the report was filed: the repository for a GitHub report, null for any other channel. */
   intakeRepository: string | null;
+  /** The connected repository that owns the bound target, when one does. */
+  repositoryFullName: string | null;
   reportId: string;
 }) {
   return (
@@ -102,6 +106,15 @@ export function StatusCard({
               ? "None yet"
               : `${status.eventCount} ${status.eventCount === 1 ? "event" : "events"}`}
           </Fact>
+          {status.channel === "email" && repositoryFullName ? (
+            <Fact label="Repository owner">
+              <OwnerAdvisoryControl
+                reportId={reportId}
+                status={status}
+                repositoryFullName={repositoryFullName}
+              />
+            </Fact>
+          ) : null}
           <Fact label="Last change">
             <time dateTime={status.updatedAt}>{formatStamp(new Date(status.updatedAt))}</time>
           </Fact>

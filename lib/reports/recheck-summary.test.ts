@@ -54,6 +54,7 @@ function caseFile(overrides: Partial<FileWithRun> = {}): FileWithRun {
     approval: null,
     delivery: null,
     handoff: null,
+    ownerAdvisory: null,
     awaitingVerdictId: null,
     events: [],
     artifacts: [],

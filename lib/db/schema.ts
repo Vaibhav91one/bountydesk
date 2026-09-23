@@ -689,6 +689,48 @@ export const deliveryAttempt = pgTable(
   ],
 );
 
+/**
+ * A private draft security advisory opened on the connected repository for an email report,
+ * after its verdict was delivered to the reporter.
+ *
+ * Separate from outbound_delivery on purpose: that outbox is what moves a report to DELIVERED,
+ * and this runs only once the report is already there. Like the outbox it has no body column;
+ * the sender reads the immutable verdict.payload and checks it against the approved hash.
+ * next_attempt_at doubles as the lease: claiming pushes it forward, so a crashed send becomes
+ * claimable again later and the marker read-back keeps the retry from opening a second one.
+ */
+export const ownerAdvisory = pgTable(
+  "owner_advisory",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    verdictId: uuid("verdict_id")
+      .notNull()
+      .references(() => verdict.id, { onDelete: "restrict" }),
+    connectedRepositoryId: uuid("connected_repository_id")
+      .notNull()
+      .references(() => connectedRepository.id, { onDelete: "restrict" }),
+    approvedContentHash: text("approved_content_hash").notNull(),
+    requestedBy: text("requested_by").notNull(),
+    state: deliveryState("state").notNull().default("PENDING"),
+    ghsaId: text("ghsa_id"),
+    htmlUrl: text("html_url"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("owner_advisory_report_key").on(t.reportId),
+    index("owner_advisory_claim_idx").on(t.state, t.nextAttemptAt),
+  ],
+);
+
 /** Append-only audit trail. The one writer that runs without approval. */
 export const sessionEvent = pgTable(
   "session_event",
