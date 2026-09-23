@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   SOURCE_URL,
   landingRedirectEnabled,
+  landingRedirectTarget,
   shouldRedirectToSource,
 } from "./landing-redirect";
 
@@ -89,4 +90,30 @@ test("does not redirect the configured app host", () => {
     false,
   );
   assert.equal(shouldRedirectToSource("/login", "bounty-desk.vaibhav.quest", env), true);
+});
+
+test("sends a landing page path to the same path on the app host", () => {
+  const env = { APP_BASE_URL: "https://app.bountydesk.vaibhav.quest" };
+
+  assert.equal(
+    landingRedirectTarget("/login", "", env),
+    "https://app.bountydesk.vaibhav.quest/login",
+  );
+  assert.equal(
+    landingRedirectTarget("/reports/a1", "?tab=evidence", env),
+    "https://app.bountydesk.vaibhav.quest/reports/a1?tab=evidence",
+  );
+  // new URL("//evil.example", base) would leave the app host; concatenation cannot.
+  assert.equal(
+    new URL(landingRedirectTarget("//evil.example/x", "", env)).host,
+    "app.bountydesk.vaibhav.quest",
+  );
+});
+
+test("keeps the repository fallback for API paths and when no app host is set", () => {
+  const env = { APP_BASE_URL: "https://app.bountydesk.vaibhav.quest" };
+
+  assert.equal(landingRedirectTarget("/api/internal/jobs/tick", "", env), SOURCE_URL);
+  assert.equal(landingRedirectTarget("/login", "", {}), SOURCE_URL);
+  assert.equal(landingRedirectTarget("/login", "", { APP_BASE_URL: "not a url" }), SOURCE_URL);
 });

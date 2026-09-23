@@ -57,3 +57,23 @@ export function shouldRedirectToSource(
 
   return !passthroughPrefixes.some((prefix) => pathname.startsWith(prefix));
 }
+
+/**
+ * Where a redirected landing request goes.
+ *
+ * A page path goes to the same path on the app host, so the landing page's "Get started",
+ * "Approve" and legal links end up at sign-in instead of the source code. The origin and path
+ * are concatenated rather than resolved with `new URL(path, base)`, which would send `//host`
+ * to another host. API paths and deployments with no app host keep the repository fallback:
+ * an API call that reached the landing host was not meant for production.
+ */
+export function landingRedirectTarget(
+  pathname: string,
+  search: string,
+  env: LandingRedirectEnv = process.env,
+): string {
+  const appHost = configuredAppHost(env);
+  if (!appHost || pathname.startsWith("/api/")) return SOURCE_URL;
+
+  return `https://${appHost}${pathname}${search}`;
+}
