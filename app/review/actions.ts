@@ -27,6 +27,7 @@ import {
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { isReportId } from "@/lib/reports/case";
+import { bindTarget } from "@/lib/targets/bind";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
@@ -341,6 +342,33 @@ export async function requestRecheckAction(
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);
   return result.ok ? { ok: true } : { ok: false, error: result.reason };
+}
+
+/**
+ * Bind a reproduction target to a report that arrived without one.
+ *
+ * Email and upload reports have no connected repository to inherit a target from, so they land
+ * with none and can only ever be ANALYSIS_ONLY. This is how a human gives one a target, and it
+ * is the only way: the profile is chosen from the server's own rows, never from anything the
+ * reporter wrote. The verdict gate in publish-verdict.ts is unchanged; this satisfies it rather
+ * than weakening it.
+ */
+export async function bindTargetAction(
+  reportId: string,
+  profileId: string,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId) || !isReportId(profileId)) {
+    return { ok: false, error: "That report or target is not valid." };
+  }
+  try {
+    const result = await bindTarget(reportId, profileId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    revalidateReportViews(reportId);
+    return { ok: true };
+  } catch (error) {
+    return thrownActionError(error, "bind");
+  }
 }
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {

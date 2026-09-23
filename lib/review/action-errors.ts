@@ -1,11 +1,16 @@
 export const RUN_NOT_FOUND = "The re-check run was not found.";
 
-export type RecheckAction = "retry" | "cancel";
+/** The reviewer actions whose thrown failures get a generic, non-leaking message. */
+export type RecheckAction = "retry" | "cancel" | "bind";
+
+const FAILURE: Record<RecheckAction, string> = {
+  retry: "Could not retry the re-check.",
+  cancel: "Could not cancel the re-check.",
+  bind: "Could not bind that target.",
+};
 
 export function genericFailure(action: RecheckAction): string {
-  return action === "retry"
-    ? "Could not retry the re-check."
-    : "Could not cancel the re-check.";
+  return FAILURE[action];
 }
 
 export function thrownActionError(_caught: unknown, action: RecheckAction): {

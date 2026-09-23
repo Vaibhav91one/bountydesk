@@ -5,6 +5,7 @@ import { ArrowLeft } from "@phosphor-icons/react/ssr";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { requireReviewer } from "@/lib/auth/dal";
 import { isReportId, readCase } from "@/lib/reports/case";
+import { listTargetProfiles } from "@/lib/targets/bind";
 import { caseLiveView } from "@/lib/reports/case-view";
 
 import { CaseApproval } from "./case-approval";
@@ -98,6 +99,9 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // A uuid that does not exist and a string that is not a uuid are the same answer to a
   // reviewer, and letting the malformed one reach the database only produces a 500.
   const file = isReportId(id) ? await readCase(id) : null;
+  // Only a report with no bound target can use these, and only a reviewer sees this page at all.
+  // Read here rather than in the client component so a browser never asks what targets exist.
+  const targetProfiles = file && !file.target ? await listTargetProfiles() : [];
   if (!file) notFound();
 
   const initial = caseLiveView(file);
@@ -168,6 +172,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         initial={initial}
         issueUrl={file.issueUrl}
         repositoryFullName={file.repositoryFullName}
+        targetProfiles={targetProfiles}
       />
     </main>
   );

@@ -390,7 +390,13 @@ export async function requestRecheck(
         parentRunId: parentRun.id,
         reason: "REVIEWER_GUIDANCE",
         status: "PENDING",
-        targetProfileId: parentRun.targetProfileId,
+        // The report's target, not the parent run's. The identity hash below is already computed
+        // from the report's current profile, so inheriting the parent's would disagree with it
+        // the moment a reviewer binds a target to a report that had none: the run would carry
+        // null while the hash described a real image, and claimRecheckRun compares the two and
+        // fails the run with "bound target identity changed". Both now come from the same read,
+        // which is the row this transaction locked.
+        targetProfileId: reportRow.targetProfileId,
         targetIdentityHash:
           target?.id && target.imageDigest
             ? targetIdentityHash({

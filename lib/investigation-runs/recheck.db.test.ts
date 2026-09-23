@@ -428,3 +428,38 @@ test("sweepRecheckRuns fails a stale PENDING run and leaves fresh work alone", a
   assert.equal(running.status, "RUNNING", "a leased running run keeps its worker");
   assert.equal(running.leaseOwner, "worker-a");
 });
+
+test("a re-check carries the report's current target, not the parent run's", async () => {
+  // The bug this guards is the whole reason binding a target could not lead to a reproduction.
+  // The parent run of a report that arrived without a target has target_profile_id null. The
+  // identity hash on the new run is computed from the report's profile, so inheriting the
+  // parent's null would make the run describe one target and be stamped with another, and
+  // claimRecheckRun fails that run with "bound target identity changed".
+  const [profile] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({ name: `bound-late-${Date.now()}`, imageDigest: "sha256:bound-late" })
+    .returning({ id: dbm.targetProfile.id });
+
+  const { reportId, verdictId } = await seedParkedAnalysisOnly({});
+
+  // The parent run is the first investigation, opened while the report had no target at all.
+  const parentRunId = await seedRun(reportId, {
+    runNumber: 1,
+    reason: "INITIAL",
+    status: "DONE",
+  });
+  assert.equal((await runRow(parentRunId)).targetProfileId, null);
+
+  // A reviewer binds a target afterwards, which is the new capability.
+  await dbm.db
+    .update(dbm.report)
+    .set({ targetProfileId: profile.id })
+    .where(dbm.eq(dbm.report.id, reportId));
+
+  const result = await recheck.requestRecheck(reportId, verdictId, "reproduce it now", "reviewer-1");
+  if (!result.ok) assert.fail(`re-check refused: ${result.reason}`);
+
+  const run = await runRow(result.runId);
+  assert.equal(run.targetProfileId, profile.id, "the run must carry the freshly bound target");
+  assert.ok(run.targetIdentityHash, "and be stamped with that target's identity");
+});
