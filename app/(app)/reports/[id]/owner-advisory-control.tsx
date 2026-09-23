@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { CircleNotch } from "@phosphor-icons/react/ssr";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { requestOwnerAdvisoryAction } from "@/app/review/actions";
@@ -53,8 +54,12 @@ export function OwnerAdvisoryControl({
   }
   if (advisory && advisory.state !== "FAILED")
     return (
-      <span className="text-body text-foreground">
-        Opening a draft advisory…
+      <span className="flex items-center gap-2 text-body text-foreground">
+        <CircleNotch
+          className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+        Opening a draft advisory
       </span>
     );
 
@@ -115,11 +120,18 @@ export function OwnerAdvisoryControl({
             {status.verdict?.payload}
           </pre>
           {error ? (
-            <span className="whitespace-normal break-words text-meta text-destructive">{error}</span>
+            <span className="whitespace-normal break-words text-meta text-destructive">
+              {error}
+            </span>
           ) : null}
           <DialogFooter>
-            <Button size="sm" onClick={notify} disabled={pending}>
-              {pending ? "Requesting…" : "Open draft advisory"}
+            <Button
+              size="sm"
+              onClick={notify}
+              loading={pending}
+              disabled={pending}
+            >
+              Open draft advisory
             </Button>
           </DialogFooter>
         </DialogContent>
