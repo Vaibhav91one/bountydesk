@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { isReviewerEmail } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
@@ -36,8 +36,9 @@ export async function approveOnboardingRequest(
       state: "APPROVED",
       approvedBy: session.login,
       approvedAt: new Date(),
-      // Clear any prior failure and let the worker pick it up promptly.
-      nextAttemptAt: new Date(),
+      // Clear any prior failure and let the worker pick it up promptly. Database time, because
+      // claim() compares next_attempt_at against now() and this server's clock may run ahead.
+      nextAttemptAt: sql`now()`,
       lastError: null,
       updatedAt: new Date(),
     })
