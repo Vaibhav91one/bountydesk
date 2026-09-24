@@ -344,7 +344,7 @@ export async function buildMesh(
       ).result;
       // Capture the service's real start command, then rebuild with an idle entrypoint so the image
       // does not auto-start before the provisioner has wired its peers. The provisioner runs this.
-      const startCommand = await inspectMeshStartCommand(sandbox, stageTag, runtime);
+      const startCommand = await inspectMeshStartCommand(sandbox, stageTag, svc, runtime);
       await writeGenDockerfile(sandbox, `FROM ${stageTag}\nENTRYPOINT ["tail", "-f", "/dev/null"]\nCMD []\n`, runtime);
       await runtime.run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
@@ -378,7 +378,7 @@ export async function buildMesh(
       // Daytona runs a sandbox's own init as pid 1 and the image entrypoint without its cmd, so a
       // datastore (postgres's entrypoint needs the "postgres" arg) does not start on its own. Capture
       // its full start command (entrypoint plus cmd) so the provisioner runs it.
-      const startCommand = await inspectMeshStartCommand(sandbox, imageRef, runtime);
+      const startCommand = await inspectMeshStartCommand(sandbox, imageRef, svc, runtime);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
       services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef, startCommand });
@@ -590,12 +590,40 @@ async function inspectStartCommand(sandbox: Sandbox, image: string): Promise<str
   throw new Error(`app image ${image} declares no CMD or ENTRYPOINT to start it`);
 }
 
-/** The full command a mesh service starts with: its entrypoint and its command combined, since a
- *  service may set either or both. The provisioner runs this after the image's entrypoint was
- *  overridden to idle, so it must be the complete launch line, not just the CMD. */
+/**
+ * The one shell line a mesh service starts with, from its image's ENTRYPOINT, CMD and WORKDIR and
+ * the compose overrides. Compose semantics: `command` replaces CMD, `entrypoint` replaces ENTRYPOINT,
+ * and a set `entrypoint` also drops the image's CMD unless `command` is given. The argv is what the
+ * container would exec, so each argument is quoted: the provisioner runs this line with `sh -c`, and
+ * `sh -c "until nc -z mongo 27017; do sleep 2; done"` joined bare would split the script into words.
+ */
+export function meshStartCommand(
+  image: { entrypoint: string[]; cmd: string[]; workdir: string },
+  compose: { entrypoint?: string[]; command?: string[] } = {},
+): string | undefined {
+  const entrypoint = compose.entrypoint ?? image.entrypoint;
+  const cmd = compose.command ?? (compose.entrypoint !== undefined ? [] : image.cmd);
+  const argv = [...entrypoint, ...cmd];
+  if (argv.length === 0) return undefined;
+  const command = argv.map(shellWord).join(" ");
+  // Run the command in the image's WORKDIR: a relative launch (vuln-bank's CMD is "./start.sh") is
+  // resolved against it, and the provisioner runs the command from an unrelated directory otherwise.
+  return image.workdir && image.workdir !== "/" ? `cd ${shellWord(image.workdir)} && ${command}` : command;
+}
+
+/** Quote an argument for sh only when it needs it, so a plain launch line stays readable in the
+ *  reviewed manifest ("docker-entrypoint.sh postgres") and host-command checks still see its head. */
+function shellWord(value: string): string {
+  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : shellArg(value);
+}
+
+/** Read a built or pulled image's ENTRYPOINT, CMD and WORKDIR and combine them with the service's
+ *  compose overrides. The provisioner runs the result after the image's entrypoint was overridden to
+ *  idle, so it must be the complete launch line, not just the CMD. */
 async function inspectMeshStartCommand(
   sandbox: Sandbox,
   image: string,
+  service: { command?: string[]; entrypoint?: string[] },
   runtime: MeshBuildRuntime = liveMeshRuntime,
 ): Promise<string> {
   const read = async (field: "Entrypoint" | "Cmd"): Promise<string[]> => {
@@ -608,13 +636,14 @@ async function inspectMeshStartCommand(
       return [];
     }
   };
-  const parts = [...(await read("Entrypoint")), ...(await read("Cmd"))];
-  if (parts.length === 0) throw new Error(`service image ${image} declares no CMD or ENTRYPOINT to start it`);
-  const command = parts.join(" ");
-  // Run the command in the image's WORKDIR: a relative launch (vuln-bank's CMD is "./start.sh") is
-  // resolved against it, and the provisioner runs the command from an unrelated directory otherwise.
+  const entrypoint = await read("Entrypoint");
+  const cmd = await read("Cmd");
   const workdir = (await runtime.run(sandbox, `docker inspect --format='{{.Config.WorkingDir}}' ${image}`)).result.trim();
-  return workdir && workdir !== "/" ? `cd ${workdir} && ${command}` : command;
+  const command = meshStartCommand({ entrypoint, cmd, workdir }, service);
+  if (!command) throw new Error(`service image ${image} declares no CMD or ENTRYPOINT to start it`);
+  // The provisioner refuses a longer line; fail the build with the reason rather than every verify.
+  if (command.length > 1_000) throw new Error(`service image ${image} start command is over 1000 characters`);
+  return command;
 }
 
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
