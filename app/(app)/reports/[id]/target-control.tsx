@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info } from "@phosphor-icons/react/ssr";
 
 import { bindTargetAction, requestRecheckAction } from "@/app/review/actions";
@@ -59,18 +59,22 @@ export function TargetControl({
   // Re-read while the report names a repository that is not ready yet, so a fork that finishes
   // onboarding appears in the picker, already selected, without a reload.
   const waiting = !status.target && (initialSuggestion?.unconnected.length ?? 0) > 0;
-  const { data } = useQuery({
-    queryKey: ["report-targets", reportId],
+  const [guideFor, setGuideFor] = useState<string | null>(null);
+  // The open guide's link is part of the request because only that link is checked on GitHub for
+  // a fork not connected yet. Switching links keeps showing the last answer until the new one lands.
+  const initial = { profiles: initialProfiles, suggestion: initialSuggestion };
+  const { data = initial } = useQuery({
+    queryKey: ["report-targets", reportId, guideFor],
     queryFn: () =>
       fetchLive<{ profiles: TargetProfileOption[]; suggestion: TargetSuggestion | null }>(
-        `/api/reports/${reportId}/targets`,
+        `/api/reports/${reportId}/targets${guideFor ? `?guide=${encodeURIComponent(guideFor)}` : ""}`,
       ),
-    initialData: { profiles: initialProfiles, suggestion: initialSuggestion },
+    initialData: guideFor ? undefined : initial,
+    placeholderData: keepPreviousData,
     refetchInterval: (query) =>
-      waiting && (query.state.data?.suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false,
+      waiting && ((query.state.data ?? initial).suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false,
   });
   const { profiles, suggestion } = data;
-  const [guideFor, setGuideFor] = useState<string | null>(null);
   // Binding authorises execution against a target, so it never happens without a click on Bind,
   // and the picker is never pre-filled with an arbitrary first profile. The one exception is a
   // target matched from a link in the report, and that choice is labelled with the link it came
@@ -89,6 +93,8 @@ export function TargetControl({
     guideFor && suggestion ? (
       <ConnectGuide
         upstream={guideFor}
+        choices={suggestion.unconnected}
+        onChoose={setGuideFor}
         progress={suggestion.progress.find((p) => p.name === guideFor) ?? null}
         connectLinks={suggestion.connectLinks}
         open
@@ -164,19 +170,12 @@ export function TargetControl({
           <Tooltip>
             <TooltipTrigger
               render={
-                <span
-                  className="inline-flex text-muted-foreground"
-                  aria-label={`Suggested because the report links ${suggested.fullName}`}
-                />
+                <span className="inline-flex text-muted-foreground" aria-label={suggestionNote(suggested)} />
               }
             >
               <Info className="size-4" />
             </TooltipTrigger>
-            <TooltipContent>
-              {suggested.fullName.toLowerCase() === suggested.mention.toLowerCase()
-                ? `Suggested because the report links ${suggested.fullName}`
-                : `Suggested because the report links ${suggested.mention}, and its fork ${suggested.fullName} is connected`}
-            </TooltipContent>
+            <TooltipContent>{suggestionNote(suggested)}</TooltipContent>
           </Tooltip>
         ) : null}
         <Button size="sm" onClick={bind} disabled={!choice || pending}>
@@ -191,6 +190,19 @@ export function TargetControl({
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
   );
+}
+
+/** Why the picker opened on this target, so a suggestion is never a default nobody can explain. */
+function suggestionNote(match: TargetSuggestion["matched"][number]): string {
+  const link = match.canonical ? `${match.mention} (now ${match.canonical})` : match.mention;
+  switch (match.via) {
+    case "name":
+      return `Suggested because the report links ${match.mention}, which GitHub no longer has, and ${match.fullName} is the only connected project with that name`;
+    case "fork":
+      return `Suggested because the report links ${link}, and its fork ${match.fullName} is connected`;
+    default:
+      return `Suggested because the report links ${link}`;
+  }
 }
 
 function ConnectButton({ onClick }: { onClick: () => void }) {
