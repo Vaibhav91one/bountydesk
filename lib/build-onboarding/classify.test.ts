@@ -543,6 +543,9 @@ test("compose command string form splits into words the way Compose does, withou
   // $$ is Compose's literal $, and a defaulted variable is interpolated before splitting.
   assert.deepEqual(composeArgv(`sh -c 'echo $$HOSTNAME'`), { argv: ["sh", "-c", "echo $HOSTNAME"] });
   assert.deepEqual(composeArgv("serve --port ${PORT:-8080}"), { argv: ["serve", "--port", "8080"] });
+  // A $$ inside a default is part of that default, not a place to cut the expression.
+  assert.deepEqual(composeArgv("${FOO:-a$$b}"), { argv: ["a$b"] });
+  assert.deepEqual(composeArgv(["${FOO-x$$}y", "$${literal}"]), { argv: ["x$y", "${literal}"] });
   // An empty string is an explicit empty override; null and absent keep the image default.
   assert.deepEqual(composeArgv(""), { argv: [] });
   assert.deepEqual(composeArgv(null), {});
@@ -563,6 +566,9 @@ test("a compose command that cannot be carried faithfully is refused with a reas
     `sh -c "unclosed`,
     "echo $HOME", // a bare variable Compose would read from the host environment
     "echo ${REQUIRED:?set it}",
+    "echo ${OUTER:-${INNER:-x}}", // nested interpolation is not modelled
+    "echo ${UNTERMINATED:-x",
+    "echo ${FOO:-a$b}", // a bare variable inside a default
     ["sh", "-c", "line one\nline two"],
     ["ok", { nested: true }],
     { not: "a command" },

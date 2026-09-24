@@ -425,10 +425,7 @@ function meshEnv(environment: unknown): Record<string, string> {
  */
 export function composeArgv(value: unknown): { argv?: string[] } | { reason: string } {
   if (value === undefined || value === null) return {};
-  const interpolate = (text: string): string | undefined => {
-    const pieces = text.split("$$").map(resolveComposeValue);
-    return pieces.includes(undefined) ? undefined : pieces.join("$");
-  };
+  const interpolate = (text: string) => interpolateCompose(text, false);
   let argv: string[];
   if (typeof value === "string") {
     const resolved = interpolate(value);
@@ -452,6 +449,47 @@ export function composeArgv(value: unknown): { argv?: string[] } | { reason: str
   if (argv.some((arg) => /[\r\n]/.test(arg))) return { reason: "spans several lines" };
   if (argv.join(" ").length > 1_000) return { reason: "is over 1000 characters" };
   return { argv };
+}
+
+/**
+ * Interpolate a Compose value in one left-to-right pass: `$$` is a literal `$` (inside a default
+ * too), and `${VAR:-default}` or `${VAR-default}` resolves to its default as a whole unit, since the
+ * host environment is not ours to read. Returns undefined for anything that would need that
+ * environment or that we do not model: a bare `$VAR`, a required or conditional expression, an
+ * unterminated brace, or a `${` nested inside a default.
+ */
+function interpolateCompose(text: string, inDefault: boolean): string | undefined {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]!;
+    const next = text[i + 1];
+    if (c !== "$") {
+      out += c;
+    } else if (next === "$") {
+      out += "$";
+      i++;
+    } else if (next === "{") {
+      if (inDefault) return undefined;
+      let depth = 1;
+      let end = i + 2;
+      for (; end < text.length && depth > 0; end++) {
+        if (text[end] === "{") depth++;
+        else if (text[end] === "}") depth--;
+      }
+      if (depth !== 0) return undefined;
+      const match = text.slice(i + 2, end - 1).match(/^[A-Za-z_][A-Za-z0-9_]*:?-([\s\S]*)$/);
+      if (!match) return undefined;
+      const fallback = interpolateCompose(match[1]!, true);
+      if (fallback === undefined) return undefined;
+      out += fallback;
+      i = end - 1;
+    } else if (next !== undefined && /[A-Za-z_]/.test(next)) {
+      return undefined;
+    } else {
+      out += c;
+    }
+  }
+  return out;
 }
 
 /**
