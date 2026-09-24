@@ -67,10 +67,16 @@ jobs:
       - name: Check for schema drift
         run: npm run db:drift
 
+      # The policy tests read .pr_agent.toml as text, so a syntax error passed them while PR-Agent
+      # rejected the file on every PR. Parse it for real.
+      - name: Parse .pr_agent.toml
+        run: python3 -c "import tomllib; tomllib.load(open('.pr_agent.toml', 'rb'))"
       - name: Verify PR Agent policy tests
         run: node --test .github/scripts/pr-agent-policy.test.mjs
       - name: Verify PR Agent verifier tests
         run: node --test .github/scripts/verify-pr-agent-review.test.mjs
+      - name: Verify Claude review policy tests
+        run: node --test .github/scripts/claude-review-policy.test.mjs
       - name: Test
         run: npm run test --if-present
       - name: Build
