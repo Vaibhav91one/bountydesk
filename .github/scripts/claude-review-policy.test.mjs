@@ -40,27 +40,55 @@ test("the policy comes from the default branch and the PR head is only data", as
   assert.match(workflow, /--add-dir pr-head/);
 });
 
-test("Claude gets read tools and gh pr only, never a shell or write access", async () => {
+// Each claude-code-action step: the subscription review and its fallback.
+const reviewSteps = (workflow) => workflow.split("uses: anthropics/claude-code-action@").slice(1).map((s) => s.split("- name:")[0]);
+
+test("Claude gets read tools and gh pr only, never a shell or write access, on every review step", async () => {
   const workflow = await read(workflowPath);
-  const allowed = workflow.match(/--allowedTools "([^"]+)"/)?.[1] ?? "";
-  const tools = allowed.split(",");
-  assert.ok(tools.length > 0);
-  for (const tool of tools) {
-    const ok =
-      ["Read", "Grep", "Glob", "mcp__github_inline_comment__create_inline_comment"].includes(tool) ||
-      /^Bash\(gh pr (diff|view|comment):\*\)$/.test(tool);
-    assert.ok(ok, `${tool} is not an allowed review tool`);
+  const steps = reviewSteps(workflow);
+  assert.equal(steps.length, 2);
+  for (const step of steps) {
+    const allowed = step.match(/--allowedTools "([^"]+)"/)?.[1] ?? "";
+    const tools = allowed.split(",");
+    assert.ok(allowed.length > 0);
+    for (const tool of tools) {
+      const ok =
+        ["Read", "Grep", "Glob", "mcp__github_inline_comment__create_inline_comment"].includes(tool) ||
+        /^Bash\(gh pr (diff|view|comment):\*\)$/.test(tool);
+      assert.ok(ok, `${tool} is not an allowed review tool`);
+    }
+    const disallowed = step.match(/--disallowedTools "([^"]+)"/)?.[1] ?? "";
+    for (const tool of ["Write", "Edit", "MultiEdit", "WebFetch", "WebSearch"]) {
+      assert.ok(disallowed.split(",").includes(tool), `${tool} must be disallowed`);
+    }
+    assert.match(step, /--add-dir pr-head/);
   }
-  const disallowed = workflow.match(/--disallowedTools "([^"]+)"/)?.[1] ?? "";
-  for (const tool of ["Write", "Edit", "MultiEdit", "WebFetch", "WebSearch"]) {
-    assert.ok(disallowed.split(",").includes(tool), `${tool} must be disallowed`);
-  }
+  // The fallback must not drift into a looser prompt than the review it stands in for.
+  const prompt = (step) => {
+    const lines = step.split("prompt: |")[1].split("\n").slice(1);
+    const end = lines.findIndex((line) => line.trim() !== "" && !line.startsWith(" ".repeat(12)));
+    return lines.slice(0, end === -1 ? undefined : end).join("\n").trim();
+  };
+  assert.ok(prompt(steps[0]).includes("<!-- claude-review head="));
+  assert.equal(prompt(steps[1]), prompt(steps[0]));
 });
 
 test("credentials are referenced from secrets, never inlined", async () => {
   const workflow = await read(workflowPath);
-  assert.match(workflow, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
-  assert.doesNotMatch(workflow, /sk-ant-|oauth_token_|anthropic_api_key:/);
+  const [primary, fallback] = reviewSteps(workflow);
+  assert.match(primary, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
+  assert.doesNotMatch(primary, /anthropic_api_key:/);
+  // The only API key is VyceAI's, and it goes only to VyceAI's endpoint.
+  assert.match(fallback, /anthropic_api_key: \$\{\{ secrets\.VYCEAI_API_KEY \}\}/);
+  assert.equal((workflow.match(/anthropic_api_key:/g) ?? []).length, 1);
+  assert.match(workflow, /ANTHROPIC_BASE_URL: https:\/\/vyceai\.com\n/);
+  assert.doesNotMatch(workflow, /sk-ant-|oauth_token_|sk-[A-Za-z0-9]{20}/);
+});
+
+test("the fallback runs only when the subscription review failed", async () => {
+  const workflow = await read(workflowPath);
+  assert.match(workflow, /- name: Review\n\s+id: claude\n[\s\S]*?continue-on-error: true/);
+  assert.match(workflow, /if: steps\.claude\.outcome == 'failure'/);
 });
 
 test("the review carries no attribution and uses the agreed format", async () => {
