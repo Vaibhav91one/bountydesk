@@ -231,6 +231,16 @@ export async function commitComposeMesh(input: CommitComposeMeshInput): Promise<
   const row = await resolveOnboarding(input.capability);
   if (!row) return { ok: false, reason: "unknown capability" };
 
+  // A mesh command or entrypoint override is read by the classifier from the repo's compose file,
+  // never taken from the agent: the agent sets a start command through the CMD of the Dockerfile it
+  // authors, which the build inspects like any other image.
+  if (
+    Array.isArray(input.services) &&
+    input.services.some((s) => s && typeof s === "object" && ("command" in s || "entrypoint" in s))
+  ) {
+    return { ok: false, reason: "services may not set command or entrypoint; put the start command in the Dockerfile's CMD" };
+  }
+
   let plan;
   try {
     plan = parseBuildPlan({

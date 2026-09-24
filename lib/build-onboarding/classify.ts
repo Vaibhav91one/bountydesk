@@ -146,6 +146,7 @@ type ComposeService = {
   expose?: unknown;
   environment?: unknown;
   command?: unknown;
+  entrypoint?: unknown;
   depends_on?: unknown;
   volumes?: unknown;
   privileged?: unknown;
@@ -287,8 +288,9 @@ export type ComposeMeshTopology =
  *
  * The app is the one service the agent probes: a non-datastore service that publishes an HTTP port.
  * Everything else is a dependency, reached by the app over the link group by its sandbox id, which
- * the provisioner substitutes for the compose service name at boot. Peers come from depends_on and
- * from env values that name another service, so the provisioner knows what to rewrite.
+ * the provisioner maps to the compose service name in /etc/hosts at boot. Peers come from depends_on
+ * and from env values, commands and entrypoints that name another service as a host, so the
+ * provisioner knows which names to map.
  */
 export function parseComposeMesh(composeText: string, appServiceOverride?: string): ComposeMeshTopology {
   let doc: unknown;
@@ -361,7 +363,16 @@ export function parseComposeMesh(composeText: string, appServiceOverride?: strin
     const port =
       firstPort(svc.ports) ?? firstPort(svc.expose) ?? (image ? datastorePortForImage(image) : undefined);
     const env = meshEnv(svc.environment);
-    const peers = servicePeers(svc, allNames, name);
+    // Compose's command and entrypoint replace the image's CMD and ENTRYPOINT, so a service that
+    // sets one (NodeGoat's web waits for mongo, seeds, then runs npm start) boots differently from
+    // its image default. Dropping it would start the image's bare CMD instead.
+    const start: { command?: string[]; entrypoint?: string[] } = {};
+    for (const field of ["command", "entrypoint"] as const) {
+      const parsed = composeArgv(svc[field]);
+      if ("reason" in parsed) return { ok: false, reason: `service ${name} ${field} ${parsed.reason}` };
+      if (parsed.argv) start[field] = parsed.argv;
+    }
+    const peers = servicePeers(svc, allNames, name, [...(start.entrypoint ?? []), ...(start.command ?? [])]);
     meshServices.push({
       service: name,
       role: name === appName ? "app" : "dependency",
@@ -371,6 +382,7 @@ export function parseComposeMesh(composeText: string, appServiceOverride?: strin
         ? { build: { context: build.context, ...(build.dockerfile !== "Dockerfile" ? { dockerfile: build.dockerfile } : {}) } }
         : { image: image! }),
       ...(Object.keys(env).length ? { env } : {}),
+      ...start,
       ...(peers.length ? { peers } : {}),
     });
   }
@@ -402,9 +414,115 @@ function meshEnv(environment: unknown): Record<string, string> {
   return out;
 }
 
-/** The compose service names a service connects to: its depends_on, plus any env value that names
- *  another service (a database host set to the db service's name, including via `${DB_HOST:-db}`). */
-function servicePeers(svc: ComposeService, allNames: Set<string>, self: string): string[] {
+/**
+ * A compose `command` or `entrypoint` as the argv Compose would exec, undefined when the field is
+ * absent or null (the image default applies), or a reason when it cannot be carried faithfully.
+ *
+ * The list form is exec-form, one argument per item. The string form is not run through a shell:
+ * Compose splits it into words (compose-go uses go-shellwords) and execs the result, so
+ * `sh -c "a && b"` is three arguments. `''` and `[]` are an explicit empty override. Variables are
+ * interpolated before splitting, and `$$` is Compose's escape for a literal `$`.
+ */
+export function composeArgv(value: unknown): { argv?: string[] } | { reason: string } {
+  if (value === undefined || value === null) return {};
+  const interpolate = (text: string): string | undefined => {
+    const pieces = text.split("$$").map(resolveComposeValue);
+    return pieces.includes(undefined) ? undefined : pieces.join("$");
+  };
+  let argv: string[];
+  if (typeof value === "string") {
+    const resolved = interpolate(value);
+    if (resolved === undefined) return { reason: "uses a variable with no default" };
+    const split = splitComposeWords(resolved);
+    if (!split) return { reason: "is not a plain word list (an unclosed quote, or shell syntax such as && or > outside sh -c)" };
+    argv = split;
+  } else if (Array.isArray(value)) {
+    argv = [];
+    for (const item of value) {
+      if (typeof item !== "string" && typeof item !== "number") return { reason: "has a list item that is not a string" };
+      const resolved = interpolate(String(item));
+      if (resolved === undefined) return { reason: "uses a variable with no default" };
+      argv.push(resolved);
+    }
+  } else {
+    return { reason: "is neither a string nor a list" };
+  }
+  // The start command is one line, launched with `sh -c` in the sandbox. A multi-line block scalar
+  // is refused rather than joined, since joining would change what a sh -c script means.
+  if (argv.some((arg) => /[\r\n]/.test(arg))) return { reason: "spans several lines" };
+  if (argv.join(" ").length > 1_000) return { reason: "is over 1000 characters" };
+  return { argv };
+}
+
+/**
+ * Split a Compose string command the way go-shellwords does with its defaults: whitespace separates
+ * words, single quotes are literal, a backslash escapes the next character outside single quotes,
+ * and double quotes group. go-shellwords stops at an unquoted `;`, `&`, `|`, `<` or `>` and fails on
+ * `(` or `)`, so a command using them is refused here rather than half-run. Returns null for that
+ * and for an unclosed quote.
+ */
+function splitComposeWords(input: string): string[] | null {
+  const words: string[] = [];
+  let buf = "";
+  let inWord = false;
+  let single = false;
+  let double = false;
+  for (let i = 0; i < input.length; i++) {
+    const c = input[i]!;
+    if (single) {
+      if (c === "'") single = false;
+      else buf += c;
+      continue;
+    }
+    if (c === "\\") {
+      if (i + 1 >= input.length) return null;
+      const next = input[++i]!;
+      buf += next === "t" ? "\t" : next === "n" ? "\n" : next;
+      inWord = true;
+      continue;
+    }
+    if (double) {
+      if (c === '"') double = false;
+      else buf += c;
+      continue;
+    }
+    if (/\s/.test(c)) {
+      if (inWord) words.push(buf);
+      buf = "";
+      inWord = false;
+      continue;
+    }
+    if (";&|<>()`".includes(c)) return null;
+    if (c === "'") single = true;
+    else if (c === '"') double = true;
+    else buf += c;
+    inWord = true;
+  }
+  if (single || double) return null;
+  if (inWord) words.push(buf);
+  return words;
+}
+
+/** True when `name` appears in `text` as a whole hostname: `mongo` in `mongodb://mongo:27017/app`
+ *  or in `nc -z mongo 27017`, but not inside `mongodb` or `mongo.example.com`. */
+function namesHost(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Za-z0-9_.-])${escaped}($|[^A-Za-z0-9_.-])`).test(text);
+}
+
+/**
+ * The compose service names a service connects to, so the provisioner writes an /etc/hosts entry for
+ * each: its depends_on, plus any service named as a host in an env value or in its command or
+ * entrypoint (`MONGODB_URI=mongodb://mongo:27017/db`, `nc -z mongo 27017`). Compose resolves every
+ * service name on its default network; the mesh wires only the ones a service actually refers to,
+ * because each entry is a DNS lookup of the peer's sandbox id that must succeed for the mesh to boot.
+ */
+function servicePeers(
+  svc: ComposeService,
+  allNames: Set<string>,
+  self: string,
+  startArgs: string[] = [],
+): string[] {
   const peers = new Set<string>();
   const dep = svc.depends_on;
   if (Array.isArray(dep)) {
@@ -412,9 +530,12 @@ function servicePeers(svc: ComposeService, allNames: Set<string>, self: string):
   } else if (dep && typeof dep === "object") {
     for (const k of Object.keys(dep as Record<string, unknown>)) peers.add(k);
   }
-  for (const value of Object.values(normalizeEnv(svc.environment))) {
-    const resolved = resolveComposeValue(value) ?? value;
-    if (allNames.has(resolved)) peers.add(resolved);
+  const texts = [
+    ...Object.values(normalizeEnv(svc.environment)).map((value) => resolveComposeValue(value) ?? value),
+    ...startArgs,
+  ];
+  for (const name of allNames) {
+    if (texts.some((text) => namesHost(text, name))) peers.add(name);
   }
   peers.delete(self);
   return [...peers].filter((n) => allNames.has(n));

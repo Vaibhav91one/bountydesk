@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classify,
+  composeArgv,
   detectEcosystem,
   dockerfileExposePort,
   ecosystemFromDockerfile,
@@ -485,4 +486,125 @@ services:
   // compose does not carry; both are present.
   assert.equal(plan.envOverrides?.DB_SERVER, "127.0.0.1");
   assert.equal(plan.envOverrides?.DEFAULT_SECURITY_LEVEL, "low");
+});
+
+// NodeGoat's compose, verbatim: the web command waits for mongo, seeds, then starts the app, and
+// neither depends_on nor an env value equal to "mongo" names the peer.
+const NODEGOAT_COMPOSE = `
+version: "3.7"
+
+services:
+  web:
+    build: .
+    environment:
+      NODE_ENV:
+      MONGODB_URI: mongodb://mongo:27017/nodegoat
+    command: sh -c "until nc -z -w 2 mongo 27017 && echo 'mongo is ready for connections' && node artifacts/db-reset.js && npm start; do sleep 2; done"
+    ports:
+      - "4000:4000"
+
+  mongo:
+    image: mongo:4.4
+    user: mongodb
+    expose:
+      - 27017
+`;
+
+test("a compose command is carried into the mesh plan and its hosts become peers (NodeGoat)", async () => {
+  const plan = await classify(
+    reader({ "docker-compose.yml": NODEGOAT_COMPOSE, Dockerfile: "FROM node:12-alpine\n", "package.json": "{}" }),
+    "Vaibhav91one/NodeGoat",
+  );
+  assert.equal(plan.strategy, "compose-mesh");
+  if (plan.strategy !== "compose-mesh") return;
+  const web = plan.services.find((service) => service.service === "web")!;
+  const mongo = plan.services.find((service) => service.service === "mongo")!;
+  assert.deepEqual(web.command, [
+    "sh",
+    "-c",
+    "until nc -z -w 2 mongo 27017 && echo 'mongo is ready for connections' && node artifacts/db-reset.js && npm start; do sleep 2; done",
+  ]);
+  assert.equal(web.entrypoint, undefined, "no entrypoint override keeps the image's own");
+  // The app reaches mongo through a URI and the wait loop, so mongo must get an /etc/hosts entry.
+  assert.deepEqual(web.peers, ["mongo"]);
+  assert.deepEqual(web.env, { MONGODB_URI: "mongodb://mongo:27017/nodegoat" });
+  assert.equal(mongo.command, undefined);
+  assert.equal(mongo.port, 27017);
+  // The stored plan round-trips through the validator the worker reads it back with.
+  const { parseBuildPlan } = await import("./build-plan");
+  assert.deepEqual(parseBuildPlan(JSON.parse(JSON.stringify(plan))), plan);
+});
+
+test("compose command string form splits into words the way Compose does, without a shell", () => {
+  assert.deepEqual(composeArgv("bundle exec thin -p 3000"), { argv: ["bundle", "exec", "thin", "-p", "3000"] });
+  assert.deepEqual(composeArgv(`sh -c 'echo "a b"'`), { argv: ["sh", "-c", 'echo "a b"'] });
+  assert.deepEqual(composeArgv(`sh -c "echo \\"hi\\" \\$$x"`), { argv: ["sh", "-c", 'echo "hi" $x'] });
+  assert.deepEqual(composeArgv(`a\\ b "" c`), { argv: ["a b", "", "c"] });
+  // $$ is Compose's literal $, and a defaulted variable is interpolated before splitting.
+  assert.deepEqual(composeArgv(`sh -c 'echo $$HOSTNAME'`), { argv: ["sh", "-c", "echo $HOSTNAME"] });
+  assert.deepEqual(composeArgv("serve --port ${PORT:-8080}"), { argv: ["serve", "--port", "8080"] });
+  // An empty string is an explicit empty override; null and absent keep the image default.
+  assert.deepEqual(composeArgv(""), { argv: [] });
+  assert.deepEqual(composeArgv(null), {});
+  assert.deepEqual(composeArgv(undefined), {});
+});
+
+test("compose command list form is exec-form and keeps each item whole", () => {
+  assert.deepEqual(composeArgv(["sh", "-c", "a && b"]), { argv: ["sh", "-c", "a && b"] });
+  assert.deepEqual(composeArgv(["node", "server.js", 3000]), { argv: ["node", "server.js", "3000"] });
+  assert.deepEqual(composeArgv([]), { argv: [] });
+  assert.deepEqual(composeArgv(["echo", "$$HOME"]), { argv: ["echo", "$HOME"] });
+});
+
+test("a compose command that cannot be carried faithfully is refused with a reason", () => {
+  for (const value of [
+    "npm run migrate && npm start", // go-shellwords stops at &&, so Compose would run half of it
+    "node server.js > /tmp/log",
+    `sh -c "unclosed`,
+    "echo $HOME", // a bare variable Compose would read from the host environment
+    "echo ${REQUIRED:?set it}",
+    ["sh", "-c", "line one\nline two"],
+    ["ok", { nested: true }],
+    { not: "a command" },
+  ]) {
+    assert.ok("reason" in composeArgv(value), `expected a refusal for ${JSON.stringify(value)}`);
+  }
+  const mesh = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["3000:3000"]
+    command: npm run migrate && npm start
+  db:
+    image: postgres:13
+`);
+  assert.equal(mesh.ok, false);
+  if (!mesh.ok) assert.match(mesh.reason, /service web command is not a plain word list/);
+});
+
+test("a compose entrypoint override is carried, and peers are named hosts, not substrings", () => {
+  const mesh = parseComposeMesh(`
+services:
+  web:
+    build: .
+    ports: ["8000:8000"]
+    entrypoint: ["/wait-for", "db:5432", "--"]
+    command: ["gunicorn", "app:app"]
+    environment:
+      CACHE_URL: redis://cache.example.com:6379
+      MONGO_DRIVER: mongodb
+  db:
+    image: postgres:13
+  cache:
+    image: redis:7
+  mongo:
+    image: mongo:4.4
+`);
+  assert.equal(mesh.ok, true);
+  if (!mesh.ok) return;
+  const web = mesh.services.find((service) => service.service === "web")!;
+  assert.deepEqual(web.entrypoint, ["/wait-for", "db:5432", "--"]);
+  assert.deepEqual(web.command, ["gunicorn", "app:app"]);
+  // db is named in the entrypoint; "cache.example.com" and "mongodb" do not name cache or mongo.
+  assert.deepEqual(web.peers, ["db"]);
 });

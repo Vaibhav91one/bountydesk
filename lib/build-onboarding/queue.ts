@@ -170,7 +170,7 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         approvedBy: null,
         approvedAt: null,
         attempts: 0,
-        nextAttemptAt: new Date(),
+        nextAttemptAt: sql`now()`,
         lastError: null,
         updatedAt: new Date(),
       },
@@ -328,9 +328,11 @@ export async function advance(
       state: toState,
       ...fields,
       // Each step gets its own attempt budget: a step that succeeded should not carry its claim
-      // count into the next, and the next step is claimable immediately.
+      // count into the next, and the next step is claimable immediately. Database time, not
+      // new Date(): claim() compares against now(), and a worker whose clock runs ahead of the
+      // database would otherwise park the row in the future until the clocks agree.
       attempts: 0,
-      nextAttemptAt: new Date(),
+      nextAttemptAt: sql`now()`,
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: null,
@@ -397,7 +399,7 @@ export async function sweepExpiredLeases(): Promise<{ released: number; failed: 
     .where(
       and(
         inArray(targetOnboarding.state, CLAIMABLE),
-        lte(targetOnboarding.leaseExpiresAt, new Date()),
+        lte(targetOnboarding.leaseExpiresAt, sql`now()`),
         sql`${targetOnboarding.attempts} < ${MAX_ATTEMPTS}`,
       ),
     )

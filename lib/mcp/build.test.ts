@@ -117,6 +117,22 @@ test("commit_compose_mesh validates topology and persists the plan without advan
   });
   assert.equal(bad.ok, false);
 
+  // A start-command override is the classifier's to read from the compose file, never the agent's.
+  const override = await build.commitComposeMesh({
+    capability: token,
+    appService: "web",
+    services: [
+      { service: "web", role: "app", port: 5000, build: { context: "." }, command: ["sh", "-c", "npm start"] },
+      { service: "db", role: "dependency", port: 5432, image: "postgres:13" },
+    ],
+    name: "mesh",
+    baseUrl: "http://localhost:5000",
+    readinessPath: "/",
+  });
+  assert.equal(override.ok, false);
+  if (!override.ok) assert.match(override.reason, /command or entrypoint/);
+  assert.equal(((await planOf(id)) as { buildPlan: unknown }).buildPlan, null);
+
   const good = await build.commitComposeMesh({
     capability: token,
     appService: "web",
