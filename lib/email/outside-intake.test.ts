@@ -146,10 +146,15 @@ test("a verified message over the size cap is dropped and its sender is told onc
   });
 
   assert.equal(result.accepted, false);
-  assert.equal(await jobFor(message.messageId), undefined);
   // The notice goes only to the address the receiving MX authenticated (SPF, DKIM and alignment
   // all passed above), so it cannot be aimed at a third party.
   assert.deepEqual(notified, ["big@good.test"]);
+  // The drop spends a daily slot so it cannot amplify, recorded as a terminal row the worker never
+  // claims rather than a report.
+  const row = await jobFor(message.messageId);
+  assert.equal(row.state, "DONE");
+  assert.equal((row.payload as { drop?: string; intake?: string }).drop, "oversized");
+  assert.equal((row.payload as { intake?: string }).intake, "outside");
 });
 
 test("an oversized message that fails SPF/DKIM is dropped with no notice", async () => {
@@ -173,6 +178,9 @@ test("an oversized message whose From is not aligned is dropped with no notice",
   const attacker = [
     "Received: by inbound-smtp.amazonaws.com",
     "Authentication-Results: amazonses.com; spf=pass envelope-from=x@attacker.test; dkim=pass header.i=@attacker.test; dmarc=fail header.from=bigcorp.test;",
+    // Without this receipt line checkFromAlignment bails before it even reaches dmarc/dkim, so the
+    // test would pass for the wrong reason; with it, the drop is the alignment check doing its job.
+    "X-SES-RECEIPT: AEFB",
     "From: <victim@bigcorp.test>",
     "",
   ].join("\r\n");
@@ -186,6 +194,46 @@ test("an oversized message whose From is not aligned is dropped with no notice",
   assert.equal(result.accepted, false);
   assert.match((result as { reason: string }).reason, /From not aligned/);
   assert.deepEqual(notified, []);
+  assert.equal(await jobFor(message.messageId), undefined, "a forged oversized message spends no slot");
+});
+
+test("the oversized notice is bounded by the daily per-sender limit", async () => {
+  const sender = "flood@bounded.test";
+  const notified: string[] = [];
+  const notifyOversized = async (e: { messageId: string }) => void notified.push(e.messageId);
+  const over = { sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 };
+
+  // Each of the first perSenderPerDay oversized messages spends a slot and mails the sender once.
+  for (let i = 0; i < intake.OUTSIDE_LIMITS.perSenderPerDay; i += 1) {
+    const admission = await intake.admitOutsideEmail(email(sender), { ...fetched(over), notifyOversized });
+    assert.equal(admission.accepted, false);
+  }
+  assert.equal(notified.length, intake.OUTSIDE_LIMITS.perSenderPerDay);
+
+  // The next one is over budget: dropped in silence, with no further outbound mail and no new row.
+  const message = email(sender);
+  const admission = await intake.admitOutsideEmail(message, { ...fetched(over), notifyOversized });
+  assert.equal(admission.accepted, false);
+  assert.equal(notified.length, intake.OUTSIDE_LIMITS.perSenderPerDay, "no notice once over the cap");
+  assert.equal(await jobFor(message.messageId), undefined, "the over-budget drop spends no slot");
+});
+
+test("a notice-send failure does not rethrow, so the inbound message is not redelivered", async () => {
+  const message = email("throwing@fail.test");
+
+  // sendOversizedNotice rethrows a transient Resend error; admitOutsideEmail must swallow it, or the
+  // route turns it into a 5xx and Resend redelivers the whole message, retrying the send each time.
+  const result = await intake.admitOutsideEmail(message, {
+    ...fetched({ sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 }),
+    notifyOversized: async () => {
+      throw new Error("resend 429");
+    },
+  });
+
+  assert.equal(result.accepted, false);
+  // The slot is still spent: on a send failure we err toward less outbound mail, not more.
+  const row = await jobFor(message.messageId);
+  assert.equal((row.payload as { drop?: string }).drop, "oversized");
 });
 
 test("a message with no Resend id cannot be verified and is dropped without a fetch", async () => {
