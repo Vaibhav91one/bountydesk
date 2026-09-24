@@ -1,6 +1,6 @@
 {
-  "id": "a2d02dfd-a87d-4575-9ab9-4aae31144035",
-  "prevId": "de72b72b-79cf-4f43-bc9a-ae574fa4f788",
+  "id": "3329ca9d-98ce-4246-8118-95e024b26df2",
+  "prevId": "a2d02dfd-a87d-4575-9ab9-4aae31144035",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2222,6 +2222,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "verified_sender": {
+          "name": "verified_sender",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duplicate_of_report_id": {
+          "name": "duplicate_of_report_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "state": {
           "name": "state",
           "type": "report_lifecycle_state",
@@ -2308,6 +2320,19 @@
         }
       },
       "foreignKeys": {
+        "report_duplicate_of_report_id_report_id_fk": {
+          "name": "report_duplicate_of_report_id_report_id_fk",
+          "tableFrom": "report",
+          "tableTo": "report",
+          "columnsFrom": [
+            "duplicate_of_report_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
         "report_connected_repository_id_connected_repository_id_fk": {
           "name": "report_connected_repository_id_connected_repository_id_fk",
           "tableFrom": "report",
@@ -3900,6 +3925,7 @@
       "schema": "public",
       "values": [
         "TRIAGING",
+        "NEEDS_DECISION",
         "REPRODUCING",
         "ANALYSIS_ONLY",
         "AWAITING_APPROVAL",

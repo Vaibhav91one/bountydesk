@@ -359,3 +359,22 @@ test("buildArgs must be single-line strings under valid env keys", () => {
     /is not a valid env name/,
   );
 });
+
+test("a compose-mesh service carries a compose command and entrypoint as bounded argv", () => {
+  const mesh = (web: Record<string, unknown>) =>
+    parseBuildPlan({
+      strategy: "compose-mesh",
+      ecosystem: "node",
+      composePath: "docker-compose.yml",
+      appService: "web",
+      services: [{ service: "web", role: "app", port: 4000, build: { context: "." }, ...web }],
+      runtime,
+    });
+  const plan = mesh({ command: ["sh", "-c", "npm start"], entrypoint: [] });
+  if (plan.strategy !== "compose-mesh") throw new Error("narrowing");
+  assert.deepEqual(plan.services[0]?.command, ["sh", "-c", "npm start"]);
+  assert.deepEqual(plan.services[0]?.entrypoint, []);
+  assert.throws(() => mesh({ command: "npm start" }), /command must be an array of single-line strings/);
+  assert.throws(() => mesh({ command: ["sh", "-c", "a\nb"] }), /single-line/);
+  assert.throws(() => mesh({ entrypoint: ["x".repeat(1_001)] }), /under 1000 characters/);
+});

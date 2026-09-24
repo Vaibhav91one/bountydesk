@@ -243,8 +243,15 @@
     {
       "idx": 34,
       "version": "7",
-      "when": 1790256431457,
-      "tag": "0034_outside_email_gate",
+      "when": 1790256351414,
+      "tag": "0034_thin_vulcan",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790259510088,
+      "tag": "0035_outside_email_gate",
       "breakpoints": true
     }
   ]

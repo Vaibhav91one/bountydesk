@@ -5,7 +5,8 @@ import test, { after, before, beforeEach } from "node:test";
 /**
  * The owner advisory sends an approved verdict to a second audience, so what is under test is
  * everything that can stop it: the request gates, the approved hash and marker at send time, a
- * grant revoked after the click, and a crashed attempt that must not open a second advisory.
+ * grant revoked after the click, and a crashed attempt or a later revision that must update the
+ * one advisory rather than open a second.
  * GitHub is faked; every gate is a row, so the database is real.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
@@ -39,7 +40,7 @@ const REPORTER = "reporter@example.test";
 let seq = 0;
 
 type Fixture = {
-  channel?: "email" | "github";
+  channel?: "email" | "github" | "manual";
   state?: string;
   outcome?: "REPRODUCED" | "NOT_REPRODUCED" | "ANALYSIS_ONLY";
   repo?: boolean;
@@ -77,19 +78,33 @@ async function seed(opts: Fixture = {}) {
     })
     .returning({ id: dbm.report.id });
 
+  const first = await addRevision(r.id, 1, opts);
+  return { reportId: r.id, ...first, repoId: repo.id, installationId: installation.id };
+}
+
+/** A verdict revision and the delivery that took it to the reporter. */
+async function addRevision(reportId: string, revision: number, opts: Fixture = {}) {
   const verdictId = randomUUID();
   const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
-  const payload = opts.payload ? opts.payload(marker) : `Reproduced.\n${marker}`;
+  const payload = opts.payload ? opts.payload(marker) : `Reproduced, revision ${revision}.\n${marker}`;
   await dbm.db.insert(dbm.verdict).values({
     id: verdictId,
-    reportId: r.id,
+    reportId,
     outcome: opts.outcome ?? "REPRODUCED",
     summary: "summary",
+    evidence: {
+      source: "agent-drafted",
+      findings: [
+        { title: "Reflected XSS in search", severity: "medium", description: "d", evidenceRef: "r" },
+        { title: "Login bypass", severity: "high", description: "An SQL injection, CWE-89.", evidenceRef: "r" },
+      ],
+    },
     payload,
     contentHash: fakeHash(payload),
+    revision,
   });
   await dbm.db.insert(dbm.outboundDelivery).values({
-    reportId: r.id,
+    reportId,
     verdictId,
     idempotencyKey: `verdict:${verdictId}`,
     target: REPORTER,
@@ -97,25 +112,38 @@ async function seed(opts: Fixture = {}) {
     state: "SENT",
     deliveredAt: opts.delivered === false ? null : new Date(),
   });
-  return { reportId: r.id, verdictId, marker, payload, repoId: repo.id, installationId: installation.id };
+  return { verdictId, marker, payload };
 }
 
-function fakeGitHub(opts: { existing?: boolean; createError?: { status: number } } = {}) {
-  const calls = { create: [] as { fullName: string; summary: string; description: string }[], mint: 0 };
+type CreateInput = Parameters<import("./advisory").AdvisoryDeps["create"]>[0];
+type UpdateInput = Parameters<import("./advisory").AdvisoryDeps["update"]>[0];
+
+function fakeGitHub(opts: { existing?: string; createError?: { status: number } } = {}) {
+  const calls = { create: [] as CreateInput[], update: [] as UpdateInput[], markers: [] as string[][], mint: 0 };
+  const url = (id: string) => `https://github.com/x/y/security/advisories/${id}`;
   const deps: import("./advisory").AdvisoryDeps = {
     hashContent: fakeHash,
     mintToken: async () => {
       calls.mint += 1;
       return { token: "t" };
     },
-    findByMarker: async () =>
-      opts.existing ? { ghsaId: "GHSA-old", htmlUrl: "https://github.com/x/y/security/advisories/GHSA-old" } : null,
+    // `existing` is the marker an advisory already on GitHub carries.
+    findByMarker: async ({ markers }) => {
+      calls.markers.push(markers);
+      return opts.existing && markers.includes(opts.existing)
+        ? { ghsaId: "GHSA-old", htmlUrl: url("GHSA-old"), marker: opts.existing }
+        : null;
+    },
     create: async (input) => {
       if (opts.createError) {
         throw Object.assign(new Error(`status ${opts.createError.status}`), opts.createError);
       }
       calls.create.push(input);
-      return { ghsaId: "GHSA-new", htmlUrl: "https://github.com/x/y/security/advisories/GHSA-new" };
+      return { ghsaId: "GHSA-new", htmlUrl: url("GHSA-new") };
+    },
+    update: async (input) => {
+      calls.update.push(input);
+      return { ghsaId: input.ghsaId, htmlUrl: url(input.ghsaId) };
     },
   };
   return { deps, calls };
@@ -126,9 +154,9 @@ async function row(reportId: string) {
   return r;
 }
 
-test("a request is refused unless the report is a delivered, reproduced email report with a live repo", async () => {
+test("a request is refused unless the report is a delivered, reproduced email or GitHub report with a live repo", async () => {
   const cases: [Fixture, RegExp][] = [
-    [{ channel: "github" }, /only an email report/],
+    [{ channel: "manual" }, /only an email or GitHub report/],
     [{ state: "DELIVERING" }, /reach the reporter first/],
     [{ repo: false }, /no connected repository/],
     [{ outcome: "NOT_REPRODUCED" }, /only a reproduced verdict/],
@@ -180,12 +208,13 @@ test("the sender opens a draft carrying the approved payload, and nothing about 
 });
 
 test("an advisory an earlier attempt already opened is found by its marker, not opened twice", async () => {
-  const { reportId } = await seed();
+  const { reportId, marker } = await seed();
   await advisory.requestOwnerAdvisory(reportId, "r");
-  const { deps, calls } = fakeGitHub({ existing: true });
+  const { deps, calls } = fakeGitHub({ existing: marker });
 
   await advisory.adviseOnce({ deps });
   assert.equal(calls.create.length, 0);
+  assert.equal(calls.update.length, 0, "it already carries this revision");
   assert.equal((await row(reportId)).ghsaId, "GHSA-old");
 });
 
@@ -248,4 +277,127 @@ test("GitHub refusing the advisory fails for good, an outage is retried later", 
   assert.equal(r.state, "PENDING");
   assert.equal(r.attempts, 1);
   assert.ok(r.nextAttemptAt.getTime() > Date.now(), "not claimable again straight away");
+});
+
+test("a GitHub report's owner gets the advisory too, with severity and CWEs from its findings", async () => {
+  const { reportId, payload } = await seed({ channel: "github" });
+  assert.deepEqual(await advisory.requestOwnerAdvisory(reportId, "r"), { ok: true });
+  const { deps, calls } = fakeGitHub();
+
+  await advisory.adviseOnce({ deps });
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.create[0].description, payload);
+  assert.equal(calls.create[0].severity, "high");
+  assert.deepEqual(calls.create[0].cweIds, ["CWE-79", "CWE-89"]);
+  assert.equal((await row(reportId)).state, "SENT");
+});
+
+/** A report whose advisory went out for revision 1, and a revision 2 since delivered. */
+async function revised() {
+  const first = await seed();
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub().deps });
+  assert.equal((await row(first.reportId)).state, "SENT");
+  const second = await addRevision(first.reportId, 2);
+  return { reportId: first.reportId, first, second };
+}
+
+test("a later delivered revision updates the same advisory with its approved text, once", async () => {
+  const { reportId, second } = await revised();
+
+  assert.deepEqual(await advisory.requestOwnerAdvisory(reportId, "r"), { ok: true });
+  const queued = await row(reportId);
+  assert.equal(queued.state, "PENDING");
+  assert.equal(queued.verdictId, second.verdictId);
+  assert.equal(queued.ghsaId, "GHSA-new", "the advisory it updates is kept");
+  assert.match(
+    (await advisory.requestOwnerAdvisory(reportId, "r") as { reason: string }).reason,
+    /already been notified/,
+    "a double click while it is pending queues nothing",
+  );
+
+  const { deps, calls } = fakeGitHub();
+  await advisory.adviseOnce({ deps });
+  assert.equal(calls.create.length, 0);
+  assert.equal(calls.markers.length, 0, "a known advisory needs no search");
+  assert.deepEqual(
+    calls.update.map((u) => [u.ghsaId, u.description]),
+    [["GHSA-new", second.payload]],
+  );
+  const sent = await row(reportId);
+  assert.equal(sent.state, "SENT");
+  assert.equal(sent.ghsaId, "GHSA-new");
+  assert.match(
+    (await advisory.requestOwnerAdvisory(reportId, "r") as { reason: string }).reason,
+    /already been notified/,
+    "the advisory already carries the latest revision",
+  );
+
+  // A worker that died after the PATCH but before the row said SENT sends the same bytes to the
+  // same advisory again: nothing new is opened.
+  await dbm.db
+    .update(dbm.ownerAdvisory)
+    .set({ state: "PENDING", nextAttemptAt: new Date(0) })
+    .where(dbm.eq(dbm.ownerAdvisory.reportId, reportId));
+  const replay = fakeGitHub();
+  await advisory.adviseOnce({ deps: replay.deps });
+  assert.equal(replay.calls.create.length, 0);
+  assert.deepEqual(replay.calls.update, calls.update);
+  assert.equal((await row(reportId)).ghsaId, "GHSA-new");
+});
+
+test("an update whose revision no longer matches its approved hash is never sent", async () => {
+  const { reportId } = await revised();
+  await advisory.requestOwnerAdvisory(reportId, "r");
+  const { deps, calls } = fakeGitHub();
+
+  await advisory.adviseOnce({ deps: { ...deps, hashContent: () => "tampered" } });
+  assert.equal(calls.mint, 0);
+  assert.equal(calls.update.length, 0);
+  const failed = await row(reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /content hash mismatch/);
+  assert.equal(failed.htmlUrl, "https://github.com/x/y/security/advisories/GHSA-new", "the advisory stays linked");
+});
+
+test("a revision that did not reproduce, or has not reached the reporter, cannot update the advisory", async () => {
+  const notReproduced = await revised();
+  await dbm.db.delete(dbm.outboundDelivery).where(dbm.eq(dbm.outboundDelivery.verdictId, notReproduced.second.verdictId));
+  const third = await addRevision(notReproduced.reportId, 3, { outcome: "NOT_REPRODUCED" });
+  assert.match(
+    (await advisory.requestOwnerAdvisory(notReproduced.reportId, "r") as { reason: string }).reason,
+    /only a reproduced verdict/,
+  );
+  assert.notEqual((await row(notReproduced.reportId)).verdictId, third.verdictId);
+
+  const undelivered = await seed();
+  await advisory.requestOwnerAdvisory(undelivered.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub().deps });
+  await addRevision(undelivered.reportId, 2, { delivered: false });
+  assert.match(
+    (await advisory.requestOwnerAdvisory(undelivered.reportId, "r") as { reason: string }).reason,
+    /already been notified/,
+  );
+});
+
+test("an advisory a crashed revision-1 send left on GitHub is updated for revision 2, not twinned", async () => {
+  const first = await seed();
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+  // The first send created the draft on GitHub, then exhausted its retries before recording it.
+  await dbm.db
+    .update(dbm.ownerAdvisory)
+    .set({ state: "FAILED" })
+    .where(dbm.eq(dbm.ownerAdvisory.reportId, first.reportId));
+  const second = await addRevision(first.reportId, 2);
+  assert.deepEqual(await advisory.requestOwnerAdvisory(first.reportId, "r"), { ok: true });
+
+  const { deps, calls } = fakeGitHub({ existing: first.marker });
+  await advisory.adviseOnce({ deps });
+  assert.equal(calls.create.length, 0);
+  assert.deepEqual(new Set(calls.markers[0]), new Set([first.marker, second.marker]));
+  assert.deepEqual(
+    calls.update.map((u) => [u.ghsaId, u.description]),
+    [["GHSA-old", second.payload]],
+  );
+  assert.equal((await row(first.reportId)).ghsaId, "GHSA-old");
 });

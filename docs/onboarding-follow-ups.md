@@ -69,6 +69,40 @@ The parser, onboarding worker, reproduction authorization, and mesh provisioner 
 host-model commands. Keep the agent instruction aligned with that contract, and retain regression
 tests for `docker`, `docker-compose`, `podman`, and `nerdctl` commands, including shell wrappers.
 
+## Compose mesh start commands and service names
+
+A compose-mesh service starts with what Compose would run: the classifier reads the service's
+`command` and `entrypoint` from the repository's compose file into the build plan as exec argv, and
+the build driver combines them with the image's own ENTRYPOINT, CMD and WORKDIR into the stored start
+command (`meshStartCommand` in `daytona-build-driver.ts`). Compose's rules apply: `command` replaces
+CMD, `entrypoint` replaces ENTRYPOINT and also drops the image's CMD unless `command` is set, and
+`[]` or `''` is an explicit empty override. A string command is split into words the way Compose
+does (go-shellwords), not run through a shell, and each word is quoted into the start command so the
+provisioner's `sh -c` hands `sh -c "<script>"` its script whole. The agent's `commit_compose_mesh`
+tool refuses these fields; an agent-authored service sets its start command through the CMD of the
+Dockerfile it writes.
+
+NodeGoat was the case that needed this. Its web command waits for mongo, seeds the database, then
+runs `npm start`; without it the image's bare `node` CMD started and nothing listened on port 4000.
+
+A service reaches a peer by its compose service name. The provisioner writes `<link ip> <name>` into
+the service's `/etc/hosts`, looking the ip up by the peer's sandbox id on the link network, for every
+name in the service's `peers`. The classifier fills `peers` from `depends_on` and from any service
+named as a host in the service's environment, command or entrypoint (`mongodb://mongo:27017/db`,
+`nc -z mongo 27017`), so nothing in the image has to be rewritten. Compose itself resolves every
+service on its default network; the mesh maps only the names a service refers to, since each entry
+is a lookup that must succeed for the mesh to boot.
+
+Known limits:
+
+- A string command with shell syntax outside `sh -c` (`a && b`, a redirect) is refused rather than
+  truncated the way go-shellwords would, and so is a multi-line command or one over 1000 characters.
+- compose-synth ignores `command`: the flattened image boots from its own entrypoint.
+- A service name used only inside a config file the classifier does not read (not env, command or
+  entrypoint) gets no hosts entry unless `depends_on` names it.
+- Dependency-to-dependency lookups (two linked children) have not been exercised live; the proven
+  path is the app (link parent) reaching a dependency (link child).
+
 ## configureTarget requires an active connected repository
 
 `configureTarget` (`lib/targets/configure.ts`) throws
@@ -94,3 +128,8 @@ The no-egress oracle now accepts `wget` as well as `curl` (see `classifyEgressPr
 `lib/sandbox/provision.ts`), so a target built on a minimal base such as busybox or alpine clears
 `verifyNoEgress`. The readiness probe (`waitForAppReady`) accepts `wget` the same way. This removed
 the first blockers the live run hit.
+
+The onboarding queue schedules on database time. `advance`, `enqueue` and approval set
+`next_attempt_at` to the database's `now()`, the same clock `claim()` compares against, so a worker
+whose clock runs ahead of Postgres no longer parks the next step in the future. That skew was why
+the worker tests left rows at `PENDING_MANIFEST` on developer machines.
