@@ -1,0 +1,72 @@
+name: Deploy
+
+# Every merge to main applies pending migrations to production, then pushes the Zerops worker. The
+# Next.js app deploys on its own through Vercel's Git integration and is not handled here.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# One deploy at a time, in merge order. A run is never cancelled part way, because a migration
+# stopped half applied or a worker push abandoned mid-deploy is worse than a late deploy. GitHub
+# keeps at most one run pending per group, so a burst of merges collapses into the newest pending
+# run, which carries every earlier commit anyway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    # workflow_dispatch can be started from any branch. Only main is allowed to reach production.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.2
+          cache: npm
+      # No secret is in scope here, so package install scripts never see the database URL.
+      - name: Install
+        run: npm ci
+      # drizzle.config.ts reads DIRECT_URL only: the session pooler on port 5432, which migrations
+      # need. The transaction pooler (DATABASE_URL, 6543) is not used.
+      - name: Migrate production
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: npm run db:migrate
+
+  worker:
+    needs: migrate
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZCLI_VERSION: v1.1.2
+      ZCLI_SHA256: b85d5cda8158d2be2e4eb42f4ed27ed0896f5d03ad31366c0da8fba48f49ffd7
+    steps:
+      # A fresh checkout has no node_modules, .env.local or scratch files, which is what keeps the
+      # upload small. Zerops runs npm ci itself (zerops.yml).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # The binary goes to RUNNER_TEMP, outside the workspace, so --no-git does not upload it.
+      - name: Install zcli
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zcli" \
+            "https://github.com/zeropsio/zcli/releases/download/${ZCLI_VERSION}/zcli-linux-amd64"
+          echo "${ZCLI_SHA256}  $RUNNER_TEMP/zcli" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/zcli"
+      # zcli reads ZEROPS_TOKEN from the environment, so no `zcli login` is needed and the token
+      # never appears in a command line. The push waits for the Zerops build and deploy to finish,
+      # so a failed deploy fails this job.
+      - name: Push bdworker
+        env:
+          ZEROPS_TOKEN: ${{ secrets.ZEROPS_TOKEN }}
+        run: '"$RUNNER_TEMP/zcli" push bdworker -P 7G5ck3U4RCuulHTz8Dchkw --no-git'
