@@ -309,6 +309,7 @@ export async function readCase(
       const [advisory] = await tx
         .select({
           state: ownerAdvisory.state,
+          verdictId: ownerAdvisory.verdictId,
           htmlUrl: ownerAdvisory.htmlUrl,
           lastError: ownerAdvisory.lastError,
         })
