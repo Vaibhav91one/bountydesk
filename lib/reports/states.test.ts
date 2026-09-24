@@ -17,6 +17,21 @@ test("the five terminal states go nowhere", () => {
   }
 });
 
+test("a gated outside report leaves only by a human decision", () => {
+  assert.equal(isTerminal("NEEDS_DECISION"), false);
+  assert.equal(canTransition("NEEDS_DECISION", "TRIAGING"), true);
+  assert.equal(canTransition("NEEDS_DECISION", "DENIED"), true);
+
+  // No verdict, analysis, reproduction or delivery straight from the gate.
+  for (const to of ["ANALYSIS_ONLY", "REPRODUCING", "AWAITING_APPROVAL", "DELIVERING", "OUT_OF_SCOPE"] as const) {
+    assert.equal(canTransition("NEEDS_DECISION", to), false, `NEEDS_DECISION -> ${to}`);
+  }
+  // Nothing leads back to the gate once a report has moved on.
+  for (const from of ["TRIAGING", "ANALYSIS_ONLY", "AWAITING_APPROVAL"] as const) {
+    assert.equal(canTransition(from, "NEEDS_DECISION"), false, `${from} -> NEEDS_DECISION`);
+  }
+});
+
 test("the happy path is legal end to end", () => {
   const path: ReportState[] = [
     "TRIAGING",

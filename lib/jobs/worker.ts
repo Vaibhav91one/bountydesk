@@ -1,7 +1,11 @@
+import { db, eq, report } from "@/lib/db";
 import type { InboundEmail } from "@/lib/email/inbound";
+import type { OutsideEmailPayload } from "@/lib/email/outside-intake";
 import { fetchInboundBody } from "@/lib/email/resend";
 import { activeRepository } from "@/lib/github/lifecycle";
-import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
+import { ensureReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
+import { holdForDecision, type GateAnalysisPayload } from "@/lib/triage/gate";
+import { createTrueForgeClient } from "@/lib/trueforge/client";
 
 import {
   LeaseLostError,
@@ -142,8 +146,39 @@ function parseDelivery(lease: Lease): {
   };
 }
 
+type EmailJobPayload = InboundEmail | OutsideEmailPayload | GateAnalysisPayload;
+
+function isOutside(payload: unknown): payload is OutsideEmailPayload {
+  return (payload as { intake?: unknown } | null)?.intake === "outside";
+}
+
+/**
+ * A reviewer released a gated outside report (lib/triage/gate.ts releaseForAnalysis). The report
+ * already exists, so there is nothing to parse: confirm the gate really did release it and hand
+ * it to the same analysis-only run an allowlisted sender's email gets.
+ */
+async function parseGateRelease(lease: Lease, reportId: string): Promise<Lease> {
+  const [row] = await db
+    .select({ channel: report.channel, state: report.state })
+    .from(report)
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (!row || row.channel !== "email") {
+    throw new UnprocessableDelivery(`gate release names no email report ${reportId}`);
+  }
+  if (row.state !== "TRIAGING") {
+    throw new UnprocessableDelivery(`report ${reportId} is ${row.state}; the gate did not release it`);
+  }
+  return advance(lease, "PARSED", { reportId });
+}
+
 async function parseEmail(lease: Lease): Promise<Lease> {
-  const email = lease.payload as InboundEmail;
+  const payload = lease.payload as EmailJobPayload;
+  if ("intake" in payload && payload.intake === "gate-analysis") {
+    return parseGateRelease(lease, payload.reportId);
+  }
+  const email = payload as InboundEmail | OutsideEmailPayload;
+  const outside = isOutside(email);
   const sourceRef = `email:${email.messageId}`;
 
   // The webhook carries no body, so pull it here rather than at intake. A fetch failure throws and
@@ -155,7 +190,8 @@ async function parseEmail(lease: Lease): Promise<Lease> {
 
   // No connected repository and no target profile: an email report has nothing bound to reproduce
   // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
-  // kept as the reply-to for a future outbound delivery.
+  // kept as the reply-to for a future outbound delivery. An outside sender's report starts at
+  // the NEEDS_DECISION gate instead, with the address intake verified by SPF and DKIM.
   const reportId = await ensureReport({
     channel: lease.channel,
     sourceRef,
@@ -163,15 +199,17 @@ async function parseEmail(lease: Lease): Promise<Lease> {
     body,
     reporterHandle: email.fromName,
     reporterContact: email.fromEmail,
+    ...(outside ? { state: "NEEDS_DECISION" as const, verifiedSender: email.verifiedSender } : {}),
     connectedRepositoryId: null,
     targetProfileId: null,
   });
 
-  await recordEvent(
+  // Under the report lock: once an outside report exists, a reviewer can act on it at the gate.
+  await recordEventLocked(
     reportId,
     "intake.accepted",
     { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
-    { idempotencyKey: `${lease.id}:intake.accepted` },
+    `${lease.id}:intake.accepted`,
   );
 
   return advance(lease, "PARSED", { reportId });
@@ -218,6 +256,10 @@ async function parse(lease: Lease): Promise<Lease> {
   return advance(lease, "PARSED", { reportId });
 }
 
+function defaultHold({ reportId, signal }: AnalysisContext): Promise<void> {
+  return holdForDecision(reportId, signal, { client: createTrueForgeClient() });
+}
+
 /**
  * Drive one job as far as its lease allows. Returns the job id, or null when the queue had
  * nothing claimable.
@@ -229,9 +271,16 @@ export async function runOnce(
   owner: string,
   {
     analysis,
+    hold = defaultHold,
     leaseSeconds = 60,
     signal,
-  }: { analysis: AnalysisDriver; leaseSeconds?: number; signal?: AbortSignal },
+  }: {
+    analysis: AnalysisDriver;
+    /** The gate step for an outside email report; injectable so tests need no TrueForge. */
+    hold?: (context: AnalysisContext) => Promise<void>;
+    leaseSeconds?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<string | null> {
   if (signal?.aborted) return null;
   const claimed = await claim(owner, leaseSeconds);
@@ -251,6 +300,17 @@ export async function runOnce(
   try {
     if (lease.state === "RECEIVED") lease = await parse(lease);
     signal?.throwIfAborted();
+    // An outside sender's report stops here. The analysis driver never sees it: no session, no
+    // sandbox, no clone. The job finishes once the acknowledgement and triage are recorded, and
+    // only a reviewer's "Run analysis" queues the job that takes the branch below.
+    if (lease.state === "PARSED" && lease.channel === "email" && isOutside(lease.payload)) {
+      if (!lease.reportId) {
+        throw new UnprocessableDelivery("job reached PARSED with no report attached");
+      }
+      await runWithHeartbeat(hold, lease.reportId, lease, leaseSeconds, signal);
+      await complete(lease);
+      return lease.id;
+    }
     if (lease.state === "PARSED") {
       if (!lease.reportId) {
         throw new UnprocessableDelivery("job reached PARSED with no report attached");

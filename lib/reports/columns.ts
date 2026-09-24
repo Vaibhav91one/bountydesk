@@ -25,7 +25,9 @@ import type { ReportState } from "@/lib/reports/states";
  * be a report nobody can see.
  */
 export const COLUMNS: { key: string; label: string; states: ReportState[] }[] = [
-  { key: "triaging", label: "Triaging", states: ["TRIAGING"] },
+  // NEEDS_DECISION is an outside email report waiting at the intake gate. It sits with Triaging
+  // because nothing has been analysed yet; its own label and mascot say that a human is up.
+  { key: "triaging", label: "Triaging", states: ["TRIAGING", "NEEDS_DECISION"] },
   { key: "analysis-only", label: "Analysis only", states: ["REPRODUCING", "ANALYSIS_ONLY"] },
   { key: "awaiting-approval", label: "Awaiting approval", states: ["AWAITING_APPROVAL"] },
   { key: "delivered", label: "Delivered", states: ["DELIVERING", "DELIVERED"] },

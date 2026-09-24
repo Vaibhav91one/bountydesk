@@ -46,6 +46,10 @@ export type NewReport = {
   reporterHandle: string | null;
   /** The verified reply-to for a non-GitHub channel (email). Null for GitHub. */
   reporterContact?: string | null;
+  /** The contact address when it passed SPF and DKIM for an outside sender; see report.verifiedSender. */
+  verifiedSender?: string | null;
+  /** Where the report starts. TRIAGING unless intake holds it at the gate (NEEDS_DECISION). */
+  state?: ReportState;
   /** Null for a channel with no repository, e.g. email: the report stays analysis-only. */
   connectedRepositoryId: string | null;
   targetProfileId: string | null;
@@ -126,6 +130,24 @@ export async function recordEvent(
   }
 
   await insert;
+}
+
+/**
+ * recordEvent under the report's row lock, for a writer that can run while a reviewer acts on the
+ * same report. The reviewer actions at the outside-email gate hold this lock while they write
+ * their own event, so taking it here serialises the max(seq) + 1 above instead of letting the two
+ * inserts collide on (report_id, seq).
+ */
+export async function recordEventLocked(
+  reportId: string,
+  type: string,
+  data: Record<string, unknown> = {},
+  idempotencyKey?: string,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
+    await recordEvent(reportId, type, data, { idempotencyKey, tx });
+  });
 }
 
 export async function reportState(reportId: string, tx: Executor = db): Promise<ReportState | null> {

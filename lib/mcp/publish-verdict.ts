@@ -19,7 +19,7 @@ import {
   type Executor,
 } from "@/lib/db";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { isVerifiedEmailRecipient } from "@/lib/email/recipient";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
 import { teardownSandbox } from "@/lib/sandbox/provision";
@@ -604,6 +604,7 @@ export async function enqueueApprovedVerdictDelivery(
       sourceRef: report.sourceRef,
       state: report.state,
       reporterContact: report.reporterContact,
+      verifiedSender: report.verifiedSender,
     })
     .from(report)
     .where(eq(report.id, verdictRow.reportId))
@@ -631,11 +632,12 @@ export async function enqueueApprovedVerdictDelivery(
     if (!/^email:.+/.test(reportRow.sourceRef)) {
       return { ok: false, reason: "invalid email delivery target" };
     }
-    // Intake only accepts mail from an allowlisted sender, so this address was authorised when
-    // the report was created. Re-reading it here refuses early, before the report moves to
-    // DELIVERING, if it has been removed since. The worker checks again at send time; this one
-    // is about not stranding the report, that one is about not mailing the wrong person.
-    if (!(await isReviewerEmail(contact))) {
+    // Intake accepts mail from an allowlisted sender, or from an outside sender whose mail passed
+    // SPF and DKIM (recorded as verified_sender). Re-reading it here refuses early, before the
+    // report moves to DELIVERING, if the address no longer qualifies. The worker checks again at
+    // send time; this one is about not stranding the report, that one is about not mailing the
+    // wrong person.
+    if (!(await isVerifiedEmailRecipient(reportRow))) {
       return { ok: false, reason: `${contact} is no longer an authorised address` };
     }
     deliveryTarget = contact;

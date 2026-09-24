@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { fetchInboundBody } from "./resend";
+import { fetchInboundBody, fetchRawHeaders } from "./resend";
 
 const realFetch = globalThis.fetch;
 
@@ -69,6 +69,64 @@ test("fetchInboundBody tolerates a missing text or html field", async () => {
     const body = await fetchInboundBody("abc-123");
     assert.equal(body.text, "only text");
     assert.equal(body.html, "");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("fetchInboundBody reads SPF, DKIM and the message size, and a missing verdict fails closed", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  stubFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          text: "abc",
+          html: "<p>abc</p>",
+          authentication: { spf: "pass", dkim: "gray", dmarc: "pass" },
+          attachments: [{ size: 1000 }, { size: "not a number" }, null],
+        }),
+        { status: 200 },
+      ),
+  );
+  try {
+    const body = await fetchInboundBody("abc-123");
+    assert.equal(body.spf, "pass");
+    assert.equal(body.dkim, "gray");
+    assert.equal(body.sizeBytes, 3 + 10 + 1000);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  stubFetch(() => new Response(JSON.stringify({ text: "x", authentication: { spf: "PASS!" } }), { status: 200 }));
+  try {
+    const body = await fetchInboundBody("abc-123");
+    assert.equal(body.spf, "unknown");
+    assert.equal(body.dkim, "unknown");
+    assert.equal(body.rawUrl, null);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("fetchRawHeaders returns the header block, sends no API key, and stops before the body", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  let seenAuth: string | null = "unset";
+  stubFetch((_url, init) => {
+    seenAuth = new Headers(init?.headers).get("authorization");
+    return new Response("X-SES-RECEIPT: a\r\nFrom: <a@b.test>\r\n\r\n" + "body ".repeat(50_000), { status: 200 });
+  });
+  try {
+    const headers = await fetchRawHeaders("https://cdn.test/raw");
+    assert.equal(seenAuth, null, "the signed URL needs no credential, so none is sent");
+    assert.ok(headers.startsWith("X-SES-RECEIPT: a"));
+    assert.ok(headers.length < 64 * 1024);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  stubFetch(() => new Response("gone", { status: 403 }));
+  try {
+    await assert.rejects(fetchRawHeaders("https://cdn.test/raw"), /403/);
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -8,10 +8,12 @@ import { isReportId, readCase } from "@/lib/reports/case";
 import { listTargetProfiles } from "@/lib/targets/bind";
 import { suggestTargets } from "@/lib/targets/suggest";
 import { caseLiveView } from "@/lib/reports/case-view";
+import { readGate } from "@/lib/triage/gate";
 
 import { CaseApproval } from "./case-approval";
 import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { CaseView } from "./case-view";
+import { TriageGate } from "./triage-gate";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -113,6 +115,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // printing it as the source would say the email was filed on GitHub.
   const intakeRepository = file?.channel === "github" ? file.repositoryFullName : null;
   if (!file) notFound();
+  // Only an email report can have passed through the outside-sender gate.
+  const gate = file.channel === "email" ? await readGate(file.id) : null;
 
   const initial = caseLiveView(file);
 
@@ -176,6 +180,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           <CaseApproval reportId={file.id} initial={initial} />
         </div>
       </header>
+
+      {gate ? <TriageGate reportId={file.id} state={file.state} gate={gate} /> : null}
 
       <CaseView
         reportId={file.id}

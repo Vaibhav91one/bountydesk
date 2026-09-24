@@ -144,7 +144,8 @@ reporter-reply correlation and no `AWAITING_REPORTER` state.
 **Frozen lifecycle clarification (2026-08-26).** The MVP report enum is `TRIAGING`, `REPRODUCING`,
 `ANALYSIS_ONLY`, `AWAITING_APPROVAL`, `DELIVERING`, `DELIVERED`, `DENIED`, `OUT_OF_SCOPE`,
 `CANCELLED`, and `EXPIRED`. The last five states are terminal. Job execution remains the separate
-enum defined in Q14; `DEAD_LETTER` is never a report state.
+enum defined in Q14; `DEAD_LETTER` is never a report state. **Amended 2026-09-24:** Q25 adds one
+non-terminal state, `NEEDS_DECISION`, for outside email reports held at the intake gate.
 
 ### Q18 — The pinned demo target
 
@@ -686,3 +687,62 @@ profile (guidance never selects target, tool, or scope), and starts the turn wit
 wrapped in `[UNTRUSTED_REVIEWER_GUIDANCE]` delimiters. All existing gates stay: scope-guard
 denials, write-probe auto-approval, the publish authorization check, and the human approval the
 new revision still needs before anything is delivered.
+
+### Q25 — Outside email intake and the NEEDS_DECISION gate (2026-09-24)
+
+Email intake used to drop every sender not on the reviewer allowlist, so an outside researcher
+could not report at all. Allowlisted senders are unchanged: their mail goes straight to the
+automatic analysis-only run. Anyone else now gets in only through a gate.
+
+Admission happens in the webhook route (`lib/email/outside-intake.ts`). The webhook carries no
+authentication results, so the route asks Resend's receiving API for the message and accepts it
+only when both SPF and DKIM are `pass`. A `gray` DKIM (unsigned, or signed by a domain other than
+the From domain) fails. Those two results do not say which domain passed (SPF covers the envelope
+sender, and a DKIM signature can come from any domain), so the From domain must also be aligned
+(`lib/email/alignment.ts`). The route reads the raw message's header block from Resend's signed raw
+URL and trusts only an `Authentication-Results` with authserv-id `amazonses.com` that sits above
+the first `X-SES-RECEIPT`, which is the block the receiving MX (Amazon SES) prepends. It needs
+`dmarc=pass header.from=<From domain>`, or `dkim=pass` from a signing domain in the same
+organisational domain (last two labels, or three under a short list of two-part suffixes).
+Anything else, including a missing receipt or result, fails closed. Resend's parsed `headers`
+object is not used: it keeps one value per header name, so a forged duplicate could replace the
+real one. Per-sender (5) and per-domain (20) daily limits are counted from the jobs
+table under a per-domain advisory lock, and the message is capped at 512 KiB. A message that fails
+any check is dropped with a 202 and a log line: no job, no report. A Resend outage answers 503 so
+Resend redelivers. Only accepted mail has a job row, so a spoofed message cannot spend a real
+sender's quota.
+
+The worker creates the report in a new state, `NEEDS_DECISION`, and records the address that passed
+SPF and DKIM as `report.verified_sender`. It then sends a fixed acknowledgement, runs a light
+triage and records duplicate candidates, and finishes the job (a new job edge, `PARSED -> DONE`).
+It never creates an analysis session. The triage is one turn of a TrueForge agent with no MCP
+servers, no skills, no sandbox and no sub-agents (`agent/email-triage.agent.json`); the model key
+lives in the harness, which is why this is an agent turn rather than a direct model call. The email
+is fenced as untrusted data. The agent's summary, vulnerability class, likely severity and spam
+likelihood are hints shown to a reviewer and decide nothing. Linked repositories are read from the
+body by pattern, not by the model. Duplicate candidates are the top three existing reports by
+word-set similarity: "similar reports go to a human as top-k candidates", never an automatic close.
+
+A state rather than a flag, because the gate is a place a report waits for a human, like
+`AWAITING_APPROVAL`, and every reader of state needed to know it. A flag on `TRIAGING` would have
+put a held report under the board's "Triaging" pulse as if an agent were working it, and would have
+left the no-analysis rule to each caller remembering to check the flag. The graph gains two edges
+and nothing leads into the state but intake:
+
+- `NEEDS_DECISION -> TRIAGING`: Run analysis. The reviewer's action moves the report and queues
+  a `gate-analysis` job in one transaction. The worker refuses that job unless the report is
+  `TRIAGING`, then runs the same analysis-only path an allowlisted email gets. Bind and Reproduce
+  apply unchanged after that; `bindTarget` refuses a report still at the gate.
+- `NEEDS_DECISION -> DENIED`: Reject, Mark as spam, or Mark duplicate. Reject and spam send nothing.
+  Mark duplicate sets `report.duplicate_of_report_id` and sends a fixed "duplicate of an existing
+  report" reply that names no other report. The reviewer's click is the approval of that fixed
+  text. The close commits before the send; a failed send is retried by the same action without
+  closing twice, under the same Resend idempotency key.
+
+`CANCELLED` and `EXPIRED` stay reachable from the gate like from any live state.
+
+The verdict recipient rule widens by exactly one case. An email report's contact is a valid
+recipient when it is an allowlisted reviewer, or when it equals the report's `verified_sender`.
+Both `enqueueApprovedVerdictDelivery` and the email arm check it, and the arm re-reads
+`verified_sender` from the row at send time, so a contact changed after intake, or a verification
+cleared after approval, is refused and held. Every verdict still needs human approval.

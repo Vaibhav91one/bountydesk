@@ -1,5 +1,5 @@
-import { and, db, eq, outboundDelivery, sql } from "@/lib/db";
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { and, db, eq, outboundDelivery, report, sql } from "@/lib/db";
+import { isVerifiedEmailRecipient } from "@/lib/email/recipient";
 import { EMAIL_ASSET_ORIGIN, ResendSendError } from "@/lib/email/resend";
 import { renderVerdictEmail } from "@/lib/email/markup";
 
@@ -81,11 +81,23 @@ export const emailArm: DeliveryArm = async (ctx, deps) => {
 
   // The email analogue of the GitHub grant re-check: authorization is re-read at send time, not
   // trusted from approval time. An address removed from the allowlist in between must not be
-  // sent report contents.
-  if (!(await isReviewerEmail(to))) {
+  // sent report contents, and an outside sender qualifies only while the report still records
+  // this exact address as the one that passed SPF and DKIM at intake. The verified sender is
+  // read here rather than carried in the context, so the check is against the row as it is now.
+  const [recipient] = await db
+    .select({ verifiedSender: report.verifiedSender })
+    .from(report)
+    .where(eq(report.id, ctx.report.id))
+    .limit(1);
+  if (
+    !(await isVerifiedEmailRecipient({
+      reporterContact: to,
+      verifiedSender: recipient?.verifiedSender ?? null,
+    }))
+  ) {
     return {
       kind: "refused",
-      message: `${to} is no longer an authorised reviewer; a human has to re-authorise it`,
+      message: `${to} is no longer an authorised recipient; a human has to re-authorise it`,
       hold: true,
     };
   }

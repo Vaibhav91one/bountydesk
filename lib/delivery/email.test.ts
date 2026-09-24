@@ -50,6 +50,7 @@ async function seedEmailFixture(
     createdAt?: Date;
     title?: string;
     payloadExtra?: string;
+    verifiedSender?: string | null;
   } = {},
 ) {
   seq += 1;
@@ -66,6 +67,7 @@ async function seedEmailFixture(
       body: "steps to reproduce",
       state: "DELIVERING",
       reporterContact: contact,
+      verifiedSender: opts.verifiedSender ?? null,
       connectedRepositoryId: null,
       targetProfileId: null,
     })
@@ -185,6 +187,55 @@ test("a recipient removed from the allowlist is refused and held, with nothing s
   assert.equal(delivery.state, "FAILED");
   assert.equal(delivery.requiresHumanReview, true);
   assert.equal(report.state, "DELIVERING");
+});
+
+test("an outside sender that passed SPF and DKIM at intake is a valid recipient", async () => {
+  await drainOthers();
+  const outsider = "researcher@outside.test";
+  const fixture = await seedEmailFixture({ reporterContact: outsider, verifiedSender: outsider });
+  const { deps, sent } = makeDeps();
+
+  await worker.deliverOnce("w-email", { deps });
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, outsider);
+  const { delivery } = await readRows(fixture);
+  assert.equal(delivery.state, "SENT");
+});
+
+test("an outside contact that no longer matches the verified sender is refused and held", async () => {
+  await drainOthers();
+  // The report's contact was changed after intake: the SPF/DKIM proof was for another address.
+  const fixture = await seedEmailFixture({
+    reporterContact: "victim@elsewhere.test",
+    verifiedSender: "researcher@outside.test",
+  });
+  const { deps, sent } = makeDeps();
+
+  await worker.deliverOnce("w-email", { deps });
+
+  assert.equal(sent.length, 0);
+  const { delivery } = await readRows(fixture);
+  assert.equal(delivery.state, "FAILED");
+  assert.equal(delivery.requiresHumanReview, true);
+});
+
+test("a verification cleared after approval stops the send", async () => {
+  await drainOthers();
+  const outsider = "researcher2@outside.test";
+  const fixture = await seedEmailFixture({ reporterContact: outsider, verifiedSender: outsider });
+  // The send-time check reads the row as it is now, not the approval-time snapshot.
+  await dbm.db
+    .update(dbm.report)
+    .set({ verifiedSender: null })
+    .where(dbm.eq(dbm.report.id, fixture.reportId));
+  const { deps, sent } = makeDeps();
+
+  await worker.deliverOnce("w-email", { deps });
+
+  assert.equal(sent.length, 0);
+  const { delivery } = await readRows(fixture);
+  assert.equal(delivery.state, "FAILED");
 });
 
 test("a report whose contact moved since approval is refused, with nothing sent", async () => {

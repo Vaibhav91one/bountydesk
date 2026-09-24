@@ -536,3 +536,54 @@ test("requestRecheckAction refuses guidance from an unauthenticated caller", asy
   );
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
 });
+
+async function seedGatedReport() {
+  seq += 1;
+  const contact = `outsider${seq}@outside.test`;
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:<gated-${seq}@mail.test>`,
+      title: `Gated ${seq}`,
+      body: "body",
+      state: "NEEDS_DECISION",
+      reporterContact: contact,
+      verifiedSender: contact,
+    })
+    .returning({ id: dbm.report.id });
+  return row.id;
+}
+
+test("the gate actions refuse a caller who is not a reviewer, and change nothing", async () => {
+  signOut();
+  const reportId = await seedGatedReport();
+  const { reportId: original } = await seedPendingReport();
+
+  await assert.rejects(() => actions.rejectAtGateAction(reportId, true), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.runAnalysisAction(reportId), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.markDuplicateAction(reportId, original), /NEXT_REDIRECT/);
+
+  assert.equal(await reportState(reportId), "NEEDS_DECISION");
+});
+
+test("a reviewer's gate decision moves the report and records who made it", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  const released = await seedGatedReport();
+
+  assert.deepEqual(await actions.rejectAtGateAction(rejected, false), { ok: true });
+  assert.deepEqual(await actions.runAnalysisAction(released), { ok: true });
+
+  assert.equal(await reportState(rejected), "DENIED");
+  assert.equal(await reportState(released), "TRIAGING");
+  const [event] = await dbm.db
+    .select({ data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, rejected), dbm.eq(dbm.sessionEvent.type, "intake.rejected")));
+  assert.deepEqual(event.data, { reviewer: "gatekeeper" });
+
+  // A malformed id never reaches the database.
+  assert.equal((await actions.runAnalysisAction("not-a-uuid")).ok, false);
+  assert.equal((await actions.markDuplicateAction(rejected, "not-a-uuid")).ok, false);
+});
