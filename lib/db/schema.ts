@@ -701,8 +701,13 @@ export const deliveryAttempt = pgTable(
 );
 
 /**
- * A private draft security advisory opened on the connected repository for an email report,
+ * A private draft security advisory opened on the connected repository for a reproduced report,
  * after its verdict was delivered to the reporter.
+ *
+ * One row per report, since the owner tracks one advisory per vulnerability. verdict_id and
+ * approved_content_hash name the revision the advisory should carry: asking again after a later
+ * revision is delivered repoints them and sets the row PENDING, and the sender then replaces the
+ * description of the advisory ghsa_id already names instead of opening another.
  *
  * Separate from outbound_delivery on purpose: that outbox is what moves a report to DELIVERED,
  * and this runs only once the report is already there. Like the outbox it has no body column;

@@ -106,7 +106,7 @@ export function StatusCard({
               ? "None yet"
               : `${status.eventCount} ${status.eventCount === 1 ? "event" : "events"}`}
           </Fact>
-          {status.channel === "email" && repositoryFullName ? (
+          {(status.channel === "email" || status.channel === "github") && repositoryFullName ? (
             <Fact label="Repository owner">
               <OwnerAdvisoryControl
                 reportId={reportId}
