@@ -46,6 +46,10 @@ export type NewReport = {
   reporterHandle: string | null;
   /** The verified reply-to for a non-GitHub channel (email). Null for GitHub. */
   reporterContact?: string | null;
+  /** The contact address when it passed SPF and DKIM for an outside sender; see report.verifiedSender. */
+  verifiedSender?: string | null;
+  /** Where the report starts. TRIAGING unless intake holds it at the gate (NEEDS_DECISION). */
+  state?: ReportState;
   /** Null for a channel with no repository, e.g. email: the report stays analysis-only. */
   connectedRepositoryId: string | null;
   targetProfileId: string | null;

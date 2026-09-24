@@ -2,10 +2,27 @@ import { requireSecret } from "@/lib/env";
 
 const RESEND_API = "https://api.resend.com";
 
+/** Resend's verdict on one sender check. Anything but "pass" is treated as a failure. */
+export type AuthResult = "pass" | "fail" | "gray" | "processing_failed" | "unknown";
+
 export type InboundBody = {
   text: string;
   html: string;
+  /**
+   * SPF and DKIM as Resend's receiving MX judged them. The webhook does not carry these, only
+   * the receiving API does. A field Resend omitted reads as "unknown", which fails closed.
+   */
+  spf: AuthResult;
+  dkim: AuthResult;
+  /** Text plus HTML plus the attachments' declared sizes, for the outside-sender size cap. */
+  sizeBytes: number;
 };
+
+const AUTH_RESULTS: readonly AuthResult[] = ["pass", "fail", "gray", "processing_failed", "unknown"];
+
+function authResult(value: unknown): AuthResult {
+  return AUTH_RESULTS.includes(value as AuthResult) ? (value as AuthResult) : "unknown";
+}
 
 /**
  * Fetch the body of a received email from Resend.
@@ -41,17 +58,33 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
     );
   }
 
-  let payload: { text?: unknown; html?: unknown };
+  let payload: {
+    text?: unknown;
+    html?: unknown;
+    authentication?: { spf?: unknown; dkim?: unknown } | null;
+    attachments?: unknown;
+  };
   try {
-    payload = (await response.json()) as { text?: unknown; html?: unknown };
+    payload = (await response.json()) as typeof payload;
   } catch (cause) {
     // A 2xx with a body that is not JSON should not surface as a bare SyntaxError. Same context as
     // the other failure paths so the worker's retry is legible.
     throw new Error(`resend receiving fetch for ${resendEmailId} returned unparseable JSON`, { cause });
   }
+  const text = typeof payload.text === "string" ? payload.text : "";
+  const html = typeof payload.html === "string" ? payload.html : "";
+  const attachmentBytes = Array.isArray(payload.attachments)
+    ? payload.attachments.reduce<number>((sum, attachment) => {
+        const size = (attachment as { size?: unknown } | null)?.size;
+        return sum + (typeof size === "number" && size > 0 ? size : 0);
+      }, 0)
+    : 0;
   return {
-    text: typeof payload.text === "string" ? payload.text : "",
-    html: typeof payload.html === "string" ? payload.html : "",
+    text,
+    html,
+    spf: authResult(payload.authentication?.spf),
+    dkim: authResult(payload.authentication?.dkim),
+    sizeBytes: Buffer.byteLength(text) + Buffer.byteLength(html) + attachmentBytes,
   };
 }
 
@@ -156,7 +189,8 @@ export async function sendVerdictEmail(opts: {
   to: string;
   subject: string;
   text: string;
-  html: string;
+  /** Omitted for a plain-text notice (the acknowledgement and the duplicate reply). */
+  html?: string;
   idempotencyKey: string;
   headers?: Record<string, string>;
   signal?: AbortSignal;
@@ -176,7 +210,7 @@ export async function sendVerdictEmail(opts: {
         to: [opts.to],
         subject: opts.subject,
         text: opts.text,
-        html: opts.html,
+        ...(opts.html ? { html: opts.html } : {}),
         ...(opts.headers ? { headers: opts.headers } : {}),
       }),
       signal: opts.signal,

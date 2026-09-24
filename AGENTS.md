@@ -54,10 +54,13 @@ installation, or a removed repository, must stop intake and delivery at once.
 
 Job execution and report lifecycle are separate enums. Job execution runs
 `RECEIVED → PARSED → SESSION_CREATED → RUNNING → DONE | DEAD_LETTER`. Leasing (`lease_owner`,
-`lease_expires_at`, `attempts`, `fence`) is orthogonal to that, not a state of its own. The
-frozen MVP report enum is `TRIAGING | REPRODUCING | ANALYSIS_ONLY | AWAITING_APPROVAL |
+`lease_expires_at`, `attempts`, `fence`) is orthogonal to that, not a state of its own. An
+outside email report held at the intake gate finishes its job at `PARSED → DONE`. The frozen
+report enum is `TRIAGING | NEEDS_DECISION | REPRODUCING | ANALYSIS_ONLY | AWAITING_APPROVAL |
 DELIVERING | DELIVERED | DENIED | OUT_OF_SCOPE | CANCELLED | EXPIRED`, and the last five are
-terminal. There is no reporter-reply state: the reviewer chat is the only conversation channel,
+terminal. `NEEDS_DECISION` is the gate an outside (non-allowlisted) email report waits at before
+anything runs on it; only a reviewer moves it on, to `TRIAGING` or `DENIED` (`docs/decisions.md`
+Q25). There is no reporter-reply state: the reviewer chat is the only conversation channel,
 so `AWAITING_REPORTER` is not part of the enum. `DEAD_LETTER` belongs to job execution only.
 
 The durable jobs table is the queue. Idempotency is the unique `(channel, delivery_id)`, and
@@ -442,8 +445,9 @@ scope decisions, not the time-box, and stay deferred there.
 
 What the end of the window does not change is the safety invariants, which were never about the
 schedule. No channel records a `DeliveryAttempt` or reaches `DELIVERED` without a verified
-recipient and a transport receipt. Email now satisfies both: the recipient is the address that
-passed inbound SPF/DKIM, re-checked against the allowlist at send time, and the receipt is
+recipient and a transport receipt. Email now satisfies both: the recipient is an allowlisted
+address, or an outside sender's address that passed inbound SPF and DKIM and is recorded as the
+report's `verified_sender`, re-checked at send time, and the receipt is
 Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an accepted send
 earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload has neither
 half yet and so still stops short of delivery. Every verdict is still human-approved, which no

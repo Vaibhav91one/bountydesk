@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
@@ -33,6 +34,8 @@ export const jobExecutionState = pgEnum("job_execution_state", [
 
 export const reportLifecycleState = pgEnum("report_lifecycle_state", [
   "TRIAGING",
+  // An outside email report waits here for a human before anything runs on it.
+  "NEEDS_DECISION",
   "REPRODUCING",
   "ANALYSIS_ONLY",
   "AWAITING_APPROVAL",
@@ -284,6 +287,14 @@ export const report = pgTable(
      * GitHub, whose delivery target is the issue. Delivery (Phase 5) refuses to send without it.
      */
     reporterContact: text("reporter_contact"),
+    /**
+     * The address that passed SPF and DKIM when an outside (non-allowlisted) sender's mail was
+     * accepted. Null for GitHub and for allowlisted senders, whose authority is the allowlist.
+     * Delivery accepts `reporter_contact` as a recipient while it still equals this value.
+     */
+    verifiedSender: text("verified_sender"),
+    /** Set when a reviewer closed this report at the gate as a duplicate of another report. */
+    duplicateOfReportId: uuid("duplicate_of_report_id").references((): AnyPgColumn => report.id),
     state: reportLifecycleState("state").notNull().default("TRIAGING"),
     connectedRepositoryId: uuid("connected_repository_id").references(
       () => connectedRepository.id,

@@ -31,6 +31,11 @@ export function isTerminal(state: ReportState): boolean {
  * And `ANALYSIS_ONLY` can move to delivery only from the approval path, because the analysis
  * packet is text we send to a reporter, and nothing reaches them unapproved.
  *
+ * `NEEDS_DECISION` is where an outside email report waits before anything runs on it. The only
+ * ways out are human ones: `TRIAGING` when a reviewer asks for the analysis-only run, and
+ * `DENIED` when a reviewer rejects it or closes it as a duplicate. Nothing moves a report into
+ * it but intake, so no edge leads here.
+ *
  * There is no delivery-failure state. A failing send is retried by the outbox worker while
  * the report stays in `DELIVERING`, so a transient GitHub error is not a lifecycle event.
  *
@@ -39,6 +44,7 @@ export function isTerminal(state: ReportState): boolean {
  */
 const ALLOWED_TRANSITIONS: Record<ReportState, readonly ReportState[]> = {
   TRIAGING: ["REPRODUCING", "ANALYSIS_ONLY", "OUT_OF_SCOPE"],
+  NEEDS_DECISION: ["TRIAGING", "DENIED"],
   REPRODUCING: ["AWAITING_APPROVAL", "ANALYSIS_ONLY"],
   ANALYSIS_ONLY: ["AWAITING_APPROVAL", "DELIVERING", "DENIED", "REPRODUCING"],
   // The reviewer-driven edges back into REPRODUCING are taken only by a supersede

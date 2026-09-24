@@ -49,6 +49,7 @@ async function seedFixture(
     reporterContact?: string | null;
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
     state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
+    verifiedSender?: string | null;
   } = {},
 ) {
   seq += 1;
@@ -73,6 +74,7 @@ async function seedFixture(
             ? REPORTER
             : opts.reporterContact
           : null,
+      verifiedSender: opts.verifiedSender ?? null,
     })
     .returning({ id: dbm.report.id });
 
@@ -300,6 +302,40 @@ test("an email report whose sender lost authorization is refused, and nothing is
     ok: false,
     reason: "gone@example.test is no longer an authorised address",
   });
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
+});
+
+test("an outside sender verified by SPF and DKIM at intake is queued as the recipient", async () => {
+  const outsider = "researcher@outside.test";
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: outsider,
+    verifiedSender: outsider,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ target: dbm.outboundDelivery.target })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  assert.equal(delivery.target, outsider);
+});
+
+test("an outside contact that differs from the verified sender is refused", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: "someone-else@outside.test",
+    verifiedSender: "researcher@outside.test",
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, false);
   assert.equal(await deliveryCount(fixture.verdictId), 0);
   assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
 });

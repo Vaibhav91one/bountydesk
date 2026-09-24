@@ -31,6 +31,13 @@ import { isReportId } from "@/lib/reports/case";
 import { bindTarget } from "@/lib/targets/bind";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
+import { safeErrorText } from "@/lib/errors/safe-error";
+import {
+  markDuplicateAtGate,
+  rejectAtGate,
+  releaseForAnalysis,
+  type GateResult,
+} from "@/lib/triage/gate";
 
 export type ActionResult = { ok: boolean; error?: string };
 
@@ -389,6 +396,51 @@ export async function requestOwnerAdvisoryAction(reportId: string): Promise<Acti
   } catch (error) {
     return thrownActionError(error, "notify");
   }
+}
+
+/** Run one gate decision, turning a thrown failure into a message that leaks nothing. */
+async function gateDecision(
+  reportId: string,
+  decide: () => Promise<GateResult>,
+): Promise<ActionResult> {
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  try {
+    const result = await decide();
+    revalidateReportViews(reportId);
+    return result.ok ? { ok: true } : { ok: false, error: result.reason };
+  } catch (error) {
+    console.error(`gate decision on report ${reportId} failed: ${safeErrorText(error)}`);
+    return { ok: false, error: "Could not record that decision." };
+  }
+}
+
+/**
+ * Reject an outside report at the NEEDS_DECISION gate, or mark it as spam. The report closes as
+ * DENIED and the reporter is sent nothing.
+ */
+export async function rejectAtGateAction(reportId: string, spam: boolean): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => rejectAtGate(reportId, session.login, spam === true));
+}
+
+/** Release an outside report from the gate into the normal analysis-only run. */
+export async function runAnalysisAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => releaseForAnalysis(reportId, session.login));
+}
+
+/**
+ * Close an outside report as a duplicate of an existing one and send the fixed duplicate reply.
+ * The reviewer's click is the approval of that fixed text. Calling it again on a report already
+ * closed as that duplicate re-sends a reply that failed, and closes nothing twice.
+ */
+export async function markDuplicateAction(
+  reportId: string,
+  duplicateOfId: string,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(duplicateOfId)) return { ok: false, error: "That is not a report id." };
+  return gateDecision(reportId, () => markDuplicateAtGate(reportId, duplicateOfId, session.login));
 }
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {

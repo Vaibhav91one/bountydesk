@@ -89,9 +89,14 @@ export function StatusCard({
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <Fact label="Status">{status.stateLabel}</Fact>
           <Fact label="Bound target">
-            <TargetControl reportId={reportId} status={status} profiles={targetProfiles}
-              suggestion={suggestion}
-            />
+            {/* bindTarget refuses a gated report, so the picker would only fail. */}
+            {status.state === "NEEDS_DECISION" ? (
+              "None until a decision"
+            ) : (
+              <TargetControl reportId={reportId} status={status} profiles={targetProfiles}
+                suggestion={suggestion}
+              />
+            )}
           </Fact>
           <Fact label="Intake">{intakeRepository ?? channelLabel(status.channel)}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>

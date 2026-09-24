@@ -239,6 +239,13 @@
       "when": 1790184807240,
       "tag": "0033_aberrant_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790256431457,
+      "tag": "0034_outside_email_gate",
+      "breakpoints": true
     }
   ]
 }

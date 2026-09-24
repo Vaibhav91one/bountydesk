@@ -73,3 +73,36 @@ test("fetchInboundBody tolerates a missing text or html field", async () => {
     globalThis.fetch = realFetch;
   }
 });
+
+test("fetchInboundBody reads SPF, DKIM and the message size, and a missing verdict fails closed", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  stubFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          text: "abc",
+          html: "<p>abc</p>",
+          authentication: { spf: "pass", dkim: "gray", dmarc: "pass" },
+          attachments: [{ size: 1000 }, { size: "not a number" }, null],
+        }),
+        { status: 200 },
+      ),
+  );
+  try {
+    const body = await fetchInboundBody("abc-123");
+    assert.equal(body.spf, "pass");
+    assert.equal(body.dkim, "gray");
+    assert.equal(body.sizeBytes, 3 + 10 + 1000);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  stubFetch(() => new Response(JSON.stringify({ text: "x", authentication: { spf: "PASS!" } }), { status: 200 }));
+  try {
+    const body = await fetchInboundBody("abc-123");
+    assert.equal(body.spf, "unknown");
+    assert.equal(body.dkim, "unknown");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
