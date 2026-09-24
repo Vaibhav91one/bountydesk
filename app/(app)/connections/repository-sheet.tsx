@@ -21,6 +21,7 @@ import {
 import { ApproveOnboardingButton } from "./approve-onboarding-button";
 import { DownloadArtifact } from "./download-artifact";
 import { OnboardingDialog, type OnboardingTab } from "./onboarding-dialog";
+import { RetryOnboardingButton } from "./retry-onboarding-button";
 import { onboardingView } from "./onboarding-steps";
 import type { RepositoryRow } from "./connection-tabs";
 import type { OnboardingDetail } from "@/lib/github/connections";
@@ -293,6 +294,11 @@ export function RepositorySheet({
                   </span>
                   {repo.onboardingProgress.reason ? (
                     <span className="text-sm">{repo.onboardingProgress.reason}</span>
+                  ) : null}
+                  {/* Keyed by repo so a success message from one repository is not carried into
+                      the next one the sheet opens on. */}
+                  {repo.onboardingProgress.state === "FAILED" ? (
+                    <RetryOnboardingButton key={repo.repoId} repoId={repo.repoId} />
                   ) : null}
                 </div>
               ) : null}
