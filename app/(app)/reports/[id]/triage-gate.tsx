@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { refreshReportViews } from "@/lib/reports/live-keys";
-import type { GateView } from "@/lib/triage/gate";
+import type { GateTriage, GateView } from "@/lib/triage/gate";
 
 type Decision =
   | { kind: "analysis" }
@@ -52,10 +52,50 @@ const COPY: Record<Decision["kind"], { title: string; description: string; confi
 
 const REPORT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Pull a report id out of a pasted id or a case-file URL. */
+/**
+ * Pull a report id out of a pasted id, a case-file URL, or the short id printed on a case file
+ * (`#725dcfed`). A short id is an 8-hex prefix; markDuplicateAction resolves it to the full id
+ * server-side, refusing one that names no report or more than one.
+ */
 function reportIdFrom(value: string): string | null {
-  const match = value.trim().match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-  return match && REPORT_ID.test(match[0]) ? match[0].toLowerCase() : null;
+  const trimmed = value.trim();
+  const full = trimmed.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  if (full && REPORT_ID.test(full[0])) return full[0].toLowerCase();
+  const short = trimmed.match(/^#?([0-9a-f]{8})$/i);
+  return short ? short[1].toLowerCase() : null;
+}
+
+/**
+ * The badges, summary and linked repositories the email triage produced. Model output about a
+ * stranger's text, so it renders as plain text and decides nothing. Shared by the live gate and the
+ * collapsed record shown after the report leaves it.
+ */
+function TriageBody({ triage }: { triage: GateTriage }) {
+  return (
+    <>
+      {triage.triage ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="outline">{triage.triage.vulnerabilityClass}</Badge>
+            <Badge variant="outline">Likely severity: {triage.triage.severity}</Badge>
+            <Badge variant={triage.triage.spamLikelihood === "high" ? "destructive" : "outline"}>
+              Spam likelihood: {triage.triage.spamLikelihood}
+            </Badge>
+          </div>
+          <p className="whitespace-pre-wrap text-body text-foreground [overflow-wrap:anywhere]">
+            {triage.triage.summary}
+          </p>
+        </div>
+      ) : (
+        <p className="text-body text-muted-foreground">The triage did not produce a usable summary.</p>
+      )}
+      {triage.linkedRepositories.length > 0 ? (
+        <p className="text-meta text-muted-foreground [overflow-wrap:anywhere]">
+          Linked repositories: {triage.linkedRepositories.join(", ")}
+        </p>
+      ) : null}
+    </>
+  );
 }
 
 /**
@@ -69,10 +109,13 @@ export function TriageGate({
   reportId,
   state,
   gate,
+  closingReason,
 }: {
   reportId: string;
   state: string;
   gate: GateView;
+  /** Why a denied report was closed (rejected or spam), read from its closing event. Null otherwise. */
+  closingReason: string | null;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -145,35 +188,51 @@ export function TriageGate({
     </Dialog>
   );
 
-  // Closed at the gate as a duplicate: say what it duplicates, and offer the reply again if it
-  // did not go out.
+  const triage = gate.triage;
+
+  // The report has left the gate. Keep what the gate recorded reachable rather than going blank: why
+  // it was closed, what it duplicates, and the initial triage (collapsed, since it is history now).
   if (state !== "NEEDS_DECISION") {
-    if (!gate.duplicateOf) return null;
     const original = gate.duplicateOf;
+    if (!original && !closingReason && !triage?.triage) return null;
     return (
-      <section className="mx-8 mt-8 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/50 bg-card px-5 py-4">
-        <p className="text-body text-foreground">
-          Closed as a duplicate of{" "}
-          <Link href={`/reports/${original.id}`} className="underline underline-offset-4">
-            {original.title}
-          </Link>
-          . {gate.duplicateReplySent ? "The duplicate reply was sent." : "The duplicate reply has not been sent."}
-        </p>
-        {gate.duplicateReplySent ? null : (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => setDecision({ kind: "duplicate", of: original.id, title: original.title })}
-          >
-            Send the reply again
-          </Button>
-        )}
+      <section className="mx-8 mt-8 flex flex-col gap-4 rounded-xl border border-border/50 bg-card px-5 py-4">
+        {original ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-body text-foreground">
+              Closed as a duplicate of{" "}
+              <Link href={`/reports/${original.id}`} className="underline underline-offset-4">
+                {original.title}
+              </Link>
+              . {gate.duplicateReplySent ? "The duplicate reply was sent." : "The duplicate reply has not been sent."}
+            </p>
+            {gate.duplicateReplySent ? null : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => setDecision({ kind: "duplicate", of: original.id, title: original.title })}
+              >
+                Send the reply again
+              </Button>
+            )}
+          </div>
+        ) : closingReason ? (
+          <p className="text-body text-foreground">{closingReason}</p>
+        ) : null}
+        {triage?.triage ? (
+          <details>
+            <summary className="cursor-pointer text-meta text-muted-foreground">Initial triage</summary>
+            <div className="mt-3 flex flex-col gap-3">
+              <TriageBody triage={triage} />
+            </div>
+          </details>
+        ) : null}
         {dialog}
       </section>
     );
   }
 
-  const triage = gate.triage;
   const manual = reportIdFrom(manualId);
 
   return (
@@ -187,30 +246,11 @@ export function TriageGate({
         </p>
       </header>
 
-      {triage?.triage ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">{triage.triage.vulnerabilityClass}</Badge>
-            <Badge variant="outline">Likely severity: {triage.triage.severity}</Badge>
-            <Badge variant={triage.triage.spamLikelihood === "high" ? "destructive" : "outline"}>
-              Spam likelihood: {triage.triage.spamLikelihood}
-            </Badge>
-          </div>
-          <p className="whitespace-pre-wrap text-body text-foreground [overflow-wrap:anywhere]">
-            {triage.triage.summary}
-          </p>
-        </div>
+      {triage ? (
+        <TriageBody triage={triage} />
       ) : (
-        <p className="text-body text-muted-foreground">
-          {triage ? "The triage did not produce a usable summary." : "Triage has not finished yet."}
-        </p>
+        <p className="text-body text-muted-foreground">Triage has not finished yet.</p>
       )}
-
-      {triage && triage.linkedRepositories.length > 0 ? (
-        <p className="text-meta text-muted-foreground [overflow-wrap:anywhere]">
-          Linked repositories: {triage.linkedRepositories.join(", ")}
-        </p>
-      ) : null}
 
       <div className="flex flex-col gap-2">
         <h3 className="text-meta text-muted-foreground">Possible duplicates</h3>
@@ -229,6 +269,7 @@ export function TriageGate({
                   <Button
                     size="xs"
                     variant="outline"
+                    disabled={pending}
                     onClick={() =>
                       setDecision({ kind: "duplicate", of: candidate.reportId, title: candidate.title })
                     }
@@ -246,31 +287,46 @@ export function TriageGate({
           <Input
             value={manualId}
             onChange={(event) => setManualId(event.target.value)}
-            placeholder="Or paste a report id or link"
+            placeholder="Or paste a report id, link, or short id"
             aria-label="Original report id"
+            disabled={pending}
             className="max-w-sm"
           />
           <Button
             size="sm"
             variant="outline"
-            disabled={!manual || manual === reportId}
+            disabled={!manual || manual === reportId || pending}
             onClick={() => manual && setDecision({ kind: "duplicate", of: manual, title: null })}
           >
             Mark duplicate
           </Button>
         </div>
+        {/* The button silently disabling on an unrecognized value reads as broken, so say what a
+            recognized value is once the box holds something that is not one. */}
+        {manualId.trim() && !manual ? (
+          <p className="text-meta text-muted-foreground">
+            Enter a full report id, a case-file link, or the 8-character short id shown as #xxxxxxxx.
+          </p>
+        ) : null}
       </div>
 
-      <div className="flex flex-wrap gap-2 border-t border-border/50 pt-4">
-        <Button size="sm" onClick={() => setDecision({ kind: "analysis" })}>
+      {/* The row lock already stops a real double action; disabling here is so a confirmed decision
+          does not leave the old buttons live and unmarked while the new state is still loading. */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-4">
+        <Button size="sm" disabled={pending} onClick={() => setDecision({ kind: "analysis" })}>
           Run analysis
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setDecision({ kind: "reject" })}>
+        <Button size="sm" variant="outline" disabled={pending} onClick={() => setDecision({ kind: "reject" })}>
           Reject
         </Button>
-        <Button size="sm" variant="destructive" onClick={() => setDecision({ kind: "spam" })}>
+        <Button size="sm" variant="destructive" disabled={pending} onClick={() => setDecision({ kind: "spam" })}>
           Mark as spam
         </Button>
+        {pending ? (
+          <span role="status" className="text-meta text-muted-foreground">
+            Recording your decision…
+          </span>
+        ) : null}
       </div>
 
       {dialog}

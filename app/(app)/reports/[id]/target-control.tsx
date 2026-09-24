@@ -56,9 +56,6 @@ export function TargetControl({
 }) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
-  // Re-read while the report names a repository that is not ready yet, so a fork that finishes
-  // onboarding appears in the picker, already selected, without a reload.
-  const waiting = !status.target && (initialSuggestion?.unconnected.length ?? 0) > 0;
   const [guideFor, setGuideFor] = useState<string | null>(null);
   // The open guide's link is part of the request because only that link is checked on GitHub for
   // a fork not connected yet. Switching links keeps showing the last answer until the new one lands.
@@ -71,8 +68,14 @@ export function TargetControl({
       ),
     initialData: guideFor ? undefined : initial,
     placeholderData: keepPreviousData,
-    refetchInterval: (query) =>
-      waiting && ((query.state.data ?? initial).suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false,
+    // The suggestion is loaded here rather than at server render, so it starts null and the fetch
+    // on mount fills it. Poll only while the report names a repository not ready yet, read off the
+    // fetched data so a fork that finishes onboarding appears in the picker without a reload.
+    refetchInterval: (query) => {
+      if (status.target) return false;
+      const suggestion = (query.state.data ?? initial).suggestion;
+      return (suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false;
+    },
   });
   const { profiles, suggestion } = data;
   // Binding authorises execution against a target, so it never happens without a click on Bind,
