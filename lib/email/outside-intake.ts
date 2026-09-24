@@ -3,6 +3,7 @@ import { enqueue } from "@/lib/jobs/queue";
 
 import { checkFromAlignment } from "./alignment";
 import type { InboundEmail } from "./inbound";
+import { sendOversizedNotice } from "./notice";
 import { fetchInboundBody, fetchRawHeaders, type InboundBody } from "./resend";
 
 /**
@@ -72,10 +73,17 @@ function overLimit(counts: { sender: number; domain: number }): string | null {
 export async function admitOutsideEmail(
   email: InboundEmail,
   deps: {
-    fetchBody: (resendEmailId: string) => Promise<InboundBody>;
-    fetchHeaders: (rawUrl: string) => Promise<string>;
-  } = { fetchBody: fetchInboundBody, fetchHeaders: fetchRawHeaders },
+    fetchBody?: (resendEmailId: string) => Promise<InboundBody>;
+    fetchHeaders?: (rawUrl: string) => Promise<string>;
+    /** Courtesy reply on the size-cap drop. Injected in tests; the default hits Resend. */
+    notifyOversized?: (email: InboundEmail) => Promise<void>;
+  } = {},
 ): Promise<OutsideAdmission> {
+  const fetchBody = deps.fetchBody ?? fetchInboundBody;
+  const fetchHeaders = deps.fetchHeaders ?? fetchRawHeaders;
+  const notifyOversized =
+    deps.notifyOversized ?? (async (e) => void (await sendOversizedNotice(e)));
+
   // SPF and DKIM come only from the receiving API, which is keyed by Resend's id.
   if (!email.resendEmailId) return { accepted: false, reason: "no Resend id to verify the sender with" };
 
@@ -83,18 +91,25 @@ export async function admitOutsideEmail(
   const early = overLimit(await recentCounts(email, db));
   if (early) return { accepted: false, reason: early };
 
-  const message = await deps.fetchBody(email.resendEmailId);
+  const message = await fetchBody(email.resendEmailId);
   if (message.spf !== "pass" || message.dkim !== "pass") {
     return { accepted: false, reason: `sender not authenticated (spf ${message.spf}, dkim ${message.dkim})` };
-  }
-  if (message.sizeBytes > OUTSIDE_LIMITS.maxBytes) {
-    return { accepted: false, reason: `message is ${message.sizeBytes} bytes, over the cap` };
   }
   // A pass on its own does not say which domain passed. The address we store and reply to must be
   // the one the receiving MX authenticated (lib/email/alignment.ts).
   if (!message.rawUrl) return { accepted: false, reason: "no raw message to check alignment with" };
-  const alignment = checkFromAlignment(await deps.fetchHeaders(message.rawUrl), senderDomain(email.fromEmail));
+  const alignment = checkFromAlignment(await fetchHeaders(message.rawUrl), senderDomain(email.fromEmail));
   if (!alignment.ok) return { accepted: false, reason: `From not aligned: ${alignment.reason}` };
+
+  // The size check runs only after SPF, DKIM and alignment all pass, so the drop notice below goes
+  // only to an address the receiving MX authenticated. A forged oversized message is dropped at
+  // one of the checks above and never earns a reply, so it cannot be used to mail a third party.
+  // The rate-limit drops above stay silent on purpose: a notice there would let a flood amplify
+  // into outbound mail.
+  if (message.sizeBytes > OUTSIDE_LIMITS.maxBytes) {
+    await notifyOversized(email);
+    return { accepted: false, reason: `message is ${message.sizeBytes} bytes, over the cap` };
+  }
 
   const payload: OutsideEmailPayload = { ...email, intake: "outside", verifiedSender: email.fromEmail };
 

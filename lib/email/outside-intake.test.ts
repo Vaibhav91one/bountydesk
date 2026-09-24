@@ -136,16 +136,56 @@ test("a message with no raw copy to check alignment against is dropped", async (
   assert.equal(await jobFor(message.messageId), undefined);
 });
 
-test("a message over the size cap is dropped", async () => {
+test("a verified message over the size cap is dropped and its sender is told once", async () => {
   const message = email("big@good.test");
+  const notified: string[] = [];
 
-  const result = await intake.admitOutsideEmail(
-    message,
-    fetched({ sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 }),
-  );
+  const result = await intake.admitOutsideEmail(message, {
+    ...fetched({ sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 }),
+    notifyOversized: async (e) => void notified.push(e.fromEmail),
+  });
 
   assert.equal(result.accepted, false);
   assert.equal(await jobFor(message.messageId), undefined);
+  // The notice goes only to the address the receiving MX authenticated (SPF, DKIM and alignment
+  // all passed above), so it cannot be aimed at a third party.
+  assert.deepEqual(notified, ["big@good.test"]);
+});
+
+test("an oversized message that fails SPF/DKIM is dropped with no notice", async () => {
+  const message = email("mallory@spoof.test");
+  const notified: string[] = [];
+
+  const result = await intake.admitOutsideEmail(message, {
+    ...fetched({ spf: "fail", sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 }),
+    notifyOversized: async (e) => void notified.push(e.fromEmail),
+  });
+
+  assert.equal(result.accepted, false);
+  assert.match((result as { reason: string }).reason, /not authenticated/);
+  // A forged oversized message must not be a lever to mail an arbitrary address.
+  assert.deepEqual(notified, []);
+  assert.equal(await jobFor(message.messageId), undefined);
+});
+
+test("an oversized message whose From is not aligned is dropped with no notice", async () => {
+  const message = email("victim@bigcorp.test");
+  const attacker = [
+    "Received: by inbound-smtp.amazonaws.com",
+    "Authentication-Results: amazonses.com; spf=pass envelope-from=x@attacker.test; dkim=pass header.i=@attacker.test; dmarc=fail header.from=bigcorp.test;",
+    "From: <victim@bigcorp.test>",
+    "",
+  ].join("\r\n");
+  const notified: string[] = [];
+
+  const result = await intake.admitOutsideEmail(message, {
+    ...fetched({ sizeBytes: intake.OUTSIDE_LIMITS.maxBytes + 1 }, attacker),
+    notifyOversized: async (e) => void notified.push(e.fromEmail),
+  });
+
+  assert.equal(result.accepted, false);
+  assert.match((result as { reason: string }).reason, /From not aligned/);
+  assert.deepEqual(notified, []);
 });
 
 test("a message with no Resend id cannot be verified and is dropped without a fetch", async () => {
