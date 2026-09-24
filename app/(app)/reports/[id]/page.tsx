@@ -4,18 +4,31 @@ import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { requireReviewer } from "@/lib/auth/dal";
-import { isReportId, readCase } from "@/lib/reports/case";
+import { readCase } from "@/lib/reports/case";
 import { listTargetProfiles } from "@/lib/targets/bind";
-import { suggestTargets } from "@/lib/targets/suggest";
 import { caseLiveView } from "@/lib/reports/case-view";
 import { readGate } from "@/lib/triage/gate";
 
 import { CaseApproval } from "./case-approval";
 import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { CaseView } from "./case-view";
+import { resolveReportId } from "./resolve-id";
 import { TriageGate } from "./triage-gate";
 
 export const metadata = { title: "Case file · BountyDesk" };
+
+/**
+ * Why a report was closed at the gate, drawn from its closing event. Duplicate closes have their
+ * own card, so only a plain reject or spam is named here. Null for anything not closed this way.
+ */
+function deniedReason(file: { state: string; events: { type: string }[] }): string | null {
+  if (file.state !== "DENIED") return null;
+  for (const event of [...file.events].reverse()) {
+    if (event.type === "intake.marked_spam") return "Closed as spam.";
+    if (event.type === "intake.rejected") return "Rejected by a reviewer.";
+  }
+  return null;
+}
 
 /**
  * A link out to GitHub, or the same text unlinked.
@@ -99,16 +112,17 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   await requireReviewer();
   const { id } = await params;
 
-  // A uuid that does not exist and a string that is not a uuid are the same answer to a
-  // reviewer, and letting the malformed one reach the database only produces a 500.
-  const file = isReportId(id) ? await readCase(id) : null;
+  // A full uuid resolves directly; the short id shown on this page (`#725dcfed`) resolves when it
+  // names exactly one report, so a reviewer can paste what they see. A string that is neither, or
+  // an ambiguous prefix, resolves to null, which is the honest not-found answer rather than a 500.
+  const resolvedId = await resolveReportId(id);
+  const file = resolvedId ? await readCase(resolvedId) : null;
   // Only a report with no bound target can use these, and only a reviewer sees this page at all.
   // Read here rather than in the client component so a browser never asks what targets exist.
   const targetProfiles = file && !file.target ? await listTargetProfiles() : [];
-  // A GitHub report already names its repository, so only an unbound email report is read for
-  // links. The body is the reporter's text and only picks which option the picker opens on.
-  const suggestion =
-    file && !file.target && file.channel === "email" ? await suggestTargets(file.body) : null;
+  // The target suggestion reads github.com links out of the body and asks GitHub about each one,
+  // which is seconds of network on a cold cache. It is loaded client-side after paint through
+  // /api/reports/[id]/targets (TargetControl), so a report with a link no longer blocks first paint.
   // Where the report came from, which is not always the repository on the row. A GitHub report
   // was filed on that repository. An email report only carries one after a reviewer binds a
   // target, and then it names the target's owner so a revoked grant can still stop the report;
@@ -117,6 +131,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   if (!file) notFound();
   // Only an email report can have passed through the outside-sender gate.
   const gate = file.channel === "email" ? await readGate(file.id) : null;
+  const closingReason = deniedReason(file);
 
   const initial = caseLiveView(file);
 
@@ -181,7 +196,14 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         </div>
       </header>
 
-      {gate ? <TriageGate reportId={file.id} state={file.state} gate={gate} /> : null}
+      {gate ? (
+        <TriageGate
+          reportId={file.id}
+          state={file.state}
+          gate={gate}
+          closingReason={closingReason}
+        />
+      ) : null}
 
       <CaseView
         reportId={file.id}
@@ -190,7 +212,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         repositoryFullName={file.repositoryFullName}
         intakeRepository={intakeRepository}
         targetProfiles={targetProfiles}
-        suggestion={suggestion}
+        suggestion={null}
       />
     </main>
   );

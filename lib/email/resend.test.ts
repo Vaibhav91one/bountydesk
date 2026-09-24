@@ -131,3 +131,38 @@ test("fetchRawHeaders returns the header block, sends no API key, and stops befo
     globalThis.fetch = realFetch;
   }
 });
+
+test("fetchRawHeaders passes a signal, so Next's GET dedupe cannot tee the body and hang the cancel", async () => {
+  // Mimic next/dist/server/lib/dedupe-fetch.js: a GET without a signal gets one tee branch while
+  // the other is kept, and cancelling a tee branch waits until both are cancelled.
+  stubFetch((_url, init) => {
+    const response = new Response("From: <a@b.test>\r\n\r\nbody", { status: 200 });
+    if (init?.signal) return response;
+    const [returned] = response.body!.tee();
+    return new Response(returned, { status: 200 });
+  });
+  try {
+    const result = await Promise.race([
+      fetchRawHeaders("https://cdn.test/raw"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 1000).unref()),
+    ]);
+    assert.equal(result, "From: <a@b.test>");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("fetchInboundBody passes a signal so a stalled Resend call cannot hold intake open", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  let signal: AbortSignal | null | undefined;
+  stubFetch((_url, init) => {
+    signal = init?.signal;
+    return new Response(JSON.stringify({ text: "" }), { status: 200 });
+  });
+  try {
+    await fetchInboundBody("em_1");
+    assert.ok(signal instanceof AbortSignal);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
