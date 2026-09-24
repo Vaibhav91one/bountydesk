@@ -13,7 +13,7 @@ import {
   targetProfile,
 } from "@/lib/db";
 import { awaitingReviewSql } from "@/lib/reports/queue";
-import type { TargetManifest } from "@/lib/targets/manifest";
+import { reviewableManifest, type TargetManifest } from "@/lib/targets/manifest";
 
 /**
  * The read model behind the Integrations screen.
@@ -176,7 +176,7 @@ async function awaitingApprovalOnboardings(): Promise<Map<number, OnboardingProp
             [
               Number(row.repoId),
               {
-                manifest: row.proposedManifest as TargetManifest,
+                manifest: reviewableManifest(row.proposedManifest),
                 imageName: row.imageName,
                 imageDigest: row.imageDigest,
               },

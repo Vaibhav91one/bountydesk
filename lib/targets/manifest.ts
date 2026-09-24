@@ -160,3 +160,26 @@ function validateScopeRules(value: unknown): void {
     }
   }
 }
+
+/**
+ * The proposed manifest in the shape the approval sheet reads.
+ *
+ * A proposal keeps its runtime under `config` (and the readiness path under `provisioning`), while
+ * the sheet reads the flat TargetManifest fields, so a compose-mesh proposal showed a blank base URL
+ * and readiness path to the reviewer approving it. The flat field wins when present.
+ */
+export function reviewableManifest(raw: unknown): TargetManifest {
+  const manifest = raw as TargetManifest & {
+    config?: { baseUrl?: string; readinessPath?: string };
+    provisioning?: { readinessPath?: string; startCommand?: string };
+  };
+  // The start command is what launches the container, so a reviewer must see it before approving.
+  const startCommand = manifest.startCommand ?? manifest.provisioning?.startCommand;
+  return {
+    ...manifest,
+    baseUrl: manifest.baseUrl ?? manifest.config?.baseUrl ?? "",
+    readinessPath:
+      manifest.readinessPath ?? manifest.config?.readinessPath ?? manifest.provisioning?.readinessPath ?? "",
+    ...(startCommand ? { startCommand } : {}),
+  };
+}

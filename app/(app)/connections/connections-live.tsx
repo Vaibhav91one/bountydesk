@@ -27,7 +27,13 @@ export function ConnectionsLive({ initial, installUrl }: { initial: RepositoryRo
     initialData: initial,
     refetchInterval: (query) => {
       const data = query.state.data ?? initial;
-      const moving = data.some((repo) => repo.onboardingProgress && IN_FLIGHT.has(repo.onboardingProgress.state));
+      // APPROVED is in flight too: the offline verify runs after a reviewer approves, and the row
+      // should turn configured (or failed) on its own rather than on the next reload.
+      const moving = data.some(
+        (repo) =>
+          (repo.onboardingProgress && IN_FLIGHT.has(repo.onboardingProgress.state)) ||
+          repo.onboardingDetail?.state === "APPROVED",
+      );
       return moving ? FAST_MS : false;
     },
   });
