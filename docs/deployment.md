@@ -255,6 +255,54 @@ npm run agent:apply
 Those commands need `TRUEFORGE_URL` to point at the authenticated proxy and `TRUEFORGE_API_KEY` to
 match the proxy secret.
 
+## Deploy on merge
+
+`.github/workflows/deploy.yml` runs on every push to `main`, with no approval step. It can also be
+started by hand from the Actions tab, but only a run on `main` does anything. Two jobs run in order:
+
+1. `migrate` runs `npm run db:migrate` against production.
+2. `worker` runs only after `migrate` succeeds. It installs a pinned `zcli` release, checks its
+   SHA-256, and runs `zcli push bdworker -P 7G5ck3U4RCuulHTz8Dchkw --no-git` from a fresh checkout.
+   The push waits for the Zerops build and deploy, so a failed deploy fails the job. Expect about
+   ten minutes.
+
+Deploys run one at a time and are never cancelled part way. When several merges land close
+together, GitHub keeps only the newest waiting run, and that run deploys every commit before it.
+
+The Vercel app deploys on its own and does not wait for this workflow. A migration usually
+finishes before the Vercel build does, but nothing orders the two. A change whose new code cannot
+run against the old schema still has to land in two merges: the migration first, then the code.
+
+The workflow needs two repository secrets (Settings, Secrets and variables, Actions):
+
+- `DIRECT_URL`, the Supabase session-pooler string on port 5432, the same value `.env.local` uses
+  for migrations. Use the pooler host, not the direct `db.<ref>.supabase.co` one: the direct host
+  is IPv6 only, and GitHub-hosted runners cannot reach it.
+- `ZEROPS_TOKEN`, a Zerops personal access token from Settings, Access Token Management. `zcli`
+  reads it from the environment, so the workflow never runs `zcli login`.
+
+`.github/scripts/deploy-policy.test.mjs` runs in CI and fails if the workflow loses its SHA pins,
+its checksum, its read-only token, its main-only guard or its no-cancel concurrency.
+
+To move to a newer `zcli`, change `ZCLI_VERSION` and take the new `zcli-linux-amd64` line from that
+release's `checksums.txt` for `ZCLI_SHA256`.
+
+## Cleaning up archived sandboxes
+
+Daytona archives the harness's agent sandboxes instead of deleting them, and they pile up on the
+account. `scripts/cleanup-archived-sandboxes.ts` deletes the archived ones that carry no
+`bountydesk.*` label and have not changed for N days (default 7). Sandboxes BountyDesk created are
+labelled and are never touched, and neither is anything that is not archived. It is a dry run
+unless you pass `--apply`:
+
+```bash
+node --env-file=.env.local --import tsx scripts/cleanup-archived-sandboxes.ts            # list only
+node --env-file=.env.local --import tsx scripts/cleanup-archived-sandboxes.ts --days 14  # list, 14 days
+node --env-file=.env.local --import tsx scripts/cleanup-archived-sandboxes.ts --apply    # delete
+```
+
+It needs `DAYTONA_API_KEY`.
+
 ## First cloud run
 
 The first cloud run should use the connected Juice Shop fork from `env.example`. After the Daytona
