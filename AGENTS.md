@@ -122,12 +122,14 @@ authorizes a verdict, target, approval, delivery, or merge.
 
 Merge acceptance requires a pull request, a green `build` check, and resolved conversations.
 
-It reviews a same-repository pull request when it opens, reopens or is marked ready, and again when
-the owner, a member or a collaborator comments `/review`. It is not a required status check. A PR
-counts as reviewed when its summary comment carries `<!-- claude-review head=<sha> -->` for the
-current head; after later pushes, comment `/review` to review the new head. Fork PRs are not
-reviewed, which is expected, not a CI failure. If the review fails or is missing, a human may merge
-with the required `build` check and human review, but must not describe the PR as reviewed by it.
+It reviews a same-repository pull request when it opens, reopens or is marked ready, on every push,
+and again when the owner, a member or a collaborator comments `/review`. A new push cancels a review
+still running on the old head. It is not a required status check. A PR counts as reviewed when its
+summary comment carries `<!-- claude-review head=<sha> -->` for the current head; the workflow's
+read-only `head-check` job compares the latest marker with the head after each review and fails,
+advisory only, when it is missing or stale. Fork PRs are not reviewed, which is expected, not a CI
+failure. If the review fails or is missing, a human may merge with the required `build` check and
+human review, but must not describe the PR as reviewed by it.
 
 A pull request cannot change its own review policy. The workflow runs from the default branch on
 `pull_request_target` and `issue_comment`, the default branch is checked out as the working tree,
