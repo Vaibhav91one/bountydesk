@@ -28,6 +28,7 @@ import {
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { isReportId } from "@/lib/reports/case";
+import { resolveReportId } from "@/app/(app)/reports/[id]/resolve-id";
 import { bindTarget } from "@/lib/targets/bind";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
@@ -48,6 +49,42 @@ export type ActionResult = { ok: boolean; error?: string };
  * the rollback.
  */
 class DecisionRefused extends Error {}
+
+/**
+ * A dropped-connection failure, the one class worth one retry.
+ *
+ * The Supabase transaction pooler hands back a socket it has already closed, and the first
+ * statement on it fails with a connection error rather than a query error. A fresh connection
+ * succeeds, so `decide` retries once. A constraint violation, a lock timeout or any other query
+ * error is not this, and is surfaced rather than retried.
+ */
+const TRANSIENT_CODES = new Set([
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "CONNECTION_CLOSED",
+  "CONNECTION_ENDED",
+  "CONNECTION_DESTROYED",
+  "CONNECT_TIMEOUT",
+]);
+
+function isTransientConnectionError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && TRANSIENT_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("connection terminated") ||
+    message.includes("connection closed") ||
+    message.includes("connection ended") ||
+    message.includes("econnreset") ||
+    message.includes("write after end") ||
+    message.includes("socket")
+  );
+}
+
+// The dialog appends its own "Nothing was recorded; reload..." line, so this stays short and does
+// not repeat it.
+const DECISION_FAILED = "Could not record that decision because the database call failed";
 
 function revalidateReportViews(reportId: string) {
   for (const path of ["/board", `/reports/${reportId}`, "/reports", "/home"]) {
@@ -82,8 +119,12 @@ async function decide(
   note: string | undefined,
 ): Promise<ActionResult> {
   let immediateDeliveryId: string | null = null;
-  try {
-    const result = await db.transaction(async (tx) => {
+
+  const runOnce = () =>
+    db.transaction(async (tx): Promise<ActionResult> => {
+      // Reset per attempt: a retried transaction re-enqueues its own delivery, and the id from a
+      // rolled-back attempt names a row that no longer exists.
+      immediateDeliveryId = null;
       const [reportRow] = await tx
         .select({ state: report.state })
         .from(report)
@@ -274,27 +315,51 @@ async function decide(
 
       return { ok: true };
     });
-    if (result.ok && immediateDeliveryId) {
-      try {
-        await deliverById(
-          immediateDeliveryId,
-          `review-action-delivery-${immediateDeliveryId}`,
-          { leaseSeconds: 20 },
-        );
-      } catch (error) {
-        console.error(
-          `delivery ${immediateDeliveryId}: immediate post after approval failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-    revalidateReportViews(reportId);
-    return result;
+
+  // A transient connection error mid-transaction rolls the whole thing back, so a single retry is
+  // safe: it either records the decision cleanly or fails again and is surfaced. An unexpected
+  // error is turned into a friendly result rather than a raw 500, so the reviewer sees a message
+  // in the dialog and can reload, and the report is never left stuck with no explanation.
+  let result: ActionResult;
+  try {
+    result = await runOnce();
   } catch (error) {
     if (error instanceof DecisionRefused) return { ok: false, error: error.message };
-    throw error;
+    if (isTransientConnectionError(error)) {
+      try {
+        result = await runOnce();
+      } catch (retryError) {
+        if (retryError instanceof DecisionRefused) return { ok: false, error: retryError.message };
+        console.error(
+          `approval decision for report ${reportId} failed after retry: ${safeErrorText(retryError)}`,
+        );
+        return { ok: false, error: DECISION_FAILED };
+      }
+    } else {
+      console.error(
+        `approval decision for report ${reportId} failed: ${safeErrorText(error)}`,
+      );
+      return { ok: false, error: DECISION_FAILED };
+    }
   }
+
+  if (result.ok && immediateDeliveryId) {
+    try {
+      await deliverById(
+        immediateDeliveryId,
+        `review-action-delivery-${immediateDeliveryId}`,
+        { leaseSeconds: 20 },
+      );
+    } catch (error) {
+      console.error(
+        `delivery ${immediateDeliveryId}: immediate post after approval failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  revalidateReportViews(reportId);
+  return result;
 }
 
 /**
@@ -439,8 +504,11 @@ export async function markDuplicateAction(
   duplicateOfId: string,
 ): Promise<ActionResult> {
   const session = await requireReviewer();
-  if (!isReportId(duplicateOfId)) return { ok: false, error: "That is not a report id." };
-  return gateDecision(reportId, () => markDuplicateAtGate(reportId, duplicateOfId, session.login));
+  // Accept the short id printed on a case file (`#725dcfed`), not just the full uuid: a reviewer
+  // pastes what they can see. A prefix that names no report, or more than one, is refused here.
+  const resolved = await resolveReportId(duplicateOfId);
+  if (!resolved) return { ok: false, error: "That is not a report id." };
+  return gateDecision(reportId, () => markDuplicateAtGate(reportId, resolved, session.login));
 }
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {

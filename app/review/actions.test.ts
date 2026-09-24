@@ -587,3 +587,65 @@ test("a reviewer's gate decision moves the report and records who made it", asyn
   assert.equal((await actions.runAnalysisAction("not-a-uuid")).ok, false);
   assert.equal((await actions.markDuplicateAction(rejected, "not-a-uuid")).ok, false);
 });
+
+/**
+ * Replace db.transaction with a fault so the approval action meets a dropped connection. The own
+ * property shadows the prototype method decide() calls, and deleting it restores the real one.
+ */
+function faultTransaction(fault: (call: number) => Promise<unknown> | "real") {
+  const real = dbm.db.transaction.bind(dbm.db);
+  let calls = 0;
+  (dbm.db as { transaction: unknown }).transaction = (...args: unknown[]) => {
+    calls += 1;
+    const outcome = fault(calls);
+    return outcome === "real" ? (real as (...a: unknown[]) => unknown)(...args) : outcome;
+  };
+  return {
+    calls: () => calls,
+    restore: () => {
+      delete (dbm.db as { transaction?: unknown }).transaction;
+    },
+  };
+}
+
+test("allowVerdict returns a friendly error instead of throwing when the DB connection drops", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, verdictId } = await seedPendingReport();
+
+  const dropped = Object.assign(new Error("Connection ended unexpectedly"), { code: "CONNECTION_ENDED" });
+  // Both the initial attempt and the one retry hit a dead pooler socket.
+  const fault = faultTransaction(() => Promise.reject(dropped));
+  let result;
+  try {
+    result = await actions.allowVerdict(reportId, verdictId);
+  } finally {
+    fault.restore();
+  }
+
+  assert.equal(result.ok, false, "a transient DB failure must not surface as a thrown 500");
+  assert.match(result.error ?? "", /database call failed/i);
+  assert.equal(fault.calls(), 2, "the initial attempt plus exactly one retry");
+  // The transaction rolled back both times, so nothing was recorded and the report is untouched.
+  assert.equal((await decisionsFor(verdictId)).length, 0);
+  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});
+
+test("allowVerdict retries once and records the decision when the first DB attempt drops", async () => {
+  signIn(REVIEWER_ID, "iris");
+  const { reportId, verdictId } = await seedPendingReport();
+
+  const dropped = Object.assign(new Error("write CONNECTION_CLOSED"), { code: "CONNECTION_CLOSED" });
+  const fault = faultTransaction((call) => (call === 1 ? Promise.reject(dropped) : "real"));
+  let result;
+  try {
+    result = await actions.allowVerdict(reportId, verdictId);
+  } finally {
+    fault.restore();
+  }
+
+  assert.equal(result.ok, true);
+  assert.equal(fault.calls(), 2);
+  const decisions = await decisionsFor(verdictId);
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decision, "APPROVED");
+});
