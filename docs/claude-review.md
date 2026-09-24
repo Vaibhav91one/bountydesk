@@ -15,6 +15,24 @@ secret. Reviews of one pull request share a concurrency group, so a push that la
 is still running cancels it and reviews the new head instead. Comments that are not `/review` get a
 group of their own and never cancel a review.
 
+## Fallback when the subscription run fails
+
+If the subscription run fails, for example because the token expired or hit a usage limit, the
+same job runs the review once more through VyceAI, using the `VYCEAI_API_KEY` repository secret.
+VyceAI serves the Anthropic Messages API at `https://vyceai.com`, so this is the same Claude Code
+action with a different base URL and model (`deepseek-v4.1`). The prompt and tool limits are
+identical, and the policy test fails if they drift apart. Three differences matter:
+
+- The model is DeepSeek, not Sonnet 5, so treat its findings with more suspicion.
+- It is billed against the VyceAI balance (about $0.15 in and $0.60 out per million tokens).
+- The pull request's diff and files are sent to VyceAI.
+
+A run that failed partway may already have posted comments before the fallback posts its own. The
+head check reads the latest summary, so the result is still correct.
+
+To refresh the subscription token instead, run `claude setup-token` and update
+`CLAUDE_CODE_OAUTH_TOKEN`.
+
 ## What it posts
 
 One inline comment per finding, on the line in question, and one summary comment that starts with
