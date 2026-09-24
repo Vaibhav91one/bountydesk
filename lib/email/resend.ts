@@ -2,6 +2,14 @@ import { requireSecret } from "@/lib/env";
 
 const RESEND_API = "https://api.resend.com";
 
+/**
+ * Every Resend fetch carries a signal, and not only as a timeout. Inside a Next.js route, fetch
+ * dedupes a signal-less GET by tee()ing its body and keeping one branch. Cancelling the other
+ * branch then waits for that kept branch forever, which is how intake hung to Vercel's 300s limit.
+ * A signal opts the call out of the dedupe (next/dist/server/lib/dedupe-fetch.js).
+ */
+const RESEND_TIMEOUT_MS = 20_000;
+
 /** Resend's verdict on one sender check. Anything but "pass" is treated as a failure. */
 export type AuthResult = "pass" | "fail" | "gray" | "processing_failed" | "unknown";
 
@@ -46,6 +54,7 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
         authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
         "user-agent": "bountydesk-worker",
       },
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
     });
   } catch (cause) {
     // A network-level failure (DNS, connection reset) rejects here rather than returning a
@@ -103,7 +112,10 @@ const MAX_HEADER_BYTES = 64 * 1024;
  * non-2xx throws so intake answers 5xx and Resend redelivers.
  */
 export async function fetchRawHeaders(rawUrl: string): Promise<string> {
-  const response = await fetch(rawUrl, { headers: { "user-agent": "bountydesk-app" } });
+  const response = await fetch(rawUrl, {
+    headers: { "user-agent": "bountydesk-app" },
+    signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
+  });
   if (!response.ok || !response.body) {
     throw new Error(`raw message fetch failed: ${response.status}`);
   }
