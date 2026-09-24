@@ -100,9 +100,54 @@ test("a different bug in the same repo is not floated by the repo boost alone", 
   assert.deepEqual(rankCandidates(targetText, rows), []);
 });
 
+test("two unrelated bugs sharing only a bare github.com link are not a high-confidence pair", () => {
+  // A bare link (no scheme) still counts for the repo boost, so its host and path tokens must not
+  // also leak into the word overlap. If they did, github/com/owner/repo alone would push two
+  // unrelated same-repo bugs to a base Jaccard near 0.5, boosted near 0.8.
+  const bare = "github.com/Vaibhav91one/juice-shop";
+  const bareTarget = {
+    title: "SQL injection on the login form",
+    body: `The login endpoint at ${bare} is vulnerable. A crafted email logs you in as admin without a password.`,
+  };
+  const rows = [
+    {
+      id: "unrelated-bare",
+      title: "Broken avatar image on the profile page",
+      body: `The profile page at ${bare} renders a broken avatar on a narrow screen. Purely cosmetic.`,
+    },
+  ];
+  assert.deepEqual(rankCandidates(`${bareTarget.title}\n${bareTarget.body}`, rows), []);
+});
+
+test("a near-verbatim cross-project resend is not dropped for a weaker same-repo match", () => {
+  // The report links a different repo (a fork or a rename), so the strongest duplicate signal here
+  // is cross-project. It must survive alongside the weak same-repo candidate, not be filtered by it.
+  const otherRepo = "https://github.com/Vaibhav91one/juice-shop-fork";
+  const rows = [
+    {
+      id: "weak-same-repo",
+      title: "Reflected XSS in the Juice Shop search box",
+      body: `Typing a script tag into the search field at ${JUICE} runs it back in the admin browser. Nothing to do with the login endpoint.`,
+    },
+    {
+      id: "cross-resend",
+      title: target.title,
+      body: target.body.replace(JUICE, otherRepo),
+    },
+  ];
+  const ranked = rankCandidates(targetText, rows);
+  const ids = ranked.map((c) => c.reportId);
+  assert.ok(ids.includes("cross-resend"), "the near-verbatim cross-project resend must survive");
+  assert.equal(ranked[0].reportId, "cross-resend");
+  assert.ok(ranked[0].score >= 0.95, `the resend should score near 1, got ${ranked[0].score}`);
+  const weak = ranked.find((c) => c.reportId === "weak-same-repo");
+  assert.ok(weak && weak.score < ranked[0].score, "the same-repo match here is the weaker signal");
+});
+
 test("jaccard and wordSet stay pure helpers the ranker builds on", () => {
   assert.equal(jaccard(new Set(["a"]), new Set()), 0);
   assert.equal(jaccard(new Set(["a", "b"]), new Set(["a", "b"])), 1);
-  // Stopwords, sub-three-character tokens, and a URL's host and path are all dropped.
+  // Stopwords, sub-three-character tokens, and a link's host and path (scheme or not) are all dropped.
   assert.deepEqual([...wordSet("the login form is XSS https://github.com/o/r")].sort(), ["form", "login", "xss"]);
+  assert.deepEqual([...wordSet("the login form is XSS github.com/o/r")].sort(), ["form", "login", "xss"]);
 });

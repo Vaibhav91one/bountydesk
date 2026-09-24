@@ -34,11 +34,15 @@ const STOPWORDS = new Set(
 export type DuplicateCandidate = { reportId: string; title: string; score: number };
 
 export function wordSet(text: string): Set<string> {
-  // Drop URLs before tokenising. A shared link would otherwise leak host and path tokens (github,
+  // Drop links before tokenising. A shared link would otherwise leak host and path tokens (github,
   // com, the owner, the repo slug) into the word overlap and double-count the repo signal that
-  // repoSet already carries. ponytail: only scheme-qualified links are stripped, which is how
-  // reports link in practice; a bare host slips through as ordinary words.
-  const prose = text.slice(0, MAX_TEXT_CHARS).replace(/https?:\/\/\S+/gi, " ");
+  // repoSet already carries. The github.com case is stripped scheme-optional, exactly the way
+  // repositoryMentions matches it, so a bare github.com/owner/repo cannot leak its tokens while
+  // still counting for the boost. Any other scheme-qualified URL goes too.
+  const prose = text
+    .slice(0, MAX_TEXT_CHARS)
+    .replace(/https?:\/\/\S+/gi, " ")
+    .replace(/(?:www\.)?github\.com\/\S+/gi, " ");
   const words = prose.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   return new Set(words.filter((w) => w.length >= 3 && !STOPWORDS.has(w)));
 }
@@ -88,12 +92,15 @@ export function rankCandidates(
   });
 
   const passing = scored.filter((candidate) => candidate.score >= MIN_SCORE);
-  // Cross-project matches are noise once a real same-target candidate is on the list, so drop them
-  // rather than let "login" and "injection" float a NodeGoat report next to a Juice Shop one. A
-  // candidate with no repo link at all is not a same-repo match and does not trigger this.
-  const hasSameRepo = passing.some((candidate) => candidate.sharesRepo);
+  // A cross-project match (both sides link a repo, and they disagree) is usually noise beside a
+  // same-repo one, so it does not float a NodeGoat report next to a Juice Shop one on "login" and
+  // "injection". But a near-verbatim resend that happens to link a different repo (a fork, a rename,
+  // a typo) can out-score every same-repo match on text alone, and dropping the strongest duplicate
+  // signal would defeat the top-k rule. So a cross-project candidate is cut only when it scores below
+  // the best same-repo candidate. With no same-repo candidate the bar is 0 and none are cut.
+  const bestSameRepo = Math.max(0, ...passing.filter((candidate) => candidate.sharesRepo).map((c) => c.score));
   return passing
-    .filter((candidate) => !(hasSameRepo && candidate.crossProject))
+    .filter((candidate) => !(candidate.crossProject && candidate.score < bestSameRepo))
     .sort((a, b) => b.score - a.score)
     .slice(0, TOP_K)
     .map(({ reportId, title, score }) => ({ reportId, title, score }));
