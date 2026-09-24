@@ -1,7 +1,9 @@
 name: Claude review
 
-# The repository's advisory code review, by Claude Code. It is not a required check. It runs on the maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN), so it
-# runs when a pull request opens and on request, not on every push.
+# The repository's advisory code review, by Claude Code. It is not a required check. It runs on the
+# maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN) and reviews every push to a pull
+# request, plus on request. After the review, head-check reports whether the latest summary names
+# the pull request's current head.
 #
 # pull_request_target and issue_comment both run this file from the default branch, so a pull
 # request cannot change its own review policy or prompt. The default branch is checked out at the
@@ -9,18 +11,16 @@ name: Claude review
 # which Claude reads as data. Claude gets read tools and `gh pr` only: no shell, so no PR code runs.
 on:
   pull_request_target:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
+permissions: {}
 
 # Concurrency is evaluated before the job's `if`, so an ordinary comment would join the per-PR group
 # and cancel a running review. Only events that will actually review share that group; everything
-# else gets a group of its own and is skipped at once.
+# else gets a group of its own and is skipped at once. Within the group a new push cancels the
+# review of the commit it replaced, since that review would land on a stale head.
 concurrency:
   group: >-
     ${{
@@ -53,6 +53,10 @@ jobs:
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
 
     steps:
       - name: Resolve the pull request
@@ -113,3 +117,33 @@ jobs:
                </details>
                Use [High] or [Medium] only.
             No tables, no emoji, no badges, no footer, no sign-off, and no line saying who or what wrote the review. Write plainly: no em dashes or en dashes.
+
+  head-check:
+    needs: review
+    # A failed review still gets a report (no summary, or a stale one); a skipped one means this
+    # event was never a review.
+    if: ${{ !cancelled() && needs.review.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Check that the review covers the head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          head_sha="$(gh pr view "$NUMBER" --repo "$REPOSITORY" --json headRefOid --jq .headRefOid)"
+          gh api --paginate --slurp "repos/$REPOSITORY/issues/$NUMBER/comments?per_page=100" > "$RUNNER_TEMP/comments.json"
+          node .github/scripts/claude-review-head-check.mjs "$RUNNER_TEMP/comments.json" "$head_sha"
