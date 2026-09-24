@@ -318,6 +318,7 @@ test("every report state maps to a mascot that exists", async () => {
 
   const all = [
     "TRIAGING",
+    "NEEDS_DECISION",
     "REPRODUCING",
     "ANALYSIS_ONLY",
     "AWAITING_APPROVAL",

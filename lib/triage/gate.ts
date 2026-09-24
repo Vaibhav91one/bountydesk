@@ -3,7 +3,7 @@ import { noticeSent, sendNotice, type SendNotice } from "@/lib/email/notice";
 import { sendVerdictEmail } from "@/lib/email/resend";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { enqueue } from "@/lib/jobs/queue";
-import { recordEvent, transition } from "@/lib/reports/lifecycle";
+import { recordEvent, recordEventLocked, transition } from "@/lib/reports/lifecycle";
 import { repositoryMentions } from "@/lib/targets/suggest";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
@@ -53,24 +53,24 @@ export async function holdForDecision(
   signal: AbortSignal,
   deps: { client: TrueForgeClient; send?: SendNotice },
 ): Promise<void> {
+  const ack = await sendNotice(reportId, "acknowledgement", deps.send ?? sendVerdictEmail, signal);
+  if (ack.status === "refused") {
+    await recordEventLocked(
+      reportId,
+      "intake.acknowledgement_refused",
+      { reason: ack.reason },
+      "intake.acknowledgement_refused",
+    );
+  }
+
+  // Read after the acknowledgement, not before it: a reviewer may already have decided, and then
+  // there is nobody left to advise.
   const [row] = await db
     .select({ title: report.title, body: report.body, state: report.state })
     .from(report)
     .where(eq(report.id, reportId))
     .limit(1);
   if (!row) throw new Error(`report ${reportId} does not exist`);
-
-  const ack = await sendNotice(reportId, "acknowledgement", deps.send ?? sendVerdictEmail, signal);
-  if (ack.status === "refused") {
-    await recordEvent(
-      reportId,
-      "intake.acknowledgement_refused",
-      { reason: ack.reason },
-      { idempotencyKey: "intake.acknowledgement_refused" },
-    );
-  }
-
-  // A reviewer can decide before the triage finishes. Then there is nobody left to advise.
   if (row.state !== "NEEDS_DECISION" || (await hasEvent(reportId, TRIAGED_EVENT))) return;
 
   const triage = await runEmailTriage(deps.client, { title: row.title, body: row.body }, { signal });
@@ -79,7 +79,20 @@ export async function holdForDecision(
     linkedRepositories: repositoryMentions(row.body),
     duplicateCandidates: await findDuplicateCandidates(reportId, row.title, row.body),
   };
-  await recordEvent(reportId, TRIAGED_EVENT, record, { idempotencyKey: TRIAGED_EVENT });
+
+  // The triage turn can take minutes, and a reviewer can release, reject or close the report in
+  // that time. The final check and the write share one transaction under the report's row lock,
+  // the lock every gate action holds for its own write, so a report that left the gate gets no
+  // triage record and the two inserts never race on the event sequence.
+  await db.transaction(async (tx) => {
+    const [live] = await tx
+      .select({ state: report.state })
+      .from(report)
+      .where(eq(report.id, reportId))
+      .for("update");
+    if (live?.state !== "NEEDS_DECISION") return;
+    await recordEvent(reportId, TRIAGED_EVENT, record, { idempotencyKey: TRIAGED_EVENT, tx });
+  });
 }
 
 export type GateView = {

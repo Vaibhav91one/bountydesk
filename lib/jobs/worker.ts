@@ -3,7 +3,7 @@ import type { InboundEmail } from "@/lib/email/inbound";
 import type { OutsideEmailPayload } from "@/lib/email/outside-intake";
 import { fetchInboundBody } from "@/lib/email/resend";
 import { activeRepository } from "@/lib/github/lifecycle";
-import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
+import { ensureReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
 import { holdForDecision, type GateAnalysisPayload } from "@/lib/triage/gate";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
 
@@ -204,11 +204,12 @@ async function parseEmail(lease: Lease): Promise<Lease> {
     targetProfileId: null,
   });
 
-  await recordEvent(
+  // Under the report lock: once an outside report exists, a reviewer can act on it at the gate.
+  await recordEventLocked(
     reportId,
     "intake.accepted",
     { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
-    { idempotencyKey: `${lease.id}:intake.accepted` },
+    `${lease.id}:intake.accepted`,
   );
 
   return advance(lease, "PARSED", { reportId });

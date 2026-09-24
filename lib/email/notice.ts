@@ -1,6 +1,6 @@
 import { and, db, eq, report, sessionEvent } from "@/lib/db";
 import { threadingHeaders } from "@/lib/delivery/email";
-import { recordEvent } from "@/lib/reports/lifecycle";
+import { recordEventLocked } from "@/lib/reports/lifecycle";
 
 import { ResendSendError, sendVerdictEmail } from "./resend";
 
@@ -110,11 +110,7 @@ export async function sendNotice(
     throw error;
   }
 
-  await recordEvent(
-    reportId,
-    sentEventType(kind),
-    { providerMessageId: sent.id },
-    { idempotencyKey: sentEventType(kind) },
-  );
+  // Locked: the acknowledgement is written while a reviewer may be deciding at the gate.
+  await recordEventLocked(reportId, sentEventType(kind), { providerMessageId: sent.id }, sentEventType(kind));
   return { status: "sent", providerMessageId: sent.id };
 }

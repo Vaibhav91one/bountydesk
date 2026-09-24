@@ -238,6 +238,54 @@ test("a retried hold does not acknowledge or triage twice", async () => {
   assert.equal(triaged.length, 1);
 });
 
+/** A report created at the gate by the worker, before its hold step has run. */
+async function parsedOnly() {
+  await drain();
+  const email = await enqueueEmail({ outside: true });
+  // A hold that does nothing, so the test can drive holdForDecision itself.
+  await worker.runOnce("gate-worker", { analysis: analysisSpy().driver, hold: async () => {} });
+  return reportFor(email.messageId);
+}
+
+test("a reviewer decision during the triage turn leaves no triage record and no error", async () => {
+  const row = await parsedOnly();
+  const { client } = fakeClient();
+  // The turn is where the minutes go: release the report while it is "running".
+  const racing = {
+    ...client,
+    createTurn: async (...args: Parameters<TrueForgeClient["createTurn"]>) => {
+      assert.deepEqual(await gate.releaseForAnalysis(row.id, "reviewer"), { ok: true });
+      return client.createTurn(...args);
+    },
+  } as TrueForgeClient;
+
+  await gate.holdForDecision(row.id, new AbortController().signal, { client: racing, send: fakeSend().send });
+
+  assert.equal((await reportById(row.id)).state, "TRIAGING");
+  const types = await eventTypes(row.id);
+  assert.ok(!types.includes(gate.TRIAGED_EVENT), "a report that left the gate gets no triage");
+  assert.ok(types.includes("intake.analysis_released"));
+});
+
+test("a reviewer decision between the acknowledgement and the triage skips the triage turn", async () => {
+  const row = await parsedOnly();
+  const mail = fakeSend();
+  const send = (async (call: SendCall) => {
+    const sent = await (mail.send as unknown as (c: SendCall) => Promise<{ id: string }>)(call);
+    await gate.rejectAtGate(row.id, "reviewer", true);
+    return sent;
+  }) as unknown as import("@/lib/email/notice").SendNotice;
+  const triage = fakeClient();
+
+  await gate.holdForDecision(row.id, new AbortController().signal, { client: triage.client, send });
+
+  assert.equal(mail.calls.length, 1, "the acknowledgement still went out");
+  assert.equal(triage.inputs.length, 0, "no triage turn for a closed report");
+  const types = await eventTypes(row.id);
+  assert.ok(types.includes("intake.marked_spam"));
+  assert.ok(!types.includes(gate.TRIAGED_EVENT));
+});
+
 test("a similar earlier report is offered as a duplicate candidate", async () => {
   const first = await heldReport({
     subject: "SQL injection in the product search endpoint",
