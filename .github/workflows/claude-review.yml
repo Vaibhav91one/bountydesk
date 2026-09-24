@@ -1,7 +1,6 @@
 name: Claude review
 
-# An advisory code review by Claude Code, next to PR Agent while the two are compared. It is not a
-# required check. It runs on the maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN), so it
+# The repository's advisory code review, by Claude Code. It is not a required check. It runs on the maintainer's Claude subscription (CLAUDE_CODE_OAUTH_TOKEN), so it
 # runs when a pull request opens and on request, not on every push.
 #
 # pull_request_target and issue_comment both run this file from the default branch, so a pull

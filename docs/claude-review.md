@@ -1,7 +1,6 @@
 # Claude review
 
-An advisory code review that runs beside PR-Agent while the two are compared. Like PR-Agent it is
-not a merge gate: `build` stays the only required check, and no review result authorizes a verdict,
+The repository's advisory code review, run by Claude Code on Sonnet 5. It is not a merge gate: `build` stays the only required check, and no review result authorizes a verdict,
 target, approval, delivery or merge. A human owns the merge decision and fixes a finding or answers
 it in its thread.
 
@@ -40,9 +39,8 @@ prompt, the tools or the review policy it is judged by.
 
 `.github/scripts/claude-review-policy.test.mjs` asserts each of these and runs in CI.
 
-## Comparing it with PR-Agent
+## History
 
-For the next few pull requests, both reviewers run. For each finding, record whether it was real.
-PR-Agent's `/review` and `/improve` are retired only if Claude review is clearly more precise, and
-at that point `docs/pr-agent-review.md`, the PR-Agent verifier and the review passages in
-`AGENTS.md` are updated with it.
+PR-Agent (`gpt-4o-mini`) ran beside this review for a trial and was retired: it read only the diff,
+and about one finding in twenty-five held up, while this review's findings were confirmed in the
+code before they were posted. Its workflows, verifier and configuration are in the git history.
