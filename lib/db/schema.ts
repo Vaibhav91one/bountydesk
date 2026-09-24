@@ -190,6 +190,38 @@ export const connectedRepository = pgTable(
 );
 
 /**
+ * What GitHub last said about a public repository name, read anonymously and kept until
+ * `expires_at`. Keyed by the lowercased `owner/repo` that was asked about: a name a report linked,
+ * or the name a fork of it would have under an installed account.
+ *
+ * A cache and nothing more. The case file re-reads its target suggestion every few seconds, and
+ * GitHub allows 60 anonymous requests an hour per IP, so a name is fetched at most once per expiry
+ * no matter how many polls or server instances ask. Rows only ever steer which server-held target
+ * a suggestion highlights; nothing about access or scope is decided from them.
+ */
+export const githubRepositoryLookup = pgTable(
+  "github_repository_lookup",
+  {
+    name: text("name").primaryKey(),
+    /** pending (first fetch in flight), found, missing (GitHub answered 404) or error. */
+    state: text("state").notNull(),
+    /** GitHub's current name, which differs from `name` when the repository was renamed or moved. */
+    fullName: text("full_name"),
+    /** Set only when the repository is a fork. */
+    parentFullName: text("parent_full_name"),
+    sourceFullName: text("source_full_name"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      "github_repository_lookup_state_check",
+      sql`${t.state} in ('pending', 'found', 'missing', 'error')`,
+    ),
+  ],
+);
+
+/**
  * What the sandbox is allowed to touch. Scope is bound here, at the capability boundary,
  * never taken from a string the agent produced.
  */
