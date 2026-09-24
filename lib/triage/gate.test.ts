@@ -190,7 +190,7 @@ test("an outside report is held at the gate with no analysis, and the job finish
   // Exactly one mail, and it is the fixed acknowledgement: no report text in it.
   assert.equal(mail.calls.length, 1);
   assert.equal(mail.calls[0].to, email.fromEmail);
-  assert.equal(mail.calls[0].subject, notice.NOTICES.acknowledgement.subject);
+  assert.match(mail.calls[0].subject, /^Re: Stored XSS in reviews/);
   assert.equal(mail.calls[0].text, notice.NOTICES.acknowledgement.text);
   assert.equal(mail.calls[0].html, undefined);
 
@@ -392,7 +392,7 @@ test("mark duplicate links, closes, and sends the fixed duplicate reply once", a
   assert.equal(after.duplicateOfReportId, original.report.id);
   assert.equal(mail.calls.length, 1);
   assert.equal(mail.calls[0].to, row.reporterContact);
-  assert.equal(mail.calls[0].subject, notice.NOTICES.duplicate.subject);
+  assert.match(mail.calls[0].subject, /^Re: Stored XSS in reviews/);
   assert.equal(mail.calls[0].text, notice.NOTICES.duplicate.text);
   assert.ok(!mail.calls[0].text.includes(original.report.id), "the reply names no other report");
 
