@@ -115,39 +115,26 @@ Security-sensitive changes land with a test. That means the scope guard, the can
 intake authentication, delivery idempotency, and the approval gate. CI must be green before a
 merge.
 
-PR-Agent is an advisory reviewer, not a merge gate or security boundary. Its findings are
-model-generated suggestions. A human owns the merge decision and must fix a finding or explain
-why it does not apply. `build` remains the required automated check; no AI review result
-authorizes a verdict, target, approval, delivery, or merge. A green PR Agent action is not
-proof of a published review on the current head. Treat a PR as reviewed only after the
-publication check in `docs/pr-agent-review.md` passes.
+The `Claude review` workflow is the advisory reviewer, not a merge gate or security boundary. Its
+findings are model-generated. A human owns the merge decision and must fix a finding or explain in
+its thread why it does not apply. `build` remains the required automated check; no AI review result
+authorizes a verdict, target, approval, delivery, or merge.
 
-Production completion has two separate outcomes. Merge acceptance requires a pull request, a
-green `build` check, and resolved conversations. The `PR Agent review` and `Verify PR Agent review`
-workflows are advisory and are not required status checks. A same-repository PR is PR-Agent
-reviewed only when the current-head publication check passes with `VERIFIED` or `NO_FINDINGS`.
-Fork PRs intentionally skip the provider-backed workflow and are not reviewed by PR-Agent; that is
-expected, not a CI failure. A provider, model, or publication failure is not review evidence. After
-the two documented attempts for a head SHA, a human may merge with the required `build` check and
-human review, but must not call the PR-Agent review verified. These checks do not replace a live
-provider or canary run when one is called for.
+Merge acceptance requires a pull request, a green `build` check, and resolved conversations.
 
-The verifier accepts a formal review bound to the head commit or the canonical persistent marker
-published after the run started. Fixture tests prove the parser in CI; only a live run with its
-canary evidence proves a PR. Live review needs the approved provider and data binding in
-`docs/pr-agent-review.md`, stays within the two attempts per head SHA plus the verifier's bounded
-API retries, and keeps the current limitations there.
+It reviews a same-repository pull request when it opens, reopens or is marked ready, and again when
+the owner, a member or a collaborator comments `/review`. It is not a required status check. A PR
+counts as reviewed when its summary comment carries `<!-- claude-review head=<sha> -->` for the
+current head; after later pushes, comment `/review` to review the new head. Fork PRs are not
+reviewed, which is expected, not a CI failure. If the review fails or is missing, a human may merge
+with the required `build` check and human review, but must not describe the PR as reviewed by it.
 
-The PR-Agent configuration loads `AGENTS.md` from the default branch, so a pull request cannot
-change its own review policy. Do not add repository-controlled PR-Agent skill paths or credentials.
-
-A second advisory reviewer, the `Claude review` workflow, runs beside PR-Agent while the two are
-compared. It reviews when a pull request opens and when a member comments `/review`, and it is not
-a required check. It holds the same line on review policy: the workflow runs from the default
-branch, the default branch is checked out as the working tree, and the pull request's files are
-read only as data from `pr-head/`. It has read tools and `gh pr` only. Its setup and guards are in
+A pull request cannot change its own review policy. The workflow runs from the default branch on
+`pull_request_target` and `issue_comment`, the default branch is checked out as the working tree,
+and the pull request's files are read only as data from `pr-head/`. Claude has read tools and
+`gh pr` only, so no pull request code runs. Its setup and guards are in
 [`docs/claude-review.md`](docs/claude-review.md), and `.github/scripts/claude-review-policy.test.mjs`
-fails CI if one of them is loosened.
+fails CI if one of them is loosened. Do not add repository-controlled review skills or credentials.
 
 Material AI assistance may be disclosed generically in a PR description, for example, `AI
 tooling assisted with implementation; a human reviewed the diff.` Do not name or tag Claude or
