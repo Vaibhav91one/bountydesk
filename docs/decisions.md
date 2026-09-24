@@ -697,7 +697,16 @@ automatic analysis-only run. Anyone else now gets in only through a gate.
 Admission happens in the webhook route (`lib/email/outside-intake.ts`). The webhook carries no
 authentication results, so the route asks Resend's receiving API for the message and accepts it
 only when both SPF and DKIM are `pass`. A `gray` DKIM (unsigned, or signed by a domain other than
-the From domain) fails. Per-sender (5) and per-domain (20) daily limits are counted from the jobs
+the From domain) fails. Those two results do not say which domain passed (SPF covers the envelope
+sender, and a DKIM signature can come from any domain), so the From domain must also be aligned
+(`lib/email/alignment.ts`). The route reads the raw message's header block from Resend's signed raw
+URL and trusts only an `Authentication-Results` with authserv-id `amazonses.com` that sits above
+the first `X-SES-RECEIPT`, which is the block the receiving MX (Amazon SES) prepends. It needs
+`dmarc=pass header.from=<From domain>`, or `dkim=pass` from a signing domain in the same
+organisational domain (last two labels, or three under a short list of two-part suffixes).
+Anything else, including a missing receipt or result, fails closed. Resend's parsed `headers`
+object is not used: it keeps one value per header name, so a forged duplicate could replace the
+real one. Per-sender (5) and per-domain (20) daily limits are counted from the jobs
 table under a per-domain advisory lock, and the message is capped at 512 KiB. A message that fails
 any check is dropped with a 202 and a log line: no job, no report. A Resend outage answers 503 so
 Resend redelivers. Only accepted mail has a job row, so a spoofed message cannot spend a real

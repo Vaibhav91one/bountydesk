@@ -448,8 +448,8 @@ scope decisions, not the time-box, and stay deferred there.
 What the end of the window does not change is the safety invariants, which were never about the
 schedule. No channel records a `DeliveryAttempt` or reaches `DELIVERED` without a verified
 recipient and a transport receipt. Email now satisfies both: the recipient is an allowlisted
-address, or an outside sender's address that passed inbound SPF and DKIM and is recorded as the
-report's `verified_sender`, re-checked at send time, and the receipt is
+address, or an outside sender's address that passed inbound SPF and DKIM aligned with its From
+domain and is recorded as the report's `verified_sender`, re-checked at send time, and the receipt is
 Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an accepted send
 earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload has neither
 half yet and so still stops short of delivery. Every verdict is still human-approved, which no

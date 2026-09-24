@@ -5,7 +5,8 @@ import type { InboundBody } from "./resend";
 
 /**
  * Outside-sender admission against a real Postgres, because the daily limits are counted from the
- * jobs table itself. The Resend fetch is faked, so each case controls SPF, DKIM and size exactly.
+ * jobs table itself. The Resend reads are faked, so each case controls SPF, DKIM, alignment and
+ * size exactly. The alignment parser itself is covered in lib/email/alignment.test.ts.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
@@ -25,9 +26,12 @@ after(async () => {
 });
 
 let seq = 0;
+/** Resend id -> From domain, so the faked raw headers can align with the message under test. */
+const domains = new Map<string, string>();
 
 function email(from: string) {
   seq += 1;
+  domains.set(`eid-${seq}`, from.split("@")[1]);
   return {
     messageId: `<outside-${seq}@mail.test>`,
     resendEmailId: `eid-${seq}`,
@@ -38,13 +42,35 @@ function email(from: string) {
   };
 }
 
-function fetched(overrides: Partial<InboundBody> = {}) {
+/** The receiving MX's header block, with its Authentication-Results for `domain`. */
+function headersFor(domain: string) {
+  return [
+    "Received: by inbound-smtp.amazonaws.com",
+    `Authentication-Results: amazonses.com; spf=pass envelope-from=x@${domain}; dkim=pass header.i=@${domain}; dmarc=pass header.from=${domain};`,
+    "X-SES-RECEIPT: AEFB",
+    `From: <someone@${domain}>`,
+    "",
+  ].join("\r\n");
+}
+
+/** Faked Resend reads. The raw headers align with the message's From unless a test pins its own. */
+function fetched(overrides: Partial<InboundBody> = {}, headers?: string) {
   let calls = 0;
-  const fetchBody = async (): Promise<InboundBody> => {
+  const fetchBody = async (resendEmailId: string): Promise<InboundBody> => {
     calls += 1;
-    return { text: "steps", html: "", spf: "pass", dkim: "pass", sizeBytes: 5, ...overrides };
+    return {
+      text: "steps",
+      html: "",
+      spf: "pass",
+      dkim: "pass",
+      sizeBytes: 5,
+      rawUrl: `https://raw.test/${resendEmailId}`,
+      ...overrides,
+    };
   };
-  return { fetchBody, calls: () => calls };
+  const fetchHeaders = async (rawUrl: string) =>
+    headers ?? headersFor(domains.get(rawUrl.slice("https://raw.test/".length)) ?? "unknown.test");
+  return { fetchBody, fetchHeaders, calls: () => calls };
 }
 
 async function jobFor(messageId: string) {
@@ -56,7 +82,7 @@ async function jobFor(messageId: string) {
   return row;
 }
 
-test("a sender passing SPF and DKIM is queued as an outside report with its verified address", async () => {
+test("a sender passing SPF, DKIM and From alignment is queued as an outside report with its verified address", async () => {
   const message = email("alice@good.test");
 
   assert.deepEqual(await intake.admitOutsideEmail(message, fetched()), { accepted: true });
@@ -84,6 +110,31 @@ for (const [label, overrides] of [
     assert.equal(await jobFor(message.messageId), undefined, "no job, so no report");
   });
 }
+
+test("a forged From whose SPF and DKIM passed for another domain is dropped", async () => {
+  const message = email("victim@bigcorp.test");
+  const attacker = [
+    "Received: by inbound-smtp.amazonaws.com",
+    "Authentication-Results: amazonses.com; spf=pass envelope-from=x@attacker.test; dkim=pass header.i=@attacker.test; dmarc=fail header.from=bigcorp.test;",
+    "X-SES-RECEIPT: AEFB",
+    // The attacker's own copy, below the receiving MX's, claiming the opposite.
+    "Authentication-Results: amazonses.com; dkim=pass header.d=bigcorp.test; dmarc=pass header.from=bigcorp.test;",
+    "From: <victim@bigcorp.test>",
+    "",
+  ].join("\r\n");
+
+  const result = await intake.admitOutsideEmail(message, fetched({}, attacker));
+
+  assert.equal(result.accepted, false);
+  assert.match((result as { reason: string }).reason, /From not aligned/);
+  assert.equal(await jobFor(message.messageId), undefined);
+});
+
+test("a message with no raw copy to check alignment against is dropped", async () => {
+  const message = email("noraw@good.test");
+  assert.equal((await intake.admitOutsideEmail(message, fetched({ rawUrl: null }))).accepted, false);
+  assert.equal(await jobFor(message.messageId), undefined);
+});
 
 test("a message over the size cap is dropped", async () => {
   const message = email("big@good.test");
@@ -150,6 +201,7 @@ test("a redelivery of an accepted message is not counted against itself", async 
 test("a Resend outage throws so the webhook can be redelivered", async () => {
   await assert.rejects(
     intake.admitOutsideEmail(email("later@good.test"), {
+      ...fetched(),
       fetchBody: async () => {
         throw new Error("resend receiving fetch failed to connect");
       },

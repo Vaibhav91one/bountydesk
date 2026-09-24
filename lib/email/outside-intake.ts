@@ -1,14 +1,16 @@
 import { db, inboundJob, sql, type Executor } from "@/lib/db";
 import { enqueue } from "@/lib/jobs/queue";
 
+import { checkFromAlignment } from "./alignment";
 import type { InboundEmail } from "./inbound";
-import { fetchInboundBody, type InboundBody } from "./resend";
+import { fetchInboundBody, fetchRawHeaders, type InboundBody } from "./resend";
 
 /**
  * Intake for mail from a sender who is not on the reviewer allowlist.
  *
  * Anyone can email the intake address, so an outside message has to earn a queue row. It is
- * accepted only when Resend's receiving MX saw both SPF and DKIM pass, when the sender and the
+ * accepted only when Resend's receiving MX saw both SPF and DKIM pass and its own
+ * Authentication-Results aligns that pass with the From domain, when the sender and the
  * sender's domain are under their daily limits, and when the message is under the size cap.
  * Everything else is dropped with no job and no report. An accepted message still runs nothing
  * on its own: the worker holds it at the NEEDS_DECISION gate (lib/triage/gate.ts).
@@ -69,7 +71,10 @@ function overLimit(counts: { sender: number; domain: number }): string | null {
  */
 export async function admitOutsideEmail(
   email: InboundEmail,
-  deps: { fetchBody: (resendEmailId: string) => Promise<InboundBody> } = { fetchBody: fetchInboundBody },
+  deps: {
+    fetchBody: (resendEmailId: string) => Promise<InboundBody>;
+    fetchHeaders: (rawUrl: string) => Promise<string>;
+  } = { fetchBody: fetchInboundBody, fetchHeaders: fetchRawHeaders },
 ): Promise<OutsideAdmission> {
   // SPF and DKIM come only from the receiving API, which is keyed by Resend's id.
   if (!email.resendEmailId) return { accepted: false, reason: "no Resend id to verify the sender with" };
@@ -85,6 +90,11 @@ export async function admitOutsideEmail(
   if (message.sizeBytes > OUTSIDE_LIMITS.maxBytes) {
     return { accepted: false, reason: `message is ${message.sizeBytes} bytes, over the cap` };
   }
+  // A pass on its own does not say which domain passed. The address we store and reply to must be
+  // the one the receiving MX authenticated (lib/email/alignment.ts).
+  if (!message.rawUrl) return { accepted: false, reason: "no raw message to check alignment with" };
+  const alignment = checkFromAlignment(await deps.fetchHeaders(message.rawUrl), senderDomain(email.fromEmail));
+  if (!alignment.ok) return { accepted: false, reason: `From not aligned: ${alignment.reason}` };
 
   const payload: OutsideEmailPayload = { ...email, intake: "outside", verifiedSender: email.fromEmail };
 
