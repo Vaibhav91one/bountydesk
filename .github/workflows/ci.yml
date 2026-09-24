@@ -69,6 +69,8 @@ jobs:
 
       - name: Verify Claude review policy tests
         run: node --test .github/scripts/claude-review-policy.test.mjs
+      - name: Verify Claude review head check tests
+        run: node --test .github/scripts/claude-review-head-check.test.mjs
       - name: Test
         run: npm run test --if-present
       - name: Build

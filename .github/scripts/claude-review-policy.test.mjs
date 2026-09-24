@@ -31,11 +31,12 @@ test("only same-repository pull requests and trusted commenters trigger a review
 
 test("the policy comes from the default branch and the PR head is only data", async () => {
   const workflow = await read(workflowPath);
-  const checkouts = workflow.split("uses: actions/checkout@").slice(1);
-  assert.equal(checkouts.length, 2);
-  assert.doesNotMatch(checkouts[0].split("- name:")[0], /ref:/, "the workspace root must be the default branch");
+  const checkouts = workflow.split("uses: actions/checkout@").slice(1).map((c) => c.split("- name:")[0]);
+  assert.equal(checkouts.length, 3);
+  assert.doesNotMatch(checkouts[0], /ref:/, "the workspace root must be the default branch");
   assert.match(checkouts[1], /path: pr-head/);
-  assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 2);
+  assert.doesNotMatch(checkouts[2], /ref:/, "the head check must run the default branch's script");
+  assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, 3);
   assert.match(workflow, /--add-dir pr-head/);
 });
 
@@ -69,4 +70,32 @@ test("the review carries no attribution and uses the agreed format", async () =>
   assert.match(workflow, /<details><summary>/);
   assert.match(workflow, /No tables, no emoji/);
   assert.match(workflow, /no line saying who or what wrote the review/);
+});
+
+// The job's block: from its `  name:` line to the next top-level job or the end of the file.
+const job = (workflow, name) => workflow.split(new RegExp(`^  ${name}:\\s*$`, "m"))[1]?.split(/^  \S/m)[0] ?? "";
+const permissions = (block) =>
+  Object.fromEntries([...(block.split(/^    permissions:\s*$/m)[1] ?? "").matchAll(/^      ([\w-]+): (\w+)$/gm)].map((m) => [m[1], m[2]]));
+
+test("every push to a pull request is reviewed, and a new push cancels the stale review", async () => {
+  const workflow = await read(workflowPath);
+  const types = workflow.match(/pull_request_target:\s*\n\s*types: \[([^\]]+)\]/)?.[1].split(/,\s*/);
+  assert.deepEqual(types?.sort(), ["opened", "ready_for_review", "reopened", "synchronize"]);
+  // Every pull_request_target event shares the per-PR group; any other comment gets a group of its
+  // own, so it can never cancel a review.
+  assert.match(workflow, /github\.event_name == 'pull_request_target'\s*\n\s*\|\|/);
+  assert.match(workflow, /format\('claude-review-\{0\}', github\.event\.pull_request\.number \|\| github\.event\.issue\.number\)/);
+  assert.match(workflow, /\|\| format\('noop-\{0\}', github\.run_id\)/);
+  assert.match(workflow, /cancel-in-progress: true/);
+});
+
+test("write access is granted per job, and the head check is read-only", async () => {
+  const workflow = await read(workflowPath);
+  assert.match(workflow, /^permissions: \{\}$/m, "no workflow-wide token permissions");
+  assert.deepEqual(permissions(job(workflow, "review")), { contents: "read", issues: "write", "pull-requests": "write" });
+  const check = job(workflow, "head-check");
+  assert.deepEqual(permissions(check), { contents: "read", issues: "read", "pull-requests": "read" });
+  assert.match(check, /needs: review/);
+  assert.doesNotMatch(check, /secrets\./, "the head check needs no secret");
+  assert.match(check, /node \.github\/scripts\/claude-review-head-check\.mjs/);
 });
