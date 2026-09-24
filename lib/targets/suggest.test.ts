@@ -176,6 +176,7 @@ test("a repository whose grant or target is not usable is never suggested", asyn
 test("a body with no links costs no query and suggests nothing", async () => {
   assert.deepEqual(await suggest.suggestTargets("no links here", { fetchImpl: plain }), {
     matched: [],
+    possibleMatches: [],
     unconnected: [],
     progress: [],
     connectLinks: [],
@@ -341,27 +342,44 @@ test("a renamed upstream follows GitHub's redirect to its connected fork, and is
   assert.equal(again.matched[0]?.canonical, "New-Org/renamed-app");
 });
 
-test("a link GitHub no longer has matches on repository name, but only within one project", async () => {
-  // bkimminich/juice-shop is the real case: the repository moved and its old name now 404s.
+test("a link GitHub has nothing at is only a possible match by name, and never pre-selects", async () => {
+  // bkimminich/juice-shop is the real case: the repository moved and its old name now 404s. A 404
+  // looks the same for a private or unrelated repository, so the target is a hint, not a choice.
   const { fullName, profile } = await seedFork({ upstream: "Shop-Org/shop-x", stage: "ready" });
   const gone = github({ "Gone-Owner/shop-x": null });
   const result = await suggest.suggestTargets("https://github.com/Gone-Owner/shop-x", { fetchImpl: gone.fetchImpl });
-  assert.deepEqual(result.matched, [
-    { profileId: profile!.id, profileName: profile!.name, fullName, mention: "Gone-Owner/shop-x", canonical: null, via: "name" },
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.possibleMatches, [
+    { profileId: profile!.id, profileName: profile!.name, fullName, mention: "Gone-Owner/shop-x" },
   ]);
+  // The link itself stays unconnected, so the reviewer can still connect the real repository.
+  assert.deepEqual(result.unconnected, ["Gone-Owner/shop-x"]);
+  assert.deepEqual(result.progress, [progressOf({ name: "Gone-Owner/shop-x" })]);
 
-  // Two unrelated projects that share a name: a guess between them would be a coin toss.
+  // Two unrelated projects that share a name: not even a hint.
   await seedFork({ upstream: "Alpha-Org/common-api", stage: "ready" });
   await seedFork({ upstream: "Beta-Org/common-api", stage: "ready" });
   const ambiguous = await suggest.suggestTargets("https://github.com/Nobody-Here/common-api", {
     fetchImpl: github({ "Nobody-Here/common-api": null }).fetchImpl,
   });
   assert.deepEqual(ambiguous.matched, []);
+  assert.deepEqual(ambiguous.possibleMatches, []);
   assert.deepEqual(ambiguous.unconnected, ["Nobody-Here/common-api"]);
 
   // A link GitHub does have is never matched on name alone.
   const real = await suggest.suggestTargets("https://github.com/Someone-Else/shop-x", { fetchImpl: plain });
   assert.deepEqual(real.matched, []);
+  assert.deepEqual(real.possibleMatches, []);
+
+  // Canonical matches in the same body still pre-select, beside the hint.
+  const both = await suggest.suggestTargets(
+    "https://github.com/Gone-Owner/shop-x and https://github.com/Shop-Org/shop-x",
+    { fetchImpl: gone.fetchImpl },
+  );
+  assert.deepEqual(both.matched, [
+    { profileId: profile!.id, profileName: profile!.name, fullName, mention: "Shop-Org/shop-x", canonical: null, via: "fork" },
+  ]);
+  assert.equal(both.possibleMatches.length, 1);
 });
 
 test("a GitHub failure keeps the last answer and backs off instead of retrying every poll", async () => {

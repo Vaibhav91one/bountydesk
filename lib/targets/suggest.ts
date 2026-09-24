@@ -75,12 +75,8 @@ export type MentionStatus =
   | "unsupported"
   | "not-connected";
 
-/**
- * How the connected repository stands in for a link: it is the linked repository, it is a fork of
- * it, or GitHub has no repository at the link and the only connected project with that repository
- * name is it (an upstream whose old name no longer redirects, as bkimminich/juice-shop does not).
- */
-export type MatchVia = "link" | "fork" | "name";
+/** How the connected repository stands in for a link: it is the linked repository, or a fork of it. */
+export type MatchVia = "link" | "fork";
 
 export type MentionProgress = {
   /** The link as the report spelled it. */
@@ -118,7 +114,10 @@ export function readableOnboardingError(error: string | null): string | null {
 }
 
 export type TargetSuggestion = {
-  /** Linked repositories whose connected repository, or fork, has a live grant and a built target. */
+  /**
+   * Linked repositories whose connected repository, or fork, has a live grant and a built target,
+   * identified by name or fork lineage as GitHub reports it. Only these pre-select the picker.
+   */
   matched: {
     profileId: string;
     profileName: string;
@@ -127,6 +126,13 @@ export type TargetSuggestion = {
     canonical: string | null;
     via: MatchVia;
   }[];
+  /**
+   * Built targets that share only a repository name with a link GitHub answered 404 for. A 404 is
+   * the same answer for a renamed upstream, a private repository and an unrelated one that happens
+   * to share the name, so these are shown as a hint and never pre-select: binding one is a choice
+   * the reviewer makes on purpose.
+   */
+  possibleMatches: { profileId: string; profileName: string; fullName: string; mention: string }[];
   /** Linked repositories BountyDesk holds no usable target for, as the report spelled them. */
   unconnected: string[];
   /** Where each linked repository stands, in the order the report mentioned them. */
@@ -158,7 +164,9 @@ export type SuggestOptions = {
 
 export async function suggestTargets(body: string, opts: SuggestOptions = {}): Promise<TargetSuggestion> {
   const mentions = repositoryMentions(body);
-  if (mentions.length === 0) return { matched: [], unconnected: [], progress: [], connectLinks: [] };
+  if (mentions.length === 0) {
+    return { matched: [], possibleMatches: [], unconnected: [], progress: [], connectLinks: [] };
+  }
 
   const lookups = await lookupQuietly(mentions, MENTION_MISSING_SECONDS, opts.fetchImpl);
   const known = mentions.map((name) => {
@@ -240,26 +248,36 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
   };
   const namesOf = (row: Row) => [row.fullName, row.parentFullName, row.sourceFullName];
 
-  const matched: TargetSuggestion["matched"] = [];
-  const progress: MentionProgress[] = known.map(({ name, canonical, missing }) => {
-    const direct = new Set([name.toLowerCase(), (canonical ?? name).toLowerCase()]);
-    let candidates = rows.filter((row) => namesOf(row).some((n) => n && direct.has(n.toLowerCase())));
-    let nameOnly = false;
-    if (candidates.length === 0 && missing) {
-      // GitHub has nothing at the link, so match on the repository name, but only when every
-      // connected repository with that name belongs to one project (a fork chain shares its
-      // root). A common name like "api" shared by two projects suggests neither.
-      const repo = repoPart(name);
-      const same = rows.filter((row) => namesOf(row).some((n) => n && repoPart(n) === repo));
-      if (new Set(same.map((row) => (row.sourceFullName ?? row.fullName).toLowerCase())).size === 1) {
-        candidates = same;
-        nameOnly = true;
-      }
-    }
-    const best = candidates
+  const bestOf = (candidates: Row[]) =>
+    candidates
       .map((row) => ({ row, status: statusOf(row) }))
       .sort((a, b) => RANK.indexOf(a.status) - RANK.indexOf(b.status))[0];
+
+  const matched: TargetSuggestion["matched"] = [];
+  const possibleMatches: TargetSuggestion["possibleMatches"] = [];
+  const progress: MentionProgress[] = known.map(({ name, canonical, missing }) => {
+    const direct = new Set([name.toLowerCase(), (canonical ?? name).toLowerCase()]);
+    const best = bestOf(rows.filter((row) => namesOf(row).some((n) => n && direct.has(n.toLowerCase()))));
     if (!best || best.status === "not-connected") {
+      if (!best && missing) {
+        // GitHub has nothing at the link, which a rename, a private repository and an unrelated one
+        // all look like. A built target sharing the repository name is offered as a hint only, and
+        // only when every connected repository with that name belongs to one project (a fork chain
+        // shares its root): a common name like "api" shared by two projects hints at neither. The
+        // link itself stays unconnected.
+        const repo = repoPart(name);
+        const same = rows.filter((row) => namesOf(row).some((n) => n && repoPart(n) === repo));
+        const guess = bestOf(same);
+        const oneProject = new Set(same.map((row) => (row.sourceFullName ?? row.fullName).toLowerCase())).size === 1;
+        if (oneProject && guess?.status === "ready" && guess.row.profileId && guess.row.profileName) {
+          possibleMatches.push({
+            profileId: guess.row.profileId,
+            profileName: guess.row.profileName,
+            fullName: guess.row.fullName,
+            mention: name,
+          });
+        }
+      }
       return {
         name,
         canonical,
@@ -271,7 +289,7 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
         forkedAs: null,
       };
     }
-    const via: MatchVia = nameOnly ? "name" : direct.has(best.row.fullName.toLowerCase()) ? "link" : "fork";
+    const via: MatchVia = direct.has(best.row.fullName.toLowerCase()) ? "link" : "fork";
     if (best.status === "ready" && best.row.profileId && best.row.profileName) {
       matched.push({
         profileId: best.row.profileId,
@@ -295,7 +313,7 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
   });
 
   const unconnected = progress.filter((p) => p.status !== "ready").map((p) => p.name);
-  if (unconnected.length === 0) return { matched, unconnected, progress, connectLinks: [] };
+  if (unconnected.length === 0) return { matched, possibleMatches, unconnected, progress, connectLinks: [] };
 
   const installations = await liveInstallations();
   const guide = opts.guide?.toLowerCase();
@@ -305,7 +323,7 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
   if (guided && guidedKnown && !guidedKnown.missing) {
     guided.forkedAs = await findFork(guidedKnown.canonical ?? guided.name, installations, opts.fetchImpl);
   }
-  return { matched, unconnected, progress, connectLinks: connectLinks(installations) };
+  return { matched, possibleMatches, unconnected, progress, connectLinks: connectLinks(installations) };
 }
 
 function repoPart(fullName: string): string {

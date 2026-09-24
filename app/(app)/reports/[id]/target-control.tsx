@@ -87,6 +87,13 @@ export function TargetControl({
   // that becomes ready while the page is open is selected too.
   const [picked, setChoice] = useState<string | null>(null);
   const choice = picked ?? suggested?.profileId ?? null;
+  // A target that only shares a repository name with a link GitHub has nothing at. That is as
+  // likely a private or unrelated repository as a renamed one, so it is named here and the picker
+  // stays empty: the reviewer has to choose it.
+  const possible = suggested
+    ? null
+    : (suggestion?.possibleMatches ?? []).find((match) => profiles.some((profile) => profile.id === match.profileId)) ??
+      null;
   const [error, setError] = useState<string | null>(null);
 
   const guide =
@@ -186,6 +193,12 @@ export function TargetControl({
           <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
         ) : null}
       </div>
+      {possible ? (
+        <span className="whitespace-normal break-words text-meta text-muted-foreground">
+          Possible match by name: {possible.profileName} ({possible.fullName}). {possible.mention} was not
+          found on GitHub, so it may be renamed, private or a different project.
+        </span>
+      ) : null}
       {guide}
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
@@ -195,14 +208,9 @@ export function TargetControl({
 /** Why the picker opened on this target, so a suggestion is never a default nobody can explain. */
 function suggestionNote(match: TargetSuggestion["matched"][number]): string {
   const link = match.canonical ? `${match.mention} (now ${match.canonical})` : match.mention;
-  switch (match.via) {
-    case "name":
-      return `Suggested because the report links ${match.mention}, which GitHub no longer has, and ${match.fullName} is the only connected project with that name`;
-    case "fork":
-      return `Suggested because the report links ${link}, and its fork ${match.fullName} is connected`;
-    default:
-      return `Suggested because the report links ${link}`;
-  }
+  return match.via === "fork"
+    ? `Suggested because the report links ${link}, and its fork ${match.fullName} is connected`
+    : `Suggested because the report links ${link}`;
 }
 
 function ConnectButton({ onClick }: { onClick: () => void }) {
