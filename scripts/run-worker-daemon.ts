@@ -36,6 +36,8 @@ import {
 } from "@/lib/reviewer-chat/queue";
 import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
 import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue";
+import { reconcileGitHubAccess } from "@/lib/github/reconcile";
+import { sweepExpiredReports } from "@/lib/reports/expiry";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -84,6 +86,27 @@ const FAILING_BUDGET_MS = 180_000;
  * minutes-long runs are legitimate and are covered by their own wide stall budgets.
  */
 const FAST_LOOP_TIMEOUT_MS = 60_000;
+
+/**
+ * The GitHub reconcile costs one API call per live installation, and the lifecycle webhooks
+ * already revoke access within seconds, so this only bounds how long a dropped webhook can go
+ * unnoticed. The expiry TTL is 30 days, so an hourly pass is plenty.
+ */
+const GITHUB_RECONCILE_INTERVAL_MS = 15 * 60_000;
+const REPORT_EXPIRY_INTERVAL_MS = 60 * 60_000;
+
+/**
+ * Run fn at most once per intervalMs from a sweep loop that ticks every 30s. The first call runs
+ * straight away, so a fresh deploy reconciles on boot. A failure still waits out the interval.
+ */
+function atMostEvery(intervalMs: number, fn: () => Promise<unknown>): () => Promise<unknown> {
+  let last = -Infinity;
+  return async () => {
+    if (Date.now() - last < intervalMs) return null;
+    last = Date.now();
+    return fn();
+  };
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
@@ -251,6 +274,29 @@ async function main(): Promise<void> {
           (id) => (signal.aborted && id === null ? null : id),
         ),
       sweepOnce: () => sweepRecheckRuns(),
+    },
+    {
+      // Periodic maintenance with nothing to claim: the work lives in the sweeper slot, which
+      // runDaemon already drives on an interval and /healthz already watches.
+      name: "github-reconcile",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(GITHUB_RECONCILE_INTERVAL_MS, async () => {
+        const summary = await reconcileGitHubAccess({ signal: AbortSignal.timeout(FAST_LOOP_TIMEOUT_MS - 5_000) });
+        if (summary.installationsRevoked || summary.repositoriesRevoked || summary.errors.length) {
+          console.log(`github reconcile: ${JSON.stringify(summary)}`);
+        }
+        return summary;
+      }),
+    },
+    {
+      name: "report-expiry",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(REPORT_EXPIRY_INTERVAL_MS, async () => {
+        const result = await sweepExpiredReports();
+        const expired = result.outcomes.filter((o) => o.status === "retired").length;
+        if (expired) console.log(`report expiry: expired ${expired} of ${result.candidates} candidates`);
+        return result;
+      }),
     },
   ];
 
