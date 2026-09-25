@@ -353,6 +353,13 @@ export const report = pgTable(
     verifiedSender: text("verified_sender"),
     /** Set when a reviewer closed this report at the gate as a duplicate of another report. */
     duplicateOfReportId: uuid("duplicate_of_report_id").references((): AnyPgColumn => report.id),
+    /**
+     * Set when this email report arrived as a reply threaded to an earlier one: its In-Reply-To or
+     * References named the parent's message id and both carry the same SPF/DKIM-verified sender.
+     * It links the thread on the case file and never gates anything; a reply still creates its own
+     * report and still stops at the same intake gate. Null for a first message and for GitHub.
+     */
+    repliesToReportId: uuid("replies_to_report_id").references((): AnyPgColumn => report.id),
     state: reportLifecycleState("state").notNull().default("TRIAGING"),
     connectedRepositoryId: uuid("connected_repository_id").references(
       () => connectedRepository.id,

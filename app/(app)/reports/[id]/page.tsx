@@ -195,6 +195,19 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                   <External href={file.repositoryUrl}>{intakeRepository}</External>
                 </>
               ) : null}
+
+              {file.repliesTo ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>reply to</span>
+                  <Link
+                    href={`/reports/${file.repliesTo.id}`}
+                    className="text-foreground underline-offset-4 hover:text-brand-soft hover:underline"
+                  >
+                    {file.repliesTo.title}
+                  </Link>
+                </>
+              ) : null}
             </p>
           </div>
 

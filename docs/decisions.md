@@ -746,3 +746,36 @@ recipient when it is an allowlisted reviewer, or when it equals the report's `ve
 Both `enqueueApprovedVerdictDelivery` and the email arm check it, and the arm re-reads
 `verified_sender` from the row at send time, so a contact changed after intake, or a verification
 cleared after approval, is refused and held. Every verdict still needs human approval.
+
+### Q26 — Linking an outside reporter's reply to their report (2026-09-25)
+
+A reply to the acknowledgement used to land as a fresh, unlinked report. The message id is unique,
+so `(channel, source_ref)` never collided, and nothing tied the second report to the first. A
+reviewer reading either one saw no thread.
+
+The fix keeps the report and adds a link. Intake still creates a report for the reply, so
+idempotency, the outside gate and the human-approval rule are all untouched: a reply from an
+outside sender still lands at `NEEDS_DECISION`, and nothing runs on it until a reviewer decides.
+What is new is a nullable self-FK, `report.replies_to_report_id`, set when the reply threads to an
+earlier report. The case file shows "reply to <parent title>" and links back.
+
+The match reads the reply's `In-Reply-To` and `References` headers, which live only in the raw MIME
+(the worker reads the header block from the same signed raw URL it fetches the body from). The
+acknowledgement is sent threaded on the parent report's own message id, so a conformant reply
+carries that id, and its `email:<id>` form is looked up against existing reports' `source_ref`. A
+match links only when the parent's `verified_sender` equals the reply's, both non-null. That keeps
+one reporter from threading a reply onto another reporter's report by quoting its id, and it means
+only outside-to-outside threads link (an allowlisted reply has no verified sender and never links,
+which is fine: acknowledgements go only to outside reporters). There is deliberately no subject
+fallback: matching "Re: We received your report" would cross-link every reporter who shares that
+subject. The header tokens are attacker-controllable and are used only to look a report up, never
+to authorize anything, so a spoofed id can at most point at a report the sender is not otherwise
+allowed to touch, which the verified-sender gate already refuses. Linking is best-effort: a failure
+to read or parse the headers leaves the reply standalone and never blocks the report.
+
+This does not add a reporter-reply conversation channel, and it does not soften Q17's line that the
+reviewer chat is the only conversation channel. There is still no `AWAITING_REPORTER` state and
+nothing auto-responds to a reply: the link is a read-time convenience for a reviewer, and the reply
+waits at the same gate any outside message does. The human gate on `publish_verdict` and the
+no-auto-close rule are unchanged, because a linked reply is still a report a human has to move by
+hand.

@@ -26,6 +26,7 @@ function caseFile(overrides: Partial<CaseFile> = {}): CaseFile {
     reporterHandle: "reporter",
     reporterUrl: null,
     reporterAvatarUrl: null,
+    repliesTo: null,
     state: "TRIAGING",
     createdAt: AT,
     updatedAt: AT,

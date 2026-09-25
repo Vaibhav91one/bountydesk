@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+import { GitHubApiError } from "@/lib/github/app-auth";
+
 /**
  * Real Postgres is required for the lease and active-repository checks. The GitHub boundary
  * stays fake so these tests can force network failures and crash windows deterministically.
@@ -784,4 +786,108 @@ test("no delivery_attempt row ever stores the installation token or app JWT", as
       );
     }
   }
+});
+
+test("a token-mint 403 terminal-refuses, holds the row for a human, and posts nothing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  // activeRepository still passes (the fixture is fully connected); the revocation only surfaces
+  // when GitHub refuses the token mint, which is the dropped-webhook window this guards.
+  deps.mintToken = async () => {
+    calls.mintToken++;
+    throw new GitHubApiError(
+      403,
+      "GitHub installation token request failed with 403: forbidden",
+    );
+  };
+
+  const id = await worker.deliverOnce("w-mint-403", { deps });
+  assert.equal(id, fixture.deliveryId);
+
+  assert.equal(calls.mintToken, 1);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0, "an authoritative refusal must never post");
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /no longer connected/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "DELIVERING");
+
+  const [held] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+  assert.equal(held.rhr, true, "a lost grant is held for a human to reconnect");
+});
+
+test("a token-mint 404 is treated the same as a 403", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    throw new GitHubApiError(404, "GitHub installation token request failed with 404: not found");
+  };
+
+  await worker.deliverOnce("w-mint-404", { deps });
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /no longer connected/);
+});
+
+test("a rate-limited token-mint 403 stays retryable rather than refusing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    throw new GitHubApiError(
+      403,
+      "GitHub installation token request failed with 403: You have exceeded a secondary rate limit",
+      true,
+    );
+  };
+
+  await worker.deliverOnce("w-mint-403-rl", { deps });
+
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING", "a rate limit is transient, not a lost grant");
+
+  const [held] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+  assert.equal(held.rhr, false);
+});
+
+test("a token-mint 5xx stays retryable rather than refusing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    calls.mintToken++;
+    throw new GitHubApiError(
+      503,
+      "GitHub installation token request failed with 503: service unavailable",
+    );
+  };
+
+  const id = await worker.deliverOnce("w-mint-503", { deps });
+  assert.equal(id, fixture.deliveryId);
+
+  assert.equal(calls.postComment, 0);
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(
+    delivery.state,
+    "PENDING",
+    "a 5xx minting the token is transient and must stay retryable",
+  );
+  assert.match(delivery.lastError ?? "", /503/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "DELIVERING");
 });
