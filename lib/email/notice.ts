@@ -10,7 +10,8 @@ import { ResendSendError, sendVerdictEmail } from "./resend";
  *
  * None carries a byte of the report, the triage or another report: an acknowledgement goes out
  * before any human has looked, a duplicate reply must not tell one reporter about another's
- * submission, and an oversized-drop notice goes out before anything is even queued. Only the body
+ * submission, a rejection discloses no reason and names no other report, and an oversized-drop
+ * notice goes out before anything is even queued. Only the body
  * is fixed. The subject is set from the reporter's own subject so the reply threads under their
  * message (see noticeSubject), which is the reporter's own input, not report or triage content.
  * The bodies here are constants, so what a reviewer's click on "Mark duplicate" approves is
@@ -34,6 +35,14 @@ export const NOTICES = {
       "Thank you for your report. A reviewer has looked at it and found that it describes an issue already reported to us, so we have closed it as a duplicate of an existing report.",
       "",
       "If you believe this is a different issue, reply with what distinguishes it.",
+      "",
+      "BountyDesk",
+    ].join("\n"),
+  },
+  rejected: {
+    subject: "We reviewed your report",
+    text: [
+      "Thank you for your report. A reviewer has looked at it, and we will not be taking it further.",
       "",
       "BountyDesk",
     ].join("\n"),
