@@ -67,9 +67,13 @@ Still to do, because the image build and snapshot are outside this change (the o
 the snapshot rebuild and deploy):
 
 1. Build `sandbox-images/browser/Dockerfile` for linux/amd64, push it, and register it as a Daytona
-   snapshot. Done for `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`, registered as the
-   `bountydesk-browser-78b8996` snapshot (2 CPU, 4 GB memory, 10 GB disk). The GHCR package is
-   private; Daytona pulled it anyway.
+   snapshot. The first build shipped as `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`,
+   registered as the `bountydesk-browser-78b8996` snapshot (2 CPU, 4 GB memory, 10 GB disk); the
+   GHCR package is private and Daytona pulled it anyway. That build is now stale: the
+   `waitUntil` fix changed `browser-oracle.mjs` and moved the marker to `browser-dcl-1`, so the
+   image must be rebuilt and re-registered with the new marker, and the env vars below repointed at
+   the new snapshot and digest. Until then `buildMarkerCheck` fails closed on every run (safe, but
+   the probe does nothing).
 2. Set three env vars in the reproduction worker: `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id),
    `BOUNTYDESK_BROWSER_IMAGE_REF` (the digest-pinned ref), and `BOUNTYDESK_BROWSER_IMAGE_NAME` (the
    tag, e.g. `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`). Until all three are set the feature

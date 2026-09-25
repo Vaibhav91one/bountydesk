@@ -81,14 +81,14 @@ function buildUrl(targetOrigin, step) {
 // dialog handlers before navigating, loads the URL, lets the page settle, then returns the
 // observation. The values are interpolated as JSON literals, so they are data inside the program,
 // never code.
-function browserProgram(url, navTimeoutMs, settleMs, maxDomChars) {
+function browserProgram(url, navTimeoutMs, settleMs, maxDomChars, waitUntil) {
   return `
 const consoleLines = [];
 const dialogMessages = [];
 try { page.on('console', (m) => { try { consoleLines.push(String(m.text())); } catch (e) {} }); } catch (e) {}
 try { page.on('dialog', async (d) => { try { dialogMessages.push(String(d.message())); } catch (e) {} try { await d.dismiss(); } catch (e) {} }); } catch (e) {}
 let navigated = false;
-try { await page.goto(${JSON.stringify(url)}, { waitUntil: 'load', timeout: ${navTimeoutMs} }); navigated = true; } catch (e) {}
+try { await page.goto(${JSON.stringify(url)}, { waitUntil: ${JSON.stringify(waitUntil)}, timeout: ${navTimeoutMs} }); navigated = true; } catch (e) {}
 try { await page.waitForTimeout(${settleMs}); } catch (e) {}
 let title = '';
 let dom = '';
@@ -132,13 +132,21 @@ function extractJson(stdout) {
   return null;
 }
 
+// Playwright's navigation-complete signals. 'load' waits for every subresource, which a heavy SPA
+// (or a page with one slow image) never fires inside the timeout, so page.goto throws and the step
+// reports navigated:false even though the DOM parsed and any DOM-XSS sink already ran. The host
+// picks the signal (see browser-probe.ts); 'domcontentloaded' is the safe default here.
+const WAIT_UNTIL = ["load", "domcontentloaded", "commit", "networkidle"];
+
 function runStep(sessionId, params, step) {
   const url = buildUrl(params.targetOrigin, step);
+  const waitUntil = WAIT_UNTIL.includes(params.waitUntil) ? params.waitUntil : "domcontentloaded";
   const program = browserProgram(
     url,
     Number(params.navTimeoutMs) || 15000,
     Number(params.settleMs) || 1500,
     Number(params.maxDomChars) || 1000000,
+    waitUntil,
   );
   const result = webcmd(["--session", sessionId, "browser", "run", "--stdin"], program);
   // webcmd wraps the program's return value in an envelope ({ ok, result, logs, page, ... }), so
