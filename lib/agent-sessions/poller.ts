@@ -195,6 +195,11 @@ async function endWithoutAgentVerdict(
   for (const sandboxId of lease.sandboxIds ?? (lease.sandboxId ? [lease.sandboxId] : [])) {
     await teardownSandbox(sandboxId, true);
   }
+  // The session is over, so forget its unsupported-pending denial count. This is the terminal
+  // exit every dead-end path (refuse, error, cancel, timeout, done-no-action, a finished report)
+  // funnels through, so it, plus the recovery cleanup in handleVerifiedPendingCall, is what keeps
+  // the in-process map from holding one entry per session for the daemon's whole life.
+  unsupportedPendingDenials.delete(lease.sessionId);
   return lease.id;
 }
 
@@ -367,6 +372,11 @@ async function handleVerifiedPendingCall(
     );
   });
 
+  // The session recovered past any earlier unsupported-pending call (it reached a real
+  // publish_verdict), so drop its denial count. A retried poll that lands on the ERROR-return
+  // branches above is also terminal for the session, so clearing here rather than only on
+  // success is correct.
+  unsupportedPendingDenials.delete(lease.sessionId);
   return lease.id;
 }
 
@@ -396,6 +406,9 @@ async function handleAgentDraftedPendingCall(
     if (!isVerdictIntegrityConflict(error)) throw error;
     if (shouldAbandonVerdictConflict(lease.attempts ?? 0)) {
       await abandonVerdictConflict(lease);
+      // abandonVerdictConflict ends the session in queue.ts without touching this in-process map,
+      // so forget the denial count here too, matching the other terminal exits.
+      unsupportedPendingDenials.delete(lease.sessionId);
       return lease.id;
     }
     throw error;
@@ -524,6 +537,95 @@ async function denyScopeGuardTool(
   );
 }
 
+/**
+ * Unique tool-call ids denied per session because the pending call was gated but not one
+ * bounty-desk knows how to resolve. gpt-5-mini sometimes emits a `call_tool` whose toolInfoType
+ * is the harness's own dispatcher ("truefoundry-system"), not an MCP tool this agent registered.
+ * Denying it and telling the model to call the real tool directly keeps the session alive, but a
+ * model that just re-wraps the call would loop forever, so denials are counted and capped.
+ *
+ * The id, not a bare count, so a retried poll of the same still-pending call (the resume's
+ * release never committed, and the row was re-claimed on the old turn) re-issues the same
+ * idempotent denial without counting twice; a genuinely new emission carries a fresh id.
+ *
+ * Every session's entry is removed once it leaves the denial cycle, on both the recovery exit
+ * (handleVerifiedPendingCall) and the terminal exit every dead-end funnels through
+ * (endWithoutAgentVerdict, plus the abandonVerdictConflict branch), so the map only ever holds
+ * sessions mid-cycle right now, not one entry per report the daemon has ever seen. This matters
+ * because gpt-5-mini emits the wrapped shape as routine behavior, not only in a pathological loop.
+ *
+ * ponytail: an in-process Map, not an agent_session column. The reproduction poller runs in one
+ * long-lived worker (the Zerops bdworker daemon), so the count survives a session's polls there;
+ * a worker restart resets it, which only buys a looping session a few more denials before the
+ * same ceiling catches it again, with the turn deadline and sandbox teardown as the outer
+ * bounds. Promote to a persisted column if the poller is ever sharded across processes.
+ */
+const unsupportedPendingDenials = new Map<string, Set<string>>();
+
+/** How many distinct unsupported-pending denials the in-process map is holding for a session.
+ * Exists so a test can prove the entry is cleared once the session leaves the denial cycle,
+ * which is the guard against the map leaking one entry per report over the daemon's life. */
+export function unsupportedPendingDenialCountForTest(sessionId: string): number {
+  return unsupportedPendingDenials.get(sessionId)?.size ?? 0;
+}
+
+/**
+ * Denials issued before the run is given up on. Three of the same unrecognized shape proves the
+ * model will not stop wrapping it, the same reasoning as queue.ts's MAX_CONSECUTIVE_CLAIM_FAILURES.
+ * Each denial spends a full extra turn (an LLM roundtrip), so this also caps the wasted turns at
+ * three before the run falls back to the ANALYSIS_ONLY recovery.
+ */
+export const MAX_UNSUPPORTED_PENDING_DENIALS = 3;
+
+/**
+ * A gated pending call that is neither a genuine publish_verdict, an auto-approved write probe,
+ * nor a known scope-guard tool. Rather than ending the session (which strands the investigation
+ * on a stray tool-call shape), deny it, tell the model to call the tool it wants directly, and
+ * resume the turn, exactly as denyScopeGuardTool does. The refuse-and-synthesize terminal path
+ * stays as the bounded fallback for a model that just keeps re-emitting the same shape.
+ */
+async function handleUnsupportedPending(
+  lease: AgentSessionLease,
+  call: PendingToolCall,
+  client: TrueForgeClient,
+  leaseSeconds: number,
+  outerSignal?: AbortSignal,
+  requestDeadlineMs?: number,
+): Promise<string> {
+  const denied = unsupportedPendingDenials.get(lease.sessionId) ?? new Set<string>();
+  if (!denied.has(call.toolCallId) && denied.size >= MAX_UNSUPPORTED_PENDING_DENIALS) {
+    unsupportedPendingDenials.delete(lease.sessionId);
+    return refuseUnresolvablePending(
+      lease,
+      `unsupported pending tool call ${call.toolName} (toolInfoType ${call.toolInfoType}) was denied ${denied.size} times and the model kept re-emitting it; ending the run`,
+    );
+  }
+  denied.add(call.toolCallId);
+  unsupportedPendingDenials.set(lease.sessionId, denied);
+
+  const reason =
+    `${call.toolName} is not a tool available here. Call the tool you need directly by its own name (for example probe_target, probe_target_write, or publish_verdict); do not wrap a tool call inside a call_tool dispatcher.`;
+  return resumeApprovalTurn(
+    lease,
+    call,
+    client,
+    { status: "deny", reason },
+    {
+      type: "agent.unsupported_tool_denied",
+      data: {
+        toolName: call.toolName,
+        toolInfoType: call.toolInfoType,
+        toolCallId: call.toolCallId,
+        reason,
+      },
+      idempotencyKey: `agent.unsupported_tool_denied:${call.toolCallId}`,
+    },
+    leaseSeconds,
+    outerSignal,
+    requestDeadlineMs,
+  );
+}
+
 async function handleAwaitingApproval(
   lease: AgentSessionLease,
   pending: PendingToolCall[],
@@ -567,9 +669,13 @@ async function handleAwaitingApproval(
   }
 
   if (call.toolName !== "publish_verdict" || call.toolInfoType !== "mcp") {
-    return refuseUnresolvablePending(
+    return handleUnsupportedPending(
       lease,
-      `unsupported pending tool call: ${call.toolName} (toolInfoType ${call.toolInfoType})`,
+      call,
+      client,
+      leaseSeconds,
+      outerSignal,
+      requestDeadlineMs,
     );
   }
 

@@ -122,7 +122,7 @@ async function seedSession(
     })
     .returning({ id: dbm.agentSession.id });
 
-  return { reportId: r.id, verdictId: v.id, agentSessionId: s.id, capabilityToken: `cap-${n}` };
+  return { reportId: r.id, verdictId: v.id, agentSessionId: s.id, sessionId: `session-${n}`, capabilityToken: `cap-${n}` };
 }
 
 /** claim() is global; retire every other row first (see queue.test.ts). */
@@ -202,6 +202,38 @@ function scopeGuardCall(
     argumentsJson: JSON.stringify({ capability }),
     ...overrides,
   };
+}
+
+/** A gated pending call bounty-desk does not recognize: gpt-5-mini's stray `call_tool`, whose
+ * toolInfoType is the harness's own dispatcher rather than an MCP tool this agent registered. */
+function unsupportedPendingCall(overrides: Partial<PendingToolCall> = {}): PendingToolCall {
+  return {
+    threadId: "thread-u",
+    toolCallId: "call-u",
+    toolName: "call_tool",
+    toolInfoType: "truefoundry-system",
+    argumentsJson: JSON.stringify({ name: "probe_target" }),
+    ...overrides,
+  };
+}
+
+/** A fake client that resumes a denied/approved turn: it records each submitted decision and
+ * hands back a fresh running turn, the shape the deny-and-continue paths need. */
+function resumeClient(snapshot: TurnSnapshot | (() => TurnSnapshot)): {
+  client: TrueForgeClient;
+  submitted: TurnInput[];
+} {
+  const submitted: TurnInput[] = [];
+  const base = fakeClient(snapshot);
+  const client: TrueForgeClient = {
+    ...base,
+    findTurnByInput: async () => null,
+    createTurn: async (_sessionId, input) => {
+      submitted.push(input[0]);
+      return { turnId: `resumed-${submitted.length}`, snapshot: { status: "running" } };
+    },
+  };
+  return { client, submitted };
 }
 
 function draftedPublishVerdictCall(
@@ -630,40 +662,63 @@ test("all scope mutation approvals are denied without widening scope", async () 
   }
 });
 
-test("a gated scope name from a non-MCP tool is refused", async () => {
+test("a gated scope name from a non-MCP tool is denied and continued, not treated as the scope-guard tool", async () => {
   await drainOthers();
   const fixture = await seedSession();
-  const client = fakeClient({
-    status: "awaiting_approval",
-    pending: [scopeGuardCall(fixture.capabilityToken, "scope_add", { toolInfoType: "truefoundry-system" })],
-  });
+  // toolInfoType is not "mcp", so this never reaches the scope-guard branch: no grant is minted
+  // and no scope changes, but the session is not killed either. It falls through to the generic
+  // unsupported-pending denial and keeps investigating.
+  const call = scopeGuardCall(fixture.capabilityToken, "scope_add", { toolInfoType: "truefoundry-system" });
+  const { client, submitted } = resumeClient({ status: "awaiting_approval", pending: [call] });
 
   await poller.pollOnce("w-non-mcp-scope", { client });
 
+  assert.equal(submitted.length, 1);
+  const decision = submitted[0];
+  assert.equal(decision.type, "user.tool_approval");
+  if (decision.type === "user.tool_approval") assert.equal(decision.approval.status, "deny");
+
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "ERROR");
-  assert.match(row.lastError ?? "", /unsupported pending tool call/);
-  assert.equal((await reportRow(fixture.reportId)).state, "ANALYSIS_ONLY");
+  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnId, "resumed-1");
+  assert.equal((await reportRow(fixture.reportId)).state, "TRIAGING");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+  assert.ok(events.some((e) => e.type === "agent.unsupported_tool_denied"));
+  assert.ok(!events.some((e) => e.type === "agent.scope_tool_denied"), "it is not the scope-guard denial");
 });
 
-test("a wrong tool name is refused loudly and never touches report state", async () => {
+test("an unknown gated tool name is denied and the session keeps investigating", async () => {
   await drainOthers();
   const fixture = await seedSession();
-  const client = fakeClient({
-    status: "awaiting_approval",
-    pending: [publishVerdictCall(fixture.capabilityToken, { toolName: "delete_everything" })],
-  });
+  const call = unsupportedPendingCall({ toolName: "delete_everything", toolInfoType: "mcp" });
+  const { client, submitted } = resumeClient({ status: "awaiting_approval", pending: [call] });
 
   const id = await poller.pollOnce("w-wrong-tool", { client });
   assert.equal(id, fixture.agentSessionId);
 
+  assert.equal(submitted.length, 1);
+  const decision = submitted[0];
+  assert.equal(decision.type, "user.tool_approval");
+  if (decision.type === "user.tool_approval") {
+    assert.equal(decision.toolCallId, call.toolCallId);
+    assert.equal(decision.approval.status, "deny");
+    if (decision.approval.status === "deny") {
+      assert.match(decision.approval.reason ?? "", /directly by its own name/);
+      assert.match(decision.approval.reason ?? "", /call_tool dispatcher/);
+    }
+  }
+
   const row = await sessionRow(fixture.agentSessionId);
-  assert.equal(row.turnStatus, "ERROR");
-  assert.match(row.lastError ?? "", /unsupported pending tool call/);
+  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnId, "resumed-1");
   assert.equal(row.pendingThreadId, null);
 
   const rep = await reportRow(fixture.reportId);
-  assert.equal(rep.state, "ANALYSIS_ONLY");
+  assert.equal(rep.state, "TRIAGING");
 });
 
 test("a capability mismatch is refused loudly and never touches report state", async () => {
@@ -987,18 +1042,17 @@ test("a session with no provisioned sandbox never calls teardown", async () => {
   assert.deepEqual(deleteSandboxCalls, []);
 });
 
-test("a wrong tool name tears down the session's provisioned sandbox", async () => {
+test("denying an unknown gated call keeps the sandbox alive, since the session continues", async () => {
   await drainOthers();
   deleteSandboxCalls = [];
-  const fixture = await seedSession({ sandboxId: "sandbox-refused-path" });
-  const client = fakeClient({
-    status: "awaiting_approval",
-    pending: [publishVerdictCall(fixture.capabilityToken, { toolName: "delete_everything" })],
-  });
+  await seedSession({ sandboxId: "sandbox-refused-path" });
+  const call = unsupportedPendingCall({ toolName: "delete_everything", toolInfoType: "mcp" });
+  const { client } = resumeClient({ status: "awaiting_approval", pending: [call] });
 
   await poller.pollOnce("w-wrong-tool-sandbox", { client });
 
-  assert.deepEqual(deleteSandboxCalls, ["sandbox-refused-path"]);
+  // The investigation is not over, so its reproduction sandbox must not be torn down under it.
+  assert.deepEqual(deleteSandboxCalls, []);
 });
 
 test("a cancelled snapshot sets CANCELLED and moves unfinished analysis to ANALYSIS_ONLY", async () => {
@@ -1152,10 +1206,11 @@ test("a done_no_action run with no verdict mints a server-authored ANALYSIS_ONLY
 test("a refused pending call with no verdict mints a server-authored ANALYSIS_ONLY verdict in the analysis lane", async () => {
   await drainOthers();
   const fixture = await seedSessionWithoutVerdict();
-  // A wrong tool name is unresolvable, which drives the refuseUnresolvablePending terminal path.
+  // A publish_verdict whose capability does not match this session is unresolvable, which drives
+  // the refuseUnresolvablePending terminal path.
   const client = fakeClient({
     status: "awaiting_approval",
-    pending: [publishVerdictCall(fixture.capabilityToken, { toolName: "delete_everything" })],
+    pending: [publishVerdictCall("someone-elses-token")],
   });
 
   await poller.pollOnce("w-synth-refuse", { client });
@@ -1165,7 +1220,7 @@ test("a refused pending call with no verdict mints a server-authored ANALYSIS_ON
 
   const row = await sessionRow(fixture.agentSessionId);
   assert.equal(row.turnStatus, "ERROR");
-  assert.match(row.lastError ?? "", /unsupported pending tool call/);
+  assert.match(row.lastError ?? "", /capability/);
   assert.ok(row.pendingVerdictId, "a verdict must have been minted for a dead-end run");
   assert.equal(row.pendingThreadId, null);
 
@@ -1174,6 +1229,140 @@ test("a refused pending call with no verdict mints a server-authored ANALYSIS_ON
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
+test("an unknown gated pending call is denied with a steer to call the tool directly, and the turn resumes", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const call = unsupportedPendingCall();
+  const { client, submitted } = resumeClient({ status: "awaiting_approval", pending: [call] });
+
+  await poller.pollOnce("w-unsupported-deny", { client });
+
+  assert.equal(submitted.length, 1, "exactly one denial turn is submitted");
+  const decision = submitted[0];
+  assert.equal(decision.type, "user.tool_approval");
+  if (decision.type === "user.tool_approval") {
+    assert.equal(decision.threadId, call.threadId);
+    assert.equal(decision.toolCallId, call.toolCallId);
+    assert.equal(decision.approval.status, "deny");
+    if (decision.approval.status === "deny") {
+      assert.match(decision.approval.reason ?? "", /call_tool dispatcher/);
+    }
+  }
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "RUNNING");
+  assert.equal(row.turnId, "resumed-1");
+  assert.equal(row.pendingThreadId, null, "an unsupported denial engages no verdict approval markers");
+  assert.equal((await reportRow(fixture.reportId)).state, "TRIAGING");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, eventKey: dbm.sessionEvent.eventKey })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, fixture.reportId));
+  const denied = events.find((e) => e.type === "agent.unsupported_tool_denied");
+  assert.ok(denied, "the denial is recorded in the session event log");
+  assert.equal(denied?.eventKey, `agent.unsupported_tool_denied:${call.toolCallId}`);
+});
+
+test("a model that keeps re-emitting an unknown gated call is denied a bounded number of times, then ends ANALYSIS_ONLY", async () => {
+  await drainOthers();
+  const fixture = await seedSessionWithoutVerdict();
+  // Each poll observes a fresh emission (a new tool-call id), which is what a genuine loop looks
+  // like; the counter is on unique ids, so a retried poll of the same id would not count twice.
+  let emission = 0;
+  const { client, submitted } = resumeClient(() => ({
+    status: "awaiting_approval",
+    pending: [unsupportedPendingCall({ toolCallId: `call-loop-${emission}` })],
+  }));
+
+  const cap = poller.MAX_UNSUPPORTED_PENDING_DENIALS;
+  for (let i = 0; i <= cap; i += 1) {
+    emission = i;
+    await dbm.db
+      .update(dbm.agentSession)
+      .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+      .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+    await poller.pollOnce(`w-loop-${i}`, { client });
+  }
+
+  assert.equal(submitted.length, cap, "the model is denied exactly the cap, not once more");
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", new RegExp(`denied ${cap} times`));
+  assert.ok(row.pendingVerdictId, "the bounded fallback still mints the ANALYSIS_ONLY verdict");
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "ANALYSIS_ONLY");
+
+  const [v] = await dbm.db
+    .select({ outcome: dbm.verdict.outcome })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
+  assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
+test("a session denied once then recovering to publish_verdict drops its denial count, so the map does not retain it", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  let phase: "deny" | "recover" = "deny";
+  const { client } = resumeClient(() =>
+    phase === "deny"
+      ? { status: "awaiting_approval", pending: [unsupportedPendingCall()] }
+      : { status: "awaiting_approval", pending: [publishVerdictCall(fixture.capabilityToken)] },
+  );
+
+  await poller.pollOnce("w-cleanup-deny", { client });
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    1,
+    "the denial is counted while the session is mid-cycle",
+  );
+
+  phase = "recover";
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-cleanup-recover", { client });
+
+  assert.equal((await reportRow(fixture.reportId)).state, "AWAITING_APPROVAL");
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    0,
+    "recovering past the denial cycle must not leave a map entry behind",
+  );
+});
+
+test("a session denied once then hitting a terminal error drops its denial count", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  let phase: "deny" | "error" = "deny";
+  const { client } = resumeClient(() =>
+    phase === "deny"
+      ? { status: "awaiting_approval", pending: [unsupportedPendingCall()] }
+      : { status: "error", message: "the model blew up" },
+  );
+
+  await poller.pollOnce("w-cleanup-deny-2", { client });
+  assert.equal(poller.unsupportedPendingDenialCountForTest(fixture.sessionId), 1);
+
+  phase = "error";
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-cleanup-error", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    0,
+    "a terminal exit must not leave a map entry behind",
+  );
 });
 
 test("a full draft claiming REPRODUCED for a report with no bound target never becomes a REPRODUCED verdict", async () => {
