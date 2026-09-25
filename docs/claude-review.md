@@ -20,12 +20,25 @@ group of their own and never cancel a review.
 If the subscription run fails, for example because the token expired or hit a usage limit, the
 same job runs the review once more through VyceAI, using the `VYCEAI_API_KEY` repository secret.
 VyceAI serves the Anthropic Messages API at `https://vyceai.com`, so this is the same Claude Code
-action with a different base URL and model (`deepseek-v4.1`). The prompt and tool limits are
-identical, and the policy test fails if they drift apart. Three differences matter:
+action with a different base URL and model (`deepseek-v4.1`). The prompt and tool allowlist are
+identical, and the policy test fails if they drift apart. These differences matter:
 
 - The model is DeepSeek, not Sonnet 5, so treat its findings with more suspicion.
 - It is billed against the VyceAI balance (about $0.15 in and $0.60 out per million tokens).
 - The pull request's diff and files are sent to VyceAI.
+- It runs at low effort. VyceAI cuts every response at 4096 output tokens and counts DeepSeek's
+  hidden reasoning against that, so a long think comes back as an empty reply with
+  `stop_reason: end_turn`. Claude Code takes that as the end of the run and the summary is never
+  posted. `CLAUDE_CODE_EFFORT_LEVEL: low` sends `output_config.effort: low`, which keeps the
+  reasoning well under the cap.
+- It gets 25 turns instead of 60, and Claude Code is told the context window is 150k tokens so it
+  compacts early. There is no prompt caching on this path, so each turn resends the whole
+  conversation.
+
+The prompt's budget paragraph exists for this path, though both reviews follow it: read a large
+saved diff 500 lines at a time, make at most 12 reads after the diff, post by turn 20, and post a
+partial review rather than none. DeepSeek makes about one tool call per turn and does not track
+turns itself, so a limit on reads works better than a turn number.
 
 A run that failed partway may already have posted comments before the fallback posts its own. The
 head check reads the latest summary, so the result is still correct.
