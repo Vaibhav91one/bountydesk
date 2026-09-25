@@ -6,13 +6,22 @@ import { buildComment, buildPrompt } from "./vyceai-review.mjs";
 const HEAD = "abc123def456abc123def456abc123def456abcd";
 const MARKER = `<!-- claude-review head=${HEAD} -->`;
 
-test("the prompt carries the head marker, the format and the diff as fenced data", () => {
+test("the prompt carries the head marker, the format and the diff fenced by a per-run token", () => {
   const prompt = buildPrompt(HEAD, "diff --git a/x b/x\n+evil");
   assert.ok(prompt.includes(MARKER));
   assert.ok(prompt.includes("## Code review"));
   assert.ok(prompt.includes("<details><summary>"));
-  assert.ok(prompt.includes("DIFF\ndiff --git a/x b/x\n+evil\nDIFF"));
   assert.ok(prompt.includes("untrusted data"));
+  // The diff sits between two identical, unguessable fence tokens.
+  const fences = prompt.match(/DIFF_[0-9a-f-]{36}/g) ?? [];
+  assert.ok(fences.length >= 2, "the diff is fenced by a token");
+  assert.equal(fences.at(0), fences.at(-1), "the same token opens and closes the fence");
+  assert.ok(prompt.includes(`${fences[0]}\ndiff --git a/x b/x\n+evil\n${fences[0]}`));
+});
+
+test("each run gets a fresh, unpredictable diff fence", () => {
+  const tokenOf = (p) => (p.match(/DIFF_[0-9a-f-]{36}/) ?? [])[0];
+  assert.notEqual(tokenOf(buildPrompt(HEAD, "x")), tokenOf(buildPrompt(HEAD, "x")));
 });
 
 test("a well-formed model reply keeps its body under the trusted marker", () => {
