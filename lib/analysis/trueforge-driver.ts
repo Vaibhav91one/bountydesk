@@ -13,7 +13,13 @@ import {
   targetProfile,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
-import { provisionMesh, provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import { routeUnreproducibleTarget } from "@/lib/reports/target-scope";
+import {
+  ProvisionCouldNotDeployError,
+  provisionMesh,
+  provisionTarget,
+  teardownSandbox,
+} from "@/lib/sandbox/provision";
 import { meshServicesFromConfig, profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
@@ -138,9 +144,11 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
 
 /**
  * The real driver: opens a TrueForge session per report and starts a turn that asks the model
- * to investigate and call publish_verdict. Unlike stubAnalysisDriver, this never transitions
- * the report's lifecycle state, and unlike the pipeline this replaces, it never decides or
- * persists a verdict either -- that transition happens only once a separate poller has
+ * to investigate and call publish_verdict. It never decides or persists a verdict, and moves the
+ * report's lifecycle state in exactly one case: when a bound target fails to deploy so hard that
+ * there is nothing to reproduce against and no later run would fix it, run() routes the report to
+ * the terminal OUT_OF_SCOPE (a deterministic scope rejection, made before any verdict exists) and
+ * starts no turn. Every verdict outcome still happens only once a separate poller has
  * independently confirmed, by asking TrueForge itself, that a genuine pending publish_verdict
  * call exists (lib/agent-sessions/poller.ts), and the verdict row it approves is the agent's
  * own drafted conclusion (lib/mcp/publish-verdict.ts), re-authorized against the same
@@ -306,6 +314,11 @@ export function createTrueforgeAnalysisDriver(
       // this report was already provisioned once, so there's nothing to redo -- provisioning
       // again here would boot a second sandbox nobody would ever store a reference to.
       let provisioned: { sandboxId: string; appPort: number; sandboxIds: string[] } | null = null;
+      // Set when a hard deploy failure below routed this bound-target report to OUT_OF_SCOPE. The
+      // report is then terminal and there is no turn to start, so run() returns before the turn
+      // transaction. This is the one case run() moves the report's state, and it moves it to a
+      // scope rejection, never to a verdict outcome, which the agent and poller still own.
+      let routedOutOfScope = false;
       if (targetInfo && targetInfo.snapshotId) {
         const [existing] = await db
           .select({ turnId: agentSession.turnId })
@@ -359,18 +372,38 @@ export function createTrueforgeAnalysisDriver(
               // A genuine cancellation must still propagate as one, not be swallowed into "no
               // target this run" -- the caller's lease/retry semantics depend on seeing it.
               if (signal.aborted) throw signal.reason;
-              // The run continues without a sandbox, so the reason has to reach a log or nobody
-              // learns why (an inactive target snapshot looked exactly like a missing key).
-              console.error(
-                `report ${reportId}: sandbox provisioning failed, continuing without one: ${
-                  safeErrorText(error)
-                }`,
-              );
-              provisioned = null;
+              // A hard deploy failure means the pinned target cannot be built or booted at all, so
+              // there is nothing to reproduce against and no later run would fix it: the report is
+              // out of scope. A transient failure (Daytona down, the app slow to answer) is a
+              // different class -- the target may be reachable next run and the report text still
+              // yields an analysis -- so it falls through to the analysis-only turn as before.
+              if (error instanceof ProvisionCouldNotDeployError) {
+                const routing = await routeUnreproducibleTarget(
+                  reportId,
+                  `target could not be deployed: ${safeErrorText(error)}`,
+                );
+                routedOutOfScope = routing.routed;
+              }
+              if (!routedOutOfScope) {
+                // The run continues without a sandbox, so the reason has to reach a log or nobody
+                // learns why (an inactive target snapshot looked exactly like a missing key).
+                console.error(
+                  `report ${reportId}: sandbox provisioning failed, continuing without one: ${
+                    safeErrorText(error)
+                  }`,
+                );
+                provisioned = null;
+              }
             }
           }
         }
       }
+
+      // The bound target is a hard dead end and the report is now terminal (OUT_OF_SCOPE), so
+      // there is no turn to start. Provisioning threw, so nothing was booted and there is no
+      // sandbox to tear down. The poller finishes the already-created session on its next pass
+      // (it cancels a session whose report is terminal).
+      if (routedOutOfScope) return;
 
       // The row lock spans the createTurn call on purpose, unlike the delivery worker's GitHub
       // calls: TrueForge is a loopback service this deployment always controls, not a slow or
