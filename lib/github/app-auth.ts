@@ -72,24 +72,50 @@ export function signAppJwt(now: Date = new Date()): string {
 export type InstallationToken = { token: string; expiresAt: string };
 
 /**
- * Mint a token scoped to exactly one repository.
- *
- * Passing `repository_ids: [repoId]` rather than leaving the installation's full repo set
- * implicit means a token minted for one report cannot be replayed against a different
- * repository the same installation happens to cover.
+ * A non-2xx response from GitHub, carrying its status so a caller can tell an authoritative
+ * refusal (a 403 the App is not authorized for, a 404 the installation is gone) apart from a
+ * transient one (5xx, or a rate-limit 403). Delivery reads it to stop retrying a token mint
+ * GitHub has permanently refused; reconcile reads it to fail safe on a read that did not answer.
  */
-export async function mintInstallationToken(
+export class GitHubApiError extends Error {
+  readonly status: number;
+  /**
+   * GitHub answers a rate limit with 403 as well as 429, so a 403 alone does not mean the App lost
+   * access. Minting tokens in a burst is itself a documented secondary-rate-limit trigger.
+   */
+  readonly rateLimited: boolean;
+  constructor(status: number, message: string, rateLimited = false) {
+    super(message);
+    this.name = "GitHubApiError";
+    this.status = status;
+    this.rateLimited = rateLimited;
+  }
+}
+
+/** GitHub's rate-limit signals: an exhausted primary quota, a retry-after, or the limit named in the body. */
+function isRateLimited(response: Response, text: string): boolean {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  return (
+    response.headers.get("x-ratelimit-remaining") === "0" ||
+    response.headers.has("retry-after") ||
+    /rate limit/i.test(text)
+  );
+}
+
+/**
+ * POST the installation access-token endpoint and parse the result. The scoped and unscoped
+ * mints differ only by the body, so the request, error surfacing, and validation live here once.
+ */
+async function requestInstallationToken(
   installationId: number,
-  repoId: number,
+  body: Record<string, unknown>,
   opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
 ): Promise<InstallationToken> {
   if (!Number.isInteger(installationId) || installationId <= 0) {
     throw new Error(
       `installationId must be a positive integer, got ${installationId}`,
     );
-  }
-  if (!Number.isInteger(repoId) || repoId <= 0) {
-    throw new Error(`repoId must be a positive integer, got ${repoId}`);
   }
 
   const doFetch = opts?.fetchImpl ?? fetch;
@@ -103,7 +129,7 @@ export async function mintInstallationToken(
         "content-type": "application/json",
         "x-github-api-version": "2022-11-28",
       },
-      body: JSON.stringify({ repository_ids: [repoId] }),
+      body: JSON.stringify(body),
       signal: requestSignal(opts?.signal),
     },
   );
@@ -111,9 +137,11 @@ export async function mintInstallationToken(
   if (!response.ok) {
     // GitHub's own error body is safe to surface; it never contains the Authorization header
     // we sent, only its own complaint about the request.
-    const body = await response.text();
-    throw new Error(
-      `GitHub installation token request failed with ${response.status}: ${body}`,
+    const text = await response.text();
+    throw new GitHubApiError(
+      response.status,
+      `GitHub installation token request failed with ${response.status}: ${text}`,
+      isRateLimited(response, text),
     );
   }
 
@@ -138,4 +166,37 @@ export async function mintInstallationToken(
   }
 
   return { token: json.token, expiresAt: json.expires_at };
+}
+
+/**
+ * Mint a token scoped to exactly one repository.
+ *
+ * Passing `repository_ids: [repoId]` rather than leaving the installation's full repo set
+ * implicit means a token minted for one report cannot be replayed against a different
+ * repository the same installation happens to cover.
+ */
+export async function mintInstallationToken(
+  installationId: number,
+  repoId: number,
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+): Promise<InstallationToken> {
+  if (!Number.isInteger(repoId) || repoId <= 0) {
+    throw new Error(`repoId must be a positive integer, got ${repoId}`);
+  }
+  return requestInstallationToken(installationId, { repository_ids: [repoId] }, opts);
+}
+
+/**
+ * Mint a token for the whole installation, unscoped to any single repository.
+ *
+ * Reconciliation needs it to read `GET /installation/repositories`, which returns only the
+ * repositories the presented token is scoped to: a per-repo token would list just that one repo
+ * and make every other connected repo look removed. Nothing that posts uses this; keep the
+ * scoped mint for delivery.
+ */
+export async function mintInstallationAccessToken(
+  installationId: number,
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+): Promise<InstallationToken> {
+  return requestInstallationToken(installationId, {}, opts);
 }

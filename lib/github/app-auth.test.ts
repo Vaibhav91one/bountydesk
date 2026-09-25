@@ -16,7 +16,12 @@ process.env.GITHUB_APP_ID = "123456";
 process.env.GITHUB_APP_PRIVATE_KEY_BASE64 =
   Buffer.from(privateKey).toString("base64");
 
-import { mintInstallationToken, signAppJwt } from "./app-auth";
+import {
+  GitHubApiError,
+  mintInstallationAccessToken,
+  mintInstallationToken,
+  signAppJwt,
+} from "./app-auth";
 
 function decodeSegment(segment: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
@@ -188,4 +193,52 @@ test("neither the private key nor a minted token ever reach console output", asy
   const serialised = JSON.stringify(calls);
   assert.equal(serialised.includes("ghs_should_never_be_logged"), false);
   assert.equal(serialised.includes(privateKey), false);
+});
+
+test("a failed mint throws GitHubApiError carrying the status", async () => {
+  const stub = (async () =>
+    new Response("Bad credentials", { status: 401 })) as typeof fetch;
+  try {
+    await mintInstallationToken(1, 1, { fetchImpl: stub });
+    assert.fail("expected the mint to throw");
+  } catch (err) {
+    assert.ok(err instanceof GitHubApiError);
+    assert.equal(err.status, 401);
+  }
+});
+
+test("a failed mint marks a rate-limited 403 apart from an authorization 403", async () => {
+  const cases: [Response, boolean][] = [
+    [new Response("Resource not accessible by integration", { status: 403 }), false],
+    [new Response("forbidden", { status: 403, headers: { "x-ratelimit-remaining": "0" } }), true],
+    [new Response("forbidden", { status: 403, headers: { "retry-after": "60" } }), true],
+    [new Response("You have exceeded a secondary rate limit", { status: 403 }), true],
+    [new Response("slow down", { status: 429 }), true],
+  ];
+  for (const [response, rateLimited] of cases) {
+    const stub = (async () => response) as typeof fetch;
+    const err = await mintInstallationToken(1, 1, { fetchImpl: stub }).catch((e: unknown) => e);
+    assert.ok(err instanceof GitHubApiError);
+    assert.equal(err.rateLimited, rateLimited);
+  }
+});
+
+test("mintInstallationAccessToken mints an unscoped, whole-installation token", async () => {
+  let seenUrl = "";
+  let seenBody: unknown;
+  const stub = (async (url: unknown, init?: RequestInit) => {
+    seenUrl = String(url);
+    seenBody = JSON.parse(init?.body as string);
+    return new Response(
+      JSON.stringify({ token: "ghs_all", expires_at: "2026-08-27T12:00:00Z" }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    );
+  }) as typeof fetch;
+
+  const result = await mintInstallationAccessToken(77, { fetchImpl: stub });
+
+  assert.equal(seenUrl, "https://api.github.com/app/installations/77/access_tokens");
+  // No repository_ids: a repo-scoped token would list only that repo, defeating reconcile.
+  assert.deepEqual(seenBody, {});
+  assert.deepEqual(result, { token: "ghs_all", expiresAt: "2026-08-27T12:00:00Z" });
 });
