@@ -11,12 +11,10 @@
 // data and is fed to page.goto as a URL, whose "execution" is the whole point and is contained by
 // the sandbox's networkBlockAll (no egress) and its single private link to the target.
 //
-// webcmd specifics to verify against a live image (the host-side contract below is stable; only
-// how this file talks to webcmd may need tuning when the image is built):
-//   - the CLI shape `webcmd session create` / `webcmd --session <id> browser run --stdin`,
-//   - that `page.on('dialog')` and `page.on('console')` fire inside webcmd's QuickJS runtime
-//     (Playwright-standard but not documented by webcmd; if they do not, the `title` sink still
-//     works and the `dialog` sink needs a fallback, noted in the README).
+// Verified offline against webcmd 0.8.4 in the built image: the CLI shape `webcmd session create` /
+// `webcmd --session <id> browser run --stdin`, and that `page.on('dialog')` and `page.on('console')`
+// both fire inside webcmd's QuickJS runtime. The image pins that version because the result
+// envelope and the config format below are webcmd internals.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -30,6 +28,10 @@ const OFFLINE_ENV = {
   ...process.env,
   WEBCMD_GLOBAL_MEMORY: "off",
   WEBCMD_CANDIDATE_PUBLIC_IP: "off",
+  // The image bakes a config here that selects the system Chromium; without it webcmd tries to
+  // download its own browser, which cannot work offline. Set here too, not only in the image ENV,
+  // so the driver does not depend on the exec API passing image env through.
+  WEBCMD_CONFIG_DIR: "/opt/webcmd",
 };
 
 function fail(message) {
@@ -139,12 +141,14 @@ function runStep(sessionId, params, step) {
     Number(params.maxDomChars) || 1000000,
   );
   const result = webcmd(["--session", sessionId, "browser", "run", "--stdin"], program);
-  const parsed = extractJson(result.stdout);
-  if (!parsed) {
+  // webcmd wraps the program's return value in an envelope ({ ok, result, logs, page, ... }), so
+  // the observation is `result`. A run that threw has no result and counts as nothing rendered.
+  const observation = extractJson(result.stdout)?.result;
+  if (!observation || typeof observation !== "object") {
     process.stderr.write(`browser-oracle: step ${step.label} produced no parseable result: ${result.stderr.slice(0, 400)}\n`);
     return { label: step.label, navigated: false, title: "", dom: "", consoleText: "", dialogFired: false, dialogMessages: [] };
   }
-  return { label: step.label, ...parsed };
+  return { label: step.label, ...observation };
 }
 
 function main() {

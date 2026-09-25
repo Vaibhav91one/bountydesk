@@ -46,7 +46,8 @@ Confirmation is a canary in a specific sink, never a bare `alert()`:
   fragment reflected into the page as inert text never lands there. Works with any DOM-mutation
   payload and is the robust default.
 - `dialog`: the payload calls `alert`/`confirm`/`prompt` with the canary, captured by a hooked
-  dialog handler. Needs webcmd's Playwright dialog hook (see the caveat below).
+  dialog handler. webcmd's Playwright `page.on('dialog')` hook fires (verified offline, step 3
+  below).
 
 A negative control (an inert payload carrying the same canary) must leave the sink clean, or the
 run is `ANALYSIS_ONLY`, the same clean-negative-control rule the HTTP oracle has.
@@ -65,16 +66,34 @@ Built and tested on the host side, with the browser faked in CI:
 Still to do, because the image build and snapshot are outside this change (the orchestrator owns
 the snapshot rebuild and deploy):
 
-1. Build `sandbox-images/browser/Dockerfile`, push it, and register it as a Daytona snapshot.
-2. Set `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id) and `BOUNTYDESK_BROWSER_IMAGE_REF` (its
-   digest-pinned ref) in the reproduction worker's env. Until both are set the feature is off:
-   `browserProbeConfig()` returns null, `probe_browser` refuses cleanly, and the reproduce leg is
-   never reached.
-3. Verify webcmd offline in the built image: `webcmd doctor` green with no network, a `page.goto`
-   plus DOM dump against a local page, and confirm no egress. Confirm `page.on('dialog')` and
-   `page.on('console')` fire in webcmd's QuickJS runtime. They are Playwright-standard but webcmd
-   does not document them; if the dialog hook does not fire, the `title` sink still works and a
-   `dialog`-sink recipe should not be enabled until it does.
+1. Build `sandbox-images/browser/Dockerfile` for linux/amd64, push it, and register it as a Daytona
+   snapshot. Done for `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`, registered as the
+   `bountydesk-browser-78b8996` snapshot (2 CPU, 4 GB memory, 10 GB disk). The GHCR package is
+   private; Daytona pulled it anyway.
+2. Set three env vars in the reproduction worker: `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id),
+   `BOUNTYDESK_BROWSER_IMAGE_REF` (the digest-pinned ref), and `BOUNTYDESK_BROWSER_IMAGE_NAME` (the
+   tag, e.g. `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`). Until all three are set the feature
+   is off: `browserProbeConfig()` returns null, `probe_browser` refuses cleanly, and the reproduce
+   leg is never reached. The tag is needed because Daytona records a snapshot's tag, not the digest
+   it resolved to (`POST /snapshots` refuses a digest imageName), so `assertSnapshotImage`'s
+   digest-exact check cannot pass. `runBrowserProbe` passes the tag as `createSandbox`'s
+   `allowedImageNameOverride`, the same narrow override the target path uses, and then re-proves
+   which image actually booted with `buildMarkerCheck` before any page loads. The marker is baked at
+   `/etc/bountydesk-build-marker` in the image and compared against `EXPECTED_BROWSER_BUILD_MARKER`
+   in `browser-probe.ts`; a missing or mismatched marker fails closed and the sandbox is torn down
+   before the target renders.
+3. Verify webcmd offline in the built image. Done locally: the amd64 image ran with no network
+   interface but loopback (curl to 1.1.1.1 and a DNS lookup both failed). `webcmd doctor` was
+   green, and `browser-oracle.mjs`, running as a non-root user against a `location.hash` to
+   `innerHTML` page served on 127.0.0.1, reported the canary in the title on the title exploit, in
+   `dialogMessages` on the alert exploit, and in neither sink on the inert negative control. The
+   console hook fires too. This needed two fixes to what the image first shipped. webcmd 0.8.4
+   ignores browser env vars and, without a config, downloads its own Chromium, which fails offline;
+   it also launches headed with no way to turn that off. The image now bakes a config pointing
+   webcmd at a wrapper that runs the system Chromium with `--headless=new`. Separately, webcmd wraps
+   a program's return value in an envelope, and the driver now reads the observation from its
+   `result` field instead of spreading the whole envelope, which had reported every step as not
+   navigated.
 4. Author and review a `browserExploit` recipe before any live DOM-XSS reproduction. No frozen
    recipe declares one today, so nothing flips a verdict until a maintainer adds and reviews one.
 5. Point the agent at `probe_browser`. The tool is registered and discoverable now, but the agent

@@ -14,6 +14,12 @@ process.env.BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS = "30";
 process.env.BOUNTYDESK_REPRODUCE_READINESS_POLL_MS = "5";
 process.env.BOUNTYDESK_BROWSER_SNAPSHOT = "browser-snap";
 process.env.BOUNTYDESK_BROWSER_IMAGE_REF = "ghcr.io/bountydesk/browser@sha256:" + "b".repeat(64);
+process.env.BOUNTYDESK_BROWSER_IMAGE_NAME = "ghcr.io/bountydesk/browser:test-sha";
+
+// browser-probe.ts's EXPECTED_BROWSER_BUILD_MARKER. The browser sandbox reads this back from its own
+// image; the target sandbox reads the juice-shop marker. They share the marker path, so the fake
+// keys the answer on which sandbox is asking.
+const BROWSER_BUILD_MARKER = "browser-78b8996";
 
 const FAKE_SANDBOX: Sandbox = {
   id: "target-sandbox",
@@ -27,6 +33,10 @@ const FAKE_SANDBOX: Sandbox = {
   sandboxClass: "container",
   public: false,
 };
+
+// The browser sandbox is a separate sandbox created with a link back to the target. Giving it its
+// own id lets the fake return the right build marker for each.
+const FAKE_BROWSER_SANDBOX: Sandbox = { ...FAKE_SANDBOX, id: "browser-sandbox" };
 
 const FAKE_SNAPSHOT: SnapshotInfo = {
   id: "snap",
@@ -58,9 +68,10 @@ function browserOracleResult(command: string): ExecResult {
   return { exitCode: 0, result: `BOUNTYDESK_BROWSER_RESULT ${JSON.stringify({ steps })}\n` };
 }
 
-function fakeExecute(_sandbox: Sandbox, command: string): ExecResult {
+function fakeExecute(sandbox: Sandbox, command: string): ExecResult {
   if (command.includes("bountydesk-build-marker")) {
-    return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
+    const marker = sandbox.id === FAKE_BROWSER_SANDBOX.id ? BROWSER_BUILD_MARKER : JUICE_SHOP_EXPECTED_BUILD_MARKER;
+    return { exitCode: 0, result: `${marker}\n` };
   }
   if (command.includes("command -v curl")) return { exitCode: 0, result: "TOOL=curl\n" };
   if (command.includes("bountydesk-egress")) {
@@ -72,8 +83,10 @@ function fakeExecute(_sandbox: Sandbox, command: string): ExecResult {
 
 mock.module("./daytona", {
   namedExports: {
-    createSandbox: async (): Promise<Sandbox> => FAKE_SANDBOX,
-    getSandbox: async (): Promise<Sandbox> => FAKE_SANDBOX,
+    // Only the browser probe passes a link (back to the target); the target's own sandbox does not.
+    createSandbox: async (_spec: unknown, _override: unknown, link?: { parentSandboxId: string }): Promise<Sandbox> =>
+      link?.parentSandboxId ? FAKE_BROWSER_SANDBOX : FAKE_SANDBOX,
+    getSandbox: async (id: string): Promise<Sandbox> => (id === FAKE_BROWSER_SANDBOX.id ? FAKE_BROWSER_SANDBOX : FAKE_SANDBOX),
     execute: async (sandbox: Sandbox, command: string): Promise<ExecResult> => fakeExecute(sandbox, command),
     deleteSandbox: async (id: string): Promise<void> => {
       deleteSandboxCalls.push(id);
