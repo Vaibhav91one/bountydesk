@@ -253,6 +253,13 @@
       "when": 1790259510088,
       "tag": "0035_outside_email_gate",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790305804466,
+      "tag": "0036_chief_siren",
+      "breakpoints": true
     }
   ]
 }

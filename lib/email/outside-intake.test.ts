@@ -296,3 +296,33 @@ test("a Resend outage throws so the webhook can be redelivered", async () => {
     }),
   );
 });
+
+/**
+ * overLimit is a pure decision over already-counted rows plus the tunable config, so these need no
+ * database: the point is the exemption logic. An exempt domain (a free-mail provider) is not charged
+ * the shared per-domain bucket, but the per-sender cap binds it like anyone else.
+ */
+const limitConfig = {
+  perSenderPerDay: 5,
+  perDomainPerDay: 20,
+  maxBytes: 512 * 1024,
+  exemptDomains: ["gmail.com"],
+};
+
+test("overLimit caps a sender at the per-sender limit even on an exempt domain", () => {
+  assert.equal(
+    intake.overLimit({ sender: 5, domain: 0 }, "a@gmail.com", limitConfig),
+    "sender over its daily limit",
+  );
+});
+
+test("overLimit skips the per-domain cap for an exempt domain", () => {
+  assert.equal(intake.overLimit({ sender: 0, domain: 999 }, "a@gmail.com", limitConfig), null);
+});
+
+test("overLimit still caps a non-exempt domain", () => {
+  assert.equal(
+    intake.overLimit({ sender: 0, domain: 20 }, "a@company.test", limitConfig),
+    "domain over its daily limit",
+  );
+});
