@@ -58,6 +58,7 @@ const MAX_DOM_CHARS = 1_000_000;
 const MAX_CONSOLE_CHARS = 100_000;
 const MAX_DIALOG_MESSAGES = 50;
 const MAX_DIALOG_MESSAGE_CHARS = 4_000;
+const MAX_NAV_ERROR_CHARS = 500;
 
 /** The line the in-sandbox driver prints its one JSON result on. Anything else on stdout (webcmd
  * daemon chatter, Chromium's dbus noise) is ignored, so the driver's output shape is the only
@@ -117,6 +118,9 @@ export type BrowserStepObservation = {
   /** Whether a JavaScript dialog (alert/confirm/prompt) fired, and its messages, capped. */
   dialogFired: boolean;
   dialogMessages: string[];
+  /** Why navigation did not complete, when it did not: the page.goto error, or webcmd's own
+   * failure. Empty when the page loaded. Turns a bare navigated:false into a diagnosable reason. */
+  navError: string;
 };
 
 export type BrowserProbeResult =
@@ -181,6 +185,7 @@ type RawStep = {
   consoleText?: unknown;
   dialogFired?: unknown;
   dialogMessages?: unknown;
+  navError?: unknown;
 };
 type RawOracleResult = { steps?: RawStep[] };
 
@@ -202,6 +207,7 @@ function normalizeObservation(label: string, raw: RawStep | undefined): BrowserS
     consoleText: clampString(raw?.consoleText, MAX_CONSOLE_CHARS),
     dialogFired: raw?.dialogFired === true,
     dialogMessages,
+    navError: clampString(raw?.navError, MAX_NAV_ERROR_CHARS),
   };
 }
 

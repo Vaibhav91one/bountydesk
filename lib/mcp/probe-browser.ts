@@ -42,6 +42,8 @@ export type ProbeBrowserResult =
       consoleText: string;
       dialogFired: boolean;
       dialogMessages: string[];
+      /** Why the page did not load, when navigated is false. Empty on a successful load. */
+      navError: string;
     }
   | { ok: false; reason: string };
 
@@ -84,5 +86,6 @@ export async function probeBrowser(input: ProbeBrowserInput): Promise<ProbeBrows
     consoleText: observation.consoleText,
     dialogFired: observation.dialogFired,
     dialogMessages: observation.dialogMessages,
+    navError: observation.navError,
   };
 }
