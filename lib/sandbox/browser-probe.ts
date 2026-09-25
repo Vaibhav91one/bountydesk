@@ -76,7 +76,7 @@ const PARAMS_PATH = "/tmp/bountydesk-browser-params.json";
  * any other mutable source: it is the trusted value the running image is checked against, and a
  * value the environment could set would let a repointed snapshot vouch for itself. A rebuilt image
  * changes this constant and the string in sandbox-images/browser/Dockerfile together. */
-const EXPECTED_BROWSER_BUILD_MARKER = "browser-78b8996";
+const EXPECTED_BROWSER_BUILD_MARKER = "browser-dcl-1";
 
 /** snapshotId and imageRef enable the feature; imageName is the tag createSandbox accepts in the
  * digest ref's place (see runBrowserProbe). */
@@ -164,6 +164,10 @@ type OracleParams = {
   navTimeoutMs: number;
   settleMs: number;
   maxDomChars: number;
+  /** Playwright's page.goto waitUntil. domcontentloaded, not load: a heavy SPA never fires the full
+   *  load event inside the timeout, which reported navigated:false even though the page rendered and
+   *  the client-side sink ran. The oracle allowlists this, so it is safe to pass through. */
+  waitUntil: "load" | "domcontentloaded" | "commit" | "networkidle";
 };
 
 /** The raw shape browser-oracle.mjs prints. Everything here is validated before use: the driver
@@ -255,8 +259,12 @@ export async function runBrowserProbe(
     targetOrigin: origin,
     steps,
     navTimeoutMs: 15_000,
-    settleMs: 1_500,
+    // domcontentloaded plus a settle: the render is "DOM parsed" not "every subresource loaded",
+    // then a pause for a client-side framework to boot and process the fragment. A DOM-XSS sink in
+    // an SPA fires after the app boots, past DOMContentLoaded, so the settle is what gives it time.
+    settleMs: 3_000,
     maxDomChars: MAX_DOM_CHARS,
+    waitUntil: "domcontentloaded",
   };
   // Agent- or recipe-supplied strings ride in as one opaque base64 blob the shell cannot break
   // out of (the base64 alphabet has no shell metacharacters), decoded to a file the driver reads
