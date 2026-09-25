@@ -34,7 +34,8 @@ const COPY: Record<Decision["kind"], { title: string; description: string; confi
   },
   reject: {
     title: "Reject this report?",
-    description: "The report closes as denied. The reporter is sent nothing.",
+    description:
+      "The report closes as denied, and the reporter receives a fixed out-of-scope reply saying we reviewed it and will not take it further. Clicking confirm approves that reply. It discloses no reason and names no other report.",
     confirm: "Reject",
   },
   spam: {
@@ -218,7 +219,26 @@ export function TriageGate({
             )}
           </div>
         ) : closingReason ? (
-          <p className="text-body text-foreground">{closingReason}</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-body text-foreground">
+              {closingReason}
+              {gate.rejectReplySent === null
+                ? ""
+                : gate.rejectReplySent
+                  ? " The reply was sent."
+                  : " The reply has not been sent."}
+            </p>
+            {gate.rejectReplySent === false ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={pending}
+                onClick={() => setDecision({ kind: "reject" })}
+              >
+                Send the reply again
+              </Button>
+            ) : null}
+          </div>
         ) : null}
         {triage?.triage ? (
           <details>

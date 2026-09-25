@@ -117,20 +117,26 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // an ambiguous prefix, resolves to null, which is the honest not-found answer rather than a 500.
   const resolvedId = await resolveReportId(id);
   const file = resolvedId ? await readCase(resolvedId) : null;
-  // Only a report with no bound target can use these, and only a reviewer sees this page at all.
-  // Read here rather than in the client component so a browser never asks what targets exist.
-  const targetProfiles = file && !file.target ? await listTargetProfiles() : [];
-  // The target suggestion reads github.com links out of the body and asks GitHub about each one,
-  // which is seconds of network on a cold cache. It is loaded client-side after paint through
-  // /api/reports/[id]/targets (TargetControl), so a report with a link no longer blocks first paint.
+  if (!file) notFound();
+
+  // Two independent reads, neither of which needs the other. targetProfiles is read here rather
+  // than in the client component so a browser never asks what targets exist (only a report with
+  // no bound target can use it, and only a reviewer reaches this page at all); the gate exists
+  // only for an email report that passed through the outside-sender check. Awaited one after the
+  // other they added their two round-trips to the render; run together they cost one.
+  // The target suggestion is a third read that stays off this path: it walks the github.com
+  // links in the body and asks GitHub about each, seconds of network on a cold cache, so it is
+  // loaded client-side after paint through /api/reports/[id]/targets (TargetControl).
+  const [targetProfiles, gate] = await Promise.all([
+    file.target ? Promise.resolve([]) : listTargetProfiles(),
+    file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
+  ]);
+
   // Where the report came from, which is not always the repository on the row. A GitHub report
   // was filed on that repository. An email report only carries one after a reviewer binds a
   // target, and then it names the target's owner so a revoked grant can still stop the report;
   // printing it as the source would say the email was filed on GitHub.
-  const intakeRepository = file?.channel === "github" ? file.repositoryFullName : null;
-  if (!file) notFound();
-  // Only an email report can have passed through the outside-sender gate.
-  const gate = file.channel === "email" ? await readGate(file.id) : null;
+  const intakeRepository = file.channel === "github" ? file.repositoryFullName : null;
   const closingReason = deniedReason(file);
 
   const initial = caseLiveView(file);

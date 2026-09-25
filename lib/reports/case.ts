@@ -89,12 +89,22 @@ export type CaseLatestRun = {
  * Read inside a read-only repeatable-read transaction for the same reason the board is: a
  * verdict landing between the report read and the event read would render a page describing
  * two different moments.
+ *
+ * The transaction pooler hands a fresh backend per statement, so a read awaited on its own line
+ * pays a full round-trip (about 150ms on prod) before the next one is even sent. Most of these
+ * reads depend only on the report id, so they are built as unawaited query builders and handed
+ * to one Promise.all: postgres-js pipelines them down the single connection instead of paying
+ * that latency a dozen times over. The chain that is genuinely ordered (pending verdict, then
+ * the decision and delivery that hang off whichever verdict is chosen) still runs in sequence,
+ * because each step reads a value the step before it produced.
  */
 export async function readCase(
   id: string,
 ): Promise<(CaseFile & { latestRun: CaseLatestRun | null }) | null> {
   return db.transaction(
     async (tx) => {
+      // Read first: everything below needs the report to exist, and the fan-out is wasted work
+      // for an id that names nothing.
       const [row] = await tx
         .select({
           id: report.id,
@@ -118,9 +128,9 @@ export async function readCase(
 
       if (!row) return null;
 
-      // The pending tuple is read before the verdict, because it decides which verdict this
-      // page is allowed to show.
-      const [session] = await tx
+      // The pending tuple decides which verdict the page may show, but reading it depends on
+      // nothing but the report id, so it rides the fan-out with the rest.
+      const sessionQuery = tx
         .select({
           pendingVerdictId: agentSession.pendingVerdictId,
           pendingApprovedContentHash: agentSession.pendingApprovedContentHash,
@@ -136,7 +146,7 @@ export async function readCase(
       // The newest run, if any. Bounded to one row on the report predicate, which reads
       // through the existing investigation_run_report_idx, so a report with a long re-check
       // history does not pay for all of it here. Null for reports written before run rows.
-      const [latestRun] = await tx
+      const latestRunQuery = tx
         .select({
           id: investigationRun.id,
           runNumber: investigationRun.runNumber,
@@ -150,6 +160,102 @@ export async function readCase(
         .where(eq(investigationRun.reportId, id))
         .orderBy(desc(investigationRun.runNumber))
         .limit(1);
+
+      const newestQuery = tx
+        .select({
+          id: verdict.id,
+          outcome: verdict.outcome,
+          summary: verdict.summary,
+          payload: verdict.payload,
+          contentHash: verdict.contentHash,
+          revision: verdict.revision,
+          evidence: verdict.evidence,
+          createdAt: verdict.createdAt,
+        })
+        .from(verdict)
+        .where(eq(verdict.reportId, id))
+        .orderBy(desc(verdict.revision))
+        .limit(1);
+
+      // The whole revision history for the artifacts panel and the superseded labels. The
+      // supersession rows name the verdicts that are dead history, which is a smaller set than
+      // "everything but the newest" the moment a run drafts a revision nobody has answered yet.
+      const historyQuery = tx
+        .select({
+          id: verdict.id,
+          outcome: verdict.outcome,
+          summary: verdict.summary,
+          revision: verdict.revision,
+          createdAt: verdict.createdAt,
+          supersededById: verdictSupersession.supersededByRunId,
+        })
+        .from(verdict)
+        .leftJoin(
+          verdictSupersession,
+          eq(verdictSupersession.oldVerdictId, verdict.id),
+        )
+        .where(eq(verdict.reportId, id))
+        .orderBy(desc(verdict.revision));
+
+      // At most one row per report (owner_advisory_report_key).
+      const advisoryQuery = tx
+        .select({
+          state: ownerAdvisory.state,
+          verdictId: ownerAdvisory.verdictId,
+          htmlUrl: ownerAdvisory.htmlUrl,
+          lastError: ownerAdvisory.lastError,
+        })
+        .from(ownerAdvisory)
+        .where(eq(ownerAdvisory.reportId, id));
+
+      const eventsQuery = tx
+        .select({
+          seq: sessionEvent.seq,
+          type: sessionEvent.type,
+          data: sessionEvent.data,
+          eventKey: sessionEvent.eventKey,
+          at: sessionEvent.createdAt,
+        })
+        .from(sessionEvent)
+        .where(eq(sessionEvent.reportId, id))
+        .orderBy(sessionEvent.seq);
+
+      const artifactsQuery = tx
+        .select({
+          id: artifact.id,
+          kind: artifact.kind,
+          sha256: artifact.sha256,
+          bytes: artifact.bytes,
+          contentType: artifact.contentType,
+          storagePath: artifact.storagePath,
+          createdAt: artifact.createdAt,
+          verdictId: artifact.verdictId,
+          verdictRevision: verdict.revision,
+        })
+        .from(artifact)
+        .leftJoin(verdict, eq(verdict.id, artifact.verdictId))
+        .where(eq(artifact.reportId, id))
+        .orderBy(desc(artifact.createdAt));
+
+      const [[session], [latestRun], [newest], historyRows, [advisory], events, artifacts] =
+        await Promise.all([
+          sessionQuery,
+          latestRunQuery,
+          newestQuery,
+          historyQuery,
+          advisoryQuery,
+          eventsQuery,
+          artifactsQuery,
+        ]);
+
+      const verdictHistory: CaseVerdictHistoryEntry[] = historyRows.map((v) => ({
+        id: v.id,
+        revision: v.revision,
+        outcome: v.outcome,
+        summary: v.summary,
+        createdAt: v.createdAt,
+        superseded: v.supersededById !== null,
+      }));
 
       // A verdict awaiting approval is gated on the verdict/hash pair, not the thread marker:
       // a synthesized ANALYSIS_ONLY verdict (a dead-end run) has a verdict and hash to approve
@@ -170,6 +276,9 @@ export async function readCase(
        * button that binds an older one would let somebody sign text they never read. The two
        * are usually the same row; when a revision lands after the tool call was prepared they
        * are not, and that is exactly when it matters.
+       *
+       * Read after the fan-out rather than inside it, because the id it looks up is only known
+       * once the session row is in hand.
        *
        * The report predicate stays on either branch. verdict.id and agent_session.report_id are
        * independent foreign keys, so a session naming a verdict that belongs to a different
@@ -200,64 +309,45 @@ export async function readCase(
         pending &&
         (row.state === "AWAITING_APPROVAL" || pending.outcome === "ANALYSIS_ONLY");
 
-      const [newest] = await tx
-        .select({
-          id: verdict.id,
-          outcome: verdict.outcome,
-          summary: verdict.summary,
-          payload: verdict.payload,
-          contentHash: verdict.contentHash,
-          revision: verdict.revision,
-          evidence: verdict.evidence,
-          createdAt: verdict.createdAt,
-        })
-        .from(verdict)
-        .where(eq(verdict.reportId, id))
-        .orderBy(desc(verdict.revision))
-        .limit(1);
-
-      // The whole revision history for the artifacts panel and the superseded labels. The
-      // supersession rows name the verdicts that are dead history, which is a smaller set than
-      // "everything but the newest" the moment a run drafts a revision nobody has answered yet.
-      const historyRows = await tx
-        .select({
-          id: verdict.id,
-          outcome: verdict.outcome,
-          summary: verdict.summary,
-          revision: verdict.revision,
-          createdAt: verdict.createdAt,
-          supersededById: verdictSupersession.supersededByRunId,
-        })
-        .from(verdict)
-        .leftJoin(
-          verdictSupersession,
-          eq(verdictSupersession.oldVerdictId, verdict.id),
-        )
-        .where(eq(verdict.reportId, id))
-        .orderBy(desc(verdict.revision));
-      const verdictHistory: CaseVerdictHistoryEntry[] = historyRows.map((v) => ({
-        id: v.id,
-        revision: v.revision,
-        outcome: v.outcome,
-        summary: v.summary,
-        createdAt: v.createdAt,
-        superseded: v.supersededById !== null,
-      }));
-
       const latest = canShowPending && pending ? pending : newest;
 
-      const [decision] = latest
-        ? await tx
-            .select({
-              id: approvalDecision.id,
-              decision: approvalDecision.decision,
-              reviewer: approvalDecision.reviewer,
-              note: approvalDecision.note,
-              decidedAt: approvalDecision.decidedAt,
-            })
-            .from(approvalDecision)
-            .where(eq(approvalDecision.verdictId, latest.id))
-        : [];
+      // Both hang off the chosen verdict and neither reads the other, so they pipeline together.
+      // The decision is what an approval writes; the delivery is keyed on the verdict, not the
+      // report, because a report can carry a delivery per revision and a report-only predicate
+      // returns whichever row the planner reached first: the page could then show revision 2's
+      // verdict beside revision 1's delivery and its errors.
+      const [[decision], [dispatch]] = await Promise.all([
+        latest
+          ? tx
+              .select({
+                id: approvalDecision.id,
+                decision: approvalDecision.decision,
+                reviewer: approvalDecision.reviewer,
+                note: approvalDecision.note,
+                decidedAt: approvalDecision.decidedAt,
+              })
+              .from(approvalDecision)
+              .where(eq(approvalDecision.verdictId, latest.id))
+          : Promise.resolve([]),
+        latest
+          ? tx
+              .select({
+                state: outboundDelivery.state,
+                attempts: outboundDelivery.attempts,
+                maxAttempts: outboundDelivery.maxAttempts,
+                lastError: outboundDelivery.lastError,
+                target: outboundDelivery.target,
+                // The two columns that separate "still working" from "waiting on a person".
+                // A held row is excluded from claim(), so its attempt counter has stopped for
+                // good; and a transport whose acceptance is not a receipt leaves delivered_at
+                // null while the provider makes its mind up.
+                requiresHumanReview: outboundDelivery.requiresHumanReview,
+                deliveredAt: outboundDelivery.deliveredAt,
+              })
+              .from(outboundDelivery)
+              .where(eq(outboundDelivery.verdictId, latest.id))
+          : Promise.resolve([]),
+      ]);
 
       const awaitingVerdictId = canShowPending && !decision ? pendingVerdictId : null;
 
@@ -271,7 +361,8 @@ export async function readCase(
       //
       // At most one row per decision (approval_submission_approval_decision_key), so there is
       // no newest to pick. Absent entirely for a synthesized verdict, which is enqueued inline
-      // by the approval action and never involves the harness.
+      // by the approval action and never involves the harness. Read after the decision because
+      // it is keyed on that decision's id.
       const [handoff] = decision
         ? await tx
             .select({
@@ -282,68 +373,6 @@ export async function readCase(
             .from(approvalSubmission)
             .where(eq(approvalSubmission.approvalDecisionId, decision.id))
         : [];
-
-      // Keyed on the verdict, not the report. A report can carry a delivery per revision, and
-      // a report-only predicate returns whichever row the planner reached first, so the page
-      // could show revision 2's verdict beside revision 1's delivery and its errors.
-      const [dispatch] = latest
-        ? await tx
-            .select({
-              state: outboundDelivery.state,
-              attempts: outboundDelivery.attempts,
-              maxAttempts: outboundDelivery.maxAttempts,
-              lastError: outboundDelivery.lastError,
-              target: outboundDelivery.target,
-              // The two columns that separate "still working" from "waiting on a person".
-              // A held row is excluded from claim(), so its attempt counter has stopped for
-              // good; and a transport whose acceptance is not a receipt leaves delivered_at
-              // null while the provider makes its mind up.
-              requiresHumanReview: outboundDelivery.requiresHumanReview,
-              deliveredAt: outboundDelivery.deliveredAt,
-            })
-            .from(outboundDelivery)
-            .where(eq(outboundDelivery.verdictId, latest.id))
-        : [];
-
-      // At most one per report (owner_advisory_report_key).
-      const [advisory] = await tx
-        .select({
-          state: ownerAdvisory.state,
-          verdictId: ownerAdvisory.verdictId,
-          htmlUrl: ownerAdvisory.htmlUrl,
-          lastError: ownerAdvisory.lastError,
-        })
-        .from(ownerAdvisory)
-        .where(eq(ownerAdvisory.reportId, id));
-
-      const events = await tx
-        .select({
-          seq: sessionEvent.seq,
-          type: sessionEvent.type,
-          data: sessionEvent.data,
-          eventKey: sessionEvent.eventKey,
-          at: sessionEvent.createdAt,
-        })
-        .from(sessionEvent)
-        .where(eq(sessionEvent.reportId, id))
-        .orderBy(sessionEvent.seq);
-
-      const artifacts = await tx
-        .select({
-          id: artifact.id,
-          kind: artifact.kind,
-          sha256: artifact.sha256,
-          bytes: artifact.bytes,
-          contentType: artifact.contentType,
-          storagePath: artifact.storagePath,
-          createdAt: artifact.createdAt,
-          verdictId: artifact.verdictId,
-          verdictRevision: verdict.revision,
-        })
-        .from(artifact)
-        .leftJoin(verdict, eq(verdict.id, artifact.verdictId))
-        .where(eq(artifact.reportId, id))
-        .orderBy(desc(artifact.createdAt));
 
       const issue = issueNumber(row.sourceRef);
       // Only a GitHub report has a GitHub profile behind its handle, and only a handle that
