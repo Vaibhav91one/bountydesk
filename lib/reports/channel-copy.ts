@@ -11,54 +11,56 @@
  * added later should read vaguely rather than read wrong.
  */
 
-export type ReportChannel = "github" | "email" | "manual" | (string & {});
+export type ReportChannel = "github" | "email" | "manual" | "upload" | (string & {});
+
+/**
+ * Whether the verdict is mailed as a reply to the reporter rather than posted as an issue comment.
+ * Upload rides the email transport, so it reads exactly like email everywhere the copy branches: a
+ * reviewer signing an upload verdict is emailing the reporter, not commenting on an issue.
+ */
+function deliversAsEmailReply(channel: ReportChannel): boolean {
+  return channel === "email" || channel === "upload";
+}
 
 /** The thing itself: "comment" on an issue, "reply" to a reporter. Lowercase, for mid-sentence. */
 export function deliverableNoun(channel: ReportChannel): string {
-  return channel === "email" ? "reply" : "comment";
+  return deliversAsEmailReply(channel) ? "reply" : "comment";
 }
 
 /** Where it goes. Reads after a verb: "posts the drafted comment {to the issue}". */
 export function destinationPhrase(channel: ReportChannel): string {
-  switch (channel) {
-    case "github":
-      return "to the issue";
-    case "email":
-      return "to the reporter";
-    default:
-      return "to the reporter";
-  }
+  return channel === "github" ? "to the issue" : "to the reporter";
 }
 
 /** The question over the drafted text, in approve mode. */
 export function draftPrompt(channel: ReportChannel): string {
-  return channel === "email"
+  return deliversAsEmailReply(channel)
     ? "Send this reply to the reporter?"
     : "Post this comment to the issue?";
 }
 
 /** The same text once a decision exists, where it is a record rather than a question. */
 export function draftRecordLabel(channel: ReportChannel): string {
-  return channel === "email" ? "The reply on record" : "The comment on record";
+  return deliversAsEmailReply(channel) ? "The reply on record" : "The comment on record";
 }
 
 /** The sentence under "Approve this verdict?". Ends the caller's paragraph. */
 export function approveConsequence(channel: ReportChannel): string {
-  return channel === "email"
+  return deliversAsEmailReply(channel)
     ? "This emails the drafted reply to the reporter as the agent's verdict. This action cannot be undone."
     : "This posts the drafted comment to the issue as the agent's verdict. This action cannot be undone.";
 }
 
 /** How the full text reads in the viewer dialog's subtitle. */
 export function draftViewerSubtitle(channel: ReportChannel): string {
-  return channel === "email"
+  return deliversAsEmailReply(channel)
     ? "The full reply as the reporter will receive it, drafted by Agent Bounty."
     : "The full comment as it will read on the issue, drafted by Agent Bounty.";
 }
 
 /** The queue card's line for a delivered report. */
 export function deliveredLabel(channel: ReportChannel): string {
-  return channel === "email" ? "Reply delivered" : "Comment delivered";
+  return deliversAsEmailReply(channel) ? "Reply delivered" : "Comment delivered";
 }
 
 /** How the intake channel is named in the case file's facts. */
@@ -70,6 +72,8 @@ export function channelLabel(channel: ReportChannel): string {
       return "Email";
     case "manual":
       return "Manual";
+    case "upload":
+      return "Upload";
     default:
       return channel;
   }
