@@ -99,6 +99,12 @@ export type GateView = {
   triage: GateTriage | null;
   duplicateOf: { id: string; title: string } | null;
   duplicateReplySent: boolean;
+  /**
+   * The reject reply's state, for a report closed by a reject. True once it went out, false when
+   * the close committed but the reply has not, so the case file can offer a resend. Null when the
+   * report was not reject-closed (still at the gate, spam, or a duplicate), so nothing renders.
+   */
+  rejectReplySent: boolean | null;
   verifiedSender: string | null;
 };
 
@@ -126,10 +132,16 @@ export async function readGate(reportId: string): Promise<GateView> {
     duplicateOf = original ?? null;
   }
 
+  // Reject-closed is read from the event trail, not a column: a reject sets no duplicateOfReportId,
+  // and intake.rejected is the only mark it leaves. Null for anything else keeps the reject resend
+  // affordance off a spam or duplicate close.
+  const rejectClosed = await hasEvent(reportId, "intake.rejected");
+
   return {
     triage: (event?.data as GateTriage | undefined) ?? null,
     duplicateOf,
     duplicateReplySent: row?.duplicateOfReportId ? await noticeSent(reportId, "duplicate") : false,
+    rejectReplySent: rejectClosed ? await noticeSent(reportId, "rejected") : null,
     verifiedSender: row?.verifiedSender ?? null,
   };
 }
@@ -155,8 +167,9 @@ async function lockAtGate(tx: Executor, reportId: string): Promise<{ ok: true } 
  *
  * The close commits before the send, the same order markDuplicateAtGate uses: a mail cannot be
  * taken back and a state change can be retried, so a send that fails surfaces its reason without
- * rolling the close back. The reviewer's click is the approval of that fixed text; nothing else
- * ever sends it.
+ * rolling the close back. Calling this again on a report already reject-closed whose reply never
+ * sent resends it without closing anything twice, under the same idempotency key. The reviewer's
+ * click is the approval of that fixed text; nothing else ever sends it.
  */
 export async function rejectAtGate(
   reportId: string,
@@ -164,14 +177,25 @@ export async function rejectAtGate(
   spam: boolean,
   send: SendNotice = sendVerdictEmail,
 ): Promise<GateResult> {
-  const closed = await db.transaction(async (tx): Promise<GateResult> => {
-    const gate = await lockAtGate(tx, reportId);
-    if (!gate.ok) return gate;
-    await transition(reportId, "NEEDS_DECISION", "DENIED", tx);
-    await recordEvent(reportId, spam ? "intake.marked_spam" : "intake.rejected", { reviewer }, { tx });
-    return { ok: true };
-  });
-  if (!closed.ok || spam) return closed;
+  // Already reject-closed with the reply still unsent: the close is done, only the reply is left
+  // to (re)send. Without this a transient Resend failure after the close would strand the reporter,
+  // because lockAtGate refuses a report that is no longer NEEDS_DECISION. Spam never resends, and a
+  // duplicate close carries no intake.rejected event, so this picks up only a reject.
+  const resendOnly =
+    !spam &&
+    (await hasEvent(reportId, "intake.rejected")) &&
+    !(await hasEvent(reportId, "intake.rejected_sent"));
+
+  if (!resendOnly) {
+    const closed = await db.transaction(async (tx): Promise<GateResult> => {
+      const gate = await lockAtGate(tx, reportId);
+      if (!gate.ok) return gate;
+      await transition(reportId, "NEEDS_DECISION", "DENIED", tx);
+      await recordEvent(reportId, spam ? "intake.marked_spam" : "intake.rejected", { reviewer }, { tx });
+      return { ok: true };
+    });
+    if (!closed.ok || spam) return closed;
+  }
 
   try {
     const reply = await sendNotice(reportId, "rejected", send);

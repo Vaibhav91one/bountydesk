@@ -332,6 +332,7 @@ test("reject closes the report and sends the fixed out-of-scope reply once", asy
   const types = await eventTypes(row.id);
   assert.ok(types.includes("intake.rejected"));
   assert.ok(types.includes("intake.rejected_sent"));
+  assert.equal((await gate.readGate(row.id)).rejectReplySent, true);
   // A second click finds nothing left to decide, and mails nothing more.
   assert.equal((await gate.rejectAtGate(row.id, "reviewer", false, reply.send)).ok, false);
   assert.equal(reply.calls.length, 1);
@@ -348,20 +349,32 @@ test("mark as spam closes the report and records it as spam, sending nothing", a
   const types = await eventTypes(row.id);
   assert.ok(types.includes("intake.marked_spam"));
   assert.ok(!types.includes("intake.rejected_sent"));
+  // Nothing to resend: a spam close never offers the reject reply.
+  assert.equal((await gate.readGate(row.id)).rejectReplySent, null);
+  assert.equal((await gate.rejectAtGate(row.id, "reviewer", false, reply.send)).ok, false);
+  assert.equal(reply.calls.length, 0);
 });
 
-test("a reject reply that fails after the close surfaces the reason without reopening it", async () => {
+test("a reject reply that failed to send can be sent again without reclosing", async () => {
   const { report: row } = await heldReport();
+
   const broken = fakeSend({ fail: true });
-
-  const result = await gate.rejectAtGate(row.id, "reviewer", false, broken.send);
-
-  assert.equal(result.ok, false);
-  assert.match(result.reason, /Closed as rejected/);
+  const first = await gate.rejectAtGate(row.id, "reviewer", false, broken.send);
+  assert.equal(first.ok, false);
+  assert.match(first.reason, /Closed as rejected/);
   assert.equal((await reportById(row.id)).state, "DENIED", "the close committed before the send");
+  assert.ok(!(await eventTypes(row.id)).includes("intake.rejected_sent"), "no sent event on a failed send");
+  assert.equal((await gate.readGate(row.id)).rejectReplySent, false);
+
+  const working = fakeSend();
+  assert.deepEqual(await gate.rejectAtGate(row.id, "reviewer", false, working.send), { ok: true });
+  assert.equal(working.calls.length, 1);
+  assert.equal(working.calls[0].idempotencyKey, `notice:rejected:${row.id}`);
+
   const types = await eventTypes(row.id);
-  assert.ok(types.includes("intake.rejected"));
-  assert.ok(!types.includes("intake.rejected_sent"), "no sent event when the send failed");
+  assert.equal(types.filter((t) => t === "intake.rejected").length, 1, "the close is not recorded twice");
+  assert.equal(types.filter((t) => t === "intake.rejected_sent").length, 1);
+  assert.equal((await gate.readGate(row.id)).rejectReplySent, true);
 });
 
 test("run analysis releases the report into the normal analysis-only run, once", async () => {
