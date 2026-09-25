@@ -480,8 +480,10 @@ async function gateDecision(
 }
 
 /**
- * Reject an outside report at the NEEDS_DECISION gate, or mark it as spam. The report closes as
- * DENIED and the reporter is sent nothing.
+ * Reject an outside report at the NEEDS_DECISION gate, or mark it as spam. Both close it as DENIED.
+ * A reject sends the reporter the fixed out-of-scope reply; spam stays silent. gateDecision surfaces
+ * the reason rejectAtGate returns, so a close that committed but whose reply failed reports that
+ * partial state rather than the generic failure message.
  */
 export async function rejectAtGateAction(reportId: string, spam: boolean): Promise<ActionResult> {
   const session = await requireReviewer();
