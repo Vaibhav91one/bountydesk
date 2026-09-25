@@ -76,7 +76,7 @@ const PARAMS_PATH = "/tmp/bountydesk-browser-params.json";
  * any other mutable source: it is the trusted value the running image is checked against, and a
  * value the environment could set would let a repointed snapshot vouch for itself. A rebuilt image
  * changes this constant and the string in sandbox-images/browser/Dockerfile together. */
-const EXPECTED_BROWSER_BUILD_MARKER = "browser-dcl-1";
+const EXPECTED_BROWSER_BUILD_MARKER = "browser-out-1";
 
 /** snapshotId and imageRef enable the feature; imageName is the tag createSandbox accepts in the
  * digest ref's place (see runBrowserProbe). */

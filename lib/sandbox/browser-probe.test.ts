@@ -14,7 +14,7 @@ process.env.BOUNTYDESK_BROWSER_IMAGE_NAME = "ghcr.io/bountydesk/browser:test-sha
 
 // The marker browser-probe.ts expects to read back from the booted image. The fake sandbox echoes
 // this from /etc/bountydesk-build-marker unless a test overrides markerValue to force a mismatch.
-const EXPECTED_MARKER = "browser-dcl-1";
+const EXPECTED_MARKER = "browser-out-1";
 
 const FAKE_BROWSER_SANDBOX: Sandbox = {
   id: "browser-sandbox-1",

@@ -69,11 +69,28 @@ the snapshot rebuild and deploy):
 1. Build `sandbox-images/browser/Dockerfile` for linux/amd64, push it, and register it as a Daytona
    snapshot. The first build shipped as `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`,
    registered as the `bountydesk-browser-78b8996` snapshot (2 CPU, 4 GB memory, 10 GB disk); the
-   GHCR package is private and Daytona pulled it anyway. That build is now stale: the
-   `waitUntil` fix changed `browser-oracle.mjs` and moved the marker to `browser-dcl-1`, so the
-   image must be rebuilt and re-registered with the new marker, and the env vars below repointed at
-   the new snapshot and digest. Until then `buildMarkerCheck` fails closed on every run (safe, but
-   the probe does nothing).
+   GHCR package is private and Daytona pulled it anyway. That build is now stale twice over: the
+   `waitUntil` fix and then the `--max-output` fix (below) both changed `browser-oracle.mjs`, and
+   the marker is now `browser-out-1`. The image must be rebuilt and re-registered with the current
+   marker, and the env vars below repointed at the new snapshot and digest. Until then
+   `buildMarkerCheck` fails closed on every run (safe, but the probe does nothing).
+
+   Two failures on a real page, both fixed and both baked into the image, so both need the rebuild
+   to take effect. First, `page.goto` waited for the full `load` event with a 15s timeout; a heavy
+   single-page app never fires `load` in time, so `goto` threw and the step read as `navigated:false`
+   even though the DOM had parsed. It now waits for `domcontentloaded` (host-owned, so future tuning
+   needs no rebuild) with a longer settle. Second, webcmd's `browser run` caps its output at 65,536
+   characters, and the oracle returns the whole serialized DOM through that channel; Juice Shop's DOM
+   is about 269K characters, so webcmd aborted every run with `BROWSER_RUN_OUTPUT_LIMIT` and returned
+   nothing, which again read as `navigated:false`. The run now passes `--max-output` sized to the DOM
+   cap plus the envelope. A step that still fails now carries the reason in `navError` rather than a
+   bare `navigated:false`.
+
+   One target-side trap this leaves: the browser sandbox reaches the target as a network peer, so a
+   target whose app binds `127.0.0.1` instead of `0.0.0.0` answers the loopback readiness check and
+   the preview proxy but refuses the browser peer, and the probe reads `navigated:false`. Juice Shop
+   binds `*:3000` and is fine; a future onboarded target that binds loopback would fail the browser
+   probe distinctly from every other check.
 2. Set three env vars in the reproduction worker: `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id),
    `BOUNTYDESK_BROWSER_IMAGE_REF` (the digest-pinned ref), and `BOUNTYDESK_BROWSER_IMAGE_NAME` (the
    tag, e.g. `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`). Until all three are set the feature
