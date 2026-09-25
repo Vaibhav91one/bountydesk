@@ -326,3 +326,57 @@ test("overLimit still caps a non-exempt domain", () => {
     "domain over its daily limit",
   );
 });
+
+test("normalizeSender collapses gmail dots and subaddressing and folds googlemail into gmail", () => {
+  assert.equal(intake.normalizeSender("A.B+tag@GoogleMail.com"), "ab@gmail.com");
+  assert.equal(intake.normalizeSender("a.b@gmail.com"), "ab@gmail.com");
+  // Subaddressing is stripped on any domain; dots are left alone off gmail.
+  assert.equal(intake.normalizeSender("dev+anything@company.test"), "dev@company.test");
+  assert.equal(intake.normalizeSender("plain@company.test"), "plain@company.test");
+});
+
+test("gmail subaddress and dot variants of one mailbox share a single per-sender bucket", async () => {
+  // Five spellings, all delivered to one Gmail inbox and all passing auth, exhaust the 5/day cap
+  // together. Without normalization each would be a fresh sender under an exempt domain with no
+  // ceiling, which is the flood this fix closes.
+  const variants = [
+    "flood+1@gmail.com",
+    "flood+2@gmail.com",
+    "fl.ood+x@gmail.com",
+    "f.l.o.o.d@gmail.com",
+    "flood+again@gmail.com",
+  ];
+  for (const from of variants) {
+    assert.deepEqual(await intake.admitOutsideEmail(email(from), fetched()), { accepted: true });
+  }
+
+  const result = await intake.admitOutsideEmail(email("flood@gmail.com"), fetched());
+  assert.deepEqual(result, { accepted: false, reason: "sender over its daily limit" });
+});
+
+test("two different gmail mailboxes keep independent per-sender buckets", async () => {
+  for (let i = 0; i < intake.OUTSIDE_LIMITS.perSenderPerDay; i += 1) {
+    assert.equal((await intake.admitOutsideEmail(email("alice@gmail.com"), fetched())).accepted, true);
+  }
+  // alice is capped, but bob is a distinct mailbox on the same exempt domain, so #242's intent holds.
+  assert.equal((await intake.admitOutsideEmail(email("alice@gmail.com"), fetched())).accepted, false);
+  assert.equal((await intake.admitOutsideEmail(email("bob@gmail.com"), fetched())).accepted, true);
+});
+
+test("a plus tag is stripped on a non-gmail domain too", async () => {
+  // subaddr.test is not exempt, but the per-sender cap (5) bites before the per-domain cap (20), so
+  // this isolates the subaddress collapse from the domain check.
+  for (let i = 0; i < intake.OUTSIDE_LIMITS.perSenderPerDay; i += 1) {
+    assert.equal((await intake.admitOutsideEmail(email(`dev+${i}@subaddr.test`), fetched())).accepted, true);
+  }
+  const result = await intake.admitOutsideEmail(email("dev+final@subaddr.test"), fetched());
+  assert.deepEqual(result, { accepted: false, reason: "sender over its daily limit" });
+});
+
+test("an exempt domain still has no aggregate ceiling across distinct mailboxes", async () => {
+  // More distinct Gmail mailboxes than the per-domain cap, one message each: all accepted, because
+  // the exemption is preserved and the per-sender cap never bites at one apiece.
+  for (let i = 0; i < intake.OUTSIDE_LIMITS.perDomainPerDay + 3; i += 1) {
+    assert.equal((await intake.admitOutsideEmail(email(`person${i}@gmail.com`), fetched())).accepted, true);
+  }
+});

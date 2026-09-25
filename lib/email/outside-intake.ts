@@ -33,12 +33,44 @@ export type OutsideEmailPayload = InboundEmail & {
   intake: "outside";
   /** The address that passed SPF and DKIM, recorded on the report as its verified sender. */
   verifiedSender: string;
+  /** The mailbox the per-sender cap is counted on. See normalizeSender for why it is not fromEmail. */
+  senderKey: string;
 };
 
 export type OutsideAdmission = { accepted: true } | { accepted: false; reason: string };
 
 export function senderDomain(address: string): string {
   return address.slice(address.lastIndexOf("@") + 1).toLowerCase();
+}
+
+/**
+ * The mailbox an address delivers to, collapsed so one person cannot mint fresh per-sender buckets.
+ *
+ * The per-sender cap is the only ceiling left for an exempt free-mail domain (the per-domain cap is
+ * waived for it). Counting on the raw fromEmail would defeat that: a Gmail owner can send from
+ * you+1@gmail.com, you+2@gmail.com and so on, each a "new sender" under the 5/day cap and each
+ * delivered to the same inbox, so the flood and the outbound oversized-notice sends are unbounded.
+ *
+ * Subaddressing (everything from the first "+" in the local part) is a tag routed to the same
+ * mailbox, so it is stripped for every domain. Gmail additionally ignores dots in the local part and
+ * serves googlemail.com as gmail.com, so those two spellings and any dotting collapse to one key.
+ * Distinct mailboxes stay distinct, so unrelated researchers on Gmail keep their own 5/day.
+ */
+export function normalizeSender(address: string): string {
+  const lower = address.trim().toLowerCase();
+  const at = lower.lastIndexOf("@");
+  if (at === -1) return lower;
+  let local = lower.slice(0, at);
+  let domain = lower.slice(at + 1);
+
+  const plus = local.indexOf("+");
+  if (plus !== -1) local = local.slice(0, plus);
+
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    local = local.replace(/\./g, "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
 }
 
 /**
@@ -54,13 +86,18 @@ async function recentCounts(
   tx: Executor,
 ): Promise<{ sender: number; domain: number }> {
   const domain = senderDomain(email.fromEmail);
+  const senderKey = normalizeSender(email.fromEmail);
+  // The sender count is on the normalized key across all outside rows, not restricted to this raw
+  // domain, so gmail.com and googlemail.com spellings of one mailbox count together. The domain
+  // count keeps its own filter on the raw domain, unchanged. Forward-only: rows written before
+  // senderKey existed lack the field and do not match, which can undercount a mailbox for its first
+  // day, then self-corrects as old rows age out of the one-day window.
   const rows = await tx.execute<{ sender: number; domain: number }>(sql`
-    select count(*) filter (where ${inboundJob.payload}->>'fromEmail' = ${email.fromEmail})::int as sender,
-           count(*)::int as domain
+    select count(*) filter (where ${inboundJob.payload}->>'senderKey' = ${senderKey})::int as sender,
+           count(*) filter (where split_part(${inboundJob.payload}->>'fromEmail', '@', 2) = ${domain})::int as domain
       from ${inboundJob}
      where ${inboundJob.channel} = 'email'
        and ${inboundJob.payload}->>'intake' = 'outside'
-       and split_part(${inboundJob.payload}->>'fromEmail', '@', 2) = ${domain}
        and ${inboundJob.createdAt} > now() - interval '1 day'
        and ${inboundJob.deliveryId} <> ${email.messageId}
   `);
@@ -123,7 +160,13 @@ async function dropOversized(
         channel: "email",
         deliveryId: email.messageId,
         state: "DONE",
-        payload: { intake: "outside", fromEmail: email.fromEmail, drop: "oversized" } as never,
+        payload: {
+          intake: "outside",
+          fromEmail: email.fromEmail,
+          // Same key the accepted path stores, so an oversized flood spends the one per-sender budget.
+          senderKey: normalizeSender(email.fromEmail),
+          drop: "oversized",
+        } as never,
       })
       .onConflictDoNothing({ target: [inboundJob.channel, inboundJob.deliveryId] });
     return true;
@@ -185,7 +228,12 @@ export async function admitOutsideEmail(
     return dropOversized(email, message.sizeBytes, notifyOversized, config);
   }
 
-  const payload: OutsideEmailPayload = { ...email, intake: "outside", verifiedSender: email.fromEmail };
+  const payload: OutsideEmailPayload = {
+    ...email,
+    intake: "outside",
+    verifiedSender: email.fromEmail,
+    senderKey: normalizeSender(email.fromEmail),
+  };
 
   // The recount and the insert share a transaction holding a per-domain advisory lock, so two
   // messages arriving together cannot both read "one under the limit" and both get in. The lock
