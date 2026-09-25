@@ -33,6 +33,7 @@
 import { decideOutcome, type ReproductionDecision } from "@/lib/reproduction/decide";
 import type { BrowserExploitLeg, BrowserExploitSink } from "@/lib/reproduction/types";
 
+import { buildMarkerCheck } from "./build-marker";
 import { createSandbox, execute, getSandbox, type Sandbox } from "./daytona";
 import {
   ensureSnapshotActive,
@@ -70,21 +71,31 @@ const RESULT_SENTINEL = "BOUNTYDESK_BROWSER_RESULT ";
 const ORACLE_SCRIPT_PATH = "/opt/bountydesk/browser-oracle.mjs";
 const PARAMS_PATH = "/tmp/bountydesk-browser-params.json";
 
-export type BrowserProbeConfig = { snapshotId: string; imageRef: string };
+/** The build marker baked into the browser image at build-marker.ts's MARKER_PATH, read back from
+ * inside the booted sandbox to prove which image actually ran. Hardcoded here, not read from env or
+ * any other mutable source: it is the trusted value the running image is checked against, and a
+ * value the environment could set would let a repointed snapshot vouch for itself. A rebuilt image
+ * changes this constant and the string in sandbox-images/browser/Dockerfile together. */
+const EXPECTED_BROWSER_BUILD_MARKER = "browser-78b8996";
+
+/** snapshotId and imageRef enable the feature; imageName is the tag createSandbox accepts in the
+ * digest ref's place (see runBrowserProbe). */
+export type BrowserProbeConfig = { snapshotId: string; imageRef: string; imageName: string };
 
 /**
  * The browser sandbox image is a separate, BountyDesk-owned snapshot (Chromium plus the webcmd
- * driver, see docs/browser-probe.md), not the target's image. Its id and pinned image ref come
- * from server env, never from a report or the agent. When either is unset the whole feature is
- * off: every entry point returns a clean "not configured" result, so nothing is provisioned and
- * no reproduction path changes until an operator builds the image and sets these. That is the
- * enablement gate for this feature.
+ * driver, see docs/browser-probe.md), not the target's image. Its snapshot id, digest-pinned image
+ * ref, and tag image name all come from server env, never from a report or the agent. When any is
+ * unset the whole feature is off: every entry point returns a clean "not configured" result, so
+ * nothing is provisioned and no reproduction path changes until an operator builds the image and
+ * sets these. That is the enablement gate for this feature.
  */
 export function browserProbeConfig(): BrowserProbeConfig | null {
   const snapshotId = process.env.BOUNTYDESK_BROWSER_SNAPSHOT?.trim();
   const imageRef = process.env.BOUNTYDESK_BROWSER_IMAGE_REF?.trim();
-  if (!snapshotId || !imageRef) return null;
-  return { snapshotId, imageRef };
+  const imageName = process.env.BOUNTYDESK_BROWSER_IMAGE_NAME?.trim();
+  if (!snapshotId || !imageRef || !imageName) return null;
+  return { snapshotId, imageRef, imageName };
 }
 
 /** One navigation to run: a server-visible path (before `#`) and a client-only fragment (after
@@ -274,7 +285,12 @@ export async function runBrowserProbe(
         ttlMinutes: BROWSER_SANDBOX_TTL_MINUTES,
         labels: { "bountydesk.purpose.browser": "1" },
       },
-      undefined,
+      // Daytona registers this snapshot under its tag, not the digest ref we pin (POST /snapshots
+      // refuses a digest imageName), so assertSnapshotImage would reject the digest-exact check.
+      // The tag is the one image name createSandbox may accept in the digest's place, the same
+      // narrow override the target path uses. The buildMarkerCheck below is what makes it safe:
+      // it must run and fail closed every time this override is exercised.
+      config.imageName,
       { parentSandboxId: target.targetSandboxId },
     );
     throwIfAborted(opts?.signal);
@@ -285,6 +301,16 @@ export async function runBrowserProbe(
     // assumption, for the one sandbox that runs the target's JavaScript.
     await verifyNoEgress(sandbox, opts?.signal);
     throwIfAborted(opts?.signal);
+
+    // A second, independent proof of image identity on top of assertSnapshotImage's control-plane
+    // check (see build-marker.ts). Passing the tag as the override above removes the digest-exact
+    // check, so this reads a marker baked into the image and rejects a repointed or wrong snapshot
+    // before any target page loads. Fails closed: a missing or mismatched marker is a refusal.
+    const markerMatches = await buildMarkerCheck(sandbox, EXPECTED_BROWSER_BUILD_MARKER);
+    throwIfAborted(opts?.signal);
+    if (!markerMatches) {
+      return { ok: false, reason: "the browser sandbox booted the wrong build" };
+    }
 
     const result = await execute(sandbox, command, BROWSER_EXEC_TIMEOUT_SECONDS);
     const observations = parseOracleStdout(result.result, steps);
