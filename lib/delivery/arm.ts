@@ -53,7 +53,7 @@ export type DeliveryContext = {
   payload: string;
   report: {
     id: string;
-    channel: "github" | "email" | "manual";
+    channel: "github" | "email" | "manual" | "upload";
     sourceRef: string;
     /** Reporter-controlled: for email it is their own subject line, so treat it as untrusted. */
     title: string;

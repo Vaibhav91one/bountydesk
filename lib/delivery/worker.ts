@@ -245,9 +245,13 @@ const githubArm: DeliveryArm = async (ctx, d) => {
   };
 };
 
-const ARMS: Partial<Record<"github" | "email" | "manual", DeliveryArm>> = {
+const ARMS: Partial<Record<"github" | "email" | "manual" | "upload", DeliveryArm>> = {
   github: githubArm,
   email: emailArm,
+  // An upload has an OTP-verified email contact and no thread to reply into, which is exactly what
+  // emailArm handles: threadingHeaders returns nothing for a non-email: source_ref, and the
+  // recipient re-check reads verified_sender the same way.
+  upload: emailArm,
 };
 
 /**

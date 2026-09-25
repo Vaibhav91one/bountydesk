@@ -60,6 +60,10 @@ export const intakeChannel = pgEnum("intake_channel", [
   "github",
   "email",
   "manual",
+  // An uploaded report. Its verdict is delivered to an OTP-verified email contact, so upload rides
+  // the email transport; the channel stays distinct for honest provenance and for the unique
+  // (channel, source_ref) index.
+  "upload",
 ]);
 
 export const verdictOutcome = pgEnum("verdict_outcome", [
@@ -351,6 +355,17 @@ export const report = pgTable(
      * Delivery accepts `reporter_contact` as a recipient while it still equals this value.
      */
     verifiedSender: text("verified_sender"),
+    /**
+     * Report-scoped one-time-code verification of reporter_contact, for a channel that has no
+     * inbound SPF/DKIM to prove the address (upload). The uploader supplies an email, receives a
+     * code, and enters it; only then does verify set verified_sender to that address so
+     * isVerifiedEmailRecipient passes at send time. Only the hash is stored, with a short expiry and
+     * an attempt cap, the same shape the reviewer allowlist uses. Null for GitHub and email, whose
+     * authority is the allowlist or the inbound SPF/DKIM check.
+     */
+    contactCodeHash: text("contact_code_hash"),
+    contactCodeExpiresAt: timestamp("contact_code_expires_at", { withTimezone: true }),
+    contactCodeAttempts: integer("contact_code_attempts").notNull().default(0),
     /** Set when a reviewer closed this report at the gate as a duplicate of another report. */
     duplicateOfReportId: uuid("duplicate_of_report_id").references((): AnyPgColumn => report.id),
     /**

@@ -267,6 +267,13 @@
       "when": 1790318871456,
       "tag": "0037_zippy_stark_industries",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790349450254,
+      "tag": "0038_familiar_caretaker",
+      "breakpoints": true
     }
   ]
 }
