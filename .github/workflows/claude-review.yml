@@ -109,11 +109,13 @@ jobs:
 
             Method. Read the diff with `gh pr diff ${{ steps.pr.outputs.number }}`. For each change, read the changed file and the code that calls it under pr-head/. Report a finding only after you have confirmed it in the code: name the exact lines and a concrete input or state that produces a wrong result. If you cannot show how it fails, drop it. Before reporting a missing check, search for one elsewhere; before suggesting an API, confirm it exists. Do not report style, naming, formatting, "consider adding logging", or anything an existing guard already handles.
 
+            Tools. You can read files and run only `gh pr diff`, `gh pr view` and `gh pr comment`, plus the inline-comment tool. You cannot run tests, builds or any other command: they are refused, and retrying a refused call never works, so do not try. Always finish by posting the summary comment below, including when there are no findings.
+
             Scope. Correctness bugs, security problems (hold the AGENTS.md invariants: the capability boundary, the human approval gate, delivery idempotency, secrets staying server-side), data loss, and missing tests on security-sensitive code. At most 8 findings, most severe first. Zero findings is a good outcome when the change is sound.
 
             Output.
             1. One inline comment per finding with mcp__github_inline_comment__create_inline_comment, on the line in question: one to three sentences giving the defect, the failure scenario and the fix.
-            2. Then exactly one summary comment with `gh pr comment ${{ steps.pr.outputs.number }} --body-file -`. It starts with the line `<!-- claude-review head=${{ steps.pr.outputs.head_sha }} -->`, then the heading `## Code review`, then either the line `No findings.` or, per finding, one block:
+            2. Then exactly one summary comment, posted as a single command that reads the body from a heredoc, with no pipe and no `$(...)`: `gh pr comment ${{ steps.pr.outputs.number }} --body-file - <<'EOF'`, then the body, then `EOF`. It starts with the line `<!-- claude-review head=${{ steps.pr.outputs.head_sha }} -->`, then the heading `## Code review`, then either the line `No findings.` or, per finding, one block:
                <details><summary><b>[High] path/to/file.ts:42</b> short title</summary>
 
                Two or three sentences: what fails, when, and how to fix it.
@@ -150,11 +152,13 @@ jobs:
 
             Method. Read the diff with `gh pr diff ${{ steps.pr.outputs.number }}`. For each change, read the changed file and the code that calls it under pr-head/. Report a finding only after you have confirmed it in the code: name the exact lines and a concrete input or state that produces a wrong result. If you cannot show how it fails, drop it. Before reporting a missing check, search for one elsewhere; before suggesting an API, confirm it exists. Do not report style, naming, formatting, "consider adding logging", or anything an existing guard already handles.
 
+            Tools. You can read files and run only `gh pr diff`, `gh pr view` and `gh pr comment`, plus the inline-comment tool. You cannot run tests, builds or any other command: they are refused, and retrying a refused call never works, so do not try. Always finish by posting the summary comment below, including when there are no findings.
+
             Scope. Correctness bugs, security problems (hold the AGENTS.md invariants: the capability boundary, the human approval gate, delivery idempotency, secrets staying server-side), data loss, and missing tests on security-sensitive code. At most 8 findings, most severe first. Zero findings is a good outcome when the change is sound.
 
             Output.
             1. One inline comment per finding with mcp__github_inline_comment__create_inline_comment, on the line in question: one to three sentences giving the defect, the failure scenario and the fix.
-            2. Then exactly one summary comment with `gh pr comment ${{ steps.pr.outputs.number }} --body-file -`. It starts with the line `<!-- claude-review head=${{ steps.pr.outputs.head_sha }} -->`, then the heading `## Code review`, then either the line `No findings.` or, per finding, one block:
+            2. Then exactly one summary comment, posted as a single command that reads the body from a heredoc, with no pipe and no `$(...)`: `gh pr comment ${{ steps.pr.outputs.number }} --body-file - <<'EOF'`, then the body, then `EOF`. It starts with the line `<!-- claude-review head=${{ steps.pr.outputs.head_sha }} -->`, then the heading `## Code review`, then either the line `No findings.` or, per finding, one block:
                <details><summary><b>[High] path/to/file.ts:42</b> short title</summary>
 
                Two or three sentences: what fails, when, and how to fix it.
