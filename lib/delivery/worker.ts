@@ -9,6 +9,7 @@ import {
   verdict,
   type Executor,
 } from "@/lib/db";
+import { GitHubApiError } from "@/lib/github/app-auth";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { transition } from "@/lib/reports/lifecycle";
 
@@ -171,39 +172,58 @@ const githubArm: DeliveryArm = async (ctx, d) => {
     };
   }
 
-  const result = await runWithHeartbeat(
-    lease,
-    ctx.leaseSeconds,
-    async (signal) => {
-      const { token } = await d.mintToken(installationId, repoId, { signal });
-      const comments = await d.listComments({
-        token,
-        fullName: repository.fullName,
-        issueNumber,
-        signal,
-      });
+  let result: { kind: "replayed" } | { kind: "posted"; posted: { id: number } };
+  try {
+    result = await runWithHeartbeat(
+      lease,
+      ctx.leaseSeconds,
+      async (signal) => {
+        const { token } = await d.mintToken(installationId, repoId, { signal });
+        const comments = await d.listComments({
+          token,
+          fullName: repository.fullName,
+          issueNumber,
+          signal,
+        });
 
-      if (
-        comments.some(
-          (comment) =>
-            comment.body === ctx.payload &&
-            comment.authorType === "Bot" &&
-            comment.githubAppId === d.githubAppId,
+        if (
+          comments.some(
+            (comment) =>
+              comment.body === ctx.payload &&
+              comment.authorType === "Bot" &&
+              comment.githubAppId === d.githubAppId,
+          )
         )
-      )
-        return { kind: "replayed" } as const;
+          return { kind: "replayed" } as const;
 
-      const posted = await d.postComment({
-        token,
-        fullName: repository.fullName,
-        issueNumber,
-        body: ctx.payload,
-        signal,
-      });
-      return { kind: "posted", posted } as const;
-    },
-    ctx.signal,
-  );
+        const posted = await d.postComment({
+          token,
+          fullName: repository.fullName,
+          issueNumber,
+          body: ctx.payload,
+          signal,
+        });
+        return { kind: "posted", posted } as const;
+      },
+      ctx.signal,
+    );
+  } catch (err) {
+    // A 403 or 404 minting the installation token is authoritative, not transient: the App is no
+    // longer authorized for this repository, or the installation is gone. activeRepository passed
+    // just above, so the webhook that should have caught this was dropped or arrived out of order.
+    // Only mintToken throws GitHubApiError in this block (comment.ts throws plain Errors), so this
+    // catches exactly the token-mint case. Refuse it like the pre-mint activeRepository failure
+    // instead of retrying against an install that will keep refusing, and hold it: reconnecting is
+    // a human's action, and the reconcile backstop will withdraw the stale grant on its next tick.
+    if (err instanceof GitHubApiError && (err.status === 403 || err.status === 404)) {
+      return {
+        kind: "refused",
+        hold: true,
+        message: `repository ${repository.fullName} is no longer connected (minting an installation token returned ${err.status}); a human has to reconnect it`,
+      };
+    }
+    throw err;
+  }
 
   // Crash recovery: the comment already went out on a prior attempt that died before the
   // worker could commit SENT/DELIVERED. Posting again would duplicate it.
