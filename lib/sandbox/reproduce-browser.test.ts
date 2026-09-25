@@ -19,7 +19,7 @@ process.env.BOUNTYDESK_BROWSER_IMAGE_NAME = "ghcr.io/bountydesk/browser:test-sha
 // browser-probe.ts's EXPECTED_BROWSER_BUILD_MARKER. The browser sandbox reads this back from its own
 // image; the target sandbox reads the juice-shop marker. They share the marker path, so the fake
 // keys the answer on which sandbox is asking.
-const BROWSER_BUILD_MARKER = "browser-dcl-1";
+const BROWSER_BUILD_MARKER = "browser-out-1";
 
 const FAKE_SANDBOX: Sandbox = {
   id: "target-sandbox",

@@ -14,7 +14,7 @@ process.env.BOUNTYDESK_BROWSER_IMAGE_NAME = "ghcr.io/bountydesk/browser:test-sha
 
 // The marker browser-probe.ts expects to read back from the booted image. The fake sandbox echoes
 // this from /etc/bountydesk-build-marker unless a test overrides markerValue to force a mismatch.
-const EXPECTED_MARKER = "browser-dcl-1";
+const EXPECTED_MARKER = "browser-out-1";
 
 const FAKE_BROWSER_SANDBOX: Sandbox = {
   id: "browser-sandbox-1",
@@ -54,6 +54,7 @@ let oracleRan = false;
  * title, so the host's own grep is what the assertions actually exercise. */
 let stepFires: (label: string) => boolean = (label) => label === "exploit";
 let stepNavigates: (label: string) => boolean = () => true;
+let stepNavError: (label: string) => string = () => "";
 
 function decodeParams(command: string): {
   steps: Array<{ label: string; path: string; hashPayload: string }>;
@@ -76,6 +77,7 @@ function oracleResult(command: string): ExecResult {
     consoleText: "",
     dialogFired: false,
     dialogMessages: [],
+    navError: stepNavError(step.label),
   }));
   return { exitCode: 0, result: `some webcmd chatter\nBOUNTYDESK_BROWSER_RESULT ${JSON.stringify({ steps })}\n` };
 }
@@ -128,6 +130,7 @@ beforeEach(() => {
   egressVerdict = "blocked";
   stepFires = (label) => label === "exploit";
   stepNavigates = () => true;
+  stepNavError = () => "";
   lastOracleCommand = "";
   markerValue = EXPECTED_MARKER;
   oracleRan = false;
@@ -248,6 +251,17 @@ test("runBrowserOracle is ANALYSIS_ONLY when the target never rendered", async (
   const result = await mod.runBrowserOracle(TARGET, leg(), CANARY);
   assert.equal(result.ok, true);
   assert.equal((result as { decision: string }).decision, "ANALYSIS_ONLY");
+});
+
+test("a step that fails to navigate carries its reason in navError", async () => {
+  stepNavigates = () => false;
+  stepNavError = () => "webcmd: BROWSER_RUN_OUTPUT_LIMIT";
+  const result = await mod.runBrowserProbe(TARGET, [{ label: "p", path: "/", hashPayload: "" }]);
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.steps[0].navigated, false);
+    assert.equal(result.steps[0].navError, "webcmd: BROWSER_RUN_OUTPUT_LIMIT");
+  }
 });
 
 test("the host waits for domcontentloaded, not the full load event", async () => {

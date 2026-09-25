@@ -88,13 +88,14 @@ const dialogMessages = [];
 try { page.on('console', (m) => { try { consoleLines.push(String(m.text())); } catch (e) {} }); } catch (e) {}
 try { page.on('dialog', async (d) => { try { dialogMessages.push(String(d.message())); } catch (e) {} try { await d.dismiss(); } catch (e) {} }); } catch (e) {}
 let navigated = false;
-try { await page.goto(${JSON.stringify(url)}, { waitUntil: ${JSON.stringify(waitUntil)}, timeout: ${navTimeoutMs} }); navigated = true; } catch (e) {}
+let navError = '';
+try { await page.goto(${JSON.stringify(url)}, { waitUntil: ${JSON.stringify(waitUntil)}, timeout: ${navTimeoutMs} }); navigated = true; } catch (e) { navError = String((e && e.message) || e); }
 try { await page.waitForTimeout(${settleMs}); } catch (e) {}
 let title = '';
 let dom = '';
 try { title = String(await page.title()); } catch (e) {}
 try { dom = String(await page.evaluate(() => document.documentElement.outerHTML)); } catch (e) {}
-return { navigated, title, dom: dom.slice(0, ${maxDomChars}), consoleText: consoleLines.join('\\n'), dialogFired: dialogMessages.length > 0, dialogMessages };
+return { navigated, navError, title, dom: dom.slice(0, ${maxDomChars}), consoleText: consoleLines.join('\\n'), dialogFired: dialogMessages.length > 0, dialogMessages };
 `;
 }
 
@@ -141,20 +142,30 @@ const WAIT_UNTIL = ["load", "domcontentloaded", "commit", "networkidle"];
 function runStep(sessionId, params, step) {
   const url = buildUrl(params.targetOrigin, step);
   const waitUntil = WAIT_UNTIL.includes(params.waitUntil) ? params.waitUntil : "domcontentloaded";
+  const maxDomChars = Number(params.maxDomChars) || 1000000;
   const program = browserProgram(
     url,
     Number(params.navTimeoutMs) || 15000,
     Number(params.settleMs) || 1500,
-    Number(params.maxDomChars) || 1000000,
+    maxDomChars,
     waitUntil,
   );
-  const result = webcmd(["--session", sessionId, "browser", "run", "--stdin"], program);
+  // webcmd caps `browser run` output at 65536 chars by default. The returned envelope carries the
+  // serialized DOM (up to maxDomChars), which a real app blows past (Juice Shop is ~269K), so
+  // without a raised cap webcmd aborts with BROWSER_RUN_OUTPUT_LIMIT and returns nothing, and every
+  // step then reads as navigated:false. Size the cap to the DOM plus the rest of the envelope.
+  const result = webcmd(
+    ["--session", sessionId, "browser", "run", "--stdin", "--max-output", String(maxDomChars + 200000)],
+    program,
+  );
   // webcmd wraps the program's return value in an envelope ({ ok, result, logs, page, ... }), so
-  // the observation is `result`. A run that threw has no result and counts as nothing rendered.
+  // the observation is `result`. A run that threw, or one webcmd truncated, has no result; surface
+  // webcmd's own stderr in the returned step so the failure is visible, not just a bare
+  // navigated:false.
   const observation = extractJson(result.stdout)?.result;
   if (!observation || typeof observation !== "object") {
     process.stderr.write(`browser-oracle: step ${step.label} produced no parseable result: ${result.stderr.slice(0, 400)}\n`);
-    return { label: step.label, navigated: false, title: "", dom: "", consoleText: "", dialogFired: false, dialogMessages: [] };
+    return { label: step.label, navigated: false, navError: `webcmd: ${result.stderr.slice(0, 300)}`, title: "", dom: "", consoleText: "", dialogFired: false, dialogMessages: [] };
   }
   return { label: step.label, ...observation };
 }
