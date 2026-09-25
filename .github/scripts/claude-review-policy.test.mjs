@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { buildPrompt } from "./vyceai-review.mjs";
+
 /**
  * The Claude review workflow runs with repository secrets and write access to pull requests, on
  * events a pull request author can cause. These assertions pin the guards that make that safe, so a
@@ -89,6 +91,25 @@ test("the fallback is a single scripted call with no agent, no tools and no pull
   assert.match(script, /deepseek-v4-flash/);
   assert.match(script, /claude-review head=/);
   assert.doesNotMatch(script, /exec(Sync)?\(|shell: true/, "no shell; gh runs through execFile arg arrays");
+});
+
+test("the fallback review does not drift into a weaker scope than the primary", async () => {
+  // The old policy test pinned the fallback prompt byte-for-byte to the primary's. The fallback is
+  // no longer an agent, so instead assert its prompt still carries the AGENTS.md invariants it must
+  // review for and the exact output format, so a future edit that guts the scope fails CI.
+  const prompt = buildPrompt("0000000000000000000000000000000000000000", "diff --git a/x b/x");
+  for (const invariant of [
+    "capability boundary",
+    "human approval gate on publish_verdict",
+    "delivery idempotency",
+    "secrets staying server-side",
+  ]) {
+    assert.ok(prompt.includes(invariant), `the fallback prompt must still name: ${invariant}`);
+  }
+  assert.ok(prompt.includes("<!-- claude-review head="));
+  assert.ok(prompt.includes("## Code review"));
+  assert.ok(prompt.includes("<details><summary>"));
+  assert.ok(prompt.includes("untrusted data"), "the diff must be framed as untrusted");
 });
 
 test("credentials are referenced from secrets, never inlined", async () => {

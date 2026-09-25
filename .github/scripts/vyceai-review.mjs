@@ -144,14 +144,16 @@ async function main() {
     throw new Error("VYCEAI_API_KEY, PR_NUMBER and HEAD_SHA are required");
   }
 
-  const diff = await prDiff(prNumber);
   let modelText = "";
   try {
+    // The diff fetch is inside the try with the call: if `gh pr diff` fails (a transient API error,
+    // an auth hiccup, or a diff past the maxBuffer), the run still posts the marked notice below
+    // rather than escaping with no comment, so the head check has a marker for this head and the
+    // run never looks silently reviewed. Any error goes to the log, never the key.
+    const diff = await prDiff(prNumber);
     modelText = await callModel(apiKey, buildPrompt(headSha, diff));
   } catch (error) {
-    // A failed call still posts the marked fallback notice, so the head check has a marker for this
-    // head and the run does not look silently reviewed. The error goes to the log, never the key.
-    console.error(`fallback review call failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`fallback review failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   await postComment(prNumber, buildComment(headSha, modelText));
