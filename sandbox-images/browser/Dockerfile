@@ -61,6 +61,14 @@ ENV WEBCMD_GLOBAL_MEMORY=off \
     WEBCMD_CANDIDATE_PUBLIC_IP=off \
     WEBCMD_CONFIG_DIR=/opt/webcmd
 
+# A build-identity marker read back from inside the booted sandbox (build-marker.ts's MARKER_PATH).
+# Daytona records only a snapshot's tag, never the digest it resolved to, and a tag can be repointed,
+# so browser-probe.ts passes the tag as createSandbox's allowedImageNameOverride and re-proves which
+# image actually booted by reading this file. The string must match EXPECTED_BROWSER_BUILD_MARKER in
+# lib/sandbox/browser-probe.ts, and matches the origin/main short sha this image is tagged with.
+# printf %s, so no trailing newline lands in the file.
+RUN printf %s 'browser-78b8996' > /etc/bountydesk-build-marker
+
 COPY browser-oracle.mjs /opt/bountydesk/browser-oracle.mjs
 
 # The sandbox is driven entirely through Daytona's exec API (the host runs

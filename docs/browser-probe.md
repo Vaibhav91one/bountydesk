@@ -70,13 +70,18 @@ the snapshot rebuild and deploy):
    snapshot. Done for `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`, registered as the
    `bountydesk-browser-78b8996` snapshot (2 CPU, 4 GB memory, 10 GB disk). The GHCR package is
    private; Daytona pulled it anyway.
-2. Set `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id) and `BOUNTYDESK_BROWSER_IMAGE_REF` (its
-   digest-pinned ref) in the reproduction worker's env. Until both are set the feature is off:
-   `browserProbeConfig()` returns null, `probe_browser` refuses cleanly, and the reproduce leg is
-   never reached. Setting them is not enough on its own yet: Daytona records a snapshot's tag, not
-   its digest, and `runBrowserProbe` passes no image-name override to `createSandbox`, so
-   `assertSnapshotImage` rejects every browser sandbox (tag != digest ref). The browser leg needs
-   the same override plus in-sandbox identity check the target path uses before it can run.
+2. Set three env vars in the reproduction worker: `BOUNTYDESK_BROWSER_SNAPSHOT` (the snapshot id),
+   `BOUNTYDESK_BROWSER_IMAGE_REF` (the digest-pinned ref), and `BOUNTYDESK_BROWSER_IMAGE_NAME` (the
+   tag, e.g. `ghcr.io/vaibhav91one/bountydesk-browser:78b8996`). Until all three are set the feature
+   is off: `browserProbeConfig()` returns null, `probe_browser` refuses cleanly, and the reproduce
+   leg is never reached. The tag is needed because Daytona records a snapshot's tag, not the digest
+   it resolved to (`POST /snapshots` refuses a digest imageName), so `assertSnapshotImage`'s
+   digest-exact check cannot pass. `runBrowserProbe` passes the tag as `createSandbox`'s
+   `allowedImageNameOverride`, the same narrow override the target path uses, and then re-proves
+   which image actually booted with `buildMarkerCheck` before any page loads. The marker is baked at
+   `/etc/bountydesk-build-marker` in the image and compared against `EXPECTED_BROWSER_BUILD_MARKER`
+   in `browser-probe.ts`; a missing or mismatched marker fails closed and the sandbox is torn down
+   before the target renders.
 3. Verify webcmd offline in the built image. Done locally: the amd64 image ran with no network
    interface but loopback (curl to 1.1.1.1 and a DNS lookup both failed). `webcmd doctor` was
    green, and `browser-oracle.mjs`, running as a non-root user against a `location.hash` to
