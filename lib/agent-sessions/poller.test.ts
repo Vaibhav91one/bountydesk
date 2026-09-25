@@ -122,7 +122,7 @@ async function seedSession(
     })
     .returning({ id: dbm.agentSession.id });
 
-  return { reportId: r.id, verdictId: v.id, agentSessionId: s.id, capabilityToken: `cap-${n}` };
+  return { reportId: r.id, verdictId: v.id, agentSessionId: s.id, sessionId: `session-${n}`, capabilityToken: `cap-${n}` };
 }
 
 /** claim() is global; retire every other row first (see queue.test.ts). */
@@ -1302,6 +1302,67 @@ test("a model that keeps re-emitting an unknown gated call is denied a bounded n
     .from(dbm.verdict)
     .where(dbm.eq(dbm.verdict.reportId, fixture.reportId));
   assert.equal(v.outcome, "ANALYSIS_ONLY");
+});
+
+test("a session denied once then recovering to publish_verdict drops its denial count, so the map does not retain it", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  let phase: "deny" | "recover" = "deny";
+  const { client } = resumeClient(() =>
+    phase === "deny"
+      ? { status: "awaiting_approval", pending: [unsupportedPendingCall()] }
+      : { status: "awaiting_approval", pending: [publishVerdictCall(fixture.capabilityToken)] },
+  );
+
+  await poller.pollOnce("w-cleanup-deny", { client });
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    1,
+    "the denial is counted while the session is mid-cycle",
+  );
+
+  phase = "recover";
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-cleanup-recover", { client });
+
+  assert.equal((await reportRow(fixture.reportId)).state, "AWAITING_APPROVAL");
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    0,
+    "recovering past the denial cycle must not leave a map entry behind",
+  );
+});
+
+test("a session denied once then hitting a terminal error drops its denial count", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  let phase: "deny" | "error" = "deny";
+  const { client } = resumeClient(() =>
+    phase === "deny"
+      ? { status: "awaiting_approval", pending: [unsupportedPendingCall()] }
+      : { status: "error", message: "the model blew up" },
+  );
+
+  await poller.pollOnce("w-cleanup-deny-2", { client });
+  assert.equal(poller.unsupportedPendingDenialCountForTest(fixture.sessionId), 1);
+
+  phase = "error";
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ leaseOwner: null, leaseExpiresAt: null, nextPollAt: new Date(0) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  await poller.pollOnce("w-cleanup-error", { client });
+
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.equal(
+    poller.unsupportedPendingDenialCountForTest(fixture.sessionId),
+    0,
+    "a terminal exit must not leave a map entry behind",
+  );
 });
 
 test("a full draft claiming REPRODUCED for a report with no bound target never becomes a REPRODUCED verdict", async () => {

@@ -195,6 +195,11 @@ async function endWithoutAgentVerdict(
   for (const sandboxId of lease.sandboxIds ?? (lease.sandboxId ? [lease.sandboxId] : [])) {
     await teardownSandbox(sandboxId, true);
   }
+  // The session is over, so forget its unsupported-pending denial count. This is the terminal
+  // exit every dead-end path (refuse, error, cancel, timeout, done-no-action, a finished report)
+  // funnels through, so it, plus the recovery cleanup in handleVerifiedPendingCall, is what keeps
+  // the in-process map from holding one entry per session for the daemon's whole life.
+  unsupportedPendingDenials.delete(lease.sessionId);
   return lease.id;
 }
 
@@ -367,6 +372,11 @@ async function handleVerifiedPendingCall(
     );
   });
 
+  // The session recovered past any earlier unsupported-pending call (it reached a real
+  // publish_verdict), so drop its denial count. A retried poll that lands on the ERROR-return
+  // branches above is also terminal for the session, so clearing here rather than only on
+  // success is correct.
+  unsupportedPendingDenials.delete(lease.sessionId);
   return lease.id;
 }
 
@@ -396,6 +406,9 @@ async function handleAgentDraftedPendingCall(
     if (!isVerdictIntegrityConflict(error)) throw error;
     if (shouldAbandonVerdictConflict(lease.attempts ?? 0)) {
       await abandonVerdictConflict(lease);
+      // abandonVerdictConflict ends the session in queue.ts without touching this in-process map,
+      // so forget the denial count here too, matching the other terminal exits.
+      unsupportedPendingDenials.delete(lease.sessionId);
       return lease.id;
     }
     throw error;
@@ -535,15 +548,26 @@ async function denyScopeGuardTool(
  * release never committed, and the row was re-claimed on the old turn) re-issues the same
  * idempotent denial without counting twice; a genuinely new emission carries a fresh id.
  *
+ * Every session's entry is removed once it leaves the denial cycle, on both the recovery exit
+ * (handleVerifiedPendingCall) and the terminal exit every dead-end funnels through
+ * (endWithoutAgentVerdict, plus the abandonVerdictConflict branch), so the map only ever holds
+ * sessions mid-cycle right now, not one entry per report the daemon has ever seen. This matters
+ * because gpt-5-mini emits the wrapped shape as routine behavior, not only in a pathological loop.
+ *
  * ponytail: an in-process Map, not an agent_session column. The reproduction poller runs in one
  * long-lived worker (the Zerops bdworker daemon), so the count survives a session's polls there;
  * a worker restart resets it, which only buys a looping session a few more denials before the
  * same ceiling catches it again, with the turn deadline and sandbox teardown as the outer
- * bounds. A session id is never reused, so a session that recovers leaves one small stale entry
- * until the process cycles. Promote to a persisted column if the poller is ever sharded across
- * processes. Owned by handleUnsupportedPending alone.
+ * bounds. Promote to a persisted column if the poller is ever sharded across processes.
  */
 const unsupportedPendingDenials = new Map<string, Set<string>>();
+
+/** How many distinct unsupported-pending denials the in-process map is holding for a session.
+ * Exists so a test can prove the entry is cleared once the session leaves the denial cycle,
+ * which is the guard against the map leaking one entry per report over the daemon's life. */
+export function unsupportedPendingDenialCountForTest(sessionId: string): number {
+  return unsupportedPendingDenials.get(sessionId)?.size ?? 0;
+}
 
 /**
  * Denials issued before the run is given up on. Three of the same unrecognized shape proves the
