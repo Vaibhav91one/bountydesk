@@ -187,6 +187,87 @@ test("a dynamic target persists its build identity on the profile", async () => 
   assert.equal(row.resolvedCommitSha, commit);
 });
 
+function connectionlessDefinition(name: string) {
+  return {
+    name,
+    // repoFullName is part of the definition shape but never matched on the connectionless path,
+    // since there is no repository to match it against.
+    repoFullName: "upload/none",
+    envPrefix: "UPLOAD",
+    imageName: "ghcr.io/vaibhav91one/uploaded-app",
+    config: { baseUrl: "http://localhost:3000", readinessPath: "/" },
+    scopeRules: [{ allow: "localhost" }],
+    provisioning: { readinessPath: "/" },
+  };
+}
+
+test("a connectionless target writes a profile with no repository binding", async () => {
+  const configured = await targets.configureConnectionlessTarget({
+    targetDefinition: connectionlessDefinition("uploaded-app"),
+    imageDigest: `sha256:${"c".repeat(64)}`,
+    snapshotId: "snapshot-upload",
+    buildMarker: "e".repeat(40),
+    buildRecipeDigest: `sha256:${"d".repeat(64)}`,
+    resolvedCommitSha: "e".repeat(40),
+  });
+
+  assert.equal(configured.repositoryId, null);
+  assert.equal(configured.repositoryFullName, null);
+
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, configured.targetProfileId));
+  assert.equal(row.name, "uploaded-app");
+  assert.equal(row.imageDigest, `sha256:${"c".repeat(64)}`);
+
+  // No connected_repository was created or bound; the profile stands alone until bindTarget links a
+  // report to it.
+  const repos = await dbm.db
+    .select({ id: dbm.connectedRepository.id })
+    .from(dbm.connectedRepository)
+    .where(dbm.eq(dbm.connectedRepository.targetProfileId, configured.targetProfileId));
+  assert.equal(repos.length, 0);
+});
+
+test("a connectionless target without build identity is refused before any write", async () => {
+  await assert.rejects(
+    targets.configureConnectionlessTarget({
+      targetDefinition: connectionlessDefinition("uploaded-no-identity"),
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      snapshotId: "snapshot-upload-2",
+      buildMarker: "f".repeat(40),
+    }),
+    /requires build identity/,
+  );
+
+  const rows = await dbm.db
+    .select({ id: dbm.targetProfile.id })
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.name, "uploaded-no-identity"));
+  assert.equal(rows.length, 0);
+});
+
+test("a connectionless target reuses its profile and refuses drift on the same name", async () => {
+  const input = {
+    targetDefinition: connectionlessDefinition("uploaded-reuse"),
+    imageDigest: `sha256:${"1".repeat(64)}`,
+    snapshotId: "snapshot-reuse",
+    buildMarker: "a".repeat(40),
+    buildRecipeDigest: `sha256:${"2".repeat(64)}`,
+    resolvedCommitSha: "a".repeat(40),
+  };
+
+  const first = await targets.configureConnectionlessTarget(input);
+  const second = await targets.configureConnectionlessTarget(input);
+  assert.equal(first.targetProfileId, second.targetProfileId);
+
+  await assert.rejects(
+    targets.configureConnectionlessTarget({ ...input, imageDigest: `sha256:${"9".repeat(64)}` }),
+    /different pinned target settings/,
+  );
+});
+
 test("configuring refuses a repository that does not match the target profile", async () => {
   await connectedRepo(700_008, "acme/webgoat");
 

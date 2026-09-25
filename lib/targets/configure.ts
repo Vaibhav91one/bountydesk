@@ -5,6 +5,7 @@ import {
   connectedRepository,
   db,
   eq,
+  type Executor,
   githubInstallation,
   isNull,
   targetProfile,
@@ -82,9 +83,21 @@ export type ConfigureJuiceShopTargetInput = Omit<
   "targetName" | "targetDefinition"
 >;
 
+/**
+ * A target that has no GitHub repository behind it: an upload, an email, or any source that arrives
+ * without a connected_repository row. There is no repoId to key a write on and no repo name to
+ * match, so a validated targetDefinition is mandatory. Scope still comes only from that definition,
+ * which the caller (an onboarding pipeline or a reviewer action) builds server-side, never from a
+ * string the agent or the reporter produced.
+ */
+export type ConfigureConnectionlessTargetInput = Omit<ConfigureTargetInput, "repoId"> & {
+  targetDefinition: TargetDefinition;
+};
+
 export type ConfiguredTarget = {
-  repositoryId: string;
-  repositoryFullName: string;
+  /** Null for a connectionless target: there is no repository that owns it. */
+  repositoryId: string | null;
+  repositoryFullName: string | null;
   targetProfileId: string;
   targetProfileName: string;
 };
@@ -148,45 +161,7 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
     }
     assertRepositoryMatchesTarget(repository.fullName, definition);
 
-    const [inserted] = await tx
-      .insert(targetProfile)
-      .values({
-        name: definition.name,
-        imageName: definition.imageName,
-        imageDigest: input.imageDigest,
-        snapshotId: input.snapshotId,
-        config,
-        scopeRules: definition.scopeRules,
-        dockerfileText: input.dockerfileText ?? null,
-        buildRecipeDigest: input.buildRecipeDigest ?? null,
-        resolvedCommitSha: input.resolvedCommitSha ?? null,
-        sourceArchiveDigest: input.sourceArchiveDigest ?? null,
-      })
-      .onConflictDoNothing({ target: targetProfile.name })
-      .returning();
-
-    const [target] = inserted
-      ? [inserted]
-      : await tx
-          .select()
-          .from(targetProfile)
-          .where(eq(targetProfile.name, definition.name))
-          .limit(1)
-          .for("update");
-
-    if (!target) throw new Error(`could not create or find ${definition.name}`);
-    if (
-      target.imageName !== definition.imageName ||
-      target.imageDigest !== input.imageDigest ||
-      target.snapshotId !== input.snapshotId ||
-      !isDeepStrictEqual(target.config, config) ||
-      !isDeepStrictEqual(target.scopeRules, definition.scopeRules) ||
-      target.buildRecipeDigest !== (input.buildRecipeDigest ?? null) ||
-      target.resolvedCommitSha !== (input.resolvedCommitSha ?? null) ||
-      target.sourceArchiveDigest !== (input.sourceArchiveDigest ?? null)
-    ) {
-      throw new TargetProfileExistsError(`${definition.name} exists with different pinned target settings`);
-    }
+    const target = await upsertTargetProfile(tx, definition, config, input);
 
     await tx
       .update(connectedRepository)
@@ -200,6 +175,96 @@ export async function configureTarget(input: ConfigureTargetInput): Promise<Conf
       targetProfileName: target.name,
     };
   });
+}
+
+/**
+ * Write a TargetProfile for a source that has no GitHub connection.
+ *
+ * The GitHub path keys the write on a connected_repository row and binds that row to the profile.
+ * An uploaded or emailed target has neither, so this path skips both: it upserts the profile from
+ * the validated definition and leaves the report-to-profile link to bindTarget, which already
+ * handles a report that owns a target but no repository. Everything the profile pins still comes
+ * from a server-held definition and a verified build, not from anything the reporter sent.
+ *
+ * A connectionless target is always dynamic, so it carries the same build-identity requirement a
+ * dynamic GitHub target does, and it must supply its own definition: it can never reuse a
+ * registered GitHub-bound profile name.
+ */
+export async function configureConnectionlessTarget(
+  input: ConfigureConnectionlessTargetInput,
+): Promise<ConfiguredTarget> {
+  const definition = input.targetDefinition;
+  if (input.targetName && input.targetName !== definition.name) {
+    throw new Error(`target name ${input.targetName} does not match manifest ${definition.name}`);
+  }
+  if (!input.buildRecipeDigest || !input.resolvedCommitSha) {
+    throw new Error("connectionless target configuration requires build identity");
+  }
+  const config = targetProfileConfig(definition, input);
+
+  return db.transaction(async (tx) => {
+    const target = await upsertTargetProfile(tx, definition, config, input);
+    return {
+      repositoryId: null,
+      repositoryFullName: null,
+      targetProfileId: target.id,
+      targetProfileName: target.name,
+    };
+  });
+}
+
+/**
+ * Insert the profile, or find the existing row and prove it matches what configure was asked to
+ * pin. Shared by the GitHub and connectionless paths so the drift guard cannot diverge between
+ * them: a profile name is unique, so the same name must always resolve to the same pinned build.
+ */
+async function upsertTargetProfile(
+  tx: Executor,
+  definition: TargetDefinition,
+  config: ReturnType<typeof targetProfileConfig>,
+  pin: TargetPin & { dockerfileText?: string },
+): Promise<typeof targetProfile.$inferSelect> {
+  const [inserted] = await tx
+    .insert(targetProfile)
+    .values({
+      name: definition.name,
+      imageName: definition.imageName,
+      imageDigest: pin.imageDigest,
+      snapshotId: pin.snapshotId,
+      config,
+      scopeRules: definition.scopeRules,
+      dockerfileText: pin.dockerfileText ?? null,
+      buildRecipeDigest: pin.buildRecipeDigest ?? null,
+      resolvedCommitSha: pin.resolvedCommitSha ?? null,
+      sourceArchiveDigest: pin.sourceArchiveDigest ?? null,
+    })
+    .onConflictDoNothing({ target: targetProfile.name })
+    .returning();
+
+  const [target] = inserted
+    ? [inserted]
+    : await tx
+        .select()
+        .from(targetProfile)
+        .where(eq(targetProfile.name, definition.name))
+        .limit(1)
+        .for("update");
+
+  if (!target) throw new Error(`could not create or find ${definition.name}`);
+  if (
+    target.imageName !== definition.imageName ||
+    target.imageDigest !== pin.imageDigest ||
+    target.snapshotId !== pin.snapshotId ||
+    !isDeepStrictEqual(target.config, config) ||
+    !isDeepStrictEqual(target.scopeRules, definition.scopeRules) ||
+    target.buildRecipeDigest !== (pin.buildRecipeDigest ?? null) ||
+    target.resolvedCommitSha !== (pin.resolvedCommitSha ?? null) ||
+    target.sourceArchiveDigest !== (pin.sourceArchiveDigest ?? null)
+  ) {
+    throw new TargetProfileExistsError(`${definition.name} exists with different pinned target settings`);
+  }
+
+  return target;
 }
 
 /**
