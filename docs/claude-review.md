@@ -18,14 +18,26 @@ group of their own and never cancel a review.
 ## Fallback when the subscription run fails
 
 If the subscription run fails, for example because the token expired or hit a usage limit, the
-same job runs the review once more through VyceAI, using the `VYCEAI_API_KEY` repository secret.
-VyceAI serves the Anthropic Messages API at `https://vyceai.com`, so this is the same Claude Code
-action with a different base URL and model (`deepseek-v4.1`). The prompt and tool limits are
-identical, and the policy test fails if they drift apart. Three differences matter:
+same job runs `.github/scripts/vyceai-review.mjs`, which reviews the pull request with one direct
+call to VyceAI's DeepSeek and posts the result as a summary comment. It uses the `VYCEAI_API_KEY`
+repository secret.
 
-- The model is DeepSeek, not Sonnet 5, so treat its findings with more suspicion.
-- It is billed against the VyceAI balance (about $0.15 in and $0.60 out per million tokens).
-- The pull request's diff and files are sent to VyceAI.
+This step is deliberately not a Claude Code agent. Through VyceAI these DeepSeek models emit their
+reasoning as the message body and never reliably reach a `gh pr comment` tool call, so an agent run
+posts nothing. The script instead makes one call at a low reasoning effort, which returns the
+formatted comment directly, and posts it. It has no tools and runs none of the pull request's code:
+the diff is read with `gh pr diff` and sent to the model as data. The script lives on the default
+branch, so a pull request cannot change how its own review runs.
+
+What to know about it:
+
+- The model is `deepseek-v4-flash`, a free VyceAI model, not Sonnet 5, so treat its findings with
+  more suspicion: they are shallower and it cannot open caller code beyond the diff. It posts a
+  summary only, no inline comments.
+- The pull request's diff is sent to VyceAI (truncated past 200 KB).
+- If the call fails or returns nothing usable, the script still posts a comment that carries the
+  head marker and says the fallback could not review it, so the head check passes and a human knows
+  to review by hand rather than trusting a silent pass.
 
 A run that failed partway may already have posted comments before the fallback posts its own. The
 head check reads the latest summary, so the result is still correct.

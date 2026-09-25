@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { buildPrompt } from "./vyceai-review.mjs";
+
 /**
  * The Claude review workflow runs with repository secrets and write access to pull requests, on
  * events a pull request author can cause. These assertions pin the guards that make that safe, so a
@@ -40,49 +42,87 @@ test("the policy comes from the default branch and the PR head is only data", as
   assert.match(workflow, /--add-dir pr-head/);
 });
 
-// Each claude-code-action step: the subscription review and its fallback.
-const reviewSteps = (workflow) => workflow.split("uses: anthropics/claude-code-action@").slice(1).map((s) => s.split("- name:")[0]);
+// The one Claude Code review step (the subscription primary). The fallback is not an agent; it is
+// a script step, checked separately below.
+const primaryStep = (workflow) => {
+  const steps = workflow.split("uses: anthropics/claude-code-action@").slice(1).map((s) => s.split("- name:")[0]);
+  assert.equal(steps.length, 1, "there is exactly one Claude Code review step, the primary");
+  return steps[0];
+};
+const fallbackScriptPath = ".github/scripts/vyceai-review.mjs";
 
-test("Claude gets read tools and gh pr only, never a shell or write access, on every review step", async () => {
+test("the primary review gets read tools and gh pr only, never a shell or write access", async () => {
   const workflow = await read(workflowPath);
-  const steps = reviewSteps(workflow);
-  assert.equal(steps.length, 2);
-  for (const step of steps) {
-    const allowed = step.match(/--allowedTools "([^"]+)"/)?.[1] ?? "";
-    const tools = allowed.split(",");
-    assert.ok(allowed.length > 0);
-    for (const tool of tools) {
-      const ok =
-        ["Read", "Grep", "Glob", "mcp__github_inline_comment__create_inline_comment"].includes(tool) ||
-        /^Bash\(gh pr (diff|view|comment):\*\)$/.test(tool);
-      assert.ok(ok, `${tool} is not an allowed review tool`);
-    }
-    const disallowed = step.match(/--disallowedTools "([^"]+)"/)?.[1] ?? "";
-    for (const tool of ["Write", "Edit", "MultiEdit", "WebFetch", "WebSearch"]) {
-      assert.ok(disallowed.split(",").includes(tool), `${tool} must be disallowed`);
-    }
-    assert.match(step, /--add-dir pr-head/);
+  const step = primaryStep(workflow);
+  const allowed = step.match(/--allowedTools "([^"]+)"/)?.[1] ?? "";
+  assert.ok(allowed.length > 0);
+  for (const tool of allowed.split(",")) {
+    const ok =
+      ["Read", "Grep", "Glob", "mcp__github_inline_comment__create_inline_comment"].includes(tool) ||
+      /^Bash\(gh pr (diff|view|comment):\*\)$/.test(tool);
+    assert.ok(ok, `${tool} is not an allowed review tool`);
   }
-  // The fallback must not drift into a looser prompt than the review it stands in for.
-  const prompt = (step) => {
-    const lines = step.split("prompt: |")[1].split("\n").slice(1);
-    const end = lines.findIndex((line) => line.trim() !== "" && !line.startsWith(" ".repeat(12)));
-    return lines.slice(0, end === -1 ? undefined : end).join("\n").trim();
-  };
-  assert.ok(prompt(steps[0]).includes("<!-- claude-review head="));
-  assert.equal(prompt(steps[1]), prompt(steps[0]));
+  const disallowed = step.match(/--disallowedTools "([^"]+)"/)?.[1] ?? "";
+  for (const tool of ["Write", "Edit", "MultiEdit", "WebFetch", "WebSearch"]) {
+    assert.ok(disallowed.split(",").includes(tool), `${tool} must be disallowed`);
+  }
+  assert.match(step, /--add-dir pr-head/);
+  const promptLines = step.split("prompt: |")[1].split("\n").slice(1);
+  const end = promptLines.findIndex((line) => line.trim() !== "" && !line.startsWith(" ".repeat(12)));
+  const prompt = promptLines.slice(0, end === -1 ? undefined : end).join("\n").trim();
+  assert.ok(prompt.includes("<!-- claude-review head="));
+});
+
+test("the fallback is a single scripted call with no agent, no tools and no pull request code", async () => {
+  const workflow = await read(workflowPath);
+  const fallback = workflow.split("- name: Review (fallback")[1]?.split("\n  head-check:")[0] ?? "";
+  assert.ok(fallback, "the fallback step exists");
+  // It runs the committed script, not a Claude Code agent, and never checks out or executes PR code.
+  assert.match(fallback, /run: node \.github\/scripts\/vyceai-review\.mjs/);
+  assert.doesNotMatch(fallback, /uses: anthropics\/claude-code-action/);
+  assert.doesNotMatch(fallback, /--add-dir pr-head/);
+  assert.doesNotMatch(fallback, /--allowedTools|--disallowedTools/);
+
+  // The script itself: the diff is data (read through gh, never executed), the key comes from the
+  // environment and goes only to VyceAI, and the posted comment always carries the head marker.
+  const script = await read(fallbackScriptPath);
+  assert.match(script, /process\.env\.VYCEAI_API_KEY/);
+  assert.match(script, /https:\/\/vyceai\.com\/v1\/messages/);
+  assert.match(script, /deepseek-v4-flash/);
+  assert.match(script, /claude-review head=/);
+  assert.doesNotMatch(script, /exec(Sync)?\(|shell: true/, "no shell; gh runs through execFile arg arrays");
+});
+
+test("the fallback review does not drift into a weaker scope than the primary", async () => {
+  // The old policy test pinned the fallback prompt byte-for-byte to the primary's. The fallback is
+  // no longer an agent, so instead assert its prompt still carries the AGENTS.md invariants it must
+  // review for and the exact output format, so a future edit that guts the scope fails CI.
+  const prompt = buildPrompt("0000000000000000000000000000000000000000", "diff --git a/x b/x");
+  for (const invariant of [
+    "capability boundary",
+    "human approval gate on publish_verdict",
+    "delivery idempotency",
+    "secrets staying server-side",
+  ]) {
+    assert.ok(prompt.includes(invariant), `the fallback prompt must still name: ${invariant}`);
+  }
+  assert.ok(prompt.includes("<!-- claude-review head="));
+  assert.ok(prompt.includes("## Code review"));
+  assert.ok(prompt.includes("<details><summary>"));
+  assert.ok(prompt.includes("untrusted data"), "the diff must be framed as untrusted");
 });
 
 test("credentials are referenced from secrets, never inlined", async () => {
   const workflow = await read(workflowPath);
-  const [primary, fallback] = reviewSteps(workflow);
+  const primary = primaryStep(workflow);
   assert.match(primary, /claude_code_oauth_token: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
   assert.doesNotMatch(primary, /anthropic_api_key:/);
-  // The only API key is VyceAI's, and it goes only to VyceAI's endpoint.
-  assert.match(fallback, /anthropic_api_key: \$\{\{ secrets\.VYCEAI_API_KEY \}\}/);
-  assert.equal((workflow.match(/anthropic_api_key:/g) ?? []).length, 1);
-  assert.match(workflow, /ANTHROPIC_BASE_URL: https:\/\/vyceai\.com\n/);
+  // The only API key is VyceAI's; it is passed once, as an env var from secrets, to the fallback.
+  assert.match(workflow, /VYCEAI_API_KEY: \$\{\{ secrets\.VYCEAI_API_KEY \}\}/);
+  assert.equal((workflow.match(/secrets\.VYCEAI_API_KEY/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /sk-ant-|oauth_token_|sk-[A-Za-z0-9]{20}/);
+  const script = await read(fallbackScriptPath);
+  assert.doesNotMatch(script, /sk-ant-|sk-[A-Za-z0-9]{20}/, "the script inlines no key");
 });
 
 test("the fallback runs only when the subscription review failed", async () => {
