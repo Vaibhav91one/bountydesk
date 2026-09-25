@@ -54,6 +54,8 @@ export type CaseFile = {
   /** The reporter's GitHub profile, and their avatar. Null when the handle is not a login. */
   reporterUrl: string | null;
   reporterAvatarUrl: string | null;
+  /** The earlier report this one replied to (email threading), for a link back. Null otherwise. */
+  repliesTo: { id: string; title: string } | null;
   state: ReportState;
   createdAt: Date;
   updatedAt: Date;

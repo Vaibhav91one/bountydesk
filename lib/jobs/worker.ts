@@ -1,9 +1,9 @@
 import { db, eq, report } from "@/lib/db";
-import type { InboundEmail } from "@/lib/email/inbound";
+import { parseThreadReferences, type InboundEmail } from "@/lib/email/inbound";
 import type { OutsideEmailPayload } from "@/lib/email/outside-intake";
-import { fetchInboundBody } from "@/lib/email/resend";
+import { fetchInboundBody, fetchRawHeaders } from "@/lib/email/resend";
 import { activeRepository } from "@/lib/github/lifecycle";
-import { ensureReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
+import { ensureReport, findRepliedToReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
 import { holdForDecision, type GateAnalysisPayload } from "@/lib/triage/gate";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
 
@@ -188,6 +188,25 @@ async function parseEmail(lease: Lease): Promise<Lease> {
   const fetched = email.resendEmailId ? await fetchInboundBody(email.resendEmailId) : null;
   const body = fetched?.text || fetched?.html || email.text;
 
+  // Link a reply to the report it threads to. The parent's message id is in this reply's
+  // In-Reply-To/References, which live only in the raw MIME, so read the header block from the
+  // signed URL the body fetch just handed back. Best-effort: a failure here must not stop a report
+  // from being created, so a fetch or parse error leaves the reply standalone. Only outside senders
+  // carry a verified sender, and findRepliedToReport links only on a verified-sender match, so an
+  // allowlisted reply (null sender) never links, which is fine: acks go only to outside reporters.
+  let repliesToReportId: string | null = null;
+  if (fetched?.rawUrl) {
+    try {
+      const tokens = parseThreadReferences(await fetchRawHeaders(fetched.rawUrl));
+      repliesToReportId = await findRepliedToReport(
+        tokens,
+        outside ? email.verifiedSender : null,
+      );
+    } catch (error) {
+      console.warn(`email parse: could not link reply ${sourceRef} to a parent: ${String(error)}`);
+    }
+  }
+
   // No connected repository and no target profile: an email report has nothing bound to reproduce
   // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
   // kept as the reply-to for a future outbound delivery. An outside sender's report starts at
@@ -199,6 +218,7 @@ async function parseEmail(lease: Lease): Promise<Lease> {
     body,
     reporterHandle: email.fromName,
     reporterContact: email.fromEmail,
+    repliesToReportId,
     ...(outside ? { state: "NEEDS_DECISION" as const, verifiedSender: email.verifiedSender } : {}),
     connectedRepositoryId: null,
     targetProfileId: null,

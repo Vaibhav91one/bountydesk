@@ -41,6 +41,7 @@ function caseFile(overrides: Partial<FileWithRun> = {}): FileWithRun {
     reporterHandle: "reporter",
     reporterUrl: null,
     reporterAvatarUrl: null,
+    repliesTo: null,
     state: "AWAITING_APPROVAL",
     createdAt: AT,
     updatedAt: AT,

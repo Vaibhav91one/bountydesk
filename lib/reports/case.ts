@@ -113,6 +113,7 @@ export async function readCase(
           channel: report.channel,
           sourceRef: report.sourceRef,
           reporterHandle: report.reporterHandle,
+          repliesToReportId: report.repliesToReportId,
           state: report.state,
           createdAt: report.createdAt,
           updatedAt: report.updatedAt,
@@ -237,7 +238,16 @@ export async function readCase(
         .where(eq(artifact.reportId, id))
         .orderBy(desc(artifact.createdAt));
 
-      const [[session], [latestRun], [newest], historyRows, [advisory], events, artifacts] =
+      // The parent this report replied to, for a link back on the header. Only email reports set it,
+      // and it reads through the primary key, so it rides the fan-out rather than adding a round trip.
+      const repliesToQuery = row.repliesToReportId
+        ? tx
+            .select({ id: report.id, title: report.title })
+            .from(report)
+            .where(eq(report.id, row.repliesToReportId))
+        : Promise.resolve([]);
+
+      const [[session], [latestRun], [newest], historyRows, [advisory], events, artifacts, [repliedTo]] =
         await Promise.all([
           sessionQuery,
           latestRunQuery,
@@ -246,6 +256,7 @@ export async function readCase(
           advisoryQuery,
           eventsQuery,
           artifactsQuery,
+          repliesToQuery,
         ]);
 
       const verdictHistory: CaseVerdictHistoryEntry[] = historyRows.map((v) => ({
@@ -402,6 +413,7 @@ export async function readCase(
           : null,
         reporterUrl: login ? `https://github.com/${login}` : null,
         reporterAvatarUrl: login ? `https://github.com/${login}.png?size=64` : null,
+        repliesTo: repliedTo ?? null,
         // Keyed on the profile id rather than the name: it is the join's primary key, so it is
         // present exactly when the join matched, and target_profile.name is NOT NULL beside it.
         target: row.targetProfileId
