@@ -107,6 +107,31 @@ test("quarantines a stale profile, keeps the report, clears the bindings", async
   assert.equal((events[0].data as { targetProfileId: string }).targetProfileId, profile.id);
 });
 
+test("an out-of-scope disposition lands the bound report in OUT_OF_SCOPE", async () => {
+  const profile = await staleProfile("quarantine-target-scope");
+  const repo = await connectedRepo(profile.id);
+  const r = await triagingReport(profile.id, repo.id);
+
+  await quarantine.quarantineStaleTargetProfile({
+    profileName: "quarantine-target-scope",
+    expectedImageDigest: STALE_DIGEST,
+    expectedSnapshotId: STALE_SNAPSHOT,
+    reason: "repository is outside the bounty scope",
+    disposition: "out-of-scope",
+  });
+
+  const [reportRow] = await dbm.db.select().from(dbm.report).where(dbm.eq(dbm.report.id, r.id));
+  assert.equal(reportRow.state, "OUT_OF_SCOPE", "a scope rejection is terminal, not ANALYSIS_ONLY");
+  assert.equal(reportRow.targetProfileId, null);
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, r.id));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "target.out_of_scope");
+});
+
 test("a digest or snapshot id that does not match the expected stale values is refused", async () => {
   const profile = await staleProfile("quarantine-target-2");
 
