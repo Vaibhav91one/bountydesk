@@ -641,6 +641,21 @@ export async function enqueueApprovedVerdictDelivery(
       return { ok: false, reason: `${contact} is no longer an authorised address` };
     }
     deliveryTarget = contact;
+  } else if (reportRow.channel === "upload") {
+    // Upload rides the email transport, so its delivery target is the same OTP-verified contact and
+    // the same recipient re-check. The one difference from email is the source_ref shape: an upload
+    // has no inbound message to thread onto, so it is upload:<id>, not email:<message-id>.
+    const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
+    if (!contact) {
+      return { ok: false, reason: "report has no verified reporter contact to deliver to" };
+    }
+    if (!/^upload:.+/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid upload delivery target" };
+    }
+    if (!(await isVerifiedEmailRecipient(reportRow))) {
+      return { ok: false, reason: `${contact} is no longer an authorised address` };
+    }
+    deliveryTarget = contact;
   } else {
     return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
   }

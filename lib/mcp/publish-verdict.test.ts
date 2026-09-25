@@ -45,7 +45,7 @@ async function seedFixture(
   opts: {
     approval?: "none" | "approved" | "denied" | "stale";
     tamperPayloadAfterDecision?: boolean;
-    channel?: "github" | "manual" | "email";
+    channel?: "github" | "manual" | "email" | "upload";
     reporterContact?: string | null;
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
     state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
@@ -64,12 +64,14 @@ async function seedFixture(
           ? `manual:${n}`
           : opts.channel === "email"
             ? `email:<msg-${n}@mail.example>`
-            : `github:1:issue:${n}`,
+            : opts.channel === "upload"
+              ? `upload:${n}`
+              : `github:1:issue:${n}`,
       title: `report ${n}`,
       body: "body",
       state: opts.state ?? "AWAITING_APPROVAL",
       reporterContact:
-        opts.channel === "email"
+        opts.channel === "email" || opts.channel === "upload"
           ? opts.reporterContact === undefined
             ? REPORTER
             : opts.reporterContact
@@ -346,6 +348,61 @@ test("a non-GitHub report is not moved into the GitHub delivery queue", async ()
   const result = await publishVerdictModule.publishVerdict(fixture.capability);
 
   assert.deepEqual(result, { ok: false, reason: "unsupported delivery channel: manual" });
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
+});
+
+test("an approved upload report is queued to its OTP-verified contact", async () => {
+  const uploader = "uploader@outside.test";
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "upload",
+    reporterContact: uploader,
+    // Upload has no inbound SPF/DKIM: verified_sender equals the contact because the OTP flow set
+    // it, which is what isVerifiedEmailRecipient checks.
+    verifiedSender: uploader,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ target: dbm.outboundDelivery.target })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  assert.equal(delivery.target, uploader);
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an upload report with no contact stays approvable rather than stranded", async () => {
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "upload",
+    reporterContact: null,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, false);
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+  assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
+});
+
+test("an upload contact that was never OTP-verified is refused, and nothing is queued", async () => {
+  const uploader = "unproven@outside.test";
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "upload",
+    reporterContact: uploader,
+    verifiedSender: null,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.deepEqual(result, {
+    ok: false,
+    reason: `${uploader} is no longer an authorised address`,
+  });
   assert.equal(await deliveryCount(fixture.verdictId), 0);
   assert.equal(await reportState(fixture.reportId), "AWAITING_APPROVAL");
 });
