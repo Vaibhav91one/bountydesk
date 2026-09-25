@@ -64,24 +64,36 @@ DIFF`;
 const MARKER = (headSha) => `<!-- claude-review head=${headSha} -->`;
 
 /**
- * Turn the model's raw text into a comment safe to post. The model usually returns the exact
- * format, but it can wrap the comment in prose or a code fence, or return nothing usable. This
- * keeps the block from the marker onward when there is one, and otherwise posts a plainly labelled
- * fallback notice that still carries the head marker, so the head check passes and a human knows to
- * review by hand rather than trusting a silent pass.
+ * Turn the model's raw text into a comment safe to post.
+ *
+ * The head marker is authoritative and always built here from headSha, never lifted from the model
+ * output. The diff is untrusted and could steer the model into echoing a `<!-- claude-review
+ * head=... -->` line (planted to fake a clean review that the merge gate would trust), so any marker
+ * the model emits is stripped and the trusted one is prepended. The model text is only ever the
+ * review body under that marker. A code fence wrapping the whole reply is unwrapped, the body is
+ * taken from its `## Code review` heading when present, and an empty reply becomes a plainly
+ * labelled notice, so the head check has a marker for this head and the run never looks silently
+ * reviewed.
  */
 export function buildComment(headSha, modelText) {
   const marker = MARKER(headSha);
-  const text = (modelText ?? "").trim();
-  const at = text.indexOf(marker);
-  if (at !== -1) {
-    // Drop a trailing ``` if the model fenced the whole thing; keep everything from the marker.
-    return text
-      .slice(at)
-      .replace(/\n?```\s*$/, "")
-      .trim();
+  let body = (modelText ?? "").trim();
+  body = body
+    .replace(/^```[a-z-]*\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .trim();
+  // Drop any marker line the model produced; ours is the only one, added below.
+  body = body.replace(/^<!--\s*claude-review\b.*?-->\s*$/gim, "").trim();
+  const heading = body.search(/^## Code review\b/m);
+  if (heading !== -1) body = body.slice(heading).trim();
+
+  if (!body) {
+    body =
+      "## Code review\n\nThe fallback reviewer did not return a usable review, so this pull request has not been reviewed by it. Merge on the required build check and a human review.";
+  } else if (!/^## Code review\b/.test(body)) {
+    body = `## Code review\n\n${body}`;
   }
-  return `${marker}\n## Code review\n\nThe fallback reviewer did not return a usable review, so this pull request has not been reviewed by it. Merge on the required build check and a human review.`;
+  return `${marker}\n${body}`;
 }
 
 async function prDiff(prNumber) {
