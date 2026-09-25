@@ -4,6 +4,7 @@ import { enqueue } from "@/lib/jobs/queue";
 import { checkFromAlignment } from "./alignment";
 import type { InboundEmail } from "./inbound";
 import { sendOversizedNotice } from "./notice";
+import { readOutsideConfig, type OutsideConfig } from "./outside-config";
 import { fetchInboundBody, fetchRawHeaders, type InboundBody } from "./resend";
 
 /**
@@ -15,6 +16,10 @@ import { fetchInboundBody, fetchRawHeaders, type InboundBody } from "./resend";
  * sender's domain are under their daily limits, and when the message is under the size cap.
  * Everything else is dropped with no job and no report. An accepted message still runs nothing
  * on its own: the worker holds it at the NEEDS_DECISION gate (lib/triage/gate.ts).
+ */
+/**
+ * The defaults readOutsideConfig falls back to when the config table has no row. Kept exported so
+ * other code and tests can read today's numbers without a database round-trip.
  */
 export const OUTSIDE_LIMITS = {
   perSenderPerDay: 5,
@@ -28,12 +33,44 @@ export type OutsideEmailPayload = InboundEmail & {
   intake: "outside";
   /** The address that passed SPF and DKIM, recorded on the report as its verified sender. */
   verifiedSender: string;
+  /** The mailbox the per-sender cap is counted on. See normalizeSender for why it is not fromEmail. */
+  senderKey: string;
 };
 
 export type OutsideAdmission = { accepted: true } | { accepted: false; reason: string };
 
 export function senderDomain(address: string): string {
   return address.slice(address.lastIndexOf("@") + 1).toLowerCase();
+}
+
+/**
+ * The mailbox an address delivers to, collapsed so one person cannot mint fresh per-sender buckets.
+ *
+ * The per-sender cap is the only ceiling left for an exempt free-mail domain (the per-domain cap is
+ * waived for it). Counting on the raw fromEmail would defeat that: a Gmail owner can send from
+ * you+1@gmail.com, you+2@gmail.com and so on, each a "new sender" under the 5/day cap and each
+ * delivered to the same inbox, so the flood and the outbound oversized-notice sends are unbounded.
+ *
+ * Subaddressing (everything from the first "+" in the local part) is a tag routed to the same
+ * mailbox, so it is stripped for every domain. Gmail additionally ignores dots in the local part and
+ * serves googlemail.com as gmail.com, so those two spellings and any dotting collapse to one key.
+ * Distinct mailboxes stay distinct, so unrelated researchers on Gmail keep their own 5/day.
+ */
+export function normalizeSender(address: string): string {
+  const lower = address.trim().toLowerCase();
+  const at = lower.lastIndexOf("@");
+  if (at === -1) return lower;
+  let local = lower.slice(0, at);
+  let domain = lower.slice(at + 1);
+
+  const plus = local.indexOf("+");
+  if (plus !== -1) local = local.slice(0, plus);
+
+  if (domain === "gmail.com" || domain === "googlemail.com") {
+    local = local.replace(/\./g, "");
+    domain = "gmail.com";
+  }
+  return `${local}@${domain}`;
 }
 
 /**
@@ -49,22 +86,39 @@ async function recentCounts(
   tx: Executor,
 ): Promise<{ sender: number; domain: number }> {
   const domain = senderDomain(email.fromEmail);
+  const senderKey = normalizeSender(email.fromEmail);
+  // The sender count is on the normalized key across all outside rows, not restricted to this raw
+  // domain, so gmail.com and googlemail.com spellings of one mailbox count together. The domain
+  // count keeps its own filter on the raw domain, unchanged. Forward-only: rows written before
+  // senderKey existed lack the field and do not match, which can undercount a mailbox for its first
+  // day, then self-corrects as old rows age out of the one-day window.
   const rows = await tx.execute<{ sender: number; domain: number }>(sql`
-    select count(*) filter (where ${inboundJob.payload}->>'fromEmail' = ${email.fromEmail})::int as sender,
-           count(*)::int as domain
+    select count(*) filter (where ${inboundJob.payload}->>'senderKey' = ${senderKey})::int as sender,
+           count(*) filter (where split_part(${inboundJob.payload}->>'fromEmail', '@', 2) = ${domain})::int as domain
       from ${inboundJob}
      where ${inboundJob.channel} = 'email'
        and ${inboundJob.payload}->>'intake' = 'outside'
-       and split_part(${inboundJob.payload}->>'fromEmail', '@', 2) = ${domain}
        and ${inboundJob.createdAt} > now() - interval '1 day'
        and ${inboundJob.deliveryId} <> ${email.messageId}
   `);
   return { sender: rows[0]?.sender ?? 0, domain: rows[0]?.domain ?? 0 };
 }
 
-function overLimit(counts: { sender: number; domain: number }): string | null {
-  if (counts.sender >= OUTSIDE_LIMITS.perSenderPerDay) return "sender over its daily limit";
-  if (counts.domain >= OUTSIDE_LIMITS.perDomainPerDay) return "domain over its daily limit";
+/**
+ * The per-sender cap and, unless the domain is exempt, the per-domain cap. An exempt domain is a
+ * free-mail provider whose senders are unrelated, so charging them a shared bucket would let one
+ * user starve the rest; they still get the per-sender cap, which is the one that bounds a single
+ * researcher. fromEmail is needed to decide exemption, so it is threaded in alongside the counts.
+ */
+export function overLimit(
+  counts: { sender: number; domain: number },
+  fromEmail: string,
+  config: OutsideConfig,
+): string | null {
+  if (counts.sender >= config.perSenderPerDay) return "sender over its daily limit";
+  if (!config.exemptDomains.includes(senderDomain(fromEmail)) && counts.domain >= config.perDomainPerDay) {
+    return "domain over its daily limit";
+  }
   return null;
 }
 
@@ -90,12 +144,13 @@ async function dropOversized(
   email: InboundEmail,
   sizeBytes: number,
   notifyOversized: (email: InboundEmail) => Promise<void>,
+  config: OutsideConfig,
 ): Promise<OutsideAdmission> {
   const reason = `message is ${sizeBytes} bytes, over the cap`;
 
   const spend = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`outside-email:${senderDomain(email.fromEmail)}`}))`);
-    if (overLimit(await recentCounts(email, tx))) return false;
+    if (overLimit(await recentCounts(email, tx), email.fromEmail, config)) return false;
     // Counted, never processed: state DONE keeps it off claim(), and the payload is only what
     // recentCounts reads (the sender and the outside marker) plus a drop tag for the audit trail.
     // A redelivery collides on (channel, delivery_id) and adds nothing, so the budget is spent once.
@@ -105,7 +160,13 @@ async function dropOversized(
         channel: "email",
         deliveryId: email.messageId,
         state: "DONE",
-        payload: { intake: "outside", fromEmail: email.fromEmail, drop: "oversized" } as never,
+        payload: {
+          intake: "outside",
+          fromEmail: email.fromEmail,
+          // Same key the accepted path stores, so an oversized flood spends the one per-sender budget.
+          senderKey: normalizeSender(email.fromEmail),
+          drop: "oversized",
+        } as never,
       })
       .onConflictDoNothing({ target: [inboundJob.channel, inboundJob.deliveryId] });
     return true;
@@ -142,8 +203,12 @@ export async function admitOutsideEmail(
   // SPF and DKIM come only from the receiving API, which is keyed by Resend's id.
   if (!email.resendEmailId) return { accepted: false, reason: "no Resend id to verify the sender with" };
 
+  // Read the tunable limits once, so every gate below (early check, size cap, the locked recount)
+  // sees the same numbers even if an owner edits them mid-flight.
+  const config = await readOutsideConfig();
+
   // Checked before the fetch so a flood from one domain costs a count, not an API call each.
-  const early = overLimit(await recentCounts(email, db));
+  const early = overLimit(await recentCounts(email, db), email.fromEmail, config);
   if (early) return { accepted: false, reason: early };
 
   const message = await fetchBody(email.resendEmailId);
@@ -159,18 +224,23 @@ export async function admitOutsideEmail(
   // The size check runs only after SPF, DKIM and alignment all pass, so the drop notice goes only
   // to an address the receiving MX authenticated. A forged oversized message is dropped at one of
   // the checks above and never earns a reply, so it cannot be used to mail a third party.
-  if (message.sizeBytes > OUTSIDE_LIMITS.maxBytes) {
-    return dropOversized(email, message.sizeBytes, notifyOversized);
+  if (message.sizeBytes > config.maxBytes) {
+    return dropOversized(email, message.sizeBytes, notifyOversized, config);
   }
 
-  const payload: OutsideEmailPayload = { ...email, intake: "outside", verifiedSender: email.fromEmail };
+  const payload: OutsideEmailPayload = {
+    ...email,
+    intake: "outside",
+    verifiedSender: email.fromEmail,
+    senderKey: normalizeSender(email.fromEmail),
+  };
 
   // The recount and the insert share a transaction holding a per-domain advisory lock, so two
   // messages arriving together cannot both read "one under the limit" and both get in. The lock
   // is taken after the Resend fetch, never across it.
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`outside-email:${senderDomain(email.fromEmail)}`}))`);
-    const late = overLimit(await recentCounts(email, tx));
+    const late = overLimit(await recentCounts(email, tx), email.fromEmail, config);
     if (late) return { accepted: false, reason: late };
     await enqueue({ channel: "email", deliveryId: email.messageId, payload }, tx);
     return { accepted: true };
