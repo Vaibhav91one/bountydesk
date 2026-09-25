@@ -1,4 +1,4 @@
-import { db, eq, report, sessionEvent, sql, type Executor } from "@/lib/db";
+import { db, eq, inArray, report, sessionEvent, sql, type Executor } from "@/lib/db";
 
 import { canTransition, type ReportState } from "./states";
 
@@ -50,6 +50,8 @@ export type NewReport = {
   verifiedSender?: string | null;
   /** Where the report starts. TRIAGING unless intake holds it at the gate (NEEDS_DECISION). */
   state?: ReportState;
+  /** The earlier report this one replies to, when intake matched its thread headers. Display only. */
+  repliesToReportId?: string | null;
   /** Null for a channel with no repository, e.g. email: the report stays analysis-only. */
   connectedRepositoryId: string | null;
   targetProfileId: string | null;
@@ -95,6 +97,38 @@ export async function ensureReport(input: NewReport, tx: Executor = db): Promise
   }
 
   return existing.id;
+}
+
+/**
+ * Find the report an inbound email reply threads to, or null.
+ *
+ * The tokens are the message ids from the reply's In-Reply-To and References headers, matched
+ * against an existing email report's source_ref (email:<id>). Those headers are sender-controlled,
+ * so a match links only when the parent report's verified_sender equals this reply's, both non-null:
+ * that stops one reporter from threading a reply onto another reporter's report by quoting its id.
+ * There is deliberately no subject fallback, which would cross-link every "Re: We received your
+ * report". The result is a display link on the case file and authorizes nothing.
+ */
+export async function findRepliedToReport(
+  parentTokens: string[],
+  verifiedSender: string | null | undefined,
+  tx: Executor = db,
+): Promise<string | null> {
+  const sender = verifiedSender?.trim().toLowerCase();
+  if (!sender || parentTokens.length === 0) return null;
+
+  const sourceRefs = parentTokens.map((token) => `email:${token}`);
+  const [row] = await tx
+    .select({ id: report.id })
+    .from(report)
+    .where(
+      sql`${report.channel} = 'email'
+        and ${inArray(report.sourceRef, sourceRefs)}
+        and lower(${report.verifiedSender}) = ${sender}`,
+    )
+    .limit(1);
+
+  return row?.id ?? null;
 }
 
 /**
