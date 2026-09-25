@@ -39,20 +39,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # webcmd is installed here so it, and the Chromium it drives, are baked in and run fully offline.
-# The install is the one moment network is allowed, at build time only. If webcmd's bundled Cloak
-# Chromium cannot be fetched offline in your build, point webcmd at the system chromium below.
-RUN npm install -g @agentrhq/webcmd
+# The install is the one moment network is allowed, at build time only. Pinned because
+# browser-oracle.mjs depends on webcmd internals (its result envelope and config.json format).
+RUN npm install -g @agentrhq/webcmd@0.8.4
 
-# Point webcmd at the system Chromium so it never needs its own download at run time, and disable
-# its two optional outbound calls (the sandbox blocks them anyway; this stops the wasted attempts).
+# webcmd picks its browser from $WEBCMD_CONFIG_DIR/config.json, not from env; with no config it
+# downloads its own Cloak Chromium, which fails offline. The `custom` kind points it at the system
+# Chromium. webcmd always launches headed (headless: false is hardcoded) and there is no X server
+# here, so the configured executable is a wrapper that adds --headless=new. The config dir is
+# world-writable because webcmd keeps its profile and session state there and the sandbox's exec
+# user is not guaranteed to be root.
+RUN printf '#!/bin/sh\nexec /usr/bin/chromium --headless=new "$@"\n' > /usr/local/bin/chromium-headless \
+    && chmod 755 /usr/local/bin/chromium-headless \
+    && mkdir -p /opt/webcmd \
+    && printf '%s\n' '{"mode":"local","updatedAt":"2026-09-25T00:00:00.000Z","browser":{"kind":"custom","executablePath":"/usr/local/bin/chromium-headless"}}' > /opt/webcmd/config.json \
+    && chmod 777 /opt/webcmd && chmod 644 /opt/webcmd/config.json
+
+# Disable webcmd's two optional outbound calls (the sandbox blocks them anyway; this stops the
+# wasted attempts). browser-oracle.mjs sets all three again for its own child processes.
 ENV WEBCMD_GLOBAL_MEMORY=off \
     WEBCMD_CANDIDATE_PUBLIC_IP=off \
-    WEBCMD_BROWSER=/usr/bin/chromium \
-    CHROME_PATH=/usr/bin/chromium
-
-# If your webcmd version needs an explicit setup step to record the browser path, run it at build
-# time (it must not need network):
-#   RUN webcmd setup --browser /usr/bin/chromium || true
+    WEBCMD_CONFIG_DIR=/opt/webcmd
 
 COPY browser-oracle.mjs /opt/bountydesk/browser-oracle.mjs
 
