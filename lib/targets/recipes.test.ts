@@ -28,17 +28,36 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns both recipes now that each oracle is fully provable", () => {
+test("juice-shop-v17.3.0 returns the two HTTP recipes and the DOM XSS recipe", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
-    ["juice-shop-sqli-search", "juice-shop-login-bypass"],
+    ["juice-shop-sqli-search", "juice-shop-login-bypass", "juice-shop-dom-xss-search"],
   );
+});
+
+test("the DOM XSS recipe carries a title-sink browserExploit with the canary only in the fragment", () => {
+  const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
+  const domXss = recipes.find((r) => r.id === "juice-shop-dom-xss-search");
+  assert.ok(domXss?.browserExploit, "the recipe has a browserExploit leg, not an HTTP oracle");
+  const leg = domXss.browserExploit;
+  assert.equal(leg.sink, "title");
+  // The payload rides only in the fragment (hashPayload); the server-visible path is the app shell.
+  assert.equal(leg.exploit.path, "/");
+  assert.equal(leg.negativeControl.path, "/");
+  // The exploit sets document.title to the run canary; the negative control carries it inertly.
+  assert.match(leg.exploit.hashPayload, /onerror=.*document\.title='\{\{canary\}\}'/);
+  assert.ok(leg.negativeControl.hashPayload.includes("{{canary}}"));
+  assert.doesNotMatch(leg.negativeControl.hashPayload, /onerror|<img/, "the control is inert");
+  // The canary must never appear in the HTTP path or a request body (it would reach the server).
+  assert.equal(leg.exploit.path.includes("{{canary}}"), false);
 });
 
 test("the registration fixture matches decisions.md Q18 exactly", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
-  for (const recipe of recipes) {
+  // The browser recipe carries a dummy fixture it never runs (reproduce.ts uses its browserExploit
+  // leg instead), so the shared-fixture check is only for the HTTP recipes.
+  for (const recipe of recipes.filter((r) => !r.browserExploit)) {
     assert.deepEqual(recipe.fixture.request, {
       method: "POST",
       path: "/api/Users/",
