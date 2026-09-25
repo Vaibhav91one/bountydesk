@@ -34,7 +34,8 @@ const COPY: Record<Decision["kind"], { title: string; description: string; confi
   },
   reject: {
     title: "Reject this report?",
-    description: "The report closes as denied. The reporter is sent nothing.",
+    description:
+      "The report closes as denied, and the reporter receives a fixed out-of-scope reply saying we reviewed it and will not take it further. Clicking confirm approves that reply. It discloses no reason and names no other report.",
     confirm: "Reject",
   },
   spam: {

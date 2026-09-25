@@ -148,15 +148,43 @@ async function lockAtGate(tx: Executor, reportId: string): Promise<{ ok: true } 
   return { ok: true };
 }
 
-/** Reject or mark as spam: close the report and send the reporter nothing. */
-export async function rejectAtGate(reportId: string, reviewer: string, spam: boolean): Promise<GateResult> {
-  return db.transaction(async (tx) => {
+/**
+ * Reject an outside report, or mark it as spam. Both close it as DENIED. A reject then sends the
+ * reporter the fixed out-of-scope reply; spam stays silent, because a spammer gets no confirmation
+ * that the address is read.
+ *
+ * The close commits before the send, the same order markDuplicateAtGate uses: a mail cannot be
+ * taken back and a state change can be retried, so a send that fails surfaces its reason without
+ * rolling the close back. The reviewer's click is the approval of that fixed text; nothing else
+ * ever sends it.
+ */
+export async function rejectAtGate(
+  reportId: string,
+  reviewer: string,
+  spam: boolean,
+  send: SendNotice = sendVerdictEmail,
+): Promise<GateResult> {
+  const closed = await db.transaction(async (tx): Promise<GateResult> => {
     const gate = await lockAtGate(tx, reportId);
     if (!gate.ok) return gate;
     await transition(reportId, "NEEDS_DECISION", "DENIED", tx);
     await recordEvent(reportId, spam ? "intake.marked_spam" : "intake.rejected", { reviewer }, { tx });
     return { ok: true };
   });
+  if (!closed.ok || spam) return closed;
+
+  try {
+    const reply = await sendNotice(reportId, "rejected", send);
+    if (reply.status === "refused") {
+      return { ok: false, reason: `Closed as rejected, but the reply was not sent: ${reply.reason}` };
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `Closed as rejected, but the reply did not send (${safeErrorText(error, 120)}). Try sending it again.`,
+    };
+  }
+  return { ok: true };
 }
 
 /**

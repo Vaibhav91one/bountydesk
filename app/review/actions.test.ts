@@ -45,9 +45,33 @@ mock.module("@/lib/delivery/worker", {
   },
 });
 
+// The gate actions mail the reporter through sendVerdictEmail. A real send would reach Resend with
+// a live key from .env.local, so it is faked here. ResendSendError and EMAIL_ASSET_ORIGIN are
+// re-declared because mock.module replaces the whole module, and lib/delivery/email imports both at
+// load; a plain Error from the fake is not an instance of this class, so notice.ts rethrows it and
+// the gate reports the failure as a partial-send reason.
+type ResendCall = { to: string; subject: string; text: string; idempotencyKey: string };
+let resendCalls: ResendCall[] = [];
+let resendFails = false;
+class FakeResendSendError extends Error {
+  readonly disposition = "transient";
+}
+mock.module("@/lib/email/resend", {
+  namedExports: {
+    sendVerdictEmail: async (opts: ResendCall) => {
+      resendCalls.push({ to: opts.to, subject: opts.subject, text: opts.text, idempotencyKey: opts.idempotencyKey });
+      if (resendFails) throw new Error("connection reset");
+      return { id: `re_${resendCalls.length}` };
+    },
+    ResendSendError: FakeResendSendError,
+    EMAIL_ASSET_ORIGIN: "https://app.test",
+  },
+});
+
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
 let actions: typeof import("./actions");
+let notice: typeof import("@/lib/email/notice");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -55,6 +79,7 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   actions = await import("./actions");
+  notice = await import("@/lib/email/notice");
 });
 
 after(async () => {
@@ -64,6 +89,8 @@ after(async () => {
 
 beforeEach(() => {
   deliverCalls = [];
+  resendCalls = [];
+  resendFails = false;
 });
 
 // The first arg keeps the old shape: REVIEWER_ID is the allowlisted reviewer (the DAL would return
@@ -552,12 +579,21 @@ async function seedGatedReport() {
       verifiedSender: contact,
     })
     .returning({ id: dbm.report.id });
-  return row.id;
+  return { id: row.id, contact };
+}
+
+async function hasEvent(reportId: string, type: string): Promise<boolean> {
+  const [row] = await dbm.db
+    .select({ id: dbm.sessionEvent.id })
+    .from(dbm.sessionEvent)
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, reportId), dbm.eq(dbm.sessionEvent.type, type)))
+    .limit(1);
+  return Boolean(row);
 }
 
 test("the gate actions refuse a caller who is not a reviewer, and change nothing", async () => {
   signOut();
-  const reportId = await seedGatedReport();
+  const { id: reportId } = await seedGatedReport();
   const { reportId: original } = await seedPendingReport();
 
   await assert.rejects(() => actions.rejectAtGateAction(reportId, true), /NEXT_REDIRECT/);
@@ -565,6 +601,7 @@ test("the gate actions refuse a caller who is not a reviewer, and change nothing
   await assert.rejects(() => actions.markDuplicateAction(reportId, original), /NEXT_REDIRECT/);
 
   assert.equal(await reportState(reportId), "NEEDS_DECISION");
+  assert.equal(resendCalls.length, 0, "a refused caller never triggers a reply");
 });
 
 test("a reviewer's gate decision moves the report and records who made it", async () => {
@@ -572,20 +609,52 @@ test("a reviewer's gate decision moves the report and records who made it", asyn
   const rejected = await seedGatedReport();
   const released = await seedGatedReport();
 
-  assert.deepEqual(await actions.rejectAtGateAction(rejected, false), { ok: true });
-  assert.deepEqual(await actions.runAnalysisAction(released), { ok: true });
+  assert.deepEqual(await actions.rejectAtGateAction(rejected.id, false), { ok: true });
+  assert.deepEqual(await actions.runAnalysisAction(released.id), { ok: true });
 
-  assert.equal(await reportState(rejected), "DENIED");
-  assert.equal(await reportState(released), "TRIAGING");
+  assert.equal(await reportState(rejected.id), "DENIED");
+  assert.equal(await reportState(released.id), "TRIAGING");
   const [event] = await dbm.db
     .select({ data: dbm.sessionEvent.data })
     .from(dbm.sessionEvent)
-    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, rejected), dbm.eq(dbm.sessionEvent.type, "intake.rejected")));
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, rejected.id), dbm.eq(dbm.sessionEvent.type, "intake.rejected")));
   assert.deepEqual(event.data, { reviewer: "gatekeeper" });
 
   // A malformed id never reaches the database.
   assert.equal((await actions.runAnalysisAction("not-a-uuid")).ok, false);
-  assert.equal((await actions.markDuplicateAction(rejected, "not-a-uuid")).ok, false);
+  assert.equal((await actions.markDuplicateAction(rejected.id, "not-a-uuid")).ok, false);
+});
+
+test("rejecting mails the fixed reply to the verified sender; marking spam stays silent", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  const spam = await seedGatedReport();
+
+  assert.deepEqual(await actions.rejectAtGateAction(rejected.id, false), { ok: true });
+  assert.equal(resendCalls.length, 1);
+  assert.equal(resendCalls[0].to, rejected.contact);
+  assert.equal(resendCalls[0].text, notice.NOTICES.rejected.text);
+  assert.ok(await hasEvent(rejected.id, "intake.rejected_sent"));
+
+  resendCalls = [];
+  assert.deepEqual(await actions.rejectAtGateAction(spam.id, true), { ok: true });
+  assert.equal(resendCalls.length, 0, "spam gets no reply");
+  assert.ok(await hasEvent(spam.id, "intake.marked_spam"));
+  assert.ok(!(await hasEvent(spam.id, "intake.rejected_sent")));
+});
+
+test("a reject whose reply fails after the close surfaces the reason and stays denied", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  resendFails = true;
+
+  const result = await actions.rejectAtGateAction(rejected.id, false);
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /Closed as rejected/);
+  assert.equal(await reportState(rejected.id), "DENIED", "the close is not rolled back");
+  assert.ok(await hasEvent(rejected.id, "intake.rejected"));
+  assert.ok(!(await hasEvent(rejected.id, "intake.rejected_sent")));
 });
 
 /**
