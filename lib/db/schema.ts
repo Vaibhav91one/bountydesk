@@ -303,6 +303,32 @@ export const reviewer = pgTable(
   (t) => [uniqueIndex("reviewer_email_key").on(t.email)],
 );
 
+/**
+ * The tunable knobs for outside-sender email intake (lib/email/outside-intake.ts).
+ *
+ * One row holds the whole config, because there is one intake to tune. When the row is absent the
+ * code falls back to OUTSIDE_LIMITS plus a built-in free-mail exempt list, so an empty table is a
+ * valid state and never a reason to reject mail. An exempt domain is not charged against the shared
+ * per-domain bucket: a whole free-mail provider would otherwise spend one 20/day pool between
+ * unrelated senders. The per-sender cap and the size cap still apply to everyone.
+ */
+export const outsideIntakeConfig = pgTable(
+  "outside_intake_config",
+  {
+    // Fixed id, not a random uuid: the check pins it to 1 so the table is a true singleton. Two
+    // owners saving at once, or one request retried, converge on the one row through onConflictDoUpdate
+    // instead of both inserting and leaving readOutsideConfig to pick between rows nondeterministically.
+    id: integer("id").primaryKey().default(1),
+    perSenderPerDay: integer("per_sender_per_day").notNull(),
+    perDomainPerDay: integer("per_domain_per_day").notNull(),
+    maxBytes: integer("max_bytes").notNull(),
+    exemptDomains: text("exempt_domains").array().notNull().default(sql`'{}'::text[]`),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [check("outside_intake_config_singleton", sql`${t.id} = 1`)],
+);
+
 export const report = pgTable(
   "report",
   {

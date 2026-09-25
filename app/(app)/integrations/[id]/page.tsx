@@ -12,7 +12,9 @@ import { appListingUrl, installationSettingsUrl, installUrl } from "@/lib/auth/o
 import { canManageReviewers, listReviewers, type ReviewerEntry } from "@/lib/auth/reviewers";
 import { formatStamp } from "@/lib/format";
 import { listConnections } from "@/lib/github/connections";
+import { readOutsideConfig, type OutsideConfig } from "@/lib/email/outside-config";
 import { findIntegration, INTEGRATIONS, type IntegrationIcon } from "../catalog";
+import { ConfigureEmailIntake } from "../configure-email-intake";
 import { ManageEmailAccess } from "../manage-email-access";
 
 import { ManageAccess, type AccessInstallation } from "./manage-access";
@@ -74,6 +76,8 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
   const isEmail = integration.id === "email";
   const reviewers: ReviewerEntry[] = isEmail ? await listReviewers() : [];
   const canManage = isEmail && canManageReviewers(session.email);
+  // The intake limits are owner-only, so read them only when this owner can edit them.
+  const outsideConfig: OutsideConfig | null = canManage ? await readOutsideConfig() : null;
 
   const Icon = ICONS[integration.icon];
   // Only GitHub has anything installed to read. The other three have no connection model at
@@ -155,7 +159,10 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 the way GitHub's is. One button, one dialog, the whole flow inside it. The signed-in
                 email is passed so the connect field can default to it. */}
             {isEmail ? (
-              <ManageEmailAccess reviewers={reviewers} canManage={canManage} ownerEmail={session.email} />
+              <>
+                {outsideConfig ? <ConfigureEmailIntake config={outsideConfig} /> : null}
+                <ManageEmailAccess reviewers={reviewers} canManage={canManage} ownerEmail={session.email} />
+              </>
             ) : null}
           </div>
         </div>
