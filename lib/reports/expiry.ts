@@ -1,4 +1,4 @@
-import { agentSession, and, db, inArray, report, sql } from "@/lib/db";
+import { agentSession, and, db, eq, inArray, report, sql, type Executor } from "@/lib/db";
 
 import { retireReports, type RetireOutcome } from "./retire";
 
@@ -23,6 +23,37 @@ export const EXPIRABLE_STATES = ["NEEDS_DECISION", "TRIAGING"] as const;
 /** turn_status values that mean a live investigation still owns the report; see agent_session. */
 const ACTIVE_TURN_STATUSES = ["RUNNING", "INVESTIGATING", "AWAITING_APPROVAL_HARNESS"] as const;
 
+function expirable() {
+  return and(
+    inArray(report.state, [...EXPIRABLE_STATES]),
+    // now() is the DB clock; updatedAt is bumped by every transition, so a state that has not
+    // moved in the TTL is genuinely untouched.
+    sql`${report.updatedAt} < now() - make_interval(days => ${EXPIRY_TTL_DAYS})`,
+    // Never expire a report a live investigation still owns, even if its state lags in TRIAGING.
+    sql`not exists (
+      select 1 from ${agentSession}
+      where ${agentSession.reportId} = ${report.id}
+        and ${agentSession.turnStatus} in (${sql.join(
+          ACTIVE_TURN_STATUSES.map((s) => sql`${s}`),
+          sql`, `,
+        )})
+    )`,
+  );
+}
+
+/**
+ * The sweep's condition, re-read inside retireReports' locked transaction. The candidate select
+ * runs earlier and outside it, so a run that started, or a transition that bumped updatedAt, in
+ * between would otherwise still be expired from a state that merely looks unchanged.
+ */
+export async function stillExpirable(tx: Executor, reportId: string): Promise<boolean> {
+  const rows = await tx
+    .select({ id: report.id })
+    .from(report)
+    .where(and(eq(report.id, reportId), expirable()));
+  return rows.length > 0;
+}
+
 export type SweepExpiredReportsResult = {
   candidates: number;
   outcomes: RetireOutcome[];
@@ -46,24 +77,7 @@ export async function sweepExpiredReports(
   const candidates = await db
     .select({ id: report.id })
     .from(report)
-    .where(
-      and(
-        inArray(report.state, [...EXPIRABLE_STATES]),
-        // now() is the DB clock; updatedAt is bumped by every transition, so a state that has
-        // not moved in the TTL is genuinely untouched.
-        sql`${report.updatedAt} < now() - make_interval(days => ${EXPIRY_TTL_DAYS})`,
-        // Never expire a report a live investigation still owns, even if its state lags in
-        // TRIAGING.
-        sql`not exists (
-          select 1 from ${agentSession}
-          where ${agentSession.reportId} = ${report.id}
-            and ${agentSession.turnStatus} in (${sql.join(
-              ACTIVE_TURN_STATUSES.map((s) => sql`${s}`),
-              sql`, `,
-            )})
-        )`,
-      ),
-    )
+    .where(expirable())
     .limit(limit);
 
   const ids = candidates.map((c) => c.id);
@@ -73,6 +87,7 @@ export async function sweepExpiredReports(
     reason: `expiry sweep: abandoned longer than ${EXPIRY_TTL_DAYS} days`,
     to: "EXPIRED",
     commit,
+    stillEligible: stillExpirable,
   });
 
   return { candidates: ids.length, outcomes };

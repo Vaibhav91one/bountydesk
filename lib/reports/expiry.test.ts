@@ -107,3 +107,27 @@ test("commit:false reports would-expire without moving the report", async () => 
   assert.equal(result.outcomes[0].status, "would-retire");
   assert.equal(await stateOf(old), "NEEDS_DECISION", "dry run leaves the state alone");
 });
+
+test("a report a run picks up after the candidate select is not expired", async () => {
+  const old = await seedReport("TRIAGING", daysAgo(40));
+  assert.equal(await dbm.db.transaction((tx) => expiry.stillExpirable(tx, old)), true);
+
+  // The session starts in the window between the sweep's select and its locked write.
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: old,
+    capabilityToken: `cap-late-${ids}`,
+    sessionId: `ses-late-${ids}`,
+    turnStatus: "RUNNING",
+  });
+  assert.equal(await dbm.db.transaction((tx) => expiry.stillExpirable(tx, old)), false);
+
+  const retire = await import("./retire");
+  const outcomes = await retire.retireReports([old], {
+    reason: "expiry sweep",
+    to: "EXPIRED",
+    commit: true,
+    stillEligible: expiry.stillExpirable,
+  });
+  assert.deepEqual(outcomes, [{ reportId: old, status: "no-longer-eligible", from: "TRIAGING" }]);
+  assert.equal(await stateOf(old), "TRIAGING");
+});

@@ -36,7 +36,7 @@ async function main(): Promise<void> {
 
   for (const outcome of outcomes) {
     const from = "from" in outcome ? outcome.from : "-";
-    console.log(`${outcome.reportId}  ${from} -> ${outcome.status === "missing" || outcome.status === "already-terminal" ? "(skipped)" : to}  ${outcome.status}`);
+    console.log(`${outcome.reportId}  ${from} -> ${outcome.status === "retired" || outcome.status === "would-retire" ? to : "(skipped)"}  ${outcome.status}`);
   }
 
   if (!commit) console.log("\ndry run, nothing written. Pass --commit to apply.");
