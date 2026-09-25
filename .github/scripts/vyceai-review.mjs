@@ -14,6 +14,9 @@
  * Env: VYCEAI_API_KEY, GH_TOKEN, PR_NUMBER, HEAD_SHA, REPOSITORY.
  */
 import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const run = promisify(execFile);
@@ -120,7 +123,17 @@ async function callModel(apiKey, prompt) {
 }
 
 async function postComment(prNumber, body) {
-  await run("gh", ["pr", "comment", String(prNumber), "--body-file", "-"], { input: body });
+  // The body goes through a temp file, not gh's stdin: promisified execFile has no `input` option
+  // (only the sync variants do), so a `--body-file -` with stdin would post nothing. A file also
+  // sidesteps argv length limits that a large `--body` would hit.
+  const dir = await mkdtemp(join(tmpdir(), "vyceai-review-"));
+  const file = join(dir, "comment.md");
+  try {
+    await writeFile(file, body);
+    await run("gh", ["pr", "comment", String(prNumber), "--body-file", file]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 async function main() {
