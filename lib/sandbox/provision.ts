@@ -274,7 +274,7 @@ async function waitForAppReady(
  * The other place execute() is allowed to gate anything: confirming the sandbox's own network
  * policy actually blocks egress, before the app starts or anything else touches it.
  */
-async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
+export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);
   if (!sandbox.networkBlockAll) {
     throw new Error("reproduction sandbox came up with networkBlockAll false");
@@ -513,7 +513,7 @@ function abortable<T>(work: Promise<T>, signal?: AbortSignal): Promise<T> {
  * fast path costs nothing extra. Pulling and building states wait; error and build_failed
  * fail at once with the state and the provider reason named.
  */
-async function ensureSnapshotActive(
+export async function ensureSnapshotActive(
   snapshotId: string,
   owner: string,
   signal?: AbortSignal,

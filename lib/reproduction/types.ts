@@ -124,6 +124,44 @@ export type ReproductionRecipe = {
      * having returned something. */
     oracleCheck: (response: ReproductionProbeResult, canary: string) => Promise<boolean> | boolean;
   };
+  /**
+   * A client-side (DOM/SPA XSS) exploit that a plain HTTP fetch can never confirm, because the
+   * bug only fires once a real browser executes the page's JavaScript. When present, the
+   * orchestrator runs this in place of the HTTP fixture/negativeControl/exploit legs above: it
+   * renders the target in a headless browser inside an isolated, offline sandbox and reads the
+   * DOM, so a recipe carries either the HTTP oracle fields or this, not both.
+   *
+   * The canary reaches the page only through the URL fragment (`hashPayload`), which a browser
+   * never sends to the server, and the browser runs in its own sandbox the target cannot read.
+   * So the run's canary appearing in the observed sink proves the client-side sink executed, not
+   * that the server reflected a value it was handed. See lib/sandbox/browser-probe.ts for the
+   * isolation argument this rests on, and docs/browser-probe.md for the threat model.
+   */
+  browserExploit?: BrowserExploitLeg;
+};
+
+/** Where an executed client-side payload leaves the run's canary for BountyDesk to read. `title`
+ * is `document.title` (only script can set it, so a fragment reflected as inert text never lands
+ * there); `dialog` is the argument to a hooked `alert`/`confirm`/`prompt`. Both are chosen over a
+ * DOM-wide grep on purpose: a hash reflected into `innerHTML` as text would put the canary in the
+ * serialized DOM without any script running, which is not the bug we are confirming. */
+export type BrowserExploitSink = "title" | "dialog";
+
+/** One browser navigation: the server-visible path (before `#`) and the client-only fragment
+ * (after `#`, where the canary rides). The full URL is the sandbox target origin + path + "#" +
+ * hashPayload. `hashPayload` may contain the literal "{{canary}}", substituted per run. */
+export type BrowserNavigation = { path: string; hashPayload: string };
+
+export type BrowserExploitLeg = {
+  sink: BrowserExploitSink;
+  /** An inert variant that carries the canary but does not execute it. It must leave the canary
+   * out of `sink`, the same clean-negative-control requirement the HTTP oracle has: if the
+   * baseline already shows the canary in the sink, the signal is unreliable and the run is
+   * ANALYSIS_ONLY rather than a guessed verdict. */
+  negativeControl: BrowserNavigation;
+  /** The payload that, if the client-side sink is vulnerable, executes and writes the run's
+   * canary into `sink`. */
+  exploit: BrowserNavigation;
 };
 
 /**
