@@ -215,7 +215,8 @@ const githubArm: DeliveryArm = async (ctx, d) => {
     // catches exactly the token-mint case. Refuse it like the pre-mint activeRepository failure
     // instead of retrying against an install that will keep refusing, and hold it: reconnecting is
     // a human's action, and the reconcile backstop will withdraw the stale grant on its next tick.
-    if (err instanceof GitHubApiError && (err.status === 403 || err.status === 404)) {
+    // A rate-limited 403 is not a refusal and falls through to the retry path.
+    if (err instanceof GitHubApiError && !err.rateLimited && (err.status === 403 || err.status === 404)) {
       return {
         kind: "refused",
         hold: true,

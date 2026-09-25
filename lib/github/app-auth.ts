@@ -79,11 +79,28 @@ export type InstallationToken = { token: string; expiresAt: string };
  */
 export class GitHubApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  /**
+   * GitHub answers a rate limit with 403 as well as 429, so a 403 alone does not mean the App lost
+   * access. Minting tokens in a burst is itself a documented secondary-rate-limit trigger.
+   */
+  readonly rateLimited: boolean;
+  constructor(status: number, message: string, rateLimited = false) {
     super(message);
     this.name = "GitHubApiError";
     this.status = status;
+    this.rateLimited = rateLimited;
   }
+}
+
+/** GitHub's rate-limit signals: an exhausted primary quota, a retry-after, or the limit named in the body. */
+function isRateLimited(response: Response, text: string): boolean {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  return (
+    response.headers.get("x-ratelimit-remaining") === "0" ||
+    response.headers.has("retry-after") ||
+    /rate limit/i.test(text)
+  );
 }
 
 /**
@@ -124,6 +141,7 @@ async function requestInstallationToken(
     throw new GitHubApiError(
       response.status,
       `GitHub installation token request failed with ${response.status}: ${text}`,
+      isRateLimited(response, text),
     );
   }
 

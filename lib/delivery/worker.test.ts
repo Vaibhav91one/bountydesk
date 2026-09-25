@@ -838,6 +838,31 @@ test("a token-mint 404 is treated the same as a 403", async () => {
   assert.match(delivery.lastError ?? "", /no longer connected/);
 });
 
+test("a rate-limited token-mint 403 stays retryable rather than refusing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    throw new GitHubApiError(
+      403,
+      "GitHub installation token request failed with 403: You have exceeded a secondary rate limit",
+      true,
+    );
+  };
+
+  await worker.deliverOnce("w-mint-403-rl", { deps });
+
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING", "a rate limit is transient, not a lost grant");
+
+  const [held] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+  assert.equal(held.rhr, false);
+});
+
 test("a token-mint 5xx stays retryable rather than refusing", async () => {
   await drainOthers();
   const fixture = await seedFixture();

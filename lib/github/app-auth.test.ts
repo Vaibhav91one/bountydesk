@@ -207,6 +207,22 @@ test("a failed mint throws GitHubApiError carrying the status", async () => {
   }
 });
 
+test("a failed mint marks a rate-limited 403 apart from an authorization 403", async () => {
+  const cases: [Response, boolean][] = [
+    [new Response("Resource not accessible by integration", { status: 403 }), false],
+    [new Response("forbidden", { status: 403, headers: { "x-ratelimit-remaining": "0" } }), true],
+    [new Response("forbidden", { status: 403, headers: { "retry-after": "60" } }), true],
+    [new Response("You have exceeded a secondary rate limit", { status: 403 }), true],
+    [new Response("slow down", { status: 429 }), true],
+  ];
+  for (const [response, rateLimited] of cases) {
+    const stub = (async () => response) as typeof fetch;
+    const err = await mintInstallationToken(1, 1, { fetchImpl: stub }).catch((e: unknown) => e);
+    assert.ok(err instanceof GitHubApiError);
+    assert.equal(err.rateLimited, rateLimited);
+  }
+});
+
 test("mintInstallationAccessToken mints an unscoped, whole-installation token", async () => {
   let seenUrl = "";
   let seenBody: unknown;
