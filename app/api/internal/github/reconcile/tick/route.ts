@@ -7,8 +7,8 @@ export const runtime = "nodejs";
 const MAX_TICK_MS = 20_000;
 
 /**
- * The reconcile backstop for GitHub access revocation. Nothing schedules this in-repo (no cron
- * config exists here); a scheduler or the Zerops worker calls it with the bearer secret. It is
+ * The reconcile backstop for GitHub access revocation, on demand. The worker daemon runs it every
+ * 15 minutes (scripts/run-worker-daemon.ts); this route is the bearer-guarded manual trigger. It is
  * idempotent and cheap: one read of GitHub's current installations, then per still-live
  * installation its repository set, revoking only what the lifecycle webhooks missed.
  */
