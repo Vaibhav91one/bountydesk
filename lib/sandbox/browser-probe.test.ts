@@ -14,7 +14,7 @@ process.env.BOUNTYDESK_BROWSER_IMAGE_NAME = "ghcr.io/bountydesk/browser:test-sha
 
 // The marker browser-probe.ts expects to read back from the booted image. The fake sandbox echoes
 // this from /etc/bountydesk-build-marker unless a test overrides markerValue to force a mismatch.
-const EXPECTED_MARKER = "browser-78b8996";
+const EXPECTED_MARKER = "browser-dcl-1";
 
 const FAKE_BROWSER_SANDBOX: Sandbox = {
   id: "browser-sandbox-1",
@@ -55,7 +55,11 @@ let oracleRan = false;
 let stepFires: (label: string) => boolean = (label) => label === "exploit";
 let stepNavigates: (label: string) => boolean = () => true;
 
-function decodeParams(command: string): { steps: Array<{ label: string; path: string; hashPayload: string }> } {
+function decodeParams(command: string): {
+  steps: Array<{ label: string; path: string; hashPayload: string }>;
+  waitUntil?: string;
+  settleMs?: number;
+} {
   const match = /printf %s '([A-Za-z0-9+/=]+)'/.exec(command);
   if (!match) throw new Error("oracle command carried no base64 params");
   return JSON.parse(Buffer.from(match[1], "base64").toString("utf8"));
@@ -244,6 +248,15 @@ test("runBrowserOracle is ANALYSIS_ONLY when the target never rendered", async (
   const result = await mod.runBrowserOracle(TARGET, leg(), CANARY);
   assert.equal(result.ok, true);
   assert.equal((result as { decision: string }).decision, "ANALYSIS_ONLY");
+});
+
+test("the host waits for domcontentloaded, not the full load event", async () => {
+  // A heavy SPA never fires the full load event inside the timeout, which reported navigated:false
+  // even though the DOM parsed and the sink ran. The host must pass domcontentloaded and a settle.
+  await mod.runBrowserOracle(TARGET, leg(), CANARY);
+  const params = decodeParams(lastOracleCommand);
+  assert.equal(params.waitUntil, "domcontentloaded");
+  assert.ok((params.settleMs ?? 0) >= 1500, "a settle gives client-side JS time to run after DOM ready");
 });
 
 test("the canary rides only in the fragment, never the server-visible path", async () => {
