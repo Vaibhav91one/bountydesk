@@ -1,5 +1,5 @@
 {
-  "id": "4c6925ee-1d28-4d90-9198-f22d09764c86",
+  "id": "77f992a2-270e-48ad-82b4-5e584daf5cd7",
   "prevId": "3329ca9d-98ce-4246-8118-95e024b26df2",
   "version": "7",
   "dialect": "postgresql",
@@ -1999,10 +1999,10 @@
       "columns": {
         "id": {
           "name": "id",
-          "type": "uuid",
+          "type": "integer",
           "primaryKey": true,
           "notNull": true,
-          "default": "gen_random_uuid()"
+          "default": 1
         },
         "per_sender_per_day": {
           "name": "per_sender_per_day",
@@ -2048,7 +2048,12 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "outside_intake_config_singleton": {
+          "name": "outside_intake_config_singleton",
+          "value": "\"outside_intake_config\".\"id\" = 1"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.owner_advisory": {

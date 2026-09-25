@@ -312,15 +312,22 @@ export const reviewer = pgTable(
  * per-domain bucket: a whole free-mail provider would otherwise spend one 20/day pool between
  * unrelated senders. The per-sender cap and the size cap still apply to everyone.
  */
-export const outsideIntakeConfig = pgTable("outside_intake_config", {
-  id: id(),
-  perSenderPerDay: integer("per_sender_per_day").notNull(),
-  perDomainPerDay: integer("per_domain_per_day").notNull(),
-  maxBytes: integer("max_bytes").notNull(),
-  exemptDomains: text("exempt_domains").array().notNull().default(sql`'{}'::text[]`),
-  updatedAt: updatedAt(),
-  updatedBy: text("updated_by"),
-});
+export const outsideIntakeConfig = pgTable(
+  "outside_intake_config",
+  {
+    // Fixed id, not a random uuid: the check pins it to 1 so the table is a true singleton. Two
+    // owners saving at once, or one request retried, converge on the one row through onConflictDoUpdate
+    // instead of both inserting and leaving readOutsideConfig to pick between rows nondeterministically.
+    id: integer("id").primaryKey().default(1),
+    perSenderPerDay: integer("per_sender_per_day").notNull(),
+    perDomainPerDay: integer("per_domain_per_day").notNull(),
+    maxBytes: integer("max_bytes").notNull(),
+    exemptDomains: text("exempt_domains").array().notNull().default(sql`'{}'::text[]`),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [check("outside_intake_config_singleton", sql`${t.id} = 1`)],
+);
 
 export const report = pgTable(
   "report",

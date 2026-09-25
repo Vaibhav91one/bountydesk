@@ -64,6 +64,29 @@ test("an owner can save valid limits, and the row round-trips lowercased and de-
   assert.deepEqual(saved.exemptDomains, ["gmail.com", "proton.me"]);
 });
 
+test("two saves converge on one row, the second value wins, and the read is deterministic", async () => {
+  // Two writes stand in for two concurrent owners or a retried request. The fixed-id singleton plus
+  // onConflictDoUpdate must leave exactly one row rather than racing into two that the read could
+  // pick between arbitrarily.
+  await config.upsertOutsideConfig(
+    { perSenderPerDay: 7, perDomainPerDay: 30, maxBytes: 100 * 1024, exemptDomains: ["one.test"] },
+    OWNER,
+  );
+  await config.upsertOutsideConfig(
+    { perSenderPerDay: 9, perDomainPerDay: 40, maxBytes: 200 * 1024, exemptDomains: ["two.test"] },
+    OWNER,
+  );
+
+  const rows = await dbm.db.select().from(dbm.outsideIntakeConfig);
+  assert.equal(rows.length, 1, "the config table holds exactly one row");
+
+  const read = await config.readOutsideConfig();
+  assert.equal(read.perSenderPerDay, 9);
+  assert.equal(read.perDomainPerDay, 40);
+  assert.equal(read.maxBytes, 200 * 1024);
+  assert.deepEqual(read.exemptDomains, ["two.test"]);
+});
+
 test("a non-owner cannot change the limits", async () => {
   session = { email: "member@bountydesk.test" };
   const result = await actions.saveOutsideConfig({
