@@ -183,6 +183,27 @@ test("a build that keeps failing leaves the report unbound and still queues its 
   assert.ok(await analysisJob(reportId));
 });
 
+test("a target bound by hand while the build waits is not mistaken for this upload's build", async () => {
+  const reportId = await heldUpload({ imageRef: "nginx:1.27", imageDigest: IMAGE_DIGEST });
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  const [other] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({ name: `unrelated-${n}`, imageDigest: `sha256:${"f".repeat(64)}` })
+    .returning({ id: dbm.targetProfile.id });
+  const { bindTarget } = await import("@/lib/targets/bind");
+  assert.equal((await bindTarget(reportId, other.id, "reviewer")).ok, true);
+
+  const driver = fakeDriver();
+  await build.buildUploadOnce({ driver });
+  assert.equal(driver.calls.length, 0);
+  const upload = await uploadRow(reportId);
+  assert.equal(upload.buildState, "FAILED");
+  assert.match(upload.buildError ?? "", /uploaded material was not built/);
+  // The reviewer's choice stands, and the report still gets its run.
+  assert.equal((await reportRow(reportId)).targetProfileId, other.id);
+  assert.ok(await analysisJob(reportId));
+});
+
 test("approval refuses bad target settings, uploads with no material, and a second approval", async () => {
   const bare = await heldUpload({});
   assert.deepEqual(await gate.approveUploadTarget(bare, "reviewer", TARGET), {

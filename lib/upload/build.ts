@@ -23,6 +23,9 @@ import { uploadBuildPlan, type ReviewedUploadTarget } from "./gate";
  * sandbox allows and the jobs loop's health budget is a few minutes.
  */
 
+/** A build that must not run, as opposed to one that failed; it is not retried. */
+class UploadBuildSkipped extends Error {}
+
 /** Longer than the build sandbox's 30 minute ttl, so a live build never loses its lease. */
 const LEASE_MINUTES = 45;
 /** A failed build is retried once, for a transient provider failure; after that it stays failed. */
@@ -129,11 +132,19 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
   const { definition, ecosystem } = upload.reviewedTarget;
 
   const [bound] = await db
-    .select({ targetProfileId: report.targetProfileId })
+    .select({ targetProfileId: report.targetProfileId, targetName: targetProfile.name })
     .from(report)
+    .leftJoin(targetProfile, eq(targetProfile.id, report.targetProfileId))
     .where(eq(report.id, upload.reportId))
     .limit(1);
-  if (bound?.targetProfileId) return definition.name;
+  if (bound?.targetProfileId) {
+    // Only this upload's own profile counts as an earlier attempt's success. A reviewer can bind some
+    // other target by hand while the build waits, and then this material was never built.
+    if (bound.targetName === definition.name) return definition.name;
+    throw new UploadBuildSkipped(
+      `a reviewer bound ${bound.targetName ?? "another target"} to the report, so the uploaded material was not built`,
+    );
+  }
 
   const [existing] = await db
     .select({ id: targetProfile.id })
@@ -186,7 +197,7 @@ export async function buildUploadOnce({
     const reason = safeErrorText(error, 500);
     console.error(`upload build ${upload.id} failed: ${reason}`);
     await finish(upload, {
-      state: upload.buildAttempts < MAX_BUILD_ATTEMPTS ? "PENDING" : "FAILED",
+      state: upload.buildAttempts < MAX_BUILD_ATTEMPTS && !(error instanceof UploadBuildSkipped) ? "PENDING" : "FAILED",
       error: reason,
     });
   }
