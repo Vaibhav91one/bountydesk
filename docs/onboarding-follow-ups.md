@@ -4,7 +4,17 @@ The manifest-driven onboarding pipeline (`lib/build-onboarding`) builds a connec
 into a Daytona snapshot, has an onboarding agent propose a target manifest, and after a reviewer
 approves it writes the `TargetProfile`. The first live run of the whole chain, against
 `crccheck/docker-hello-world`, proved the build, GHCR push, snapshot, manifest proposal and
-approval all work, and surfaced the items below. This is the future-work record for the pipeline.
+approval all work, and surfaced the items below. This is the future-work record for the pipeline:
+each section says what is built and what is still open.
+
+Still open, in one place:
+
+- Rotating a connectionless target profile (see "Binding a target without a connected repository").
+- A tarball without a Dockerfile at its root.
+- Building from a non-GitHub git URL.
+- Reclaiming each mesh service's pushed image, and deleting images on registries other than GHCR.
+- Scheduling the trial-snapshot sweep.
+- A self-hosted private registry at multi-tenant scale.
 
 ## Source identity is resolved before customer code runs
 
@@ -25,8 +35,9 @@ digest, so a source with no git commit (an uploaded tarball, a prebuilt image) c
 `sourceIdentityDigest`, the build driver's pre-build gate, the onboarding write in `verifyAndWrite`,
 and `configureConnectionlessTarget`. A present-but-mutable commit ref like `HEAD` is still refused
 rather than hashed into a stable-looking identity. The git-clone driver still needs a commit to check
-out, so it accepts the anchor but stops with a clear error when there is no commit; staging a non-git
-source is the remaining work, and belongs to the non-GitHub build path.
+out. Non-git sources are staged by their own paths in the build driver: an archive is re-hashed in the
+sandbox and unpacked, and a prebuilt image is wrapped in `FROM <name>@<digest>` with the digest baked
+into the build marker (`docs/decisions.md` Q30).
 
 ## Make the registry handoff pluggable, not GHCR-specific
 
@@ -55,19 +66,23 @@ about ten seconds with no sandbox create, and a sandbox then boots from the mate
 once the snapshot is active the origin registry tag is dead weight, and the driver deletes it,
 best-effort, after `waitForSnapshotActive`. GHCR deletion needs a delete-scoped token: set
 `REGISTRY_DELETE_TOKEN` (a token with `delete:packages`) to reclaim the image, otherwise it is left
-in place, which is harmless because the snapshot is self-contained. The mesh path pushes one image per
-service and does not yet reclaim them; that is the remaining wiring here.
+in place, which is harmless because the snapshot is self-contained. Only GHCR has a delete path: on
+any other registry host the image is left in place with a warning, whatever tokens are set. The mesh
+path pushes one image per service and does not yet reclaim them.
 
 `sweepTrialSnapshots` (`lib/sandbox/daytona.ts`) reclaims build-created snapshots that no live target
 depends on: it deletes `onboarding-` snapshots whose id is not in the protected set, where the set is
 every snapshot a target profile pins (single-image and each mesh service) plus every in-flight
-onboarding row's built snapshot (`collectProtectedSnapshotIds` in `worker.ts`). It runs as
-maintenance, not on the onboarding hot path, so a concurrent build's snapshot cannot be swept before
-the database records it, and it never reaches the live API from an ordinary onboarding.
+onboarding row's built snapshot (`collectProtectedSnapshotIds` in `worker.ts`). It is meant to run
+as maintenance, not on the onboarding hot path, so a concurrent build's snapshot cannot be swept
+before the database records it. `sweepOrphanSnapshots` wraps it, but nothing calls that yet: no
+worker loop or script schedules the sweep, so trial snapshots still accumulate until it is run.
 
 Remaining work:
 
 - Reclaim each mesh service's pushed image the way the single-image path does.
+- Add a delete path for registries other than GHCR.
+- Schedule `sweepOrphanSnapshots` as a maintenance job.
 - At multi-tenant scale, self-host a private registry. Zot is a single static binary over
   filesystem or S3 storage and is the lightweight option; Harbor adds per-project RBAC, which is
   per-tenant isolation, plus scanning and retention. This is the proper fix for customer images
@@ -133,17 +148,24 @@ Known limits:
 - Dependency-to-dependency lookups (two linked children) have not been exercised live; the proven
   path is the app (link parent) reaching a dependency (link child).
 
-## configureTarget requires an active connected repository
+## Binding a target without a connected repository
 
-`configureTarget` (`lib/targets/configure.ts`) throws
-`GitHub repository <id> is not an active connected repository` unless a `connected_repository`
-row under a live installation exists. The GitHub App install webhook creates that row; a
-hand-driven onboarding, or an email or upload target with no GitHub identity, has none. This is
-the per-medium gap from the intake discussion: a non-GitHub target cannot be written today.
+`configureTarget` (`lib/targets/configure.ts`) still requires a `connected_repository` row under a
+live installation, and that is right for GitHub-sourced targets. A target with no GitHub identity
+binds through `configureConnectionlessTarget` instead, which writes a profile with no connected
+repository and the same digest, snapshot and build-marker proofs, and requires an identity anchor and
+a `build_recipe_digest`. Its caller is `bindConnectionlessTargetFromBuild`
+(`lib/build-onboarding/connectionless-bind.ts`), which the upload build loop uses.
 
-Future work: give `configureTarget` a path that binds a target to a `repoId` without a GitHub
-`connected_repository`, for email, upload and other non-GitHub sources, while keeping the
-connected-repo check for GitHub-sourced targets.
+Remaining work:
+
+- Rotation. A re-bind with changed pins throws `TargetProfileExistsError`, and `rotateTarget` and
+  `npm run rotate:target` are GitHub-only, so a connectionless target cannot be rebuilt in place.
+- A tarball without a Dockerfile. The upload build plan always uses `Dockerfile` at the archive root;
+  the onboarding agent that writes a Dockerfile for a GitHub repository is not wired to uploads, so
+  such a build fails and the report ends `ANALYSIS_ONLY`.
+- A non-GitHub git URL. The `git` source kind accepts any clone URL, but no intake or onboarding path
+  produces one.
 
 ## The build egress allowlist is per-ecosystem
 

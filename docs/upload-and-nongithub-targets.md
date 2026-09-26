@@ -1,16 +1,19 @@
 # Upload intake and non-GitHub targets
 
-This is the design record for the work that lets a report be reproduced and delivered without a
-GitHub identity. Four pieces make that possible: a `configureTarget` path that binds a target
-without a connected GitHub repository, a registry handoff that is not tied to GHCR and does not
-leave customer images lying around, an onboarding start command the platform verifies rather than
-trusts, and an upload outbound contract that rides the email delivery path.
+This is the record for the work that lets a report be reproduced and delivered without a GitHub
+identity. It started as a design record (#264) and now describes what was built, in #266, #267,
+#281, #283 and #285, with each deviation from the design called out where it happened. The
+decisions are `docs/decisions.md` Q30 (non-GitHub sources) and Q32 (upload intake).
 
-Two records already own the neighbouring ground and are not repeated here.
-[`docs/onboarding-follow-ups.md`](onboarding-follow-ups.md) is the future-work record for the
-build, registry and snapshot pipeline. [`docs/target-profiles.md`](target-profiles.md) covers the
-target manifest and the dynamic-setup flow. This doc references them where the design leans on
-them and covers only what those two do not.
+Four pieces make it work: a path that binds a target without a connected GitHub repository, a
+registry handoff that is not tied to GHCR and does not leave customer images behind, an onboarding
+start command the platform boots before it stores, and an upload channel whose verdict rides the
+email delivery path.
+
+Two records own the neighbouring ground and are not repeated here.
+[`docs/onboarding-follow-ups.md`](onboarding-follow-ups.md) is the future-work record for the build,
+registry and snapshot pipeline, and lists what is still open. [`docs/target-profiles.md`](target-profiles.md)
+covers the target manifest and the dynamic-setup flow.
 
 ## Invariants every piece here holds
 
@@ -27,272 +30,140 @@ These come from `AGENTS.md` and `docs/decisions.md`, and none of the work below 
 - No channel records a `DeliveryAttempt` or reaches `DELIVERED` without a verified recipient and a
   transport receipt.
 
-## The non-GitHub configureTarget seam
+## Binding a target without a connected repository
 
-### Current state
+`configureTarget` in `lib/targets/configure.ts` still requires a `connected_repository` row under a
+live installation, and keeps doing so for GitHub-sourced targets. A target with no GitHub identity
+binds through `configureConnectionlessTarget` in the same file. It writes the profile with no
+connected repository, and it requires the same proofs: an image digest, a snapshot id, a build
+marker, an identity anchor and a `build_recipe_digest`. Its caller is
+`bindConnectionlessTargetFromBuild` (`lib/build-onboarding/connectionless-bind.ts`), which turns a
+finished build into a profile; the upload build loop is the one production caller.
 
-`configureTarget` in `lib/targets/configure.ts` throws
-`GitHub repository <id> is not an active connected repository` unless a `connected_repository`
-row under a live installation exists. The GitHub App install webhook creates that row. A
-hand-driven onboarding, or an email or upload target with no GitHub identity, has none, so it
-cannot get a profile. This is the gap `docs/onboarding-follow-ups.md` names under
-"configureTarget requires an active connected repository": a non-GitHub target cannot be written
-today, which means a non-GitHub report cannot be reproduced at all.
+The identity anchor is any one of a commit SHA, a source archive digest, or the image's own digest
+(`hasIdentityAnchor` in `lib/build-onboarding/source-identity.ts`). The design did not name this;
+it was needed because an uploaded tarball or prebuilt image has no commit.
 
-### Design
+The build driver stages three source kinds (`lib/build-onboarding/build-driver.ts`,
+`stageSource` in `daytona-build-driver.ts`):
 
-Give `configureTarget` a second path that binds a target to a target id without a GitHub
-`connected_repository`, while keeping the connected-repo check for GitHub-sourced targets. The
-inputs the check guards, the image digest, snapshot id and build marker, all come from the same
-server-held sources whichever path writes the profile, so the trust model does not change; only
-the identity that the profile hangs off does. This seam is shared groundwork: both a non-GitHub
-onboarded target and a reproducible uploaded report need it, so it is built once rather than per
-channel.
+- `git`: clone, check out the exact SHA, confirm HEAD. Only the server-derived github.com URL of the
+  same repository ever gets a token.
+- `archive`: the controller hashes the bytes, the sandbox re-hashes them before `tar -xf`, and the
+  archive digest is the build marker.
+- `image`: nothing is staged. The driver writes a Dockerfile of `FROM <name>@<digest>` and bakes
+  the digest into `/etc/bountydesk-build-marker`, so the booted snapshot carries a marker the
+  platform checks. The image's registry must be on `PREBUILT_IMAGE_REGISTRIES` (default
+  `docker.io,ghcr.io`), because it joins the build egress allowlist.
 
-### What this does not relax
+What this does not relax: reproduction still runs in the no-egress sandbox, and the agent still
+reaches the app only through `probe_target` and `probe_target_write`.
 
-The profile still carries a verified image digest, snapshot id and build marker, and a dynamic
-write still refuses to go without a `build_recipe_digest`. Reproduction still runs in the
-no-egress sandbox, and the agent still reaches the app only through `probe_target` and
-`probe_target_write`. Removing the GitHub identity requirement does not remove any of the identity
-proofs that make a snapshot trustworthy.
+Not built: rotating a connectionless profile (a changed re-bind throws `TargetProfileExistsError`),
+a tarball without a Dockerfile at its root, and a non-GitHub git URL. They are listed in
+`docs/onboarding-follow-ups.md`.
 
 ## Pluggable and ephemeral registry handoff
 
-### Current state
+A registry cannot be removed from the design. Daytona's non-registry snapshot paths run its own
+builder with open egress, which the untrusted-build model forbids, and there is no path that
+imports an image tarball. So the image built in the egress-controlled build sandbox travels through
+a registry to reach the offline reproduction snapshot.
 
-A registry cannot be removed from the design, and `docs/onboarding-follow-ups.md` explains why:
-Daytona's non-registry snapshot paths run its own builder with open egress, which the
-untrusted-build model forbids, and there is no path that imports a prebuilt image tarball. So the
-image built inside the egress-controlled build sandbox has to travel through a registry to reach
-the offline reproduction snapshot. The open question is which registry and how private, not
-whether.
+As built, `RegistryHandoff` (`lib/build-onboarding/registry.ts`) owns the push, the digest read and
+the delete, and returns `{ pullableTag, digest }` as the design specified. The env is
+`REGISTRY_HOST`, `REGISTRY_USER`, `REGISTRY_NAMESPACE` and `REGISTRY_PUSH_TOKEN`, defaulting to
+`ghcr.io`, `bountydesk`, and the old `GHCR_NAMESPACE` and `GHCR_PUSH_TOKEN`, so an existing
+deployment needs no change. `IMAGE_NAME_RE` in `lib/targets/manifest.ts` accepts any registry host
+and still refuses a tagged or digest-pinned name. There is one implementation, as the design asked;
+no ECR or GAR variant was added.
 
-The coupling to GHCR is thin and lives in a few places. `lib/build-onboarding/daytona-build-driver.ts`
-holds the `docker login/push/logout ghcr.io -u bountydesk` host and reads `GHCR_NAMESPACE` and
-`GHCR_PUSH_TOKEN`. `lib/targets/manifest.ts` hardcodes the registry host in its image-name check:
-`IMAGE_NAME_RE = /^ghcr\.io\/.../`. Everything downstream is already registry-agnostic:
-`createSnapshot` in `lib/sandbox/daytona.ts` takes any `registry/name` tag, and a reproduction
-pull has been proven against both GHCR and a plain Docker Hub image. The build marker that
-re-verifies identity is baked into the image layers and read from inside the booted snapshot
-(`lib/sandbox/build-marker.ts`), so it survives whatever registry the image passes through, and
-the image digest folded into `build_recipe_digest` is a content hash, registry-independent by
-construction.
+Images are ephemeral where the registry allows it. The open question the design raised is settled:
+Daytona pulls a snapshot's image eagerly at registration (verified 2026-09-26), so the driver
+deletes the pushed image once the snapshot is active. That needs `REGISTRY_DELETE_TOKEN`, a token
+with `delete:packages`. The design expected a registry-agnostic delete by digest; what was built
+deletes a GHCR package version by tag through the GitHub Packages API. On any other registry, or
+without the token, the image is left in place with a warning, which is harmless because the
+snapshot is self-contained. The mesh path does not reclaim its images yet.
 
-### Design: parameterize the registry
+Snapshots are handled as designed. `sweepTrialSnapshots` (`lib/sandbox/daytona.ts`) deletes
+`onboarding-` snapshots that no target profile, mesh service or in-flight onboarding row
+references. Nothing schedules it yet.
 
-The seam parameterizes which registry, not whether there is one. A thin registry handoff replaces
-the GHCR literals at the push site. It resolves the untagged repo ref for a build, logs in inside
-the build sandbox right before the push and hands back a teardown that logs out right after, and
-names the host to add to the build egress allowlist so a non-GHCR registry is reachable. The
-return contract is unchanged: the driver still yields a pullable tag ref and a `sha256:` digest
-read from the pushed image's `RepoDigests`. Nothing downstream changes, because the seam only
-removes the `ghcr.io` assumption from the push, not the shape of what push produces.
+## The onboarding start command
 
-Credentials thread exactly as they do now. The push token is server-held env, introduced only at
-login time inside the build sandbox and removed by the returned teardown, so the untrusted build
-still never runs with a reusable token. The login step owns the provider-specific auth, whether
-that is `docker login <host>`, an ECR password exchange, or a GAR key.
+The reproduction sandbox is the target container, booted offline with no Docker daemon, so a
+`docker run` start command can never work. `validateStartCommand` and `assertSafeMeshStartCommand`
+reject host-model commands, and the agent's `commit_compose_mesh` tool refuses `command` and
+`entrypoint`.
 
-New env replaces the GHCR-specific names: a registry host, user, namespace and push token, with
-today's GHCR values kept as the defaults so nothing breaks. Per-medium and per-tenant routing
-falls out of setting different values with no code branch: GitHub targets can keep GHCR, email or
-upload targets can point at a neutral registry, and each tenant can get its own namespace. The
-GHCR leak in `manifest.ts` is fixed at the same time by generalizing `IMAGE_NAME_RE` to the
-configured registry host while keeping the untagged and undigested rule.
+As built, the proposed start command reaches the reviewer through `reviewableManifest`, and the
+boot check runs after approval: `verifyAndWrite` in `lib/build-onboarding/worker.ts` re-validates
+the command, boots the snapshot offline with it and waits for readiness, and writes the
+`TargetProfile` only if that succeeds. A command that does not boot leaves the row approved and
+unwritten. This differs from the design in one respect: the boot happens after the reviewer
+approves, not before, so the reviewer does not see a "verified to boot offline" result; a command
+that fails simply never becomes a profile.
 
-This is one interface with one implementation today, which the codebase normally treats as an
-abstraction to avoid. It earns its place because its purpose is to delete the GHCR coupling and
-its return type is unchanged, so it is a rename with a seam, not a speculative factory. Do not add
-ECR or GAR implementations until a second registry is actually wired.
+## Upload intake
 
-### Design: make images ephemeral
+The design put the upload UI under `app/(app)/` and had the route create the report at
+`ANALYSIS_ONLY`. As built, the public page is `/submit` (`app/submit`), outside `app/(app)`,
+because an uploader is not a reviewer and needs no account, and the report lands at
+`NEEDS_DECISION`, the same gate an outside email waits at.
 
-The snapshot is the durable artifact. The pushed registry image only needs to exist for the
-seconds of the handoff, so delete it once the snapshot is registered and active. This is the
-largest privacy win for the least code, and it works with any registry, because delete-by-digest
-is a standard registry API. It makes the customer's code present in the registry for seconds
-rather than indefinitely.
+`/submit` posts a multipart form to `app/api/intake/upload/route.ts`. The route checks the content
+type and caps the request at 4 MB before parsing, then `lib/upload/intake.ts` bounds each field and
+the attached material and applies the outside-email daily limits per contact and per domain, plus
+10 uploads a day per client address. There is no captcha. An accepted upload becomes an `upload`
+report with `source_ref = upload:<uuid>` and an `upload_intake` row beside it (migration 0043), and
+the contact is mailed a report-scoped code. `app/api/intake/upload/verify/route.ts` confirms the
+code or sends another, acting only on upload reports and only on the address given at upload. At
+most three codes go out per report, the first included.
 
-Snapshots are not deleted the same way, because a `TargetProfile` boots from its snapshot on every
-reproduction run. The design distinguishes two kinds. Trial snapshots from agent iteration that no
-approved profile references are eligible for a time-based sweep, gated on a reference check against
-`target_profile.snapshotId` so nothing an approved target uses is ever swept. Pinned snapshots
-that an approved `TargetProfile` points at, such as the frozen Juice Shop demo, are never swept.
-The existing name-reuse handling in `deleteSnapshotByName`, which lists then deletes by id
-idempotently, is the shape to reuse for both the trial sweep and the superseded-image delete.
-
-One question gates the delete timing and is called out below: whether Daytona pulls the image
-eagerly at `createSnapshot` or lazily at first sandbox boot. If the pull is lazy, the image has to
-survive until first successful reproduction boot, not just until registration returns.
-
-## The onboarding start command model
-
-### Current state
-
-The reproduction sandbox is the target container itself, booted offline from the snapshot with no
-Docker daemon inside. A `docker run` start command can never work there, which the first live run
-hit as `docker: not found`, recorded in `docs/onboarding-follow-ups.md` under "host-model start
-command". Validation already rejects host-model commands in three places: `validateStartCommand`
-in `lib/targets/manifest.ts`, `assertSafeMeshStartCommand` in `lib/sandbox/provision.ts`, and the
-agent's `commit_compose_mesh` build tool, which refuses `command` and `entrypoint` fields so a
-built service sets its start command through the CMD of the Dockerfile it writes.
-
-### Design
-
-The agent proposes a start command, readiness path and port alongside the built image through its
-`commit_target_image` build tool, but the proposal is verified in the build sandbox before it is
-ever stored, not trusted from prose. The onboarding worker already boots the snapshot to check
-readiness and confirm no egress. That verify step extends to run the proposed start command in the
-offline booted snapshot and confirm the app answers its readiness path. A command that only works
-with network, or that needs a Docker daemon, fails the verify and is rejected with a concrete
-reason back to the agent. Whether the app actually starts this way becomes a machine check rather
-than a review judgement.
-
-The validation gates on the proposed command reuse the existing rules rather than inventing new
-ones: non-empty, single line, within the length cap, head not one of the container host commands
-and not smuggled in after a shell separator. The command runs only inside the offline reproduction
-container, which has no secrets and no egress, so there is no injection surface beyond what the
-existing validators already cover.
-
-The reviewer still approves the exact command. The proposed start command and readiness path land
-on the onboarding row's build plan and are surfaced on the approval sheet through
-`reviewableManifest`, which already hoists the start command to a flat field so a reviewer sees it.
-Only after approval does `configureTarget` write the `TargetProfile`. The flow is: agent proposes,
-build sandbox verifies by booting offline and checking readiness, reviewer approves the exact
-command, profile is written. The repo stays a passive test app and no repo-local script is
-authoritative for reproduction, which `docs/target-profiles.md` states as the rule. Recording the
-offline-verify result on the onboarding row lets the reviewer see "verified to boot offline"
-rather than approving an unverified command; no new manifest fields are needed beyond that.
-
-## The upload outbound contract
-
-### Current state
-
-This section is the design as it was recorded before upload intake existed; what was built is in
-"Upload intake as built" below.
-
-The email path already satisfies the two-part contract and is the pattern to reuse. The verified
-recipient is a single gate, `isVerifiedEmailRecipient` in `lib/email/recipient.ts`: a contact
-qualifies when it equals the report's `verifiedSender`, the address that passed inbound SPF and
-DKIM at intake, or when it is an allowlisted reviewer address. The target is frozen at approval:
-`publish_verdict` decides the delivery target per channel, enqueues the outbox row with that target
-and the approved content hash, then moves the report to `DELIVERING`. Send and receipt are split:
-`emailArm` in `lib/delivery/email.ts` re-checks the recipient and the leased target at send time,
-sends through Resend, stamps the provider message id and returns SENT with a null `delivered_at`,
-leaving the report in `DELIVERING`. Only the Resend `email.delivered` webhook, applied in
-`lib/email/receipts.ts`, moves `DELIVERING` to `DELIVERED`, and it correlates purely on the
-provider message id, so it is channel-agnostic. The `intakeChannel` enum in `lib/db/schema.ts` is
-`github, email, manual`, with no `upload`, and the delivery worker's arm map covers only github and
-email.
-
-### Design
-
-The delivery half is already channel-agnostic, so the only real gap for upload is the recipient:
-an upload has no inherent reply-to address, and OTP proof today exists only for the reviewer
-allowlist, not for an arbitrary reporter.
-
-The uploader supplies an email contact and proves control of it by a one-time code, mirroring the
-reviewer OTP pattern but bound to the report rather than the allowlist. An uploader is not a
-reviewer and must not become one. The cheapest storage that keeps the security gate untouched is
-to set the report's `verifiedSender` to the OTP-verified contact, so `isVerifiedEmailRecipient`
-passes with no change: it already means "delivery accepts this contact while it equals the proven
-value, re-checked at send". OTP proves the same "this exact address is controlled" that SPF and
-DKIM prove for inbound email; the proof method differs, so it is recorded in an audit event or a
-small verification-method field for honesty, but the gate logic and the send and receipt paths do
-not change. The OTP flow itself generalizes the reviewer helpers (`hashCode`, the code TTL and the
-attempt cap in `lib/auth/reviewers.ts`, and `sendVerificationEmail`) into a report-scoped
-verification. A report can still be created and triaged before the contact is verified, because
-intake and reproduction are separate; verification only has to complete before the report can be
-approved for delivery.
-
-The transport is the email path, exactly as `AGENTS.md` hints. An upload with a verified email
-contact rides the proven Resend send and `email.delivered` receipt, which makes its SENT and
-DELIVERED semantics identical to email by construction. An in-app inbox with its own pickup receipt
-would be a second delivery channel with its own auth, notification and audit surface, re-solving a
-problem email already solves, so it is out of scope unless a concrete requirement forbids emailing
-the verdict.
-
-The wiring to ride email is small. Add `upload` to the `intakeChannel` enum through a migration for
-honest provenance, so the board and case file show a report arrived by upload rather than
-masquerading as email. Add an `upload` branch to the delivery-target switch in `publish_verdict`
-that mirrors the email branch, requiring a verified `reporterContact` and accepting the upload
-source-ref form. Map `upload` to the existing email arm in the delivery worker, and widen the
-delivery-context channel union to include `upload`. Nothing in `receipts.ts` changes, because the
-delivered webhook already completes any delivery it can correlate by provider message id.
-
-### What stays unchanged
-
-The approval gate on exact text is untouched: the content hash is frozen at `publish_verdict` and
-re-checked in the delivery worker before send. The intake-versus-reproduction separation holds: an
-uploaded report with no bound `TargetProfile` stops at `ANALYSIS_ONLY`, and upload delivery only
-ever carries an approved verdict, which may be `ANALYSIS_ONLY`. Reproducing an uploaded report
-needs the non-GitHub `configureTarget` path above first; delivering an analysis-only verdict does
-not. An uploaded body or attachment is untrusted input and is parsed the way email intake already
-parses untrusted input, and the verdict email renderer already escapes agent- and target-echoed
-markup, which upload payloads inherit.
-
-## Upload intake as built
-
-The public page `/submit` posts a multipart form to `app/api/intake/upload/route.ts`. The route
-checks the content type and caps the request at 4 MB before parsing anything, then
-`lib/upload/intake.ts` bounds each field and the attached material and applies the outside-email
-daily limits per contact and per domain, plus a per-client-address cap. An accepted upload becomes
-an `upload` report held at `NEEDS_DECISION` with an `upload_intake` row beside it, and the contact is
-mailed a report-scoped code. `app/api/intake/upload/verify/route.ts` confirms the code or mails
-another (three per report), acting only on upload reports and only on the address given at upload.
+The body is parsed in the route process with bounds, not in the sandbox the design described for
+email attachments. An uploaded archive is only unpacked inside the build sandbox.
 
 Target material is optional and at most one of: a tarball with a Dockerfile at its root, a single
-Dockerfile (stored as a deterministic one-file tarball so it rides the archive path), or a prebuilt
-image named with its sha256 digest. A prebuilt image must come from a registry on the server-held
-`PREBUILT_IMAGE_REGISTRIES` list (Docker Hub and GHCR by default), checked at intake and again in
-the build driver, because the image's registry joins the build egress allow-list.
+Dockerfile of at most 64 KB with a `FROM` line (stored as a deterministic one-file tarball so it
+takes the archive path), or a prebuilt image named by tag and sha256 digest. A prebuilt image's
+registry is checked against `PREBUILT_IMAGE_REGISTRIES` at intake and again in the build driver.
+There is no git URL option.
 
 Nothing builds until a reviewer releases the report at the gate with "Build target and run" and
-states the port, readiness path, optional start command and build ecosystem. Those are validated
-through `targetDefinitionFromManifest` into a definition whose name and repository label come from
-the report id and whose scope is the manifest default, loopback only. The `upload-build` worker loop
-(`lib/upload/build.ts`) builds the material through the non-GitHub build path, pins it with
+states the port, readiness path, optional start command and build ecosystem
+(`app/(app)/reports/[id]/upload-gate.tsx`, `approveUploadTarget` in `lib/upload/gate.ts`). Those
+are validated through `targetDefinitionFromManifest` into a definition whose name and repository
+label come from the report id and whose scope is loopback only. The report moves to `TRIAGING`. The
+`upload-build` worker loop (`lib/upload/build.ts`) builds the material, pins it with
 `bindConnectionlessTargetFromBuild`, binds the report, and queues the same analysis run the gate's
-"Run analysis" queues. A build that fails twice leaves the report unbound, and the run stops at
-`ANALYSIS_ONLY`.
+"Run analysis" queues. A build gets two attempts. One that fails twice, or is skipped because a
+reviewer bound another target meanwhile, leaves the report as it was, and the run proceeds without
+the uploaded target, ending `ANALYSIS_ONLY` if nothing is bound. A failed upload build does not get
+the static review a failed GitHub build gets.
 
-## Open questions
+The gate also offers "Run analysis" without building, and "Dismiss", which moves the report to
+`DENIED`.
 
-- Does Daytona already hold a GHCR pull credential, or is the onboarding image public? A private
-  neutral registry needs its pull credential registered in Daytona per host, which is a
-  control-plane config item, not code in this repo. The seam should document it and fail loud if a
-  snapshot never leaves the pulling or error state for a private ref.
-- Can a registry image be deleted by digest immediately after `createSnapshot` returns, or does
-  Daytona pull lazily on first sandbox create? If the pull is lazy, ephemeral deletion has to
-  happen after the first successful reproduction boot, not after registration.
-- Do trial snapshots accumulate today, or does the agent iterate only in a build sandbox so the
-  final `onboarding-<slug>` snapshot is the only one created? Verify before building a sweeper.
-- Does making upload a real intake channel ripple into read models, board filters or dedupe? The
-  channel is part of the unique `(channel, source_ref)` index, so a new enum value is cleaner than
-  overloading email, but the read side needs a check.
+## Upload delivery
 
-## Phased path
+Upload rides the email transport, as designed. The uploader's confirmed contact is written to the
+report's `verified_sender` (`lib/auth/report-contact.ts`, on the shared OTP primitives in
+`lib/auth/otp.ts`), so `isVerifiedEmailRecipient` accepts it with no change. Starting a new
+verification clears `verified_sender`. The proof method is recorded as the event
+`upload.contact_verified` with `method: "otp"`; there is no column for it.
 
-The upload outbound contract is the first shippable feature, because its delivery half is already
-channel-agnostic and the only real work is a report-scoped OTP plus an enum value and two small
-branches. The non-GitHub `configureTarget` path is shared groundwork that both the upload channel
-and any non-GitHub target need, so it is built once and early. The registry work is the onboarding
-hardening the multi-service mesh and the pentest workbench lean on.
+`publish_verdict` has an `upload` branch that requires a confirmed contact and an `upload:` source
+ref, the delivery worker maps `upload` to the email arm, and the arm re-checks the recipient at
+send. `DELIVERED` needs Resend's `email.delivered` webhook, the same as email. An unconfirmed
+contact is refused at approval and again at send, so the report cannot be delivered, though a
+reviewer can still work it. Nothing expires an unconfirmed upload report.
 
-1. Delete the pushed image after the snapshot is registered. Smallest diff, biggest privacy win,
-   no interface change, gated on the lazy-pull open question above.
-2. Contact OTP verification for uploads and the delivery wiring: the report-scoped OTP that sets
-   `verifiedSender`, the `upload` enum value, the `publish_verdict` branch, the arm map entry, and
-   the widened channel union. After this, an approved upload verdict rides email to SENT then
-   DELIVERED.
-3. The non-GitHub `configureTarget` path, which unblocks reproducible non-GitHub targets and any
-   uploaded report that should be reproduced rather than left at `ANALYSIS_ONLY`.
-4. Parameterize the registry: introduce the registry handoff, replace the GHCR literals and the
-   `manifest.ts` regex, and default the env to today's GHCR values.
-5. Offline start-command verify: extend the onboarding verify step to boot the proposed start
-   command offline, check readiness, reject on failure, and record the result for the reviewer.
-6. The upload intake route and minimal UI, which creates the report as `ANALYSIS_ONLY` by default
-   and collects and verifies the contact, then flips the catalog entry to `built: true`.
-7. Attachment and size hardening, and the trial-snapshot sweeper if trial snapshots turn out to
-   accumulate.
+The read side shows the channel as upload (`lib/reports/channel-copy.ts`), which answers the
+design's question about board filters and read models.
+
+## Still open
+
+- Whether Daytona needs a pull credential per private registry host. That is control-plane
+  configuration, not code in this repo; `docs/deployment.md` records the GHCR one.
+- Everything under "Still open" in `docs/onboarding-follow-ups.md`.

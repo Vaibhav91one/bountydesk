@@ -64,15 +64,22 @@ run repo-provided reproduction scripts as the source of truth.
 
 ## Dynamic setup feature
 
-The fully automated version should automate the operator work above without changing the trust
-model. The expected flow is:
+Dynamic setup automates the operator work above without changing the trust model. The flow for a
+connected GitHub repository is:
 
 1. The GitHub App installation creates or updates the connected repository row.
-2. A build worker claims the repo and clones it in a build sandbox with dependency egress.
+2. A build worker claims the repo and clones it in a build sandbox with dependency egress. A public
+   repository clones anonymously. A private one is queued only when its installation has accepted
+   Contents: read, and clones with a single-repository, contents:read installation token passed
+   through a credential helper and revoked after the clone; without the permission nothing is
+   cloned and reproduction ends `ANALYSIS_ONLY` with `POLICY_REFUSED`.
 3. The worker reads or asks an onboarding agent to propose the target manifest. The proposal
    only identifies framework, port, health path, image name and start command.
-4. The worker builds the target image, writes a build marker into it, registers a Daytona
-   snapshot, then verifies the snapshot can boot.
+4. The worker builds the target image, writes a build marker into it, pushes it through the
+   registry handoff (GHCR by default, any registry through `REGISTRY_*`), and registers a Daytona
+   snapshot. Once the snapshot is active the pushed image is deleted when a delete token is
+   configured. After a reviewer approves the manifest, the worker boots the snapshot offline with
+   the proposed start command and checks readiness before writing anything.
 5. The platform writes or rotates the server-side `TargetProfile` and binds the connected repo
    to it.
 6. Report intake can then create bound reports for that repo. Reproduction still runs in a
@@ -82,6 +89,23 @@ The dynamic build sandbox is not trusted. It may run customer code and download 
 so only the built artifact and explicit metadata should cross into the reproduction sandbox.
 The reproduction sandbox stays offline except for the platform's preview tunnel, and the human
 approval gate remains unchanged.
+
+If the target cannot be built or deployed, reproduction does not start. The report gets a
+read-only static review of the source instead and ends `ANALYSIS_ONLY` (`docs/decisions.md` Q31).
+
+## Targets without a connected repository
+
+A target can also come from a source with no GitHub identity: an archive with a Dockerfile at its
+root, a single Dockerfile, or a prebuilt image named by tag and sha256 digest. Today these arrive
+through upload intake, and a reviewer states the port, readiness path, optional start command and
+build ecosystem before anything builds. The build driver stages the source (an archive is re-hashed
+in the sandbox before unpacking; a prebuilt image becomes `FROM <name>@<digest>` with the digest
+baked in as the build marker), and `configureConnectionlessTarget` writes the profile with no
+connected repository. The identity anchor is a commit SHA, a source archive digest or the image
+digest, whichever the source has. A prebuilt image must come from a registry on
+`PREBUILT_IMAGE_REGISTRIES` (default `docker.io,ghcr.io`), because its registry joins the build
+egress allowlist. Scope is loopback only, as for every target. A connectionless profile cannot be
+rotated yet; see `docs/onboarding-follow-ups.md`.
 
 Artifacts are intentionally separate from this target-profile flow. A future artifacts feature
 can attach logs, screenshots, or request traces to the platform case file, but it should not

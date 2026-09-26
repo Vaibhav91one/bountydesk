@@ -1,7 +1,7 @@
 # BountyDesk — Decisions & Session Record
 
 Working record of the review + grilling session for the BountyDesk / TrueForge hackathon project.
-Last updated 2026-08-26. Repository companions:
+Last updated 2026-09-26. Repository companions:
 
 - [`demo-runbook.md`](./demo-runbook.md) — the demo happy path, backups and pre-warm checklist
 - [`plan.md`](./plan.md) — the implementation phases and exit criteria
@@ -241,6 +241,11 @@ contents:read installation token that is revoked after the clone. Accepting the 
 (`new_permissions_accepted`) queues the waiting private repositories and lets the next
 reproduction through without any row edits.
 
+Also amended 2026-09-26: the security advisories permission now carries a second use. The App
+subscribes to the `repository_advisory` event, a private vulnerability report becomes an `advisory`
+report, and its approved verdict is written back by editing that advisory (Q27). Read is what intake
+needs to fetch the advisory; write is what delivery needs.
+
 **Token model — no stored PAT, no broad OAuth repo token.** To post a comment: authenticate the App → generate an installation access token (~1h TTL) → post the approved comment idempotently → discard the token. Nothing long-lived is persisted.
 
 **Intake stays the same shape.** `POST /api/intake/github`, `X-Hub-Signature-256` (App webhook secret, platform-owned), `X-GitHub-Delivery` for idempotency, raw-body HMAC, 202 only after a durable commit. The App payload carries the installation, so BountyDesk resolves **`installation_id` → org → repo → TargetProfile server-side** — the issue/agent never supplies its own target.
@@ -370,6 +375,12 @@ build isolation and a server-created profile.
 `manual`, so there is no migration; a dedicated `upload` value can come later if it earns
 itself.
 
+Amended 2026-09-26: the channels are now `github`, `email`, `upload` and `advisory`. Upload got its
+own enum value and is public with a report-scoped one-time code rather than an authenticated user
+(Q32). GitHub security advisories are a fourth channel (Q27). An uploaded archive or image can now
+become a target, through the reviewer-approved build this section anticipated (Q30, Q32). Drive
+intake is dropped.
+
 #### Intake parsing controls
 
 Designed, not built: no external network, no platform secrets,
@@ -385,6 +396,11 @@ unbuilt. An operator checkbox is not proof of external delivery and must not cre
 `DeliveryAttempt` or move a report to `DELIVERED`. A later channel contract must define a
 verifiable recipient and transport receipt. Until then, those reports may be denied, cancelled
 or expired through the existing lifecycle, but cannot claim delivery.
+
+Amended 2026-09-26: every channel now has an outbound contract. Email and upload deliver to a
+verified contact, with Resend's `email.delivered` webhook as the receipt (Q25, Q32). An advisory
+report, and an email report bound to an advisory-capable repository, deliver by editing a GitHub
+security advisory, with GitHub's 2xx on the write as the receipt (Q27, Q28).
 
 ### Implementation gates (2026-08-27)
 
@@ -564,6 +580,12 @@ Every older page was rewritten to the decided architecture, then scanned for ret
 - Dedupe feedback loop with held-out audit sample (only human-confirmed outcomes feed it).
 - CVSS/severity as human-signed-off only; researcher appeal path.
 - Attachment MIME/zip-bomb hardening; signed artifact downloads.
+- Multi-target expansion: more pinned lab targets (DVWA, WebGoat, CVE labs) beside Juice Shop, and
+  target choice shown on the board, the case file and the chat.
+- The agentic code review module, kept separate from onboarding; the sandboxability pre-check and
+  the static review (Q31) are read-only and leave a seam for it.
+- The agent-driven pentest workbench (`docs/pentest-workbench.md`).
+- Drive intake is dropped, not deferred: the catalog lists it as out of scope for this version.
 
 ---
 
@@ -789,3 +811,170 @@ nothing auto-responds to a reply: the link is a read-time convenience for a revi
 waits at the same gate any outside message does. The human gate on `publish_verdict` and the
 no-auto-close rule are unchanged, because a linked reply is still a report a human has to move by
 hand.
+
+### Q27: Advisory intake and the advisory delivery channel (2026-09-26)
+
+GitHub-issue intake puts a report in a public issue, which discloses a working vulnerability before
+there is a fix. A repository with private vulnerability reporting turned on takes reports as draft
+security advisories instead, visible only to the reporter and the maintainers. BountyDesk now takes
+those in as their own intake channel, `advisory` (migration 0039), and writes the verdict back onto
+the same advisory. The flow, the delivery contract and the failure states are in
+[`advisory-intake.md`](./advisory-intake.md).
+
+The App subscribes to `repository_advisory`, and the intake route takes the `reported` and
+`published` actions. The repository is resolved server-side under the same lock issue intake takes,
+and it must be connected, active and bound to a target profile. The worker reads the advisory back
+through the API instead of trusting the webhook body, and creates the report with
+`source_ref = github:<repoId>:advisory:<ghsaId>`.
+
+An advisory report waits at `NEEDS_DECISION`, like an outside email (Q25). Any GitHub user can file
+a private vulnerability report, so an advisory is an outside report by construction, and there is
+no allowlist or `/reproduce` command that lets one skip the gate. A reviewer releases it with Run
+analysis or dismisses it to `DENIED`.
+
+GitHub has no comments API for advisories, so a reply cannot be a comment. The verdict is written by
+replacing the advisory's description with the approved text. A companion issue would be public,
+which is the disclosure this channel exists to avoid. The consequence is that the reporter's original description on the advisory is
+replaced; the report body in BountyDesk keeps it. Every outcome is written, including
+`ANALYSIS_ONLY`, because the advisory is the only place the reporter looks.
+
+This is a new `advisory` delivery arm rather than an extension of the owner-advisory path from the
+Q19 amendment. The owner-advisory path opens a draft for a repository owner after a reproduced
+email or issue verdict was delivered to the reporter; the advisory arm is the reporter's delivery
+itself. The two stay separate and may converge later.
+
+The recipient is the repository grant, re-checked with `activeRepository` at send. The receipt is
+GitHub's 201 or 200 on the create or PATCH, carrying a `ghsa_id`, so the arm completes the report
+in the same transaction like the issue arm. Idempotency is the
+`<!-- bountydesk-delivery:<verdictId> -->` marker read back from the advisory. A revoked grant, or a
+403, 404 or 422 from GitHub, refuses the send and holds the row for a human, and the report stays in
+`DELIVERING`.
+
+### Q28: Email reports route to an advisory when the repository supports it (2026-09-26)
+
+An email report bound to a connected repository used to get its verdict only as an email reply.
+When the verdict is about a repository the App is installed on, the maintainers are the people who
+need it, and a draft advisory is where GitHub's fix and CVE flow starts.
+
+At approval, `enqueueApprovedVerdictDelivery` sends an email report's verdict to the advisory
+channel when the report has a grant snapshot, a connected repository, and `hasActiveRepositoryGrant`
+holds. Otherwise it falls back to the email reply to the verified contact (Q25). The choice is
+stored per outbox row in `outbound_delivery.channel` (migration 0040), which overrides the report's
+intake channel in the delivery worker. The report keeps its `email` provenance.
+
+The advisory arm's create path opens a draft with the report title as summary, the verdict as
+description, and severity and CWEs from the findings, without credits. A revision PATCHes the same
+draft, found by its marker. The route does not check that the installation has accepted the
+advisories permission: an installation that has not gets a held refusal, not a silent fallback to
+email, so a reviewer sees that the permission is missing.
+
+### Q29: Private repositories reproduce behind Contents: read (2026-09-26)
+
+The private-repository policy designed in the Q19 amendment of 2026-08-27 is built, and the Q19
+amendment of 2026-09-26 records the mechanics. In short: repository visibility
+(`connected_repository.is_private`) and the installation's Contents permission
+(`github_installation.contents_permission`) are stored from the lifecycle webhooks, with the
+reconcile tick as backfill (migration 0042). A private repository whose installation lacks
+Contents: read is accepted and triaged but refused reproduction with `ANALYSIS_ONLY` and
+`POLICY_REFUSED`, and onboarding does not queue or clone it. Accepting the permission
+(`new_permissions_accepted`) queues the waiting private repositories.
+
+Every server-side read of private source uses an installation token scoped to that one repository
+and narrowed to `contents: read`, revoked right after use (`lib/github/repo-access.ts`). The clone
+passes the token through a git credential helper, not the URL. The static review and the
+sandboxability pre-check read private source the same way; a refused token leaves them reading
+nothing rather than failing the run. Contents: read stays out of the App's default permissions: an
+installation adds it only when it wants private repositories reproduced.
+
+### Q30: Non-GitHub sources and the identity anchor (2026-09-26)
+
+A target used to be buildable only from a GitHub clone, because the build identity was a commit SHA
+and `configureTarget` required an active connected repository. Neither fits an uploaded tarball or a
+prebuilt image.
+
+The identity anchor is now any one of a commit SHA, a source archive digest, or the image's own
+sha256 digest. `hasIdentityAnchor` (`lib/build-onboarding/source-identity.ts`) is the single check,
+applied at `sourceIdentityDigest`, the build driver, the onboarding write and
+`configureConnectionlessTarget`. A mutable ref like `HEAD` is still refused, and every profile write
+still needs a `build_recipe_digest`.
+
+The build driver stages three source kinds (`lib/build-onboarding/build-driver.ts`):
+
+- `git`: clone, check out the exact SHA, and confirm HEAD. Only the server-derived github.com URL of
+  the same repository ever gets a token.
+- `archive`: the controller hashes the bytes, the sandbox re-hashes them before unpacking, and the
+  archive digest is the build marker.
+- `image`: nothing is staged. The driver writes `FROM <name>@<digest>` and bakes the digest into the
+  build marker, so a prebuilt image still boots with a marker the platform checks. The image's
+  registry must be on `PREBUILT_IMAGE_REGISTRIES` (default `docker.io,ghcr.io`), checked at intake
+  and again in the driver, because that registry joins the build egress allowlist.
+
+A target built from one of these binds through `configureConnectionlessTarget`, called by
+`bindConnectionlessTargetFromBuild`. It writes a `TargetProfile` with no connected repository and
+the same image digest, snapshot and build-marker proofs a GitHub target carries. Reproduction is
+unchanged: the offline sandbox, the scope guard and the probe tools.
+
+Not built: rotating a connectionless profile (a changed re-bind throws `TargetProfileExistsError`,
+and `rotateTarget` is GitHub-only), a tarball without a Dockerfile (the upload build plan always
+expects `Dockerfile` at the archive root, and nothing generates one for it), and a non-GitHub git URL
+(the `git` source accepts one, but no caller builds it). The registry handoff itself is pluggable
+(`RegistryHandoff`, `REGISTRY_*` env with the GHCR values as defaults); that record is in
+[`onboarding-follow-ups.md`](./onboarding-follow-ups.md).
+
+### Q31: Static review when a target cannot be built or deployed (2026-09-26)
+
+A connected repository whose build failed, or whose snapshot would not deploy, used to leave its
+report with nothing but a bare failure. Tier R in Q23 promised an evidenced `ANALYSIS_ONLY`
+instead, and this is that tier.
+
+Onboarding records `COULD_NOT_BUILD` on the onboarding row (`target_onboarding.analysis_only_reason`,
+migration 0041) when a plan cannot be flattened or a build fails its last attempt. Provisioning
+raises `COULD_NOT_DEPLOY` on a hard deploy failure; a transient one is not reclassified. In either
+case the analysis driver runs a static review instead of a reproduction: it reads a bounded,
+read-only corpus of the source at the pinned commit (the tree, a fixed set of files, and files the
+report names) into the turn, records a `reproduction.static_fallback` event with the files it read,
+and `publish_verdict` accepts only `ANALYSIS_ONLY` from that turn, with the reason on the evidence.
+Nothing is cloned into a sandbox and nothing is probed.
+
+`OUT_OF_SCOPE` is narrower than its name suggests. It is set in two places only. An operator
+quarantine with the out-of-scope disposition (`lib/targets/quarantine.ts`) is a scope decision on a
+bound target. The other is the dead end of this fallback (`routeUnreproducibleTarget` in
+`lib/reports/target-scope.ts`): the report is still `TRIAGING`, a static fallback was recorded, it
+read no source, and the turn drafted no verdict. A static review that read source, or any review
+that drafted a verdict, ends `ANALYSIS_ONLY`. `OUT_OF_SCOPE` is never produced from the absence of a
+target alone.
+
+Two limits of what was built. A private repository without Contents: read has no live grant, so it
+gets the plain analysis turn with `POLICY_REFUSED`, not a `COULD_NOT_BUILD` static review. A failed
+upload build is not routed here: it leaves the report unbound and runs the plain analysis turn.
+
+### Q32: Upload intake (2026-09-26)
+
+Q21 described upload as an authenticated platform user posting a report on the `manual` channel. It
+was built differently: upload is for a reporter with no account anywhere, and it has its own `upload`
+channel for honest provenance and for the `(channel, source_ref)` index.
+
+The public page `/submit` (`app/submit`, outside the reviewer app) posts a multipart form to
+`app/api/intake/upload/route.ts`. The request is capped at 4 MB. The report text and contact are
+bounded, the outside-email daily limits apply per contact and per domain, and a client address may
+upload 10 times a day. An accepted upload becomes an `upload` report at `NEEDS_DECISION` with an
+`upload_intake` row (migration 0043) holding any target material, and the contact is mailed a
+report-scoped one-time code (`lib/auth/report-contact.ts`, on the shared primitives in
+`lib/auth/otp.ts`). Confirming the code sets the report's `verified_sender`, the same field an
+outside email's SPF and DKIM result sets, so the email delivery gate needs no change. At most three
+codes go out per report, the first included.
+
+Target material is optional and at most one of: a tarball with a Dockerfile at its root, a single
+Dockerfile (wrapped into a one-file tarball so it takes the archive path), or a prebuilt image named
+by tag and sha256 digest from an allowed registry. Nothing builds until a reviewer chooses "Build
+target and run" at the gate and states the port, readiness path, optional start command and build
+ecosystem. Those go through the same manifest validation as any target, with a name derived from the
+report id and loopback-only scope. The `upload-build` worker loop (`lib/upload/build.ts`) builds the
+material through the non-GitHub path (Q30), binds it with `bindConnectionlessTargetFromBuild`, and
+queues the same analysis run the gate's "Run analysis" queues. A build that fails twice leaves the
+report unbound, and the run ends `ANALYSIS_ONLY`.
+
+Delivery rides the email transport: the verdict goes to the contact only if it is the confirmed
+`verified_sender`, re-checked at approval and at send, and `DELIVERED` needs Resend's
+`email.delivered` receipt. An unconfirmed contact is refused at both points. Nothing expires an
+unconfirmed upload report; it waits for a reviewer like any held report.
