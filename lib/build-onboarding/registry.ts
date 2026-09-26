@@ -84,12 +84,14 @@ class EnvRegistry implements RegistryHandoff {
 
   async push(sandbox: Sandbox, imageRef: string, run: SandboxRun): Promise<PushedImage> {
     // Introduce the credential right before the push and drop it right after, so no untrusted build
-    // step ran with a reusable token in the sandbox.
+    // step ran with a reusable token in the sandbox. Host and user are already checked against a safe
+    // charset in createRegistry, but they still go through shArg here so the credential command never
+    // depends on that validation to stay injection-free.
     try {
-      await run(sandbox, `echo ${shArg(this.pushToken)} | docker login ${this.host} -u ${this.user} --password-stdin`);
+      await run(sandbox, `echo ${shArg(this.pushToken)} | docker login ${shArg(this.host)} -u ${shArg(this.user)} --password-stdin`);
       await run(sandbox, `docker push ${imageRef}`);
     } finally {
-      await run(sandbox, `docker logout ${this.host}`).catch(() => undefined);
+      await run(sandbox, `docker logout ${shArg(this.host)}`).catch(() => undefined);
     }
     const digest = (
       await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)

@@ -122,7 +122,7 @@ test("buildMesh keeps the push credential inside the login/push/logout window on
   const tokenUses = commands.filter((entry) => entry.command.includes(PUSH_TOKEN));
   assert.ok(tokenUses.length > 0, "the push path must log in with the token");
   for (const entry of tokenUses) {
-    assert.match(entry.command, /docker login ghcr\.io/);
+    assert.match(entry.command, /docker login 'ghcr\.io'/);
   }
   // Every login is followed by a push then a logout on the same sandbox.
   const logins = commands.filter((entry) => entry.command.includes("docker login"));

@@ -27,10 +27,10 @@ test("push returns the pullable tag and digest and keeps the credential in the l
   assert.equal(pushed.digest, `sha256:${"a".repeat(64)}`);
 
   const login = commands.find((c) => c.includes("docker login")) ?? "";
-  assert.match(login, /docker login ghcr\.io -u bountydesk/);
+  assert.match(login, /docker login 'ghcr\.io' -u 'bountydesk'/);
   assert.ok(login.includes("secret-tok"), "the login carries the push token");
   assert.ok(commands.some((c) => c.startsWith("docker push ghcr.io/acme/widget")));
-  assert.ok(commands.some((c) => c.includes("docker logout ghcr.io")));
+  assert.ok(commands.some((c) => c.includes("docker logout 'ghcr.io'")));
   // The digest read runs after the credential is gone.
   const logoutAt = commands.findIndex((c) => c.includes("docker logout"));
   const inspectAt = commands.findIndex((c) => c.includes(".RepoDigests"));
