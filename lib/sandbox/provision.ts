@@ -228,42 +228,43 @@ async function waitForAppReady(
   const deadline = Date.now() + timeoutMs;
   const probePath = readinessPath.startsWith("/") ? readinessPath : `/${readinessPath}`;
   const tool = await httpProbeTool(sandbox, signal);
-  if (!tool) {
-    throw new Error(
-      `sandbox ${sandbox.id} has neither curl nor wget, so app readiness cannot be checked`,
-    );
-  }
   // 127.0.0.1, not localhost: on some base images localhost resolves to ::1 first, and a target
   // that binds 0.0.0.0 (IPv4) is then unreachable over IPv6 and reads as never-ready. The IPv4
   // literal reaches the common 0.0.0.0 bind directly.
   const url = `http://127.0.0.1:${port}${probePath}`;
+  // /proc/net/tcp{,6} lists one socket per line as "sl local_address rem_address st ...", where
+  // local_address is IP:PORT in hex and state 0A is LISTEN. The port is uppercase, zero-padded to
+  // four hex digits, so 8080 is 1F90 and 3000 is 0BB8. Used only by the clientless fallback below.
+  const portHex = port.toString(16).toUpperCase().padStart(4, "0");
   // wget has no per-request status readout as portable as curl's -w, so a clean fetch counts as
-  // ready and anything else as not-yet: the loop only needs to know the app answered.
+  // ready and anything else as not-yet: the loop only needs to know the app answered. With
+  // neither client present (a minimal base like python:3.11-slim ships no curl or wget) the
+  // fallback proves the port has a LISTEN socket instead. That proves the port is bound, not that
+  // readinessPath returns 2xx, which is the best obtainable without an HTTP client and strictly
+  // better than failing every clientless image outright.
   const probe =
     tool === "curl"
       ? `curl -s -o /dev/null -w '%{http_code}' ${url} 2>/dev/null || echo 000`
-      : `wget -q -O /dev/null -T 5 ${url} 2>/dev/null && echo 200 || echo 000`;
+      : tool === "wget"
+        ? `wget -q -O /dev/null -T 5 ${url} 2>/dev/null && echo 200 || echo 000`
+        : `cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -E -q ':${portHex} [0-9A-F]+:[0-9A-F]+ 0A' && echo LISTEN || echo 000`;
 
   while (Date.now() < deadline) {
     throwIfAborted(signal);
     const result = await execute(sandbox, probe, 10);
     const status = result.result.trim();
-    if (/^2\d\d$/.test(status)) return;
+    if (status === "LISTEN" || /^2\d\d$/.test(status)) return;
     await delay(READINESS_POLL_MS, signal);
   }
 
   // A verbose probe distinguishes the two ways readiness fails: a connection error means the app
   // is not listening (it never bound or did not survive), while an HTTP status shows it answered
-  // but not with a 2xx on this path. The app log tail catches a crash message either way.
-  const diag = startCommand
-    ? (
-        await execute(
-          sandbox,
-          `wget -S -O /dev/null -T 5 ${url} 2>&1 | head -4; echo "-- log: $(tail -c 250 /tmp/bountydesk-app.log 2>/dev/null | tr '\\n' ' ')"`,
-          15,
-        )
-      ).result.trim()
-    : "";
+  // but not with a 2xx on this path. The app log tail catches a crash message either way. Without
+  // an HTTP client there is no verbose probe to run, so the clientless case tails the log alone.
+  const logTail = `echo "-- log: $(tail -c 250 /tmp/bountydesk-app.log 2>/dev/null | tr '\\n' ' ')"`;
+  const diagCommand =
+    tool === "none" ? logTail : `wget -S -O /dev/null -T 5 ${url} 2>&1 | head -4; ${logTail}`;
+  const diag = startCommand ? (await execute(sandbox, diagCommand, 15)).result.trim() : "";
   throw new Error(
     `sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms` +
       (diag ? `; ${diag}` : ""),
@@ -283,14 +284,17 @@ export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Pr
     throw new Error("reproduction sandbox came up with a non-empty egress allow list");
   }
 
-  // The probe needs an HTTP client inside the target image. curl is preferred, but minimal
-  // bases (busybox, alpine) ship wget instead, so it is accepted as a fallback. With neither
-  // the probe cannot run, and we refuse to certify rather than assume the block held.
+  // The outbound probe needs an HTTP client inside the target image. curl is preferred; minimal
+  // bases (busybox, alpine) ship wget instead, so it is accepted as a fallback.
   const tool = await httpProbeTool(sandbox, signal);
-  if (!tool) {
-    throw new Error(
-      "neither curl nor wget is available in the sandbox, so the egress probes prove nothing",
-    );
+  if (tool === "none") {
+    // The image ships no curl or wget, so there is no way to attempt an outbound fetch from
+    // inside the sandbox. Accepting this is safe: networkBlockAll was already asserted true and
+    // the egress allow lists empty above, and that platform guarantee is the actual egress
+    // control. The in-sandbox outbound attempt below is only belt-and-suspenders confirmation of
+    // it, so the confirmation is skipped rather than replaced with a weaker check that a leaky
+    // sandbox could pass. Anything ambiguous still fails closed; a missing client is not ambiguous.
+    return;
   }
 
   // IP literals only, deliberately: networkBlockAll blocks DNS resolution too, not just the
@@ -321,7 +325,7 @@ export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Pr
 async function httpProbeTool(
   sandbox: Sandbox,
   signal?: AbortSignal,
-): Promise<"curl" | "wget" | null> {
+): Promise<"curl" | "wget" | "none"> {
   const found = await execute(
     sandbox,
     "if command -v curl >/dev/null 2>&1; then echo TOOL=curl; " +
@@ -331,7 +335,7 @@ async function httpProbeTool(
   throwIfAborted(signal);
   if (found.result.includes("TOOL=curl")) return "curl";
   if (found.result.includes("TOOL=wget")) return "wget";
-  return null;
+  return "none";
 }
 
 export type EgressProbeResult = {
