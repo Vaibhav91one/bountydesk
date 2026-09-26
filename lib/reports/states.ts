@@ -43,6 +43,8 @@ export function isTerminal(state: ReportState): boolean {
  * than repeated on each line.
  */
 const ALLOWED_TRANSITIONS: Record<ReportState, readonly ReportState[]> = {
+  // The first pass goes TRIAGING to ANALYSIS_ONLY; TRIAGING to REPRODUCING is legal but has no
+  // direct caller, because REPRODUCING is entered only by a re-check from a later state.
   TRIAGING: ["REPRODUCING", "ANALYSIS_ONLY", "OUT_OF_SCOPE"],
   NEEDS_DECISION: ["TRIAGING", "DENIED"],
   REPRODUCING: ["AWAITING_APPROVAL", "ANALYSIS_ONLY"],
