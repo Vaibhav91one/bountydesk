@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before, beforeEach } from "node:test";
 
+import { GitHubApiError } from "@/lib/github/app-auth";
+
 /**
  * The owner advisory sends an approved verdict to a second audience, so what is under test is
  * everything that can stop it: the request gates, the approved hash and marker at send time, a
@@ -46,6 +48,7 @@ type Fixture = {
   repo?: boolean;
   delivered?: boolean;
   payload?: (marker: string) => string;
+  advisoriesPermission?: string;
 };
 
 async function seed(opts: Fixture = {}) {
@@ -57,7 +60,13 @@ async function seed(opts: Fixture = {}) {
     .returning({ id: dbm.targetProfile.id });
   const [installation] = await dbm.db
     .insert(dbm.githubInstallation)
-    .values({ installationId: 100 + n, accountLogin: `acme-${n}`, accountId: 200 + n, accountType: "User" })
+    .values({
+      installationId: 100 + n,
+      accountLogin: `acme-${n}`,
+      accountId: 200 + n,
+      accountType: "User",
+      repositoryAdvisoriesPermission: opts.advisoriesPermission ?? null,
+    })
     .returning({ id: dbm.githubInstallation.id });
   const [repo] = await dbm.db
     .insert(dbm.connectedRepository)
@@ -118,7 +127,7 @@ async function addRevision(reportId: string, revision: number, opts: Fixture = {
 type CreateInput = Parameters<import("./advisory").AdvisoryDeps["create"]>[0];
 type UpdateInput = Parameters<import("./advisory").AdvisoryDeps["update"]>[0];
 
-function fakeGitHub(opts: { existing?: string; createError?: { status: number } } = {}) {
+function fakeGitHub(opts: { existing?: string; createError?: { status: number }; updateError?: { status: number } } = {}) {
   const calls = { create: [] as CreateInput[], update: [] as UpdateInput[], markers: [] as string[][], mint: 0 };
   const url = (id: string) => `https://github.com/x/y/security/advisories/${id}`;
   const deps: import("./advisory").AdvisoryDeps = {
@@ -142,6 +151,9 @@ function fakeGitHub(opts: { existing?: string; createError?: { status: number } 
       return { ghsaId: "GHSA-new", htmlUrl: url("GHSA-new") };
     },
     update: async (input) => {
+      if (opts.updateError) {
+        throw Object.assign(new Error(`status ${opts.updateError.status}`), opts.updateError);
+      }
       calls.update.push(input);
       return { ghsaId: input.ghsaId, htmlUrl: url(input.ghsaId) };
     },
@@ -277,6 +289,66 @@ test("GitHub refusing the advisory fails for good, an outage is retried later", 
   assert.equal(r.state, "PENDING");
   assert.equal(r.attempts, 1);
   assert.ok(r.nextAttemptAt.getTime() > Date.now(), "not claimable again straight away");
+});
+
+test("a refusal when the permission is already granted names the missing advisory feature", async () => {
+  // The installation has the write, so GitHub refusing is not the permission: the private repository
+  // has no security advisories surface without GitHub Advanced Security.
+  const noFeature = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(noFeature.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub({ createError: { status: 404 } }).deps });
+  const failed = await row(noFeature.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
+});
+
+test("a 422 is a validation error, failed as such, not read as a permission or feature problem", async () => {
+  // Permission is "write", so a permission-based read of the refusal would be wrong. A 422 is
+  // GitHub rejecting the request body, which no permission change or feature fixes.
+  const rejected = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(rejected.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub({ createError: { status: 422 } }).deps });
+  const failed = await row(rejected.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /validation error rather than a permission problem/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
+  assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+});
+
+test("a 404 updating a known advisory with the permission granted is a lost advisory, not a missing feature", async () => {
+  // First send opens the draft (GHSA-new). A later revision updates that known advisory, so a 404 on
+  // the PATCH means the advisory is gone, not that a repository with the write granted lacks the
+  // feature.
+  const first = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub().deps });
+  assert.equal((await row(first.reportId)).ghsaId, "GHSA-new");
+  await addRevision(first.reportId, 2);
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+
+  await advisory.adviseOnce({ deps: fakeGitHub({ updateError: { status: 404 } }).deps });
+  const failed = await row(first.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /no longer reachable/);
+  assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
+});
+
+test("a rate-limited token mint (403) is transient and retried, not failed for good", async () => {
+  const limited = await seed();
+  await advisory.requestOwnerAdvisory(limited.reportId, "r");
+  const { deps } = fakeGitHub();
+  // A secondary rate limit on minting the installation token surfaces as a 403 GitHubApiError with
+  // rateLimited set. It must not be read as a missing permission.
+  const mintToken = async () => {
+    throw new GitHubApiError(403, "secondary rate limit on token mint", true);
+  };
+  await advisory.adviseOnce({ deps: { ...deps, mintToken } });
+  const r = await row(limited.reportId);
+  assert.equal(r.state, "PENDING", "a rate-limited mint stays claimable, not failed for good");
+  assert.doesNotMatch(r.lastError ?? "", /has not granted/);
+  assert.doesNotMatch(r.lastError ?? "", /GitHub Advanced Security/);
 });
 
 test("a GitHub report's owner gets the advisory too, with severity and CWEs from its findings", async () => {

@@ -44,7 +44,10 @@ let seq = 0;
  * the reporter's advisory the report names, and updateAdvisoryDescription edits that same row, so a
  * retry then reads back what the last write left.
  */
-function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null) {
+function fakeAdvisoryDeps(
+  seeded: { ghsaId: string; description: string } | null,
+  opts: { updateStatus?: number; createStatus?: number } = {},
+) {
   const store = new Map<string, { ghsaId: string; htmlUrl: string; summary: string; description: string }>();
   if (seeded) {
     store.set(seeded.ghsaId, {
@@ -80,6 +83,7 @@ function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null
     },
     updateAdvisoryDescription: async ({ ghsaId, description }): Promise<Advisory> => {
       calls.update++;
+      if (opts.updateStatus) throw new GitHubRequestError(opts.updateStatus, "fake: github rejected the edit");
       const existing = store.get(ghsaId);
       if (!existing) throw new GitHubRequestError(404, "fake: advisory not found");
       existing.description = description;
@@ -97,6 +101,7 @@ function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null
     },
     createDraftAdvisory: async ({ summary, description }): Promise<Advisory> => {
       calls.create++;
+      if (opts.createStatus) throw new GitHubRequestError(opts.createStatus, "fake: github refused the create");
       created += 1;
       const ghsaId = `GHSA-new${created}-cccc-dddd`;
       store.set(ghsaId, {
@@ -121,6 +126,9 @@ async function seedFixture(
     // An email report bound to an advisory-capable repo: channel email, source_ref email:..., and an
     // outbox row whose channel override is advisory and whose target names the repo for a create.
     emailAdvisory?: boolean;
+    // The installation's recorded repository_advisories permission. null (the default) is an
+    // installation that never accepted the write; "write" is one that has.
+    advisoriesPermission?: string;
   } = {},
 ) {
   seq += 1;
@@ -136,6 +144,7 @@ async function seedFixture(
       accountId: 600000 + n,
       accountType: "User",
       suspendedAt: opts.suspended ? new Date() : null,
+      repositoryAdvisoriesPermission: opts.advisoriesPermission ?? null,
     })
     .returning({ id: dbm.githubInstallation.id });
 
@@ -285,6 +294,63 @@ test("an advisory the App cannot read is refused and held, not delivered", async
   assert.equal(row.rhr, true);
   assert.match(row.lastError ?? "", /refused the advisory write/);
   assert.equal(await reportState(f.reportId), "DELIVERING");
+});
+
+test("a refusal on an installation without the advisories permission says to accept it", async () => {
+  await drainOthers();
+  const f = await seedFixture();
+  const { deps } = fakeAdvisoryDeps(null);
+
+  await worker.deliverOnce("adv-refuse-no-perm", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /accept "Repository security advisories: write" on the installation/);
+  assert.doesNotMatch(row.lastError ?? "", /Advanced Security/);
+});
+
+test("opening a new draft refused with the permission granted names the missing advisory feature", async () => {
+  await drainOthers();
+  // An email->advisory report opens a fresh draft. The installation has the write, so a refused
+  // create is not the permission: the repository has no advisories surface without Advanced Security.
+  const f = await seedFixture({ emailAdvisory: true, advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps(null, { createStatus: 404 });
+
+  await worker.deliverOnce("adv-create-no-feature", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /does not have security advisories available/);
+  assert.match(row.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+});
+
+test("a 404 against a known advisory with the permission granted is a lost advisory, not a missing feature", async () => {
+  await drainOthers();
+  // The reply path names an advisory the report came from, so it exists. With the write granted, a
+  // 404 means that advisory is gone (withdrawn or deleted), not that the repository lacks the feature.
+  const f = await seedFixture({ advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps(null);
+
+  await worker.deliverOnce("adv-lost-advisory", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /no longer reachable/);
+  assert.doesNotMatch(row.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+});
+
+test("a 422 is a validation error, held as such, not read as a permission or feature problem", async () => {
+  await drainOthers();
+  // The installation has the write, so the permission branch would send the wrong person to the
+  // wrong place. A 422 is GitHub rejecting the request body, not a permission or feature gap.
+  const f = await seedFixture({ advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "the reporter's original report" }, { updateStatus: 422 });
+
+  await worker.deliverOnce("adv-422", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /validation error rather than a permission problem/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+  assert.doesNotMatch(row.lastError ?? "", /GitHub Advanced Security/);
 });
 
 test("the grant revoked between intake and send is refused and held, not delivered", async () => {
