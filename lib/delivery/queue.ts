@@ -10,6 +10,12 @@ export type NewDelivery = {
   idempotencyKey: string;
   target: string;
   approvedContentHash: string;
+  /**
+   * The transport to deliver over when it is not the report's own intake channel. Only an
+   * email report routed to a draft advisory sets this ("advisory"); every other delivery leaves
+   * it undefined and the worker falls back to report.channel.
+   */
+  channel?: (typeof outboundDelivery.channel.enumValues)[number];
 };
 
 type ExistingDelivery = NewDelivery & {
@@ -132,6 +138,8 @@ export type DeliveryLease = {
   idempotencyKey: string;
   target: string;
   approvedContentHash: string;
+  /** The transport override frozen at approval; null means the worker uses report.channel. */
+  channel: (typeof outboundDelivery.channel.enumValues)[number] | null;
   attempts: number;
   maxAttempts: number;
   fence: number;
@@ -145,6 +153,7 @@ type ClaimedDeliveryRow = {
   idempotency_key: string;
   target: string;
   approved_content_hash: string;
+  channel: (typeof outboundDelivery.channel.enumValues)[number] | null;
   attempts: number;
   max_attempts: number;
   fence: string | number;
@@ -158,6 +167,7 @@ function deliveryLease(row: ClaimedDeliveryRow): DeliveryLease {
     idempotencyKey: row.idempotency_key,
     target: row.target,
     approvedContentHash: row.approved_content_hash,
+    channel: row.channel,
     attempts: row.attempts,
     maxAttempts: row.max_attempts,
     fence: Number(row.fence),
@@ -201,6 +211,7 @@ export async function claim(
               ${outboundDelivery.verdictId}             as verdict_id,
               ${outboundDelivery.idempotencyKey}        as idempotency_key,
               ${outboundDelivery.target}                as target,
+              ${outboundDelivery.channel}                  as channel,
               ${outboundDelivery.approvedContentHash}   as approved_content_hash,
               ${outboundDelivery.attempts}               as attempts,
               ${outboundDelivery.maxAttempts}            as max_attempts,
@@ -247,6 +258,7 @@ export async function claimById(
               ${outboundDelivery.verdictId}             as verdict_id,
               ${outboundDelivery.idempotencyKey}        as idempotency_key,
               ${outboundDelivery.target}                as target,
+              ${outboundDelivery.channel}                  as channel,
               ${outboundDelivery.approvedContentHash}   as approved_content_hash,
               ${outboundDelivery.attempts}               as attempts,
               ${outboundDelivery.maxAttempts}            as max_attempts,

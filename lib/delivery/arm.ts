@@ -1,4 +1,4 @@
-import type { Advisory, AdvisoryContent } from "@/lib/github/advisory";
+import type { Advisory, AdvisoryContent, AdvisorySeverity } from "@/lib/github/advisory";
 import type { IssueComment } from "@/lib/github/comment";
 
 import type { DeliveryLease } from "./queue";
@@ -41,11 +41,16 @@ export type DeliveryDeps = {
     signal?: AbortSignal;
   }) => Promise<{ id: string }>;
   /**
-   * The advisory transport's two GitHub calls. Required for the same reason sendEmail is: an absent
-   * one would silently turn advisory delivery into a no-op. The GitHub and email tests stub them
-   * with a throw, which doubles as an assertion that those arms never touch an advisory. There is no
-   * create here: an advisory-channel report came from the reporter's own advisory, so its verdict is
-   * written back onto that advisory (named by the source_ref's GHSA id), never a new draft.
+   * The advisory transport's GitHub calls. Required for the same reason sendEmail is: an absent one
+   * would silently turn advisory delivery into a no-op. The GitHub and email tests stub them with a
+   * throw, which doubles as an assertion that those arms never touch an advisory.
+   *
+   * Two shapes of advisory delivery share these. An advisory-channel report came from the reporter's
+   * own advisory, so getAdvisory + updateAdvisoryDescription write the verdict back onto that
+   * advisory (named by the source_ref's GHSA id). An email report bound to an advisory-capable repo
+   * has no pre-existing advisory, so createDraftAdvisory opens one the first time and
+   * findAdvisoryByMarker makes a retry find the draft an earlier attempt already opened instead of a
+   * second one.
    */
   getAdvisory: (opts: {
     token: string;
@@ -60,6 +65,21 @@ export type DeliveryDeps = {
     description: string;
     signal?: AbortSignal;
   }) => Promise<Advisory>;
+  createDraftAdvisory: (opts: {
+    token: string;
+    fullName: string;
+    summary: string;
+    description: string;
+    severity: AdvisorySeverity | null;
+    cweIds: string[];
+    signal?: AbortSignal;
+  }) => Promise<Advisory>;
+  findAdvisoryByMarker: (opts: {
+    token: string;
+    fullName: string;
+    markers: string[];
+    signal?: AbortSignal;
+  }) => Promise<(Advisory & { marker: string }) | null>;
 };
 
 /**

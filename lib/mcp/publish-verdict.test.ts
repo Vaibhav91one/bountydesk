@@ -50,6 +50,8 @@ async function seedFixture(
     outcome?: "ANALYSIS_ONLY" | "REPRODUCED" | "NOT_REPRODUCED";
     state?: "AWAITING_APPROVAL" | "ANALYSIS_ONLY";
     verifiedSender?: string | null;
+    targetProfileId?: string | null;
+    connectedRepositoryId?: string | null;
   } = {},
 ) {
   seq += 1;
@@ -77,6 +79,8 @@ async function seedFixture(
             : opts.reporterContact
           : null,
       verifiedSender: opts.verifiedSender ?? null,
+      targetProfileId: opts.targetProfileId ?? null,
+      connectedRepositoryId: opts.connectedRepositoryId ?? null,
     })
     .returning({ id: dbm.report.id });
 
@@ -268,12 +272,81 @@ test("an approved email report is queued to the reporter's verified address", as
 
   assert.equal(result.ok, true);
   const [delivery] = await dbm.db
-    .select({ target: dbm.outboundDelivery.target })
+    .select({ target: dbm.outboundDelivery.target, channel: dbm.outboundDelivery.channel })
     .from(dbm.outboundDelivery)
     .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
-  // The destination comes from the verified sender, never from the report's source reference.
+  // The destination comes from the verified sender, never from the report's source reference. With no
+  // bound repository the channel override stays null, so the worker keeps this on the email arm.
   assert.equal(delivery.target, REPORTER);
+  assert.equal(delivery.channel, null);
   assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an approved email report bound to an advisory-capable repo is routed to the advisory channel", async () => {
+  const { targetProfileId, connectedRepositoryId } = await seedTargetWithGrant();
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    targetProfileId,
+    connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ target: dbm.outboundDelivery.target, channel: dbm.outboundDelivery.channel })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  // The verdict is written back as a draft advisory on the bound repo, not mailed. The frozen target
+  // names the repo (no GHSA exists yet), and the channel override points the worker at the advisory arm.
+  assert.match(delivery.target, /^github:\d+:advisory:create$/);
+  assert.equal(delivery.channel, "advisory");
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an advisory-routed email report is not gated on a verified email contact", async () => {
+  // A bound advisory-capable repo mails nobody, so a missing reporter contact must not strand it: the
+  // recipient is the repository, re-verified by the advisory arm.
+  const { targetProfileId, connectedRepositoryId } = await seedTargetWithGrant();
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: null,
+    targetProfileId,
+    connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ channel: dbm.outboundDelivery.channel })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  assert.equal(delivery.channel, "advisory");
+  assert.equal(await reportState(fixture.reportId), "DELIVERING");
+});
+
+test("an email report bound to a revoked repo falls back to the email reply", async () => {
+  // A suspended installation is not an advisory-capable repo, so the verdict goes to the reporter.
+  const { targetProfileId, connectedRepositoryId } = await seedTargetWithGrant({ suspended: true });
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    targetProfileId,
+    connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, true);
+  const [delivery] = await dbm.db
+    .select({ target: dbm.outboundDelivery.target, channel: dbm.outboundDelivery.channel })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+  assert.equal(delivery.target, REPORTER);
+  assert.equal(delivery.channel, null);
 });
 
 test("an email report with no verified contact stays approvable rather than stranded", async () => {

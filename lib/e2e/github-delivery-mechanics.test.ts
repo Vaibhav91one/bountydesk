@@ -165,6 +165,12 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
       updateAdvisoryDescription: async () => {
         throw new Error("github delivery must not touch an advisory");
       },
+      createDraftAdvisory: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
+      findAdvisoryByMarker: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
       githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => ({ token: "fake-installation-token", expiresAt: new Date().toISOString() }),
@@ -219,6 +225,12 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
         throw new Error("github delivery must not touch an advisory");
       },
       updateAdvisoryDescription: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
+      createDraftAdvisory: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
+      findAdvisoryByMarker: async () => {
         throw new Error("github delivery must not touch an advisory");
       },
       githubAppId: 123456,

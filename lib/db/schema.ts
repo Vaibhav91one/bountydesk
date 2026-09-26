@@ -714,6 +714,15 @@ export const outboundDelivery = pgTable(
       .notNull()
       .references(() => verdict.id, { onDelete: "restrict" }),
     state: deliveryState("state").notNull().default("PENDING"),
+    /**
+     * The transport that carries this delivery, when it differs from the report's intake channel.
+     * Null means "use report.channel", which is every delivery except one: an email report bound to
+     * an advisory-capable repository is delivered as a draft advisory, not an email reply, and this
+     * column is how the worker picks the advisory arm for a report whose channel column still says
+     * email. It is frozen here at approval, alongside target, so a routing decision a human approved
+     * cannot drift before the worker acts on it.
+     */
+    channel: intakeChannel("channel"),
     /** Stable marker embedded in the comment; makes a retry a no-op rather than a duplicate. */
     idempotencyKey: text("idempotency_key").notNull(),
     target: text("target").notNull(),
