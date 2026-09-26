@@ -7,6 +7,7 @@ import {
 } from "@/lib/mcp/publish-verdict";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
+import { routeUnreproducibleTarget } from "@/lib/reports/target-scope";
 import { isTerminal } from "@/lib/reports/states";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import {
@@ -119,7 +120,8 @@ async function refuseUnresolvablePending(
  * ANALYSIS_ONLY, and, when it has no verdict at all, mint the server-authored ANALYSIS_ONLY
  * verdict so a human can still approve and deliver it from the Analysis only lane. The
  * alternative is a report parked at ANALYSIS_ONLY with nothing to approve, which can never
- * reach delivery.
+ * reach delivery. The one exception is a static review that read no source and drafted nothing:
+ * that report goes to OUT_OF_SCOPE with no verdict (see routeUnreproducibleTarget).
  *
  * The mint happens only when there is no verdict yet. A report that somehow already has one
  * (not reachable through the real driver, which mints only via publish_verdict) stays where it
@@ -174,7 +176,13 @@ async function endWithoutAgentVerdict(
       pendingVerdictId: null,
       pendingApprovedContentHash: null,
     };
-    if (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING") {
+    // A static review that had no source to read and then drafted nothing leaves nothing to
+    // reproduce and nothing to analyze, so the report is out of scope rather than handed a
+    // synthesized ANALYSIS_ONLY. routeUnreproducibleTarget refuses every other case, which then
+    // takes the ANALYSIS_ONLY path below.
+    const outOfScope =
+      reportRow.state === "TRIAGING" && (await routeUnreproducibleTarget(lease.reportId, tx)).routed;
+    if (!outOfScope && (reportRow.state === "TRIAGING" || reportRow.state === "REPRODUCING")) {
       await transition(lease.reportId, reportRow.state, "ANALYSIS_ONLY", tx);
       const synthesized = await synthesizeAnalysisOnlyVerdict(lease.reportId, tx);
       if (synthesized) {

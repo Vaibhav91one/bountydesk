@@ -11,7 +11,6 @@ import {
   gt,
   report,
   REPORT_TERMINAL_STATES,
-  sessionEvent,
   sql,
   targetOnboarding,
   targetProfile,
@@ -19,15 +18,12 @@ import {
   verdictSupersession,
   type Executor,
 } from "@/lib/db";
-import {
-  isStaticFallbackReason,
-  STATIC_FALLBACK_EVENT,
-  type StaticFallbackReason,
-} from "@/lib/analysis/static-review";
+import type { StaticFallbackReason } from "@/lib/analysis/static-review";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
 import { isVerifiedEmailRecipient } from "@/lib/email/recipient";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
+import { readStaticFallback } from "@/lib/reports/target-scope";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { appendVerdictRevision, ensureInitialVerdict, nextVerdictRevision } from "@/lib/verdicts/lifecycle";
@@ -140,20 +136,8 @@ async function reproductionUnavailabilityEvidence(reportId: string, tx: Executor
   return { reproduction: "unavailable", reason: "no-reproduction-target" };
 }
 
-/**
- * The reason recorded with this report's static-review turn (lib/analysis/trueforge-driver.ts), or
- * null when its turn was an ordinary one. The event is written in the same transaction that stored
- * the turn, and session_event rows cannot be edited, so this is server-authored and stable.
- */
 async function staticFallbackReason(reportId: string, tx: Executor): Promise<StaticFallbackReason | null> {
-  const [row] = await tx
-    .select({ data: sessionEvent.data })
-    .from(sessionEvent)
-    .where(and(eq(sessionEvent.reportId, reportId), eq(sessionEvent.type, STATIC_FALLBACK_EVENT)))
-    .orderBy(desc(sessionEvent.seq))
-    .limit(1);
-  const reason = (row?.data as { reason?: unknown } | undefined)?.reason;
-  return isStaticFallbackReason(reason) ? reason : null;
+  return (await readStaticFallback(reportId, tx))?.reason ?? null;
 }
 
 async function analysisOnlyReasonEvidence(reportId: string, tx: Executor): Promise<{ analysisOnlyReason?: StaticFallbackReason }> {

@@ -13,9 +13,10 @@ import { boundedSourceReader, REVIEW_FILES } from "./sandboxability";
  * publish_verdict approval gate as every other verdict.
  *
  * Gathering is fail-open: GitHub being unreachable, a private repo, or a missing ref leaves the corpus
- * empty, and the agent is told to work from the report text. The reason is recorded either way, so a
- * report whose static review produced nothing still ends as ANALYSIS_ONLY with that reason on its
- * verdict, never as a dead job.
+ * empty, and the agent is told to work from the report text. The reason is recorded either way. A
+ * review that read source but drafted nothing still ends ANALYSIS_ONLY with that reason on a
+ * synthesized verdict. One that read no source and drafted nothing could neither reproduce nor
+ * analyze, so the poller routes it to OUT_OF_SCOPE (lib/reports/target-scope.ts). Neither is a dead job.
  */
 
 /** The session_event type that records a report's static fallback and its reason. publish-verdict

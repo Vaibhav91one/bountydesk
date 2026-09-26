@@ -113,6 +113,7 @@ async function seedUndeployableTarget() {
       imageName: "ghcr.io/example/app",
       imageDigest: `sha256:${"b".repeat(64)}`,
       snapshotId: "snapshot-undeployable",
+      resolvedCommitSha: COMMIT,
       config: {
         baseUrl: "http://localhost:3000",
         provisioning: { readinessPath: "/", expectedBuildMarker: "marker", startCommand: "start-app" },
@@ -340,8 +341,7 @@ test("a static-review run cannot publish NOT_REPRODUCED even with a bound, grant
     .set({ targetProfileId })
     .where(dbm.eq(dbm.connectedRepository.id, repo.connectedRepositoryId));
   const reportId = await seedReport({ targetProfileId, connectedRepositoryId: repo.connectedRepositoryId });
-  // A tree listing that fails: the static review reads nothing and still runs.
-  globalThis.fetch = (async () => new Response("", { status: 502 })) as typeof fetch;
+  fakeGitHub(repo.fullName, { "routes/search.js": "query(q)" });
   const provision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
     throw new provisionModule.ProvisionCouldNotDeployError("image will not start");
   };
@@ -360,9 +360,9 @@ test("a static-review run cannot publish NOT_REPRODUCED even with a bound, grant
   assert.equal((verdicts[0].evidence as { analysisOnlyReason: string }).analysisOnlyReason, "COULD_NOT_DEPLOY");
 });
 
-test("a static review that drafts nothing still ends in ANALYSIS_ONLY with the reason recorded", async () => {
+test("a static review that read source but drafts nothing still ends in ANALYSIS_ONLY with the reason recorded", async () => {
   const repo = await seedRepo({ state: "FAILED", analysisOnlyReason: "COULD_NOT_BUILD" });
-  fakeGitHub(repo.fullName, {});
+  fakeGitHub(repo.fullName, { "routes/search.js": "query(q)" });
   const reportId = await seedReport({ connectedRepositoryId: repo.connectedRepositoryId });
 
   const d = driver.createTrueforgeAnalysisDriver(driverClient());
@@ -376,6 +376,57 @@ test("a static review that drafts nothing still ends in ANALYSIS_ONLY with the r
   const evidence = verdicts[0].evidence as { source: string; analysisOnlyReason: string };
   assert.equal(evidence.source, "server-synthesized");
   assert.equal(evidence.analysisOnlyReason, "COULD_NOT_BUILD");
+});
+
+async function outOfScopeEvents(reportId: string) {
+  return dbm.db
+    .select({ data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, reportId), dbm.eq(dbm.sessionEvent.type, "target.out_of_scope")));
+}
+
+test("a static review with no source that drafts nothing ends OUT_OF_SCOPE with the reason recorded", async () => {
+  const repo = await seedRepo({ state: "UNSUPPORTED", analysisOnlyReason: "COULD_NOT_BUILD" });
+  // GitHub unreachable: the review has no source, and its turn then errors.
+  globalThis.fetch = (async () => new Response("", { status: 502 })) as typeof fetch;
+  const reportId = await seedReport({ connectedRepositoryId: repo.connectedRepositoryId });
+
+  const d = driver.createTrueforgeAnalysisDriver(driverClient());
+  await d.ensureSession(ctx(reportId));
+  await d.run(ctx(reportId));
+  await pollOnly(reportId, pollerClient({ status: "error", message: "the static review turn failed" }));
+
+  const { state, verdicts } = await finalState(reportId);
+  assert.equal(state, "OUT_OF_SCOPE", "a target that can be neither reproduced nor analyzed is out of scope");
+  assert.equal(verdicts.length, 0, "no ANALYSIS_ONLY verdict is synthesized for it");
+  const events = await outOfScopeEvents(reportId);
+  assert.equal(events.length, 1);
+  assert.equal((events[0].data as { reason: string }).reason, "COULD_NOT_BUILD");
+
+  const [session] = await dbm.db
+    .select({ turnStatus: dbm.agentSession.turnStatus, pendingVerdictId: dbm.agentSession.pendingVerdictId })
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId));
+  assert.equal(session.turnStatus, "ERROR", "the session is finished, not left to be polled again");
+  assert.equal(session.pendingVerdictId, null);
+});
+
+test("an undeployable target with no source that drafts nothing also ends OUT_OF_SCOPE", async () => {
+  const targetProfileId = await seedUndeployableTarget();
+  const reportId = await seedReport({ targetProfileId });
+  const provision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new provisionModule.ProvisionCouldNotDeployError("image will not start");
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(driverClient(), provision);
+  await d.ensureSession(ctx(reportId));
+  await d.run(ctx(reportId));
+  await pollOnly(reportId, pollerClient({ status: "done_no_action" }));
+
+  const { state, verdicts } = await finalState(reportId);
+  assert.equal(state, "OUT_OF_SCOPE");
+  assert.equal(verdicts.length, 0);
+  assert.equal(((await outOfScopeEvents(reportId))[0].data as { reason: string }).reason, "COULD_NOT_DEPLOY");
 });
 
 test("a FAILED onboarding with no build reason, or a revoked grant, is not a static fallback", async () => {
