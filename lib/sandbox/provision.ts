@@ -262,8 +262,17 @@ async function waitForAppReady(
   // but not with a 2xx on this path. The app log tail catches a crash message either way. Without
   // an HTTP client there is no verbose probe to run, so the clientless case tails the log alone.
   const logTail = `echo "-- log: $(tail -c 250 /tmp/bountydesk-app.log 2>/dev/null | tr '\\n' ' ')"`;
-  const diagCommand =
-    tool === "none" ? logTail : `wget -S -O /dev/null -T 5 ${url} 2>&1 | head -4; ${logTail}`;
+  // Run the verbose probe with whichever client is present: curl prints the status or, on a
+  // connection error, the reason (-sS keeps that on a failure); wget -S prints the response
+  // headers or its own error. A curl-only image was previously diagnosed with wget, which is not
+  // installed there, so it silently produced nothing.
+  const verboseProbe =
+    tool === "curl"
+      ? `curl -sS -o /dev/null -w 'HTTP %{http_code}\\n' --max-time 5 ${url} 2>&1 | head -4`
+      : tool === "wget"
+        ? `wget -S -O /dev/null -T 5 ${url} 2>&1 | head -4`
+        : null;
+  const diagCommand = verboseProbe ? `${verboseProbe}; ${logTail}` : logTail;
   const diag = startCommand ? (await execute(sandbox, diagCommand, 15)).result.trim() : "";
   throw new Error(
     `sandbox ${sandbox.id} did not answer on port ${port} within ${timeoutMs}ms` +
