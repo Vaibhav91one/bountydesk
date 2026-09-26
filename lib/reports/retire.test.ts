@@ -29,7 +29,9 @@ after(async () => {
 
 let seq = 0;
 
-async function seedReport(state: "TRIAGING" | "AWAITING_APPROVAL" | "DELIVERED"): Promise<string> {
+async function seedReport(
+  state: "TRIAGING" | "REPRODUCING" | "AWAITING_APPROVAL" | "DELIVERING" | "DELIVERED",
+): Promise<string> {
   seq += 1;
   const [row] = await dbm.db
     .insert(dbm.report)
@@ -84,6 +86,22 @@ test("committing moves the report and records why", async () => {
     reason: "left over from a smoke run",
   });
 });
+
+// A report can be retired from any non-terminal state. These three are the in-flight ones an
+// operator is most likely to abandon: mid-reproduction, waiting on a reviewer, and mid-send.
+for (const from of ["REPRODUCING", "AWAITING_APPROVAL", "DELIVERING"] as const) {
+  test(`committing retires a ${from} report to CANCELLED`, async () => {
+    const id = await seedReport(from);
+
+    const outcomes = await retire.retireReports([id], { reason: "abandoned in flight", commit: true });
+
+    assert.deepEqual(outcomes, [{ reportId: id, status: "retired", from }]);
+    assert.equal(await stateOf(id), "CANCELLED");
+    const [event] = await events(id);
+    assert.equal(event.type, "report.retired");
+    assert.deepEqual(event.data, { from, to: "CANCELLED", reason: "abandoned in flight" });
+  });
+}
 
 test("a report that already finished is skipped, not rewritten", async () => {
   const id = await seedReport("DELIVERED");
