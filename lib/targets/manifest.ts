@@ -41,7 +41,7 @@ export function targetDefinitionFromManifest(input: unknown): TargetDefinition {
 
   const imageName = readString(manifest, "imageName");
   if (!IMAGE_NAME_RE.test(imageName) || imageName.includes("@") || /:[^/]+$/.test(imageName)) {
-    throw new Error("target manifest imageName must be an untagged ghcr.io image name");
+    throw new Error("target manifest imageName must be an untagged image name of the form registry-host/namespace/name");
   }
 
   const baseUrl = readString(manifest, "baseUrl");

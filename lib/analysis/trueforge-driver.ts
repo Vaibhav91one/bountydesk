@@ -12,6 +12,7 @@ import {
   report,
   targetOnboarding,
   targetProfile,
+  uploadIntake,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
 import { recordEvent } from "@/lib/reports/lifecycle";
@@ -27,6 +28,7 @@ import { privateRepoPolicyRefused } from "@/lib/github/repo-access";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 
+import { gatherArchiveSource } from "./archive-source";
 import {
   gatherStaticSource,
   STATIC_FALLBACK_EVENT,
@@ -159,9 +161,10 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
  * The real driver: opens a TrueForge session per report and starts a turn that asks the model
  * to investigate and call publish_verdict. It never decides or persists a verdict and never moves
  * the report's lifecycle state. A target that cannot be built (the repo's onboarding came to rest
- * with COULD_NOT_BUILD) or cannot be deployed (provisioning threw ProvisionCouldNotDeployError)
- * gets a read-only static review turn instead of a reproduction one (lib/analysis/static-review.ts),
- * and the reason is recorded with the turn so publish-verdict holds that run to ANALYSIS_ONLY.
+ * with COULD_NOT_BUILD, or an upload's build gave up) or cannot be deployed (provisioning threw
+ * ProvisionCouldNotDeployError) gets a read-only static review turn instead of a reproduction one
+ * (lib/analysis/static-review.ts), and the reason is recorded with the turn so publish-verdict
+ * holds that run to ANALYSIS_ONLY.
  * Every verdict outcome still happens only once a separate poller has
  * independently confirmed, by asking TrueForge itself, that a genuine pending publish_verdict
  * call exists (lib/agent-sessions/poller.ts), and the verdict row it approves is the agent's
@@ -290,12 +293,16 @@ export function createTrueforgeAnalysisDriver(
           onboardingState: targetOnboarding.state,
           onboardingReason: targetOnboarding.analysisOnlyReason,
           onboardingCommitSha: targetOnboarding.resolvedCommitSha,
+          uploadBuildState: uploadIntake.buildState,
+          uploadMaterialKind: uploadIntake.materialKind,
+          uploadArchiveDigest: uploadIntake.sourceArchiveDigest,
         })
         .from(report)
         .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
         .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
         .leftJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
         .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
+        .leftJoin(uploadIntake, eq(uploadIntake.reportId, report.id))
         .where(eq(report.id, reportId))
         .limit(1);
       if (!context) {
@@ -359,13 +366,16 @@ export function createTrueforgeAnalysisDriver(
           isPrivate: context.repoIsPrivate,
           contentsPermission: context.installationContentsPermission,
         });
-      let staticReason: StaticFallbackReason | null =
-        !targetInfo &&
+      const onboardingCouldNotBuild =
         repoGrantLive &&
         (context.onboardingState === "UNSUPPORTED" || context.onboardingState === "FAILED") &&
-        context.onboardingReason === "COULD_NOT_BUILD"
-          ? "COULD_NOT_BUILD"
-          : null;
+        context.onboardingReason === "COULD_NOT_BUILD";
+      // An upload whose reviewer-approved build gave up (lib/upload/build.ts) is the same case with
+      // no repository behind it: its source is the stored archive, read below instead of GitHub. A
+      // reviewer who bound some other target by hand while the build waited made that the target.
+      const uploadCouldNotBuild = context.uploadBuildState === "FAILED" && !context.targetProfileId;
+      let staticReason: StaticFallbackReason | null =
+        !targetInfo && (onboardingCouldNotBuild || uploadCouldNotBuild) ? "COULD_NOT_BUILD" : null;
 
       if (turnPending && targetInfo && targetInfo.snapshotId) {
         const appPort = profileAppPort(context.targetConfig);
@@ -433,7 +443,25 @@ export function createTrueforgeAnalysisDriver(
       // it: these are GitHub fetches, not something to hold a lock across. A retry whose turn
       // already exists skips it, since the transaction below would discard the result anyway.
       let staticSource: StaticSource | null = null;
-      if (staticReason && turnPending && context.repoFullName) {
+      let staticSubject = context.repoFullName;
+      if (staticReason && turnPending && uploadCouldNotBuild && !context.repoFullName) {
+        // An image upload has no source to read, so its review works from the report text alone.
+        staticSubject = "the uploaded archive";
+        if (context.uploadMaterialKind !== "image") {
+          const [upload] = await db
+            .select({ archive: uploadIntake.archive })
+            .from(uploadIntake)
+            .where(eq(uploadIntake.reportId, reportId))
+            .limit(1);
+          if (upload?.archive) {
+            staticSource = gatherArchiveSource({
+              archive: Buffer.from(upload.archive),
+              digest: context.uploadArchiveDigest,
+              reportText: `${context.title}\n${context.body}`,
+            });
+          }
+        }
+      } else if (staticReason && turnPending && context.repoFullName) {
         const pinnedRef =
           staticReason === "COULD_NOT_DEPLOY"
             ? (context.targetCommitSha ?? context.onboardingCommitSha)
@@ -508,7 +536,7 @@ export function createTrueforgeAnalysisDriver(
             session.capabilityToken,
             targetInfo,
             provisioned !== null,
-            staticReason ? staticReviewSection(staticReason, context.repoFullName, staticSource) : null,
+            staticReason ? staticReviewSection(staticReason, staticSubject, staticSource) : null,
           );
           const { turnId } = await client.createTurn(
             session.sessionId,

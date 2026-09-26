@@ -16,8 +16,9 @@ import { uploadBuildPlan, type ReviewedUploadTarget } from "./gate";
  * PENDING). The build runs through the non-GitHub build path (a BuildSource of kind archive or image),
  * the result is pinned with bindConnectionlessTargetFromBuild, and the report is bound to that profile.
  * Whatever happens, the report then gets the same analysis run the gate's "Run analysis" queues: with a
- * bound target it can reproduce, and without one (the build failed) it stops at ANALYSIS_ONLY, which is
- * the "no bound target, no REPRODUCED" rule rather than a dead end.
+ * bound target it can reproduce. Without one (the build gave up at FAILED) the analysis driver runs the
+ * tier-3 static review with COULD_NOT_BUILD over the stored archive (lib/analysis/archive-source.ts),
+ * which ends ANALYSIS_ONLY, or OUT_OF_SCOPE when there was no source to read and nothing was drafted.
  *
  * It runs in its own daemon loop, not the jobs loop, because a build takes as long as the build
  * sandbox allows and the jobs loop's health budget is a few minutes.

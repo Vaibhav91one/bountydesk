@@ -1,4 +1,4 @@
-import { connectedRepository, db, eq, targetOnboarding, targetProfile } from "@/lib/db";
+import { connectedRepository, db, eq, inArray, targetOnboarding, targetProfile, uploadIntake } from "@/lib/db";
 import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest, validateStartCommand } from "@/lib/targets/manifest";
@@ -9,7 +9,7 @@ import {
   teardownSandbox,
   type MeshServiceAuth,
 } from "@/lib/sandbox/provision";
-import { sweepTrialSnapshots } from "@/lib/sandbox/daytona";
+import { sweepTrialSnapshots, type SnapshotSweepOps } from "@/lib/sandbox/daytona";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
@@ -634,9 +634,26 @@ export async function collectProtectedSnapshotIds(): Promise<Set<string>> {
  * Reclaim build-created snapshots that no live target depends on.
  *
  * Read the protected set from the database, then sweep. This runs as maintenance, not on the
- * onboarding hot path: a hot-path sweep could race a concurrent build and delete a snapshot the
- * database has not yet recorded, and it would reach the live Daytona API from every onboarding.
+ * onboarding hot path: a hot-path sweep would reach the live Daytona API from every onboarding.
+ *
+ * A build registers its snapshot before the database records it: an onboarding writes the id when
+ * it leaves PENDING_BUILD, and an upload build when it binds the profile. Neither id is in the
+ * protected set while that build runs, so a pass that finds any build in flight does nothing and
+ * waits for the next interval rather than guess which unrecorded snapshot is the live one.
  */
-export async function sweepOrphanSnapshots(): Promise<{ deleted: string[]; kept: string[] }> {
-  return sweepTrialSnapshots(await collectProtectedSnapshotIds());
+export async function sweepOrphanSnapshots(
+  ops?: SnapshotSweepOps,
+): Promise<{ deleted: string[]; kept: string[]; skipped: boolean }> {
+  const [building] = await db
+    .select({ id: targetOnboarding.id })
+    .from(targetOnboarding)
+    .where(eq(targetOnboarding.state, "PENDING_BUILD"))
+    .limit(1);
+  const [uploading] = await db
+    .select({ id: uploadIntake.id })
+    .from(uploadIntake)
+    .where(inArray(uploadIntake.buildState, ["PENDING", "BUILDING"]))
+    .limit(1);
+  if (building || uploading) return { deleted: [], kept: [], skipped: true };
+  return { ...(await sweepTrialSnapshots(await collectProtectedSnapshotIds(), ops)), skipped: false };
 }
