@@ -17,6 +17,9 @@ export class GitHubRequestError extends Error {
 
 export type Advisory = { ghsaId: string; htmlUrl: string };
 
+/** A draft advisory's readable content, as intake needs it: the report title and body. */
+export type AdvisoryContent = Advisory & { summary: string; description: string };
+
 export type AdvisorySeverity = "critical" | "high" | "medium" | "low";
 
 // Most severe first. "info" is not a GitHub severity, so a verdict of only info findings gets none.
@@ -160,6 +163,38 @@ export async function updateAdvisoryDescription(opts: {
     body: JSON.stringify({ description: opts.description }),
   });
   return toAdvisory(await readJson(response, "update advisory"), "update advisory");
+}
+
+/**
+ * Read one advisory's summary and description, the two fields intake turns into a report's title
+ * and body. Reading it back through the API rather than trusting the webhook payload also proves
+ * the installation can actually see the advisory: a repository whose "Repository security
+ * advisories: read" was never accepted fails here at intake instead of silently triaging a
+ * webhook-shaped stub.
+ */
+export async function getAdvisory(opts: {
+  token: string;
+  fullName: string;
+  ghsaId: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+}): Promise<AdvisoryContent> {
+  const doFetch = opts.fetchImpl ?? fetch;
+  const response = await doFetch(
+    `${advisoriesUrl(opts.fullName)}/${encodeURIComponent(opts.ghsaId)}`,
+    { ...requestInit(opts.token, opts.signal), method: "GET" },
+  );
+  const item = await readJson(response, "get advisory");
+  const base = toAdvisory(item, "get advisory");
+  const summary =
+    typeof (item as { summary?: unknown }).summary === "string"
+      ? (item as { summary: string }).summary
+      : "";
+  const description =
+    typeof (item as { description?: unknown }).description === "string"
+      ? (item as { description: string }).description
+      : "";
+  return { ...base, summary, description };
 }
 
 /**

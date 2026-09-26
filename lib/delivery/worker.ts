@@ -13,6 +13,7 @@ import { GitHubApiError } from "@/lib/github/app-auth";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { transition } from "@/lib/reports/lifecycle";
 
+import { advisoryArm } from "./advisory-arm";
 import { emailArm } from "./email";
 import {
   claim,
@@ -42,11 +43,12 @@ function errorMessage(err: unknown): string {
 }
 
 async function defaultDeps(): Promise<DeliveryDeps> {
-  const [hash, appAuth, comment, resend] = await Promise.all([
+  const [hash, appAuth, comment, resend, advisory] = await Promise.all([
     import("@/lib/verdicts/hash"),
     import("@/lib/github/app-auth"),
     import("@/lib/github/comment"),
     import("@/lib/email/resend"),
+    import("@/lib/github/advisory"),
   ]);
 
   return {
@@ -56,6 +58,9 @@ async function defaultDeps(): Promise<DeliveryDeps> {
     postComment: comment.postIssueComment,
     listComments: comment.listIssueComments,
     sendEmail: resend.sendVerdictEmail,
+    findAdvisoryByMarker: advisory.findAdvisoryByMarker,
+    createDraftAdvisory: advisory.createDraftAdvisory,
+    updateAdvisoryDescription: advisory.updateAdvisoryDescription,
   };
 }
 
@@ -245,13 +250,14 @@ const githubArm: DeliveryArm = async (ctx, d) => {
   };
 };
 
-const ARMS: Partial<Record<"github" | "email" | "manual" | "upload", DeliveryArm>> = {
+const ARMS: Partial<Record<"github" | "email" | "manual" | "upload" | "advisory", DeliveryArm>> = {
   github: githubArm,
   email: emailArm,
   // An upload has an OTP-verified email contact and no thread to reply into, which is exactly what
   // emailArm handles: threadingHeaders returns nothing for a non-email: source_ref, and the
   // recipient re-check reads verified_sender the same way.
   upload: emailArm,
+  advisory: advisoryArm,
 };
 
 /**

@@ -274,6 +274,13 @@
       "when": 1790349450254,
       "tag": "0038_familiar_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790398643269,
+      "tag": "0039_advisory_intake_channel",
+      "breakpoints": true
     }
   ]
 }

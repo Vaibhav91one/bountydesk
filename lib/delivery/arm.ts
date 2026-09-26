@@ -1,3 +1,4 @@
+import type { Advisory, AdvisorySeverity } from "@/lib/github/advisory";
 import type { IssueComment } from "@/lib/github/comment";
 
 import type { DeliveryLease } from "./queue";
@@ -39,6 +40,33 @@ export type DeliveryDeps = {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }) => Promise<{ id: string }>;
+  /**
+   * The advisory transport's three GitHub calls. Required for the same reason sendEmail is: an
+   * absent one would silently turn advisory delivery into a no-op. The GitHub and email tests stub
+   * them with a throw, which doubles as an assertion that those arms never open an advisory.
+   */
+  findAdvisoryByMarker: (opts: {
+    token: string;
+    fullName: string;
+    markers: string[];
+    signal?: AbortSignal;
+  }) => Promise<(Advisory & { marker: string }) | null>;
+  createDraftAdvisory: (opts: {
+    token: string;
+    fullName: string;
+    summary: string;
+    description: string;
+    severity: AdvisorySeverity | null;
+    cweIds: string[];
+    signal?: AbortSignal;
+  }) => Promise<Advisory>;
+  updateAdvisoryDescription: (opts: {
+    token: string;
+    fullName: string;
+    ghsaId: string;
+    description: string;
+    signal?: AbortSignal;
+  }) => Promise<Advisory>;
 };
 
 /**
@@ -53,7 +81,7 @@ export type DeliveryContext = {
   payload: string;
   report: {
     id: string;
-    channel: "github" | "email" | "manual" | "upload";
+    channel: "github" | "email" | "manual" | "upload" | "advisory";
     sourceRef: string;
     /** Reporter-controlled: for email it is their own subject line, so treat it as untrusted. */
     title: string;

@@ -5,6 +5,7 @@ import {
   classifyFindings,
   createDraftAdvisory,
   findAdvisoryByMarker,
+  getAdvisory,
   updateAdvisoryDescription,
 } from "./advisory";
 
@@ -36,6 +37,37 @@ test("the marker search follows GitHub's cursor links and ignores a next link of
   const offHost = (async () =>
     reply([], { link: '<https://evil.example/next>; rel="next"' })) as typeof fetch;
   assert.equal(await findAdvisoryByMarker({ token: "t", fullName: "o/r", markers: ["m"], fetchImpl: offHost }), null);
+});
+
+test("getAdvisory reads the summary and description, and keeps a refusal's status", async () => {
+  let seen: { url: string; method?: string } | undefined;
+  const fetchImpl = (async (url: string, init: RequestInit) => {
+    seen = { url, method: init.method };
+    return reply({
+      ghsa_id: "GHSA-read-aaaa-bbbb",
+      html_url: "https://github.com/o/r/security/advisories/GHSA-read-aaaa-bbbb",
+      summary: "XSS in search",
+      description: "the reporter's writeup",
+    });
+  }) as typeof fetch;
+
+  const advisory = await getAdvisory({ token: "t", fullName: "o/r", ghsaId: "GHSA-read-aaaa-bbbb", fetchImpl });
+  assert.equal(advisory.summary, "XSS in search");
+  assert.equal(advisory.description, "the reporter's writeup");
+  assert.equal(advisory.ghsaId, "GHSA-read-aaaa-bbbb");
+  assert.equal(seen?.method, "GET");
+  assert.equal(seen?.url, "https://api.github.com/repos/o/r/security-advisories/GHSA-read-aaaa-bbbb");
+
+  // A 404 (the installation cannot see the advisory) surfaces as a status-carrying error, not a stub.
+  await assert.rejects(
+    getAdvisory({
+      token: "t",
+      fullName: "o/r",
+      ghsaId: "GHSA-x",
+      fetchImpl: (async () => reply({ message: "not found" }, { status: 404 })) as typeof fetch,
+    }),
+    (error: { status?: number }) => error.status === 404,
+  );
 });
 
 test("a refusal keeps GitHub's status, and a response pointing off github.com is rejected", async () => {

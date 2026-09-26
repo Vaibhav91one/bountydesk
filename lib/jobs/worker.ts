@@ -146,6 +146,102 @@ function parseDelivery(lease: Lease): {
   };
 }
 
+type AdvisoryDelivery = {
+  action?: string;
+  repository_advisory?: { ghsa_id?: string };
+  sender?: { login?: string };
+  repository?: { id?: number; full_name?: string };
+  installation?: { id?: number };
+};
+
+/**
+ * Reads a draft advisory's title and body. Injected so a test can drive parseAdvisory without a
+ * live GitHub App: the default mints an installation token and reads the advisory through the API.
+ */
+export type AdvisoryReader = (opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}) => Promise<{ summary: string; description: string }>;
+
+async function defaultReadAdvisory(opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}): Promise<{ summary: string; description: string }> {
+  const [{ mintInstallationToken }, { getAdvisory }] = await Promise.all([
+    import("@/lib/github/app-auth"),
+    import("@/lib/github/advisory"),
+  ]);
+  const { token } = await mintInstallationToken(opts.installationId, opts.repoId, {
+    signal: opts.signal,
+  });
+  const { summary, description } = await getAdvisory({
+    token,
+    fullName: opts.fullName,
+    ghsaId: opts.ghsaId,
+    signal: opts.signal,
+  });
+  return { summary, description };
+}
+
+/**
+ * Turn a repository_advisory delivery into a report.
+ *
+ * Access is re-checked here, not just at intake: a suspension or a repository removal can land
+ * between the 202 and this run, and the target profile is read from the server, never the payload,
+ * exactly as the issue path does. A report whose repository has since lost its grant can only reach
+ * ANALYSIS_ONLY downstream (see the repository-grant gate), which is the "no bound target, no
+ * REPRODUCED" invariant, so nothing here has to special-case it.
+ */
+async function parseAdvisory(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
+  const payload = lease.payload as AdvisoryDelivery;
+  const ghsaId = payload.repository_advisory?.ghsa_id;
+  const installationId = payload.installation?.id;
+  if (!ghsaId) throw new UnprocessableDelivery("advisory delivery carries no ghsa_id");
+  if (!installationId) throw new UnprocessableDelivery("advisory delivery carries no installation id");
+
+  const repository = await activeRepository(installationId, payload.repository?.id);
+  if (!repository) {
+    throw new UnprocessableDelivery(
+      `repository ${payload.repository?.full_name ?? "?"} is no longer connected`,
+    );
+  }
+
+  const { summary, description } = await readAdvisory({
+    installationId,
+    repoId: repository.repoId,
+    fullName: repository.fullName,
+    ghsaId,
+    signal: undefined,
+  });
+
+  const sourceRef = `github:${repository.repoId}:advisory:${ghsaId}`;
+
+  const reportId = await ensureReport({
+    channel: lease.channel,
+    sourceRef,
+    title: summary || `${repository.fullName} advisory ${ghsaId}`,
+    body: description,
+    reporterHandle: payload.sender?.login ?? null,
+    connectedRepositoryId: repository.connectedRepositoryId,
+    targetProfileId: repository.targetProfileId,
+  });
+
+  await recordEvent(
+    reportId,
+    "intake.accepted",
+    { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
+    { idempotencyKey: `${lease.id}:intake.accepted` },
+  );
+
+  return advance(lease, "PARSED", { reportId });
+}
+
 type EmailJobPayload = InboundEmail | OutsideEmailPayload | GateAnalysisPayload;
 
 function isOutside(payload: unknown): payload is OutsideEmailPayload {
@@ -235,8 +331,9 @@ async function parseEmail(lease: Lease): Promise<Lease> {
   return advance(lease, "PARSED", { reportId });
 }
 
-async function parse(lease: Lease): Promise<Lease> {
+async function parse(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
   if (lease.channel === "email") return parseEmail(lease);
+  if (lease.channel === "advisory") return parseAdvisory(lease, readAdvisory);
 
   const { payload, issueNumber, title, body, reporterHandle } = parseDelivery(lease);
 
@@ -292,12 +389,15 @@ export async function runOnce(
   {
     analysis,
     hold = defaultHold,
+    readAdvisory = defaultReadAdvisory,
     leaseSeconds = 60,
     signal,
   }: {
     analysis: AnalysisDriver;
     /** The gate step for an outside email report; injectable so tests need no TrueForge. */
     hold?: (context: AnalysisContext) => Promise<void>;
+    /** Reads an advisory's title and body; injectable so tests need no live GitHub App. */
+    readAdvisory?: AdvisoryReader;
     leaseSeconds?: number;
     signal?: AbortSignal;
   },
@@ -318,7 +418,7 @@ export async function runOnce(
   let lease = claimed;
 
   try {
-    if (lease.state === "RECEIVED") lease = await parse(lease);
+    if (lease.state === "RECEIVED") lease = await parse(lease, readAdvisory);
     signal?.throwIfAborted();
     // An outside sender's report stops here. The analysis driver never sees it: no session, no
     // sandbox, no clone. The job finishes once the acknowledgement and triage are recorded, and

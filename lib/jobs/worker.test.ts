@@ -106,6 +106,21 @@ async function enqueueIssue(repo: Repo, overrides: Record<string, unknown> = {})
   });
 }
 
+async function enqueueAdvisory(repo: Repo, ghsaId: string) {
+  deliveries += 1;
+  return queue.enqueue({
+    channel: "advisory",
+    deliveryId: `worker-advisory-${deliveries}`,
+    payload: {
+      action: "reported",
+      repository_advisory: { ghsa_id: ghsaId },
+      sender: { login: "reporter" },
+      repository: { id: repo.repoId, full_name: repo.fullName },
+      installation: { id: repo.installationId },
+    },
+  });
+}
+
 async function job(jobId: string) {
   const [row] = await dbm.db
     .select()
@@ -161,6 +176,64 @@ test("a delivery becomes a report and the job finishes", async () => {
 
   // The target comes from the server-held binding, never from the payload.
   assert.equal(created.targetProfileId, targetProfileId);
+});
+
+test("an advisory delivery becomes a report with the advisory source ref", async () => {
+  await drain();
+  const repo = await connectedRepo();
+  const ghsaId = "GHSA-worker-aaaa-bbbb";
+  const { jobId } = await enqueueAdvisory(repo, ghsaId);
+
+  let readWith: { installationId: number; repoId: number; fullName: string; ghsaId: string } | null = null;
+  const finishedId = await worker.runOnce("worker-adv", {
+    analysis: analysisDriver(),
+    readAdvisory: async (opts) => {
+      readWith = opts;
+      return { summary: "XSS in the search box", description: "advisory body from the API" };
+    },
+  });
+  assert.equal(finishedId, jobId);
+
+  // The advisory body is read for the bound repository, by its GHSA id, not trusted from the payload.
+  assert.deepEqual(readWith, {
+    installationId: repo.installationId,
+    repoId: repo.repoId,
+    fullName: repo.fullName,
+    ghsaId,
+    signal: undefined,
+  });
+
+  const finished = await job(jobId);
+  assert.equal(finished.state, "DONE");
+  assert.ok(finished.reportId);
+
+  const [reportRow] = await dbm.db
+    .select()
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, finished.reportId as string));
+  assert.equal(reportRow.channel, "advisory");
+  assert.equal(reportRow.sourceRef, `github:${repo.repoId}:advisory:${ghsaId}`);
+  assert.equal(reportRow.title, "XSS in the search box");
+  assert.equal(reportRow.body, "advisory body from the API");
+  assert.equal(reportRow.targetProfileId, targetProfileId);
+});
+
+test("an advisory for a repository that lost its grant is not made into a report", async () => {
+  await drain();
+  const repo = await connectedRepo({ granted: false });
+  const { jobId } = await enqueueAdvisory(repo, "GHSA-revoked-cccc-dddd");
+
+  await worker.runOnce("worker-adv-revoked", {
+    analysis: analysisDriver(),
+    readAdvisory: async () => {
+      throw new Error("must not read an advisory for an unconnected repository");
+    },
+  });
+
+  // The delivery cannot be processed and is buried, exactly like an issue for a revoked repo.
+  const finished = await job(jobId);
+  assert.equal(finished.state, "DEAD_LETTER");
+  assert.equal(finished.reportId, null);
 });
 
 test("session creation commits before the job is marked SESSION_CREATED", async () => {
