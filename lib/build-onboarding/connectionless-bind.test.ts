@@ -132,6 +132,12 @@ test("a git-cloned source binds with the commit as the anchor", async () => {
   const row = await storedProfile(configured.targetProfileId);
   assert.equal(row.resolvedCommitSha, commit);
   assert.equal(row.sourceArchiveDigest, null);
+  // A repo build reports no snapshotImageRef, so the bind falls back to the default onboarding tag on
+  // the build's image.
+  assert.equal(
+    (row.config as { provisioning?: { snapshotImageRefOverride?: string } }).provisioning?.snapshotImageRefOverride,
+    "ghcr.io/ns/cloned:bountydesk-onboarding",
+  );
 });
 
 test("a build with no recipe digest is refused before any profile is written", async () => {
