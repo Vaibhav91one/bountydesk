@@ -121,6 +121,9 @@ async function seedFixture(
     // An email report bound to an advisory-capable repo: channel email, source_ref email:..., and an
     // outbox row whose channel override is advisory and whose target names the repo for a create.
     emailAdvisory?: boolean;
+    // The installation's recorded repository_advisories permission. null (the default) is an
+    // installation that never accepted the write; "write" is one that has.
+    advisoriesPermission?: string;
   } = {},
 ) {
   seq += 1;
@@ -136,6 +139,7 @@ async function seedFixture(
       accountId: 600000 + n,
       accountType: "User",
       suspendedAt: opts.suspended ? new Date() : null,
+      repositoryAdvisoriesPermission: opts.advisoriesPermission ?? null,
     })
     .returning({ id: dbm.githubInstallation.id });
 
@@ -285,6 +289,33 @@ test("an advisory the App cannot read is refused and held, not delivered", async
   assert.equal(row.rhr, true);
   assert.match(row.lastError ?? "", /refused the advisory write/);
   assert.equal(await reportState(f.reportId), "DELIVERING");
+});
+
+test("a refusal on an installation without the advisories permission says to accept it", async () => {
+  await drainOthers();
+  const f = await seedFixture();
+  const { deps } = fakeAdvisoryDeps(null);
+
+  await worker.deliverOnce("adv-refuse-no-perm", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /accept "Repository security advisories: write" on the installation/);
+  assert.doesNotMatch(row.lastError ?? "", /Advanced Security/);
+});
+
+test("a refusal when the permission is already granted names the missing advisory feature", async () => {
+  await drainOthers();
+  // The installation has the write, so a 404 is not the permission: the private repository has no
+  // security advisories surface without GitHub Advanced Security.
+  const f = await seedFixture({ advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps(null);
+
+  await worker.deliverOnce("adv-refuse-no-feature", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /does not have security advisories available/);
+  assert.match(row.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
 });
 
 test("the grant revoked between intake and send is refused and held, not delivered", async () => {

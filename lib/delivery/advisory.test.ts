@@ -46,6 +46,7 @@ type Fixture = {
   repo?: boolean;
   delivered?: boolean;
   payload?: (marker: string) => string;
+  advisoriesPermission?: string;
 };
 
 async function seed(opts: Fixture = {}) {
@@ -57,7 +58,13 @@ async function seed(opts: Fixture = {}) {
     .returning({ id: dbm.targetProfile.id });
   const [installation] = await dbm.db
     .insert(dbm.githubInstallation)
-    .values({ installationId: 100 + n, accountLogin: `acme-${n}`, accountId: 200 + n, accountType: "User" })
+    .values({
+      installationId: 100 + n,
+      accountLogin: `acme-${n}`,
+      accountId: 200 + n,
+      accountType: "User",
+      repositoryAdvisoriesPermission: opts.advisoriesPermission ?? null,
+    })
     .returning({ id: dbm.githubInstallation.id });
   const [repo] = await dbm.db
     .insert(dbm.connectedRepository)
@@ -277,6 +284,18 @@ test("GitHub refusing the advisory fails for good, an outage is retried later", 
   assert.equal(r.state, "PENDING");
   assert.equal(r.attempts, 1);
   assert.ok(r.nextAttemptAt.getTime() > Date.now(), "not claimable again straight away");
+});
+
+test("a refusal when the permission is already granted names the missing advisory feature", async () => {
+  // The installation has the write, so GitHub refusing is not the permission: the private repository
+  // has no security advisories surface without GitHub Advanced Security.
+  const noFeature = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(noFeature.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub({ createError: { status: 404 } }).deps });
+  const failed = await row(noFeature.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
 });
 
 test("a GitHub report's owner gets the advisory too, with severity and CWEs from its findings", async () => {

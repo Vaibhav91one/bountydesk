@@ -231,22 +231,10 @@ export async function adviseOnce(opts: { signal?: AbortSignal; deps?: AdvisoryDe
   try {
     outcome = await send(claimed, d, opts.signal);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    const status = (error as { status?: unknown }).status;
-    // 403 and 404 are GitHub saying no: the installation has not accepted the advisories
-    // permission, or private vulnerability reporting is off for the repository. Retrying
-    // does not change either, a person does.
-    // 403 is what an installation that has not accepted the permission gets, and it is the
-    // one a reviewer can act on, so it says what to do; GitHub's own text follows for detail.
-    outcome =
-      status === 403
-        ? {
-            state: "FAILED",
-            error: `The GitHub App installation has not granted "Repository security advisories: write". Accept it on the installation, then try again. (${message})`,
-          }
-        : status === 404 || status === 422
-          ? { state: "FAILED", error: `GitHub refused the advisory (${status}): ${message}` }
-          : { state: "RETRY", error: message };
+    // send classifies GitHub's own refusals (a 403/404/422 that a person has to act on) and returns
+    // them as FAILED, because telling the two root causes apart needs the advisories permission it
+    // has loaded. What reaches here is an outage, a network error, or something unexpected: retry it.
+    outcome = { state: "RETRY", error: error instanceof Error ? error.message : String(error) };
   }
 
   const failedForGood = outcome.state === "RETRY" && claimed.attempts >= MAX_ATTEMPTS;
@@ -290,6 +278,7 @@ async function send(
       installationId: githubInstallation.installationId,
       repoId: connectedRepository.repoId,
       fullName: connectedRepository.fullName,
+      advisories: githubInstallation.repositoryAdvisoriesPermission,
     })
     .from(verdict)
     .innerJoin(report, eq(report.id, row.reportId))
@@ -322,46 +311,65 @@ async function send(
     return { state: "FAILED", error: `${source.fullName} is no longer connected` };
   }
 
-  const { token } = await d.mintToken(Number(source.installationId), Number(source.repoId), { signal });
   const fullName = repository.fullName;
 
-  let ghsaId = row.ghsaId;
-  if (!ghsaId) {
-    // An attempt that died after GitHub created the advisory but before the row said SENT left
-    // it there with its verdict's marker in it, and a later revision may since have been asked
-    // for. Any revision's marker names this report's advisory; finding it is the difference
-    // between a retry and a twin.
-    const revisions = await db
-      .select({ id: verdict.id })
-      .from(verdict)
-      .where(eq(verdict.reportId, row.reportId));
-    const existing = await d.findByMarker({
+  // GitHub refusing the write has two root causes a human fixes in different places, and the
+  // recorded advisories permission tells them apart, so the refusal is classified here where that
+  // column is in scope rather than in the caller. A 403/404/422 is permanent (the installation
+  // permission, or the repository having no advisories surface), so it FAILs for a human; anything
+  // else (an outage, a network error) is re-thrown for adviseOnce to retry.
+  try {
+    const { token } = await d.mintToken(Number(source.installationId), Number(source.repoId), { signal });
+
+    let ghsaId = row.ghsaId;
+    if (!ghsaId) {
+      // An attempt that died after GitHub created the advisory but before the row said SENT left
+      // it there with its verdict's marker in it, and a later revision may since have been asked
+      // for. Any revision's marker names this report's advisory; finding it is the difference
+      // between a retry and a twin.
+      const revisions = await db
+        .select({ id: verdict.id })
+        .from(verdict)
+        .where(eq(verdict.reportId, row.reportId));
+      const existing = await d.findByMarker({
+        token,
+        fullName,
+        markers: revisions.map((v) => deliveryMarker(v.id)),
+        signal,
+      });
+      if (existing?.marker === marker) return { state: "SENT", advisory: existing, updated: false };
+      ghsaId = existing?.ghsaId ?? null;
+    }
+
+    if (ghsaId) {
+      // Idempotent: a retry that repeats this PATCH writes the same approved bytes again.
+      const advisory = await d.update({ token, fullName, ghsaId, description: source.payload, signal });
+      return { state: "SENT", advisory, updated: true };
+    }
+
+    const { severity, cweIds } = classifyFindings(verdictFindings(source.evidence));
+    const advisory = await d.create({
       token,
       fullName,
-      markers: revisions.map((v) => deliveryMarker(v.id)),
+      summary: source.title.replace(/[\r\n]+/g, " ").trim().slice(0, MAX_SUMMARY) || "Security report",
+      description: source.payload,
+      severity,
+      cweIds,
       signal,
     });
-    if (existing?.marker === marker) return { state: "SENT", advisory: existing, updated: false };
-    ghsaId = existing?.ghsaId ?? null;
+    return { state: "SENT", advisory, updated: false };
+  } catch (error) {
+    const status = (error as { status?: unknown }).status;
+    if (status === 403 || status === 404 || status === 422) {
+      const message = error instanceof Error ? error.message : String(error);
+      const detail =
+        source.advisories !== "write"
+          ? `The GitHub App installation has not granted "Repository security advisories: write". Accept it on the installation, then try again.`
+          : `This repository does not have security advisories available (a private repository needs GitHub Advanced Security). Enable it on the repository, then try again.`;
+      return { state: "FAILED", error: `${detail} (${message})` };
+    }
+    throw error;
   }
-
-  if (ghsaId) {
-    // Idempotent: a retry that repeats this PATCH writes the same approved bytes again.
-    const advisory = await d.update({ token, fullName, ghsaId, description: source.payload, signal });
-    return { state: "SENT", advisory, updated: true };
-  }
-
-  const { severity, cweIds } = classifyFindings(verdictFindings(source.evidence));
-  const advisory = await d.create({
-    token,
-    fullName,
-    summary: source.title.replace(/[\r\n]+/g, " ").trim().slice(0, MAX_SUMMARY) || "Security report",
-    description: source.payload,
-    severity,
-    cweIds,
-    signal,
-  });
-  return { state: "SENT", advisory, updated: false };
 }
 
 function deliveryMarker(verdictId: string): string {

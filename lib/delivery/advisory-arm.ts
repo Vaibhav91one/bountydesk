@@ -47,6 +47,7 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
       installationId: githubInstallation.installationId,
       repoId: connectedRepository.repoId,
       fullName: connectedRepository.fullName,
+      advisories: githubInstallation.repositoryAdvisoriesPermission,
     })
     .from(report)
     .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
@@ -63,6 +64,7 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
 
   const installationId = row.installationId;
   const repoId = row.repoId;
+  const advisoriesPermission = row.advisories;
 
   // The destination is frozen on the outbox row at approval. A create target that no longer names the
   // bound repository, or a source_ref that moved, is not the delivery a human approved.
@@ -185,20 +187,27 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
       ctx.signal,
     );
   } catch (err) {
-    // GitHub saying no, not GitHub being down. A 403 is an installation that has not accepted
-    // "Repository security advisories: write"; a 404 is that plus an advisory it cannot see; a 422
-    // is GitHub rejecting the edit or the draft. None is fixed by retrying, and accepting the
-    // permission is a human's action, so hold the row. A rate-limited 403 is transient and falls
-    // through to retry.
+    // GitHub saying no, not GitHub being down. A 403/404/422 has two root causes a human fixes in
+    // different places, and the installation's recorded advisories permission tells them apart. When
+    // it is not "write", the installation never accepted "Repository security advisories: write", so
+    // the fix is on the installation. When it is "write" and GitHub still refuses, the repository
+    // itself has no security advisories surface (a private repository needs GitHub Advanced Security),
+    // so the fix is on the repository. Neither is fixed by retrying, so hold the row. A rate-limited
+    // 403 is transient and falls through to retry.
     const mintRefusal =
       err instanceof GitHubApiError && !err.rateLimited && (err.status === 403 || err.status === 404);
     const apiRefusal =
       err instanceof GitHubRequestError && (err.status === 403 || err.status === 404 || err.status === 422);
     if (mintRefusal || apiRefusal) {
+      const status = (err as { status?: number }).status;
+      const message =
+        advisoriesPermission !== "write"
+          ? `GitHub refused the advisory write for ${fullName} (${status}); accept "Repository security advisories: write" on the installation, then a human can retry`
+          : `GitHub refused the advisory write for ${fullName} (${status}); this repository does not have security advisories available (a private repository needs GitHub Advanced Security). Enable it on the repository, then a human can retry.`;
       return {
         kind: "refused",
         hold: true,
-        message: `GitHub refused the advisory write for ${fullName} (${(err as { status?: number }).status}); accept "Repository security advisories: write" on the installation, then a human can retry`,
+        message,
       };
     }
     throw err;
