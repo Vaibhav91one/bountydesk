@@ -5,6 +5,7 @@ import type { Sandbox, SnapshotInfo } from "@/lib/sandbox/daytona";
 
 import { parseBuildPlan } from "./build-plan";
 import { buildMesh, type MeshBuildRuntime } from "./daytona-build-driver";
+import { createRegistry } from "./registry";
 
 /**
  * buildMesh's orchestration, exercised through the injected runtime so no live Daytona account or
@@ -75,9 +76,9 @@ function meshPlan() {
   return plan;
 }
 
+const PUSH_TOKEN = "push-token-secret";
 const CTX = {
-  ghcrNamespace: "ghcr.io/example",
-  pushToken: "push-token-secret",
+  registry: createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/example", pushToken: PUSH_TOKEN }),
   slug: "owner-vuln-bank",
   buildMarker: "a".repeat(40),
   resolvedCommitSha: "a".repeat(40),
@@ -118,10 +119,10 @@ test("buildMesh keeps the push credential inside the login/push/logout window on
   const { runtime, commands } = makeRuntime();
   await buildMesh(SANDBOX, meshPlan(), { ...CTX, runtime });
 
-  const tokenUses = commands.filter((entry) => entry.command.includes(CTX.pushToken));
+  const tokenUses = commands.filter((entry) => entry.command.includes(PUSH_TOKEN));
   assert.ok(tokenUses.length > 0, "the push path must log in with the token");
   for (const entry of tokenUses) {
-    assert.match(entry.command, /docker login ghcr\.io/);
+    assert.match(entry.command, /docker login 'ghcr\.io'/);
   }
   // Every login is followed by a push then a logout on the same sandbox.
   const logins = commands.filter((entry) => entry.command.includes("docker login"));

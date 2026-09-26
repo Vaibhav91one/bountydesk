@@ -22,6 +22,7 @@ import {
   type TargetPin,
 } from "./registry";
 import { isValidImageDigest } from "./validation";
+import { hasIdentityAnchor } from "@/lib/build-onboarding/source-identity";
 
 export { isValidImageDigest, isValidSnapshotId } from "./validation";
 
@@ -197,7 +198,14 @@ export async function configureConnectionlessTarget(
   if (input.targetName && input.targetName !== definition.name) {
     throw new Error(`target name ${input.targetName} does not match manifest ${definition.name}`);
   }
-  if (!input.buildRecipeDigest || !input.resolvedCommitSha) {
+  if (
+    !input.buildRecipeDigest ||
+    !hasIdentityAnchor({
+      resolvedCommitSha: input.resolvedCommitSha,
+      sourceArchiveDigest: input.sourceArchiveDigest,
+      imageDigest: input.imageDigest,
+    })
+  ) {
     throw new Error("connectionless target configuration requires build identity");
   }
   const config = targetProfileConfig(definition, input);
