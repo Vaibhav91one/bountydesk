@@ -269,3 +269,52 @@ test("a failed repository read leaves that installation's repositories alone", a
   assert.equal(row.active, true);
   assert.ok(row.targetProfileId, "a repository must not be revoked on a read that failed");
 });
+
+test("reconcile backfills repository visibility and the Contents permission without restoring anything", async () => {
+  const inst = await seedInstallation();
+  const privateRepo = await seedRepo(inst.rowId, { bound: false });
+  const publicRepo = await seedRepo(inst.rowId, { bound: false });
+
+  await reconcile.reconcileGitHubAccess({
+    fetchImpl: fakeFetch({
+      installations: [
+        { id: inst.installationId, suspended_at: null, permissions: { contents: "read", issues: "write" } },
+      ],
+      repos: { repositories: [{ id: privateRepo, private: true }, { id: publicRepo, private: false }] },
+    }),
+    mintToken: fakeMint,
+  });
+
+  const [installation] = await dbm.db
+    .select({ contents: dbm.githubInstallation.contentsPermission })
+    .from(dbm.githubInstallation)
+    .where(dbm.eq(dbm.githubInstallation.id, inst.rowId));
+  assert.equal(installation.contents, "read");
+  const visibility = async (repoId: number) =>
+    (
+      await dbm.db
+        .select({
+          isPrivate: dbm.connectedRepository.isPrivate,
+          targetProfileId: dbm.connectedRepository.targetProfileId,
+        })
+        .from(dbm.connectedRepository)
+        .where(dbm.eq(dbm.connectedRepository.repoId, repoId))
+    )[0];
+  assert.deepEqual(await visibility(privateRepo), { isPrivate: true, targetProfileId: null });
+  assert.deepEqual(await visibility(publicRepo), { isPrivate: false, targetProfileId: null });
+});
+
+test("a permissions object without contents records the permission as absent", async () => {
+  const inst = await seedInstallation();
+  await reconcile.reconcileGitHubAccess({
+    fetchImpl: fakeFetch({
+      installations: [{ id: inst.installationId, suspended_at: null, permissions: { issues: "write" } }],
+    }),
+    mintToken: fakeMint,
+  });
+  const [installation] = await dbm.db
+    .select({ contents: dbm.githubInstallation.contentsPermission })
+    .from(dbm.githubInstallation)
+    .where(dbm.eq(dbm.githubInstallation.id, inst.rowId));
+  assert.equal(installation.contents, "none");
+});

@@ -43,10 +43,14 @@ a report without one stops at `ANALYSIS_ONLY` with nothing cloned, built, deploy
 Connectivity is the GitHub App model, not manual webhooks. OAuth login is identity, the App
 install is repo access. Least privilege is Metadata read plus Issues read and write. Cloning a
 connected repository does not widen that: a public repository clones anonymously, and Contents
-read would be needed only for a private one. The intended private-repository policy accepts and
-triages the signed issue, then refuses reproduction with `POLICY_REFUSED` until that permission
-is deliberately added and accepted. This is not built: current GitHub intake requires a bound
-target profile, and repository visibility is not stored. The webhook secret belongs to the
+read is needed only for a private one. The private-repository policy accepts and triages the
+report, then refuses reproduction with `POLICY_REFUSED` (and onboarding refuses to clone) until
+that permission is deliberately added and accepted. Visibility is stored on
+`connected_repository.is_private` and the granted permission on
+`github_installation.contents_permission`, both from the lifecycle webhooks with the reconcile tick
+as backfill. A private clone uses an installation token scoped to that one repository and narrowed
+to contents:read, passed through a credential helper rather than the URL and revoked right after
+the clone (`lib/github/repo-access.ts`). The webhook secret belongs to the
 platform, and `installation_id → repo → TargetProfile` resolves server-side. Mint short-lived
 installation tokens per delivery and discard them. Keep access in sync from the `installation`,
 `installation_repositories`, and `repository` lifecycle webhooks: a suspended or deleted
@@ -461,7 +465,6 @@ The parked surfaces, so a plan knows where they live:
   `built: false`). Upload is blocked on the outbound contract above; drive was out of scope for
   the demo rather than merely unbuilt. Email is built in both directions: intake through
   `app/api/intake/email/route.ts` and the reply through `lib/delivery/email.ts`.
-- The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
 - Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
   called live-proven; the recorded proof used the deterministic canary pipeline.

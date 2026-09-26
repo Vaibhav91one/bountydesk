@@ -123,6 +123,27 @@ test("a grant that is no longer live is refused", async () => {
   }
 });
 
+test("a private repository is retried only once the installation holds Contents: read", async () => {
+  const repoId = await seed("FAILED");
+  const [repo] = await dbm.db
+    .update(dbm.connectedRepository)
+    .set({ isPrivate: true })
+    .where(dbm.eq(dbm.connectedRepository.repoId, repoId))
+    .returning({ installationId: dbm.connectedRepository.installationId });
+
+  const refused = await mod.retryOnboardingRequest(reviewer, repoId);
+  assert.equal(refused.ok, false);
+  assert.match((refused as { error: string }).error, /Contents: read/);
+  assert.equal((await rowOf(repoId)).state, "FAILED");
+
+  await dbm.db
+    .update(dbm.githubInstallation)
+    .set({ contentsPermission: "read" })
+    .where(dbm.eq(dbm.githubInstallation.id, repo.installationId));
+  assert.deepEqual(await mod.retryOnboardingRequest(reviewer, repoId), { ok: true });
+  assert.equal((await rowOf(repoId)).state, "PENDING_PLAN");
+});
+
 test("a malformed repo id is refused before any lookup", async () => {
   for (const raw of [null, "", "abc", "-1", "0", "1.5", "9007199254740993"]) {
     const result = await mod.retryOnboardingRequest(reviewer, raw);

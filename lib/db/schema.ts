@@ -151,6 +151,13 @@ export const githubInstallation = pgTable(
      * no answer, and guessing one would be worse than falling back.
      */
     accountType: text("account_type"),
+    /**
+     * The installation's `contents` permission as GitHub last reported it ("read" or "write"),
+     * "none" when GitHub sent permissions without it, and null when no payload has carried
+     * permissions yet. Reproducing or cloning a private repository needs "read" or "write" here;
+     * a public one never reads it.
+     */
+    contentsPermission: text("contents_permission"),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -187,6 +194,13 @@ export const connectedRepository = pgTable(
      * are what let a report's link find the fork's target. Display and matching only: nothing
      * about access or scope is decided from them.
      */
+    /**
+     * GitHub's `private` flag from the last webhook or reconcile read. Null means not observed
+     * yet (a row written before this column existed), which the clone treats as public: an
+     * anonymous clone of a repository that is really private simply fails, so the unknown case
+     * never mints a token or leaks anything.
+     */
+    isPrivate: boolean("is_private"),
     parentFullName: text("parent_full_name"),
     sourceFullName: text("source_full_name"),
     createdAt: createdAt(),

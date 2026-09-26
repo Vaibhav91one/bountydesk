@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import { repoReadToken } from "@/lib/github/repo-access";
+
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 
 export function isCommitSha(value: unknown): value is string {
@@ -40,8 +42,15 @@ export async function resolveRepositoryCommit(repoFullName: string, sourceRef: s
   const url = new URL(`https://api.github.com/repos/${repoFullName}/commits`);
   if (sourceRef && !/^https?:\/\//.test(sourceRef)) url.searchParams.set("sha", sourceRef);
   url.searchParams.set("per_page", "1");
+  // A private repository is read with a contents:read token, and one without that grant is refused
+  // here (POLICY_REFUSED), the first step of onboarding that touches the repository.
+  const token = await repoReadToken(repoFullName);
   const response = await fetch(url, {
-    headers: { accept: "application/vnd.github+json", "user-agent": "bountydesk-onboarding" },
+    headers: {
+      accept: "application/vnd.github+json",
+      "user-agent": "bountydesk-onboarding",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
   });
   if (!response.ok) throw new Error(`could not resolve ${repoFullName} source commit: GitHub returned ${response.status}`);
   const rows = (await response.json()) as Array<{ sha?: unknown }>;

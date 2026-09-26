@@ -28,7 +28,9 @@ import {
  * One-way-safe, exactly like the webhooks: reconcile can only revoke. It never clears a tombstone,
  * never lifts a suspension, and never restores a target profile. Restoring access is always an
  * operator action, the one signal we can order, so a reconcile pass cannot re-open intake by
- * itself even if it races a real reinstall.
+ * itself even if it races a real reinstall. It does copy two facts from GitHub onto live rows, the
+ * installation's Contents permission and each repository's visibility (syncAccessFacts), but those
+ * restore nothing: they only feed the private-repository policy.
  *
  * Fail safe on every read. A reconcile failure must never revoke: if the truth from GitHub did
  * not fully arrive (a failed page, a rate limit, a 5xx), we leave state as it is and record the
@@ -41,8 +43,12 @@ const PER_PAGE = 100;
 // response (a server always returning a full page) from looping forever.
 const MAX_PAGES = 100;
 
-/** The slice of GitHub's installation object reconcile reads. */
-type LiveInstallation = { id: number; suspended: boolean };
+/** The slice of GitHub's installation object reconcile reads. `contents` is the granted Contents
+ *  permission ("none" when absent from a permissions object), undefined when GitHub sent none. */
+type LiveInstallation = { id: number; suspended: boolean; contents?: string };
+
+/** One repository of an installation. `private` is undefined when GitHub did not say. */
+type LiveRepo = { id: number; private?: boolean };
 
 export type ReconcileSummary = {
   installationsChecked: number;
@@ -111,7 +117,18 @@ async function fetchLiveInstallations(
     for (const item of json) {
       if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "number") {
         const suspendedAt = (item as { suspended_at?: unknown }).suspended_at;
-        out.push({ id: (item as { id: number }).id, suspended: typeof suspendedAt === "string" });
+        const permissions = (item as { permissions?: unknown }).permissions;
+        const contents =
+          permissions && typeof permissions === "object"
+            ? (permissions as { contents?: unknown }).contents
+            : undefined;
+        out.push({
+          id: (item as { id: number }).id,
+          suspended: typeof suspendedAt === "string",
+          ...(permissions && typeof permissions === "object"
+            ? { contents: typeof contents === "string" ? contents : "none" }
+            : {}),
+        });
       }
     }
     if (json.length < PER_PAGE) break;
@@ -120,23 +137,23 @@ async function fetchLiveInstallations(
 }
 
 /**
- * Every repository id currently in one installation, across all pages, read with a whole-
- * installation token. Throws on any page that does not answer, for the same reason as above: a
- * short read must not look like repositories were removed.
+ * Every repository currently in one installation, across all pages, read with a whole-installation
+ * token. Throws on any page that does not answer, for the same reason as above: a short read must
+ * not look like repositories were removed.
  */
-async function fetchLiveRepoIds(
+async function fetchLiveRepos(
   installationId: number,
   mintToken: NonNullable<ReconcileDeps["mintToken"]>,
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
-): Promise<number[]> {
+): Promise<LiveRepo[]> {
   const { token } = await mintToken(installationId, { signal });
   const headers = {
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
     "x-github-api-version": "2022-11-28",
   };
-  const ids: number[] = [];
+  const repos: LiveRepo[] = [];
   for (let page = 1; page <= MAX_PAGES; page++) {
     const json = await getJson(
       fetchImpl,
@@ -144,18 +161,54 @@ async function fetchLiveRepoIds(
       headers,
       signal,
     );
-    const repos = (json as { repositories?: unknown })?.repositories;
-    if (!Array.isArray(repos)) {
+    const pageRepos = (json as { repositories?: unknown })?.repositories;
+    if (!Array.isArray(pageRepos)) {
       throw new Error("GitHub returned a malformed installation repositories list");
     }
-    for (const repo of repos) {
+    for (const repo of pageRepos) {
       if (repo && typeof repo === "object" && typeof (repo as { id?: unknown }).id === "number") {
-        ids.push((repo as { id: number }).id);
+        const isPrivate = (repo as { private?: unknown }).private;
+        repos.push({
+          id: (repo as { id: number }).id,
+          ...(typeof isPrivate === "boolean" ? { private: isPrivate } : {}),
+        });
       }
     }
-    if (repos.length < PER_PAGE) break;
+    if (pageRepos.length < PER_PAGE) break;
   }
-  return ids;
+  return repos;
+}
+
+/**
+ * Copy GitHub's current Contents permission and repository visibility onto our rows. This is the
+ * backfill for rows written before either was stored, and the catch-up for a permission change that
+ * sent no webhook. It is not a grant: neither column restores access, a target binding or intake.
+ * They only feed the private-repository policy, which then reads what GitHub says right now.
+ */
+async function syncAccessFacts(
+  installationRowId: string,
+  contents: string | undefined,
+  liveRepos: LiveRepo[],
+): Promise<void> {
+  if (contents !== undefined) {
+    await db
+      .update(githubInstallation)
+      .set({ contentsPermission: contents, updatedAt: new Date() })
+      .where(eq(githubInstallation.id, installationRowId));
+  }
+  for (const isPrivate of [true, false]) {
+    const ids = liveRepos.filter((r) => r.private === isPrivate).map((r) => r.id);
+    if (ids.length === 0) continue;
+    await db
+      .update(connectedRepository)
+      .set({ isPrivate, updatedAt: new Date() })
+      .where(
+        and(
+          eq(connectedRepository.installationId, installationRowId),
+          inArray(connectedRepository.repoId, ids),
+        ),
+      );
+  }
 }
 
 /**
@@ -263,14 +316,15 @@ export async function reconcileGitHubAccess(
     if (row.suspendedAt) continue;
 
     // Both sides live: reconcile the repository set. A failure here withdraws nothing.
-    let liveRepoIds: number[];
+    let liveRepos: LiveRepo[];
     try {
-      liveRepoIds = await fetchLiveRepoIds(row.installationId, mintToken, fetchImpl, deps.signal);
+      liveRepos = await fetchLiveRepos(row.installationId, mintToken, fetchImpl, deps.signal);
     } catch (err) {
       summary.errors.push(`list repositories for installation ${row.installationId}: ${errorMessage(err)}`);
       continue;
     }
-    const liveSet = new Set(liveRepoIds);
+    await syncAccessFacts(row.id, gh.contents, liveRepos);
+    const liveSet = new Set(liveRepos.map((r) => r.id));
 
     const activeRepos = await db
       .select({ repoId: connectedRepository.repoId })

@@ -34,6 +34,8 @@ import { meshBuildPlan } from "./mesh-build-plan";
 import { isCommitSha, isSha256Digest, sourceIdentityDigest } from "./source-identity";
 import { resolveRegistry, type RegistryHandoff, type SandboxRun } from "./registry";
 import { selectEgressHosts } from "./egress-profiles";
+import { gitCloneCommand, redactToken, repoReadToken } from "@/lib/github/repo-access";
+import { revokeInstallationToken } from "@/lib/github/app-auth";
 
 /**
  * The one implementation of BuildDriver that touches live infrastructure.
@@ -138,7 +140,15 @@ function numEnv(name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-export function createDaytonaBuildDriver(): BuildDriver {
+export type DaytonaBuildDriverDeps = {
+  /** Read token for a private connected repository, null for a public one. Throws on POLICY_REFUSED. */
+  readToken?: (repoFullName: string) => Promise<string | null>;
+  revokeToken?: (token: string) => Promise<void>;
+};
+
+export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): BuildDriver {
+  const readToken = deps.readToken ?? ((repoFullName: string) => repoReadToken(repoFullName));
+  const revokeToken = deps.revokeToken ?? ((token: string) => revokeInstallationToken(token));
   return {
     async build(input: BuildInput): Promise<BuildResult> {
       // The source is resolved before any provider configuration is read: a source with no immutable
@@ -186,8 +196,24 @@ export function createDaytonaBuildDriver(): BuildDriver {
 
       try {
         // A prebuilt image has no source to stage; its marker is its own digest, baked in below.
-        const { buildMarker } =
-          source.kind === "image" ? { buildMarker: source.imageDigest } : await stageSource(run, sandbox, source);
+        // A private repository without Contents: read is refused here (POLICY_REFUSED), before the
+        // clone. Only the server-derived GitHub clone of this very repository gets a token: an explicit
+        // git source pointing anywhere else is always cloned anonymously, so a token is never handed to
+        // a host the connected repository does not live on. The token is minted right before the clone
+        // and revoked right after it, before the repository's own build steps run in this sandbox.
+        const cloneToken =
+          source.kind === "git" && source.cloneUrl === `https://github.com/${input.repoFullName}.git`
+            ? await readToken(input.repoFullName)
+            : null;
+        let buildMarker: string;
+        try {
+          ({ buildMarker } =
+            source.kind === "image"
+              ? { buildMarker: source.imageDigest }
+              : await stageSource(run, sandbox, source, cloneToken));
+        } finally {
+          if (cloneToken) await revokeToken(cloneToken);
+        }
 
         await startDockerDaemon(sandbox);
 
@@ -261,9 +287,16 @@ export async function stageSource(
   run: SandboxRun,
   sandbox: Sandbox,
   source: Exclude<BuildSource, { kind: "image" }>,
+  cloneToken: string | null = null,
 ): Promise<{ buildMarker: string }> {
   if (source.kind === "git") {
-    await run(sandbox, `git clone --no-checkout ${shellArg(source.cloneUrl)} /work/source`);
+    try {
+      await run(sandbox, gitCloneCommand(source.cloneUrl, "/work/source", cloneToken));
+    } catch (error) {
+      // run() surfaces command output, not the command, and git does not print credentials, but the
+      // failure text is stored on the onboarding row, so strip the token regardless.
+      throw new Error(redactToken(error instanceof Error ? error.message : String(error), cloneToken));
+    }
     await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(source.resolvedCommitSha)}`);
     const head = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
     if (head.toLowerCase() !== source.resolvedCommitSha.toLowerCase()) {
