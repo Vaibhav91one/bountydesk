@@ -127,7 +127,7 @@ async function addRevision(reportId: string, revision: number, opts: Fixture = {
 type CreateInput = Parameters<import("./advisory").AdvisoryDeps["create"]>[0];
 type UpdateInput = Parameters<import("./advisory").AdvisoryDeps["update"]>[0];
 
-function fakeGitHub(opts: { existing?: string; createError?: { status: number } } = {}) {
+function fakeGitHub(opts: { existing?: string; createError?: { status: number }; updateError?: { status: number } } = {}) {
   const calls = { create: [] as CreateInput[], update: [] as UpdateInput[], markers: [] as string[][], mint: 0 };
   const url = (id: string) => `https://github.com/x/y/security/advisories/${id}`;
   const deps: import("./advisory").AdvisoryDeps = {
@@ -151,6 +151,9 @@ function fakeGitHub(opts: { existing?: string; createError?: { status: number } 
       return { ghsaId: "GHSA-new", htmlUrl: url("GHSA-new") };
     },
     update: async (input) => {
+      if (opts.updateError) {
+        throw Object.assign(new Error(`status ${opts.updateError.status}`), opts.updateError);
+      }
       calls.update.push(input);
       return { ghsaId: input.ghsaId, htmlUrl: url(input.ghsaId) };
     },
@@ -311,6 +314,25 @@ test("a 422 is a validation error, failed as such, not read as a permission or f
   assert.match(failed.lastError ?? "", /validation error rather than a permission problem/);
   assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
   assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+});
+
+test("a 404 updating a known advisory with the permission granted is a lost advisory, not a missing feature", async () => {
+  // First send opens the draft (GHSA-new). A later revision updates that known advisory, so a 404 on
+  // the PATCH means the advisory is gone, not that a repository with the write granted lacks the
+  // feature.
+  const first = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub().deps });
+  assert.equal((await row(first.reportId)).ghsaId, "GHSA-new");
+  await addRevision(first.reportId, 2);
+  await advisory.requestOwnerAdvisory(first.reportId, "r");
+
+  await advisory.adviseOnce({ deps: fakeGitHub({ updateError: { status: 404 } }).deps });
+  const failed = await row(first.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /no longer reachable/);
+  assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
 });
 
 test("a rate-limited token mint (403) is transient and retried, not failed for good", async () => {

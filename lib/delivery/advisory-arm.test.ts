@@ -46,7 +46,7 @@ let seq = 0;
  */
 function fakeAdvisoryDeps(
   seeded: { ghsaId: string; description: string } | null,
-  opts: { updateStatus?: number } = {},
+  opts: { updateStatus?: number; createStatus?: number } = {},
 ) {
   const store = new Map<string, { ghsaId: string; htmlUrl: string; summary: string; description: string }>();
   if (seeded) {
@@ -101,6 +101,7 @@ function fakeAdvisoryDeps(
     },
     createDraftAdvisory: async ({ summary, description }): Promise<Advisory> => {
       calls.create++;
+      if (opts.createStatus) throw new GitHubRequestError(opts.createStatus, "fake: github refused the create");
       created += 1;
       const ghsaId = `GHSA-new${created}-cccc-dddd`;
       store.set(ghsaId, {
@@ -307,18 +308,33 @@ test("a refusal on an installation without the advisories permission says to acc
   assert.doesNotMatch(row.lastError ?? "", /Advanced Security/);
 });
 
-test("a refusal when the permission is already granted names the missing advisory feature", async () => {
+test("opening a new draft refused with the permission granted names the missing advisory feature", async () => {
   await drainOthers();
-  // The installation has the write, so a 404 is not the permission: the private repository has no
-  // security advisories surface without GitHub Advanced Security.
-  const f = await seedFixture({ advisoriesPermission: "write" });
-  const { deps } = fakeAdvisoryDeps(null);
+  // An email->advisory report opens a fresh draft. The installation has the write, so a refused
+  // create is not the permission: the repository has no advisories surface without Advanced Security.
+  const f = await seedFixture({ emailAdvisory: true, advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps(null, { createStatus: 404 });
 
-  await worker.deliverOnce("adv-refuse-no-feature", { deps });
+  await worker.deliverOnce("adv-create-no-feature", { deps });
   const row = await deliveryRow(f.deliveryId);
   assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /does not have security advisories available/);
   assert.match(row.lastError ?? "", /GitHub Advanced Security/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+});
+
+test("a 404 against a known advisory with the permission granted is a lost advisory, not a missing feature", async () => {
+  await drainOthers();
+  // The reply path names an advisory the report came from, so it exists. With the write granted, a
+  // 404 means that advisory is gone (withdrawn or deleted), not that the repository lacks the feature.
+  const f = await seedFixture({ advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps(null);
+
+  await worker.deliverOnce("adv-lost-advisory", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /no longer reachable/);
+  assert.doesNotMatch(row.lastError ?? "", /GitHub Advanced Security/);
   assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
 });
 

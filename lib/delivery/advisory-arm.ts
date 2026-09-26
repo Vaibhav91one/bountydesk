@@ -114,6 +114,12 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
   const fullName = repository.fullName;
   const marker = deliveryMarker(lease.verdictId);
 
+  // Whether the write targets an advisory we already know exists. The reply path does (its GHSA id
+  // comes from the report's source_ref), and the create path does once it finds an earlier draft by
+  // marker. It matters on refusal: a repository missing the advisories feature can only explain a
+  // failure to open a brand-new draft, never a failure against an advisory that demonstrably exists.
+  let targetedExisting = ghsaId !== null;
+
   let result: { kind: "replayed" | "updated" | "created"; advisory: Advisory };
   try {
     result = await runWithHeartbeat(
@@ -153,6 +159,7 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
           return { kind: "replayed", advisory: existing } as const;
         }
         if (existing) {
+          targetedExisting = true;
           const advisory = await deps.updateAdvisoryDescription({
             token,
             fullName,
@@ -187,15 +194,16 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
       ctx.signal,
     );
   } catch (err) {
-    // GitHub saying no, not GitHub being down. There are three root causes, fixed in three places,
-    // so the held message names the right one. A 403 or 404 is about reaching the advisory: the
-    // installation's recorded advisories permission tells the two apart. Not "write" means it never
-    // accepted "Repository security advisories: write", so the fix is on the installation; "write"
-    // and still refused means the repository has no security advisories surface (a private repository
-    // needs GitHub Advanced Security), so the fix is on the repository. A 422 is different: GitHub
-    // accepted the call but rejected the body, a validation error on the drafted advisory that no
-    // permission change fixes, so it points a human at the draft. None is fixed by a blind retry, so
-    // hold the row. A rate-limited 403 is transient and falls through to retry.
+    // GitHub saying no, not GitHub being down. The held message names which cause it is. A 422 is
+    // GitHub accepting the call but rejecting the body, a validation error on the drafted advisory
+    // that no permission change fixes, so it points a human at the draft. Otherwise, for a 403 or
+    // 404, not "write" means the installation never accepted "Repository security advisories: write",
+    // so the fix is on the installation. With "write", the cause depends on whether the advisory was
+    // meant to exist: only a failure to open a brand-new draft points at the repository missing the
+    // advisories feature (a private repository needs GitHub Advanced Security); a failure against an
+    // advisory we already knew (the reply path, or a draft found by marker) means it is no longer
+    // reachable, which happens when it is withdrawn or deleted after intake. None is fixed by a blind
+    // retry, so hold the row. A rate-limited 403 is transient and falls through to retry.
     const mintRefusal =
       err instanceof GitHubApiError && !err.rateLimited && (err.status === 403 || err.status === 404);
     const apiRefusal =
@@ -207,6 +215,8 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
         message = `GitHub rejected the advisory write for ${fullName} (422); the request was not accepted, which is a validation error rather than a permission problem. A human should review the drafted advisory.`;
       } else if (advisoriesPermission !== "write") {
         message = `GitHub refused the advisory write for ${fullName} (${status}); accept "Repository security advisories: write" on the installation, then a human can retry`;
+      } else if (targetedExisting) {
+        message = `GitHub refused the advisory write for ${fullName} (${status}); the advisory this report came from is no longer reachable, which happens if it was withdrawn or deleted after intake. A human should review the report.`;
       } else {
         message = `GitHub refused the advisory write for ${fullName} (${status}); this repository does not have security advisories available (a private repository needs GitHub Advanced Security). Enable it on the repository, then a human can retry.`;
       }

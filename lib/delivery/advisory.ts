@@ -314,12 +314,17 @@ async function send(
 
   const fullName = repository.fullName;
 
-  // GitHub refusing the write has three root causes a human fixes in three places, so the refusal is
-  // classified here where the recorded advisories permission is in scope rather than in the caller.
-  // A 403 or 404 is about reaching the advisory (the installation permission, or the repository
-  // having no advisories surface); a 422 is GitHub rejecting the body, a validation error no
-  // permission change fixes. All three are permanent, so they FAIL for a human; anything else (an
-  // outage, a network error) is re-thrown for adviseOnce to retry.
+  // Whether the write targets an advisory we already know exists (this report's own advisory from a
+  // prior send, or one found by marker). A repository missing the advisories feature can only explain
+  // a failure to open a brand-new draft, never a failure against an advisory that demonstrably exists.
+  let targetedExisting = false;
+
+  // GitHub refusing the write is classified here, where the recorded advisories permission is in
+  // scope rather than in the caller. A 422 is GitHub rejecting the body, a validation error no
+  // permission change fixes. A 403 or 404 is about reaching the advisory: the permission, the
+  // repository missing the advisories feature (only when opening a new draft), or an advisory that
+  // was known but is no longer reachable. All are permanent, so they FAIL for a human; anything else
+  // (an outage, a network error) is re-thrown for adviseOnce to retry.
   try {
     const { token } = await d.mintToken(Number(source.installationId), Number(source.repoId), { signal });
 
@@ -345,6 +350,7 @@ async function send(
 
     if (ghsaId) {
       // Idempotent: a retry that repeats this PATCH writes the same approved bytes again.
+      targetedExisting = true;
       const advisory = await d.update({ token, fullName, ghsaId, description: source.payload, signal });
       return { state: "SENT", advisory, updated: true };
     }
@@ -372,7 +378,9 @@ async function send(
           ? `GitHub rejected the advisory write (422); the request was not accepted, which is a validation error rather than a permission problem. A human should review the drafted advisory.`
           : source.advisories !== "write"
             ? `The GitHub App installation has not granted "Repository security advisories: write". Accept it on the installation, then try again.`
-            : `This repository does not have security advisories available (a private repository needs GitHub Advanced Security). Enable it on the repository, then try again.`;
+            : targetedExisting
+              ? `The advisory is no longer reachable (${status}); it may have been withdrawn or deleted after it was created. A human should review it.`
+              : `This repository does not have security advisories available (a private repository needs GitHub Advanced Security). Enable it on the repository, then try again.`;
       return { state: "FAILED", error: `${detail} (${message})` };
     }
     throw error;
