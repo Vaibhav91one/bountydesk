@@ -351,8 +351,11 @@ export function resolveBuildSource(input: BuildInput): BuildSource {
     if (source.kind === "archive" && !isSha256Digest(source.sourceArchiveDigest)) {
       throw new Error("an archive source requires a sha256 source archive digest");
     }
-    if (source.kind === "image" && (!isSha256Digest(source.imageDigest) || source.imageRef.includes("@sha256:"))) {
-      throw new Error("a prebuilt image source requires a tag reference and its own sha256 digest");
+    if (
+      source.kind === "image" &&
+      (!isSha256Digest(source.imageDigest) || source.imageRef.includes("@sha256:") || !isSafeImageRef(source.imageRef))
+    ) {
+      throw new Error("a prebuilt image source requires a plain tag reference and its own sha256 digest");
     }
     return source;
   }
@@ -368,6 +371,20 @@ export function resolveBuildSource(input: BuildInput): BuildSource {
     cloneUrl: `https://github.com/${input.repoFullName}.git`,
     resolvedCommitSha: input.resolvedCommitSha,
   };
+}
+
+/**
+ * A prebuilt image ref reaches the Daytona API and is stored on the profile, and its untagged name is
+ * later compared against a snapshot's imageName. It is server-authored, but this keeps the reference to
+ * the characters a registry reference actually uses so a stray value with a space or a shell
+ * metacharacter is refused at the boundary rather than carried downstream. The digest is what pins the
+ * identity; the tag is the mutable half, and the registered snapshot's digest is re-verified at
+ * reproduction (see the prebuilt-image follow-up on the target profile).
+ */
+const SAFE_IMAGE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+
+export function isSafeImageRef(ref: string): boolean {
+  return ref.length <= 512 && SAFE_IMAGE_REF.test(ref);
 }
 
 /** Strip the tag off an image reference to get its untagged name, e.g. ghcr.io/x/y:tag -> ghcr.io/x/y.

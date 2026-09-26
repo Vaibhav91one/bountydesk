@@ -157,7 +157,10 @@ test("resolveBuildSource refuses a source whose anchor is missing or malformed",
     [{ kind: "archive", archive: Buffer.from("x"), sourceArchiveDigest: "not-a-digest" }, /source archive digest/],
     [{ kind: "image", imageRef: "ghcr.io/x/y:tag", imageDigest: "nope" }, /sha256 digest/],
     // A digest-pinned ref cannot register as a Daytona snapshot, so it is refused at the seam.
-    [{ kind: "image", imageRef: `ghcr.io/x/y@sha256:${"a".repeat(64)}`, imageDigest: `sha256:${"a".repeat(64)}` }, /tag reference/],
+    [{ kind: "image", imageRef: `ghcr.io/x/y@sha256:${"a".repeat(64)}`, imageDigest: `sha256:${"a".repeat(64)}` }, /plain tag reference/],
+    // An image ref with a shell metacharacter or whitespace is refused at the boundary.
+    [{ kind: "image", imageRef: "ghcr.io/x/y:tag; rm -rf /", imageDigest: `sha256:${"a".repeat(64)}` }, /plain tag reference/],
+    [{ kind: "image", imageRef: "ghcr.io/x/y:$(id)", imageDigest: `sha256:${"a".repeat(64)}` }, /plain tag reference/],
   ];
   for (const [source, re] of bad) {
     assert.throws(() => resolveBuildSource({ ...base, source } as BuildInput), re, JSON.stringify(source));
