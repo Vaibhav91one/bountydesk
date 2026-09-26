@@ -229,8 +229,8 @@ export async function releaseForAnalysis(reportId: string, reviewer: string): Pr
 }
 
 /**
- * Dismiss a gated report that has no reporter mailbox to answer, which today means an advisory
- * report. It closes as DENIED and records the same intake.rejected event a reject does, so the case
+ * Dismiss a gated report that has no reporter mailbox to answer: an advisory report, or an upload,
+ * whose contact may never have been confirmed. It closes as DENIED and records the same intake.rejected event a reject does, so the case
  * file names the reason, but it sends nothing: an advisory reporter is reached by editing the
  * advisory on an approved verdict, never by a canned gate reply, so there is no reply to send here.
  */

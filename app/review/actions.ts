@@ -30,6 +30,8 @@ import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { isReportId } from "@/lib/reports/case";
 import { resolveReportId } from "@/app/(app)/reports/[id]/resolve-id";
 import { bindTarget } from "@/lib/targets/bind";
+import type { Ecosystem } from "@/lib/build-onboarding/build-plan";
+import { approveUploadTarget } from "@/lib/upload/gate";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { safeErrorText } from "@/lib/errors/safe-error";
@@ -497,10 +499,33 @@ export async function runAnalysisAction(reportId: string): Promise<ActionResult>
   return gateDecision(reportId, () => releaseForAnalysis(reportId, session.login));
 }
 
-/** Dismiss a gated advisory report: close it as denied, with no reporter reply to send. */
+/**
+ * Dismiss a gated advisory or upload report: close it as denied and send nothing. An upload's
+ * contact may be unproven, so it gets no canned reply either.
+ */
 export async function dismissAdvisoryAction(reportId: string): Promise<ActionResult> {
   const session = await requireReviewer();
   return gateDecision(reportId, () => denyAtGate(reportId, session.login));
+}
+
+/**
+ * Release an upload report and queue its target material for a build, with the target settings the
+ * reviewer approved. The settings are validated server-side into a target definition; the build and
+ * the analysis run happen on the worker.
+ */
+export async function approveUploadTargetAction(
+  reportId: string,
+  input: { port: number; readinessPath: string; startCommand?: string; ecosystem?: string },
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () =>
+    approveUploadTarget(reportId, session.login, {
+      port: Number(input.port),
+      readinessPath: String(input.readinessPath ?? ""),
+      ...(input.startCommand ? { startCommand: String(input.startCommand) } : {}),
+      ...(input.ecosystem ? { ecosystem: input.ecosystem as Ecosystem } : {}),
+    }),
+  );
 }
 
 /**

@@ -29,7 +29,7 @@ const INTEGRATIONS = [
   { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected", live: false },
   { key: "email", name: "Email", icon: Gmail, state: "accepting reports", live: true },
   { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon", live: false },
-  { key: "upload", name: "File upload", icon: Folder, state: "coming soon", live: false },
+  { key: "upload", name: "File upload", icon: Folder, state: "accepting reports", live: true },
 ] as const;
 
 export default async function HomePage() {

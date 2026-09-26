@@ -266,10 +266,11 @@ async function parseGateRelease(lease: Lease, reportId: string): Promise<Lease> 
     .from(report)
     .where(eq(report.id, reportId))
     .limit(1);
-  // Both channels that wait at the gate can be released this way: an outside email report and an
-  // advisory report. The release job itself is enqueued on the email channel as a routing signal,
-  // so this checks the report it names, not the job's channel.
-  if (!row || (row.channel !== "email" && row.channel !== "advisory")) {
+  // Every channel that waits at the gate can be released this way: an outside email report, an
+  // advisory report, and an upload (directly, or after its reviewer-approved target build). The
+  // release job itself is enqueued on the email channel as a routing signal, so this checks the
+  // report it names, not the job's channel.
+  if (!row || (row.channel !== "email" && row.channel !== "advisory" && row.channel !== "upload")) {
     throw new UnprocessableDelivery(`gate release names no gated report ${reportId}`);
   }
   if (row.state !== "TRIAGING") {

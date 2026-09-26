@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -125,6 +126,7 @@ export const reviewerChatMessageSender = pgEnum("reviewer_chat_message_sender", 
 ]);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () =>
@@ -1231,5 +1233,61 @@ export const artifact = pgTable(
     uniqueIndex("artifact_verdict_kind_key").on(t.verdictId, t.kind),
     index("artifact_report_idx").on(t.reportId),
     index("artifact_verdict_idx").on(t.verdictId),
+  ],
+);
+
+/**
+ * What an upload brought with it besides the report text: who sent it (for the intake limits) and,
+ * optionally, target material to build a reproduction target from.
+ *
+ * The material is untrusted and inert here. Nothing builds it until a reviewer releases the report
+ * and approves a target definition, which sets build_state to PENDING and stores that definition in
+ * reviewed_target; the build loop (lib/upload/build.ts) is the only reader after that. The archive is
+ * kept in the database because the upload is capped at a few megabytes and the build needs the exact
+ * bytes its digest names.
+ */
+export const uploadIntake = pgTable(
+  "upload_intake",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    /** The normalized contact mailbox and its domain, counted by the per-sender and per-domain caps. */
+    senderKey: text("sender_key").notNull(),
+    senderDomain: text("sender_domain").notNull(),
+    /** The submitting client address, counted by the per-address cap. */
+    clientIp: text("client_ip"),
+    /** archive, dockerfile or image; null when the upload carried no target material. */
+    materialKind: text("material_kind"),
+    /** The tarball, or a one-file tarball holding the uploaded Dockerfile. */
+    archive: bytea("archive"),
+    sourceArchiveDigest: text("source_archive_digest"),
+    imageRef: text("image_ref"),
+    imageDigest: text("image_digest"),
+    materialBytes: integer("material_bytes"),
+    /** The reviewer-approved target definition and build plan. Null until a reviewer approves one. */
+    reviewedTarget: jsonb("reviewed_target"),
+    approvedBy: text("approved_by"),
+    /** Null until approved; then PENDING, BUILDING, BUILT or FAILED. */
+    buildState: text("build_state"),
+    buildLeaseExpiresAt: timestamp("build_lease_expires_at", { withTimezone: true }),
+    buildAttempts: integer("build_attempts").notNull().default(0),
+    buildError: text("build_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("upload_intake_report_key").on(t.reportId),
+    index("upload_intake_created_idx").on(t.createdAt),
+    index("upload_intake_build_state_idx").on(t.buildState),
+    check(
+      "upload_intake_material_kind_check",
+      sql`${t.materialKind} is null or ${t.materialKind} in ('archive', 'dockerfile', 'image')`,
+    ),
+    check(
+      "upload_intake_build_state_check",
+      sql`${t.buildState} is null or ${t.buildState} in ('PENDING', 'BUILDING', 'BUILT', 'FAILED')`,
+    ),
   ],
 );

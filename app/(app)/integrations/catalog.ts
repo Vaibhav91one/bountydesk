@@ -109,18 +109,34 @@ export const INTEGRATIONS: Integration[] = [
     tagline: "Report intake by direct upload, for a reporter with no account anywhere.",
     icon: "folder",
     developer: "BountyDesk",
-    built: false,
+    built: true,
     sections: [
       {
         title: "Overview",
-        body: "A report is uploaded directly, for a reporter with neither a GitHub account nor an email thread. Like every other channel, it can create and triage a report and cannot reproduce one without a server-authorised target.",
+        body: "Anyone can submit a report on the public page at /submit, with an email contact and, optionally, target material: a source tarball with a Dockerfile at its root, a single Dockerfile, or a prebuilt image named with its sha256 digest. The report waits at the gate until a reviewer decides, so nothing is built, started or analysed before then.",
       },
       {
-        title: "Why it is not built",
-        body: "The same outbound gap as email: no verified recipient, no transport receipt, so no delivery.",
+        title: "Delivery",
+        body: "The uploader confirms the contact address with a six-digit code sent to it. The verdict rides the email transport to that address only after the code is confirmed and a reviewer approves the exact text; an unconfirmed contact is refused at approval and again at send time.",
+      },
+      {
+        title: "Target material",
+        bullets: [
+          "Built only when a reviewer approves it and states the port, readiness path and start command. The scope is loopback only and never comes from the upload.",
+          "Built in the egress-limited build sandbox and bound as a pinned target, anchored on the archive digest or the image digest.",
+          "A prebuilt image is accepted only from an allowed registry, Docker Hub and GHCR unless PREBUILT_IMAGE_REGISTRIES says otherwise.",
+          "A build that fails leaves the report unbound, so it runs analysis only.",
+        ],
+      },
+      {
+        title: "Limits",
+        body: "Uploads are capped at about 4 MB and use the same daily limits per contact and per domain as outside email, plus a limit per client address.",
       },
     ],
-    links: [{ label: "Design record", href: SOURCE, external: true }],
+    links: [
+      { label: "Submit page", href: "/submit" },
+      { label: "Design record", href: SOURCE, external: true },
+    ],
   },
   {
     id: "drive",

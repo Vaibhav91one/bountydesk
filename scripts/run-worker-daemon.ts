@@ -30,6 +30,7 @@ import { createTrueForgeClient } from "@/lib/trueforge/client";
 import { onboardOnce } from "@/lib/build-onboarding/worker";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
+import { buildUploadOnce } from "@/lib/upload/build";
 import {
   reviewerChatEnabled,
   sweepExpiredLeases as sweepReviewerChat,
@@ -252,6 +253,13 @@ async function main(): Promise<void> {
         }),
       sweepOnce: sweepOnboarding,
     },
+    {
+      // A reviewer-approved upload's target build. Its claim re-takes an expired lease itself, so
+      // there is nothing to sweep.
+      name: "upload-build",
+      claimOnce: (signal) => buildUploadOnce({ driver: buildDriver, signal }),
+      sweepOnce: async () => null,
+    },
     ...(reviewerChatEnabled()
       ? [{
           name: "reviewer-chat",
@@ -309,6 +317,7 @@ async function main(): Promise<void> {
     budgets: {
       jobs: JOBS_STALL_BUDGET_MS,
       "build-onboarding": BUILD_ONBOARDING_STALL_BUDGET_MS,
+      "upload-build": BUILD_ONBOARDING_STALL_BUDGET_MS,
     },
     failureBudgetMs: FAILING_BUDGET_MS,
   });
