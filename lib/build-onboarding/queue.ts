@@ -133,7 +133,11 @@ export async function setResolvedSourceIdentity(
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
-export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<void> {
+export async function enqueue(
+  input: EnqueueInput,
+  tx: Executor = db,
+  opts: { requeueUnsupported?: boolean } = {},
+): Promise<void> {
   await tx
     .insert(targetOnboarding)
     .values({
@@ -146,8 +150,8 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
     })
     .onConflictDoUpdate({
       target: targetOnboarding.repoId,
-      // A FAILED onboarding is requeued from the start with the corrected source, its build
-      // outputs and attempt budget cleared. Any other existing state (a build in flight, a
+      // A FAILED onboarding (or, on a reviewer's request, an UNSUPPORTED one) is requeued from the
+      // start with the corrected source, its build outputs and attempt budget cleared. Any other existing state (a build in flight, a
       // proposal awaiting a human, a configured target) is left exactly as it is: the setWhere
       // below makes the update a no-op for those, so this stays idempotent for work in progress.
       set: {
@@ -176,7 +180,12 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         analysisOnlyReason: null,
         updatedAt: new Date(),
       },
-      setWhere: eq(targetOnboarding.state, "FAILED"),
+      // An UNSUPPORTED row is requeued only when a reviewer asks for it (the source may have been
+      // fixed since the classifier refused it). An automatic enqueue, such as a reconnect webhook,
+      // leaves it alone so an honestly unsupported repository is not rebuilt in a loop.
+      setWhere: opts.requeueUnsupported
+        ? inArray(targetOnboarding.state, ["FAILED", "UNSUPPORTED"])
+        : eq(targetOnboarding.state, "FAILED"),
     });
 }
 
