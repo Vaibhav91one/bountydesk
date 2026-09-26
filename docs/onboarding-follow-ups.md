@@ -17,8 +17,16 @@ customer's build. The agent's own iteration sandbox checks out the same SHA.
 The resolved commit and an optional source-archive digest are stored on the onboarding row, and the
 resulting identity (repository, commit, archive digest, plan, every service image digest and
 snapshot) is folded into a `build_recipe_digest` that a dynamic `TargetProfile` write refuses to go
-without. Remaining work: a trusted controller that stages a source archive so the archive digest is
-populated rather than optional.
+without.
+
+The identity anchor is now any one of a commit SHA, a source archive digest, or the built image's own
+digest, so a source with no git commit (an uploaded tarball, a prebuilt image) can still be anchored.
+`hasIdentityAnchor` (`lib/build-onboarding/source-identity.ts`) is the single check, applied at
+`sourceIdentityDigest`, the build driver's pre-build gate, the onboarding write in `verifyAndWrite`,
+and `configureConnectionlessTarget`. A present-but-mutable commit ref like `HEAD` is still refused
+rather than hashed into a stable-looking identity. The git-clone driver still needs a commit to check
+out, so it accepts the anchor but stops with a clear error when there is no commit; staging a non-git
+source is the remaining work, and belongs to the non-GitHub build path.
 
 ## Make the registry handoff pluggable, not GHCR-specific
 
@@ -29,23 +37,37 @@ out, and there is no path that imports a prebuilt image tarball. So the image bu
 egress-controlled DinD sandbox has to travel through a registry to reach the offline reproduction
 snapshot. The question is which registry and how private, not whether.
 
-The coupling to GHCR is thin. The GHCR-specific code is the `docker login/push/logout ghcr.io`
-host, the `bountydesk` login, and `GHCR_NAMESPACE` in `daytona-build-driver.ts`. Everything
-downstream is already registry-agnostic: `createSnapshot` takes any `registry/name` tag, and a
-reproduction pull has been proven against both GHCR and a plain Docker Hub image
-(`lib/sandbox/daytona.ts`).
+The coupling to GHCR is now behind one interface. `RegistryHandoff` (`lib/build-onboarding/registry.ts`)
+owns the push, the digest read, and the image delete; the build driver holds no registry host or
+login. The default is GHCR, configured through `REGISTRY_HOST`, `REGISTRY_USER`, `REGISTRY_NAMESPACE`
+and `REGISTRY_PUSH_TOKEN` with the historical `GHCR_NAMESPACE` and `GHCR_PUSH_TOKEN` as the fallbacks,
+so an existing deployment needs no new configuration. Any OCI registry plugs in by setting those, and
+a later ephemeral or private registry replaces the whole thing by implementing the interface.
+Everything downstream was already registry-agnostic: `createSnapshot` takes any `registry/name` tag,
+and a reproduction pull has been proven against both GHCR and a plain Docker Hub image.
 
-Future work:
+`IMAGE_NAME_RE` in `lib/targets/manifest.ts` accepts any registry host, not just `ghcr.io`; a tagged
+or digest-pinned name is still refused, so a stored `imageName` stays an untagged reference.
 
-- Parameterize the registry as `REGISTRY_HOST`, `REGISTRY_USER`, `REGISTRY_NAMESPACE` and
-  `REGISTRY_PUSH_TOKEN`, plus a matching Daytona pull credential. Any OCI registry then plugs in
-  with no code change (GHCR, Docker Hub, ECR, GAR, Quay, or self-hosted). Per-medium and
-  per-tenant fall out of this: GitHub targets can keep GHCR, email or upload targets point at a
-  neutral registry, and each tenant gets its own namespace, all by setting different values.
-- Delete the pushed image once `createSnapshot` succeeds. The snapshot is the durable artifact;
-  the registry image only needs to exist during the handoff. Deleting it makes the customer's
-  code ephemeral in the registry, present for seconds rather than indefinitely. This is the
-  largest privacy improvement for the least code, and it works with any registry.
+The pushed image is reclaimed after its snapshot materialises. Daytona pulls a snapshot's image
+eagerly at registration, verified 2026-09-26: a `POST /snapshots` goes pending, pulling, active in
+about ten seconds with no sandbox create, and a sandbox then boots from the materialised snapshot. So
+once the snapshot is active the origin registry tag is dead weight, and the driver deletes it,
+best-effort, after `waitForSnapshotActive`. GHCR deletion needs a delete-scoped token: set
+`REGISTRY_DELETE_TOKEN` (a token with `delete:packages`) to reclaim the image, otherwise it is left
+in place, which is harmless because the snapshot is self-contained. The mesh path pushes one image per
+service and does not yet reclaim them; that is the remaining wiring here.
+
+`sweepTrialSnapshots` (`lib/sandbox/daytona.ts`) reclaims build-created snapshots that no live target
+depends on: it deletes `onboarding-` snapshots whose id is not in the protected set, where the set is
+every snapshot a target profile pins (single-image and each mesh service) plus every in-flight
+onboarding row's built snapshot (`collectProtectedSnapshotIds` in `worker.ts`). It runs as
+maintenance, not on the onboarding hot path, so a concurrent build's snapshot cannot be swept before
+the database records it, and it never reaches the live API from an ordinary onboarding.
+
+Remaining work:
+
+- Reclaim each mesh service's pushed image the way the single-image path does.
 - At multi-tenant scale, self-host a private registry. Zot is a single static binary over
   filesystem or S3 storage and is the lightweight option; Harbor adds per-project RBAC, which is
   per-tenant isolation, plus scanning and retention. This is the proper fix for customer images
@@ -68,6 +90,14 @@ app (the busybox target's `httpd`, a node start, and so on), never a `docker run
 The parser, onboarding worker, reproduction authorization, and mesh provisioner now reject
 host-model commands. Keep the agent instruction aligned with that contract, and retain regression
 tests for `docker`, `docker-compose`, `podman`, and `nerdctl` commands, including shell wrappers.
+
+The proposed start command is verified before the profile is stored, not just parsed. `verifyAndWrite`
+re-runs `validateStartCommand` on the single-image start command at the write seam (defence in depth
+against a stored manifest changed between proposal and approval; mesh services validate per service in
+`assertSafeMeshStartCommand`), and the offline provision then actually launches the command and waits
+for readiness. A command that does not boot fails the verify, so the row stays approved and unwritten
+rather than binding a target that never starts. The reviewer sees the command in `reviewableManifest`
+before approving.
 
 ## Compose mesh start commands and service names
 

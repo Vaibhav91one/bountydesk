@@ -6,6 +6,30 @@ export function isCommitSha(value: unknown): value is string {
   return typeof value === "string" && COMMIT_SHA_RE.test(value);
 }
 
+const SHA256_DIGEST_RE = /^sha256:[0-9a-f]{64}$/i;
+
+/** A content digest like sha256:<64 hex>, used for both a source archive and a built image. */
+export function isSha256Digest(value: unknown): value is string {
+  return typeof value === "string" && SHA256_DIGEST_RE.test(value);
+}
+
+/**
+ * Whether a build is anchored to something immutable. The anchor is a commit SHA (a git source), a
+ * source archive digest (an uploaded tarball), or the built image's own digest (a prebuilt image).
+ * Any one is enough; a build with none of them has nothing to pin its identity to.
+ */
+export function hasIdentityAnchor(anchors: {
+  resolvedCommitSha?: string | null;
+  sourceArchiveDigest?: string | null;
+  imageDigest?: string | null;
+}): boolean {
+  return (
+    isCommitSha(anchors.resolvedCommitSha) ||
+    isSha256Digest(anchors.sourceArchiveDigest) ||
+    isSha256Digest(anchors.imageDigest)
+  );
+}
+
 /** Resolve the server-owned repository to one immutable commit before customer code runs. */
 export async function resolveRepositoryCommit(repoFullName: string, sourceRef: string): Promise<string> {
   if (isCommitSha(sourceRef)) return sourceRef.toLowerCase();
@@ -58,7 +82,7 @@ export async function resolveRepositoryLineage(
 
 export type SourceIdentityInput = {
   repoFullName: string;
-  resolvedCommitSha: string;
+  resolvedCommitSha?: string;
   sourceArchiveDigest?: string;
   plan: unknown;
   /** The build base snapshot or image identity, when the strategy builds on one. */
@@ -78,7 +102,15 @@ export type SourceIdentityInput = {
  * have no meaningful order are sorted before hashing.
  */
 export function sourceIdentityDigest(input: SourceIdentityInput): string {
-  if (!isCommitSha(input.resolvedCommitSha)) throw new Error("source identity requires a full commit SHA");
+  // A commit ref, when given, must be a real immutable SHA: a mutable ref like "HEAD" is never
+  // hashed into a stable-looking identity. With no commit at all, a source archive or image digest
+  // anchors the identity instead.
+  if (input.resolvedCommitSha !== undefined && !isCommitSha(input.resolvedCommitSha)) {
+    throw new Error("source identity commit ref must be a full commit SHA");
+  }
+  if (!hasIdentityAnchor(input)) {
+    throw new Error("source identity requires a commit SHA, a source archive digest, or an image digest");
+  }
   const services = [...(input.services ?? [])].sort((a, b) => a.service.localeCompare(b.service));
   return `sha256:${createHash("sha256")
     .update(JSON.stringify({ ...input, services }))

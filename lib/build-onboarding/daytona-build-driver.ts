@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { requireEnv, requireSecret } from "@/lib/env";
+import { requireEnv } from "@/lib/env";
 import {
   BUILD_PURPOSE,
   createBuildSandbox,
@@ -10,6 +10,7 @@ import {
   deleteSandbox,
   execute,
   PURPOSE_LABEL,
+  waitForSnapshotActive,
   type CreateSnapshotSpec,
   type ExecResult,
   type Sandbox,
@@ -27,7 +28,8 @@ import {
 import { synthesizeComposeDockerfile } from "./compose-compiler";
 import { getDatastoreRecipe, type DatastoreCreds } from "./datastore-recipes";
 import { meshBuildPlan } from "./mesh-build-plan";
-import { sourceIdentityDigest } from "./source-identity";
+import { hasIdentityAnchor, isCommitSha, sourceIdentityDigest } from "./source-identity";
+import { resolveRegistry, type RegistryHandoff } from "./registry";
 import { selectEgressHosts } from "./egress-profiles";
 
 /**
@@ -142,19 +144,29 @@ export function createDaytonaBuildDriver(): BuildDriver {
       }
 
       // The source identity is checked before any provider configuration is read: a build with no
-      // immutable commit must fail for that reason, not incidentally on a missing snapshot name.
+      // immutable anchor must fail for that reason, not incidentally on a missing snapshot name. The
+      // anchor is a commit SHA (git), a source archive digest (an upload), or an image digest.
       const resolvedCommitSha = input.resolvedCommitSha;
-      if (!resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(resolvedCommitSha)) {
-        throw new Error("onboarding build requires a server-resolved 40-character commit SHA");
+      if (!hasIdentityAnchor({ resolvedCommitSha, sourceArchiveDigest: input.sourceArchiveDigest })) {
+        throw new Error(
+          "onboarding build requires an identity anchor: a server-resolved 40-character commit SHA or a source archive digest",
+        );
+      }
+      if (!isCommitSha(resolvedCommitSha)) {
+        // This driver stages source by git clone, so it still needs a commit to check out. A source
+        // that arrives as an archive or a prebuilt image is anchored by its digest but staged another
+        // way, which is wired in the non-GitHub build path, not here.
+        throw new Error(
+          "this build driver stages source by git clone and needs a 40-character commit SHA; a source-archive build is not wired in this driver yet",
+        );
       }
 
       const baseSnapshot = requireEnv("BUILD_BASE_SNAPSHOT");
-      const ghcrNamespace = requireEnv("GHCR_NAMESPACE").replace(/\/+$/, "");
-      const pushToken = requireSecret("GHCR_PUSH_TOKEN");
+      const registry = resolveRegistry();
       const allowList = egressAllowList(plan);
 
       const slug = repoSlug(input.repoFullName);
-      const imageName = `${ghcrNamespace}/${slug}`;
+      const imageName = `${registry.namespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
       // The clone target is the server-held repository name, not any caller-supplied ref, so nothing
       // can redirect the clone to a different repository than this onboarding row is for.
@@ -192,8 +204,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
         // push-and-register flow rather than the single-image path below.
         if (plan.strategy === "compose-mesh") {
           const mesh = await buildMesh(sandbox, plan, {
-            ghcrNamespace,
-            pushToken,
+            registry,
             slug,
             buildMarker,
             resolvedCommitSha,
@@ -204,28 +215,24 @@ export function createDaytonaBuildDriver(): BuildDriver {
 
         const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
 
-        // Only now introduce the push credential, use it, and remove it, so the untrusted build ran
-        // with no reusable token in the sandbox.
-        try {
-          await run(sandbox, `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`);
-          await run(sandbox, `docker push ${imageRef}`);
-        } finally {
-          await run(sandbox, "docker logout ghcr.io").catch(() => undefined);
-        }
-        const digest = (
-          await run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
-        ).result.trim();
+        // The registry introduces the push credential right before the push and drops it right
+        // after, so the untrusted build ran with no reusable token in the sandbox.
+        const { pullableTag, digest } = await registry.push(sandbox, imageRef, run);
 
         // A rebuild of the same target reuses this deterministic name, and Daytona refuses a create
         // that collides with an existing snapshot. Replace the prior one rather than fail on it.
         await deleteSnapshotByName(`onboarding-${slug}`);
         const snapshot = await createSnapshot({
           name: `onboarding-${slug}`,
-          image: imageRef,
+          image: pullableTag,
           cpu: BUILD_CPU,
           memoryGb: BUILD_MEMORY_GB,
           diskGb: BUILD_DISK_GB,
         });
+
+        // Daytona materialises the snapshot's image at registration, so the origin registry tag is no
+        // longer needed to boot the target once the snapshot is active. Reclaim it, best-effort.
+        await reclaimOriginImage(registry, snapshot.id, pullableTag);
 
         return {
           imageName,
@@ -280,8 +287,7 @@ export async function buildMesh(
   sandbox: Sandbox,
   plan: Extract<BuildPlan, { strategy: "compose-mesh" }>,
   ctx: {
-    ghcrNamespace: string;
-    pushToken: string;
+    registry: RegistryHandoff;
     slug: string;
     buildMarker: string;
     resolvedCommitSha: string;
@@ -302,7 +308,7 @@ export async function buildMesh(
   const buildTag = `bountydesk-${randomBytes(4).toString("hex")}`;
 
   const plannedServices = meshBuildPlan(plan, {
-    ghcrNamespace: ctx.ghcrNamespace,
+    ghcrNamespace: ctx.registry.namespace,
     slug: ctx.slug,
     buildTag,
   });
@@ -347,7 +353,7 @@ export async function buildMesh(
       const startCommand = await inspectMeshStartCommand(sandbox, stageTag, svc, runtime);
       await writeGenDockerfile(sandbox, `FROM ${stageTag}\nENTRYPOINT ["tail", "-f", "/dev/null"]\nCMD []\n`, runtime);
       await runtime.run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
-      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.registry, runtime);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
       const built: BuiltService = {
         ...common,
@@ -379,7 +385,7 @@ export async function buildMesh(
       // datastore (postgres's entrypoint needs the "postgres" arg) does not start on its own. Capture
       // its full start command (entrypoint plus cmd) so the provisioner runs it.
       const startCommand = await inspectMeshStartCommand(sandbox, imageRef, svc, runtime);
-      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.pushToken, runtime);
+      const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.registry, runtime);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
       services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef, startCommand });
     }
@@ -408,23 +414,37 @@ export async function buildMesh(
   };
 }
 
-/** Push a built image and read back its pushed digest. The credential is introduced right before the
- *  push and removed right after, so no untrusted build step ran with a reusable token in the sandbox. */
+/** Push a built image through the registry and return its pushed digest. The registry keeps the push
+ *  credential inside the login/push/logout window, so no untrusted build step held a reusable token. */
 async function pushAndDigest(
   sandbox: Sandbox,
   imageRef: string,
-  pushToken: string,
+  registry: RegistryHandoff,
   runtime: MeshBuildRuntime,
 ): Promise<string> {
+  const { digest } = await registry.push(sandbox, imageRef, runtime.run);
+  return digest;
+}
+
+/**
+ * Reclaim the origin registry image once its snapshot has materialised.
+ *
+ * Daytona pulls a snapshot's image eagerly at registration (see waitForSnapshotActive), so once the
+ * snapshot is active the origin tag is dead weight, not something a reproduction still pulls from.
+ * Best-effort: a snapshot that never reports active, or a registry with no delete credential, leaves
+ * the image in place rather than failing a build that already produced a verified snapshot.
+ */
+async function reclaimOriginImage(
+  registry: RegistryHandoff,
+  snapshotId: string,
+  pullableTag: string,
+): Promise<void> {
   try {
-    await runtime.run(sandbox, `echo ${shellArg(pushToken)} | docker login ghcr.io -u bountydesk --password-stdin`);
-    await runtime.run(sandbox, `docker push ${imageRef}`);
-  } finally {
-    await runtime.run(sandbox, "docker logout ghcr.io").catch(() => undefined);
+    await waitForSnapshotActive(snapshotId);
+    await registry.deleteImage(pullableTag);
+  } catch (error) {
+    console.warn(`could not reclaim origin image ${pullableTag}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return (
-    await runtime.run(sandbox, `docker inspect --format='{{index .RepoDigests 0}}' ${imageRef} | sed 's/.*@//'`)
-  ).result.trim();
 }
 
 /** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. Daytona's

@@ -1,7 +1,7 @@
-import { connectedRepository, db, eq, targetOnboarding } from "@/lib/db";
+import { connectedRepository, db, eq, targetOnboarding, targetProfile } from "@/lib/db";
 import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
-import { parseTargetManifest } from "@/lib/targets/manifest";
+import { parseTargetManifest, validateStartCommand } from "@/lib/targets/manifest";
 import type { TargetDefinition } from "@/lib/targets/registry";
 import {
   provisionMesh,
@@ -9,12 +9,13 @@ import {
   teardownSandbox,
   type MeshServiceAuth,
 } from "@/lib/sandbox/provision";
+import { sweepTrialSnapshots } from "@/lib/sandbox/daytona";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
 import { classify, rawSourceReader } from "./classify";
 import { knownTargetHints } from "./known-target-hints";
-import { resolveRepositoryCommit, resolveRepositoryLineage, type RepositoryLineage } from "./source-identity";
+import { hasIdentityAnchor, resolveRepositoryCommit, resolveRepositoryLineage, type RepositoryLineage } from "./source-identity";
 import { runOnboardingAgent, type RunOnboardingAgentInput } from "./onboarding-agent";
 import {
   runSandboxabilityReview,
@@ -279,10 +280,20 @@ async function verifyAndWrite(
     !lease.imageDigest ||
     !lease.snapshotId ||
     !lease.buildMarker ||
-    !lease.buildRecipeDigest ||
-    !lease.resolvedCommitSha
+    !lease.buildRecipeDigest
   ) {
-    throw new Error("approved onboarding row is missing its build outputs or identity");
+    throw new Error("approved onboarding row is missing its build outputs");
+  }
+  // The identity anchor is a commit SHA, a source archive digest, or the image digest; a non-git
+  // target has no commit but is still anchored, so this checks for any one rather than the commit.
+  if (
+    !hasIdentityAnchor({
+      resolvedCommitSha: lease.resolvedCommitSha,
+      sourceArchiveDigest: lease.sourceArchiveDigest,
+      imageDigest: lease.imageDigest,
+    })
+  ) {
+    throw new Error("approved onboarding row has no identity anchor");
   }
   const manifest = asTargetDefinition(lease.proposedManifest);
   const definition: TargetDefinition = { ...manifest, imageName: lease.imageName };
@@ -291,6 +302,16 @@ async function verifyAndWrite(
   if (!appPort) throw new Error("proposed manifest has no usable app port in its baseUrl");
   const readinessPath = definition.provisioning.readinessPath;
   const snapshotImageRef = onboardingSnapshotImageRef(lease.imageName);
+
+  // Revalidate the proposed start command right before it is booted and stored. parseTargetManifest
+  // validated it when the manifest was proposed; this is the defence-in-depth re-check at the write
+  // seam, in case a stored manifest was changed between proposal and approval. The offline provision
+  // below then actually runs the command and waits for readiness, so a command that does not boot
+  // fails the verify and the profile is never written. Mesh services validate per service in
+  // meshServiceAuth / assertSafeMeshStartCommand.
+  if (definition.provisioning.startCommand !== undefined) {
+    validateStartCommand(definition.provisioning.startCommand);
+  }
 
   // A compose-mesh build carries every service; the offline verify boots the whole mesh. A
   // single-image build boots the one snapshot exactly as before. Either way the sandboxes the verify
@@ -550,4 +571,66 @@ async function recordLineage(
   } catch (error) {
     console.warn(`could not record the fork lineage of ${repoFullName}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+// A row past one of these has either bound its snapshot to a profile (CONFIGURED, so the profile
+// query protects it) or produced nothing worth keeping (UNSUPPORTED, FAILED). Every other state is
+// in flight, and its built snapshot must be protected from the sweep until the row records it.
+const ONBOARDING_TERMINAL = new Set(["CONFIGURED", "UNSUPPORTED", "FAILED"]);
+
+/** Snapshot ids on a stored services value. A target profile config holds `{ services: [...] }`; a
+ *  target_onboarding built_services column is the array itself, so both shapes are read here. */
+function meshSnapshotIds(value: unknown): string[] {
+  const array = Array.isArray(value)
+    ? value
+    : Array.isArray((value as { services?: unknown } | null)?.services)
+      ? (value as { services: unknown[] }).services
+      : [];
+  const ids: string[] = [];
+  for (const service of array) {
+    const id = (service as { snapshotId?: unknown } | null)?.snapshotId;
+    if (typeof id === "string" && id) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * Every snapshot id a live target boots from or an in-flight onboarding still holds: every target
+ * profile's snapshot (single-image and each mesh service), plus every non-terminal onboarding row's
+ * built snapshot. sweepTrialSnapshots never deletes one of these, so an onboarding whose snapshot is
+ * built but whose row is not yet approved is safe from the sweep.
+ */
+export async function collectProtectedSnapshotIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const profiles = await db
+    .select({ snapshotId: targetProfile.snapshotId, config: targetProfile.config })
+    .from(targetProfile);
+  for (const profile of profiles) {
+    if (profile.snapshotId) ids.add(profile.snapshotId);
+    for (const id of meshSnapshotIds(profile.config)) ids.add(id);
+  }
+  const rows = await db
+    .select({
+      state: targetOnboarding.state,
+      snapshotId: targetOnboarding.snapshotId,
+      builtServices: targetOnboarding.builtServices,
+    })
+    .from(targetOnboarding);
+  for (const row of rows) {
+    if (ONBOARDING_TERMINAL.has(row.state)) continue;
+    if (row.snapshotId) ids.add(row.snapshotId);
+    for (const id of meshSnapshotIds(row.builtServices)) ids.add(id);
+  }
+  return ids;
+}
+
+/**
+ * Reclaim build-created snapshots that no live target depends on.
+ *
+ * Read the protected set from the database, then sweep. This runs as maintenance, not on the
+ * onboarding hot path: a hot-path sweep could race a concurrent build and delete a snapshot the
+ * database has not yet recorded, and it would reach the live Daytona API from every onboarding.
+ */
+export async function sweepOrphanSnapshots(): Promise<{ deleted: string[]; kept: string[] }> {
+  return sweepTrialSnapshots(await collectProtectedSnapshotIds());
 }

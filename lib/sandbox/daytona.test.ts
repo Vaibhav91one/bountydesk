@@ -19,6 +19,7 @@ import {
   deleteSandbox,
   execute,
   listSandboxes,
+  sweepTrialSnapshots,
   type SandboxSpec,
   type SnapshotInfo,
 } from "./daytona";
@@ -711,4 +712,33 @@ test("a rejected sandbox that is still destroying is waited for, then reported c
   } finally {
     setTeardownPollForTests(10, 3000);
   }
+});
+
+test("sweepTrialSnapshots deletes orphan onboarding snapshots but never a referenced or foreign one", async () => {
+  const snapshot = (id: string, name: string): SnapshotInfo => ({
+    id,
+    name,
+    imageName: `ghcr.io/acme/${name}:bountydesk-onboarding`,
+    state: "active",
+    cpu: 2,
+    mem: 4,
+    disk: 10,
+  });
+  const listed = [
+    snapshot("s1", "onboarding-acme-widget"), // referenced by a live profile: keep
+    snapshot("s2", "onboarding-acme-orphan"), // build-created, nothing references it: delete
+    snapshot("s3", "juice-shop-v17.3.0"), // not onboarding-named: never touched
+    snapshot("s4", "onboarding-acme-mesh-db"), // a live mesh dependency snapshot: keep
+  ];
+  const deletedIds: string[] = [];
+  const { deleted, kept } = await sweepTrialSnapshots(new Set(["s1", "s4"]), {
+    list: async () => listed,
+    deleteById: async (id) => {
+      deletedIds.push(id);
+    },
+  });
+
+  assert.deepEqual(deleted, ["s2"], "only the unreferenced onboarding snapshot is deleted");
+  assert.deepEqual(deletedIds, ["s2"]);
+  assert.deepEqual([...kept].sort(), ["s1", "s4"], "referenced snapshots are kept, whatever their name");
 });
