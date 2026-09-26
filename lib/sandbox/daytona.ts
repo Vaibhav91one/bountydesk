@@ -720,3 +720,80 @@ export async function deleteSnapshotByName(name: string): Promise<void> {
     }
   }
 }
+
+/**
+ * Wait for a freshly registered snapshot to finish materialising its image, or give up.
+ *
+ * Daytona pulls a snapshot's image eagerly at registration (verified 2026-09-26: a POST /snapshots
+ * goes pending -> pulling -> active in about ten seconds with no sandbox create, and a sandbox then
+ * boots from the materialised snapshot). Once it is active the origin registry image is no longer
+ * needed to boot the target, so a caller that reclaims the origin image waits for this first.
+ */
+export async function waitForSnapshotActive(
+  snapshotId: string,
+  timeoutMs = 120_000,
+  pollMs = 3_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const info = await getSnapshot(snapshotId);
+    if (info.state === "active") return;
+    if (["error", "build_failed", "destroyed"].includes(info.state)) {
+      throw new DaytonaError(`snapshot ${snapshotId} is ${info.state}, not active`);
+    }
+    if (Date.now() > deadline) {
+      throw new DaytonaError(`snapshot ${snapshotId} did not become active within ${timeoutMs}ms (last ${info.state})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/** Snapshots created by the onboarding build carry this name prefix; the sweep only ever touches
+ *  these, never a manually registered snapshot. */
+const ONBOARDING_SNAPSHOT_NAME = /^onboarding-/;
+
+/** The two provider calls the sweep makes, behind an interface so its logic is tested without a live
+ *  Daytona account. The live wiring is the default; a test passes fakes and asserts what it deleted. */
+export type SnapshotSweepOps = {
+  list(): Promise<SnapshotInfo[]>;
+  deleteById(id: string): Promise<void>;
+};
+
+const liveSweepOps: SnapshotSweepOps = {
+  async list() {
+    const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>("/snapshots?limit=200");
+    return Array.isArray(listed) ? listed : (listed.items ?? []);
+  },
+  async deleteById(id) {
+    await call(`/snapshots/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+  },
+};
+
+/**
+ * Delete build-created snapshots that no live target depends on.
+ *
+ * A build registers an "onboarding-" snapshot before the row is approved, so a build whose row never
+ * reached a written profile (a failed verify, an abandoned onboarding) leaves the snapshot behind.
+ * This reclaims those. `protectedSnapshotIds` is every snapshot id a target profile pins or an
+ * in-flight onboarding row still holds, so a snapshot a running target boots from is never touched;
+ * that set, not the name, is what keeps this from pulling an image out from under a live target.
+ * Same list-then-delete-by-id shape as deleteSnapshotByName.
+ */
+export async function sweepTrialSnapshots(
+  protectedSnapshotIds: ReadonlySet<string>,
+  ops: SnapshotSweepOps = liveSweepOps,
+): Promise<{ deleted: string[]; kept: string[] }> {
+  const items = await ops.list();
+  const deleted: string[] = [];
+  const kept: string[] = [];
+  for (const snapshot of items) {
+    if (!snapshot.id || !ONBOARDING_SNAPSHOT_NAME.test(snapshot.name)) continue;
+    if (protectedSnapshotIds.has(snapshot.id)) {
+      kept.push(snapshot.id);
+      continue;
+    }
+    await ops.deleteById(snapshot.id);
+    deleted.push(snapshot.id);
+  }
+  return { deleted, kept };
+}

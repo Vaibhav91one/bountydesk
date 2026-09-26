@@ -2,7 +2,9 @@ import type { TargetDefinition } from "./registry";
 
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/;
 const ENV_PREFIX_RE = /^[A-Z0-9_]{1,80}$/;
-const IMAGE_NAME_RE = /^ghcr\.io\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._/-]*$/;
+// Any registry host, not just ghcr.io, so a target built into a non-GHCR registry validates. The
+// trailing @digest and :tag are still refused below, so this stays an untagged name.
+const IMAGE_NAME_RE = /^[a-z0-9][a-z0-9.-]*(?::\d+)?\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._/-]*$/;
 
 export type TargetManifest = {
   name: string;
@@ -130,7 +132,7 @@ function normalizePath(value: string, key: string): string {
   return value;
 }
 
-function validateStartCommand(value: string): void {
+export function validateStartCommand(value: string): void {
   if (value.length > 1_000 || /[\r\n]/.test(value)) {
     throw new Error("target manifest startCommand must be a single line under 1000 characters");
   }

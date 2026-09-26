@@ -86,6 +86,30 @@ test("the driver refuses to build without a server-resolved commit, before touch
   }
 });
 
+test("a source-archive build with no commit is refused by this git-clone driver, before Daytona", async () => {
+  // The archive digest is a valid identity anchor, so the identity check passes; this driver still
+  // needs a commit to check out, so it fails there rather than cloning with nothing to check out. It
+  // must fail before any env read or provider call.
+  const driver = createDaytonaBuildDriver();
+  const plan = {
+    strategy: "dockerfile" as const,
+    ecosystem: "node" as const,
+    dockerfilePath: "Dockerfile",
+    buildContext: ".",
+    seed: { kind: "none" as const },
+    runtime: { name: "app", baseUrl: "http://localhost:3000", readinessPath: "/" },
+  };
+  await assert.rejects(
+    driver.build({
+      repoFullName: "acme/app",
+      sourceRef: "upload://acme-app.tgz",
+      sourceArchiveDigest: `sha256:${"a".repeat(64)}`,
+      plan,
+    }),
+    /not wired in this driver yet/,
+  );
+});
+
 test("the slug is a registry-safe, lowercase identifier", () => {
   assert.equal(repoSlug("Acme-Corp/My.Repo_v2"), "acme-corp-my.repo_v2");
   // No leading, trailing, or doubled separators from stripped characters.
