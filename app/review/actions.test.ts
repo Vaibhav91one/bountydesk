@@ -718,3 +718,71 @@ test("allowVerdict retries once and records the decision when the first DB attem
   assert.equal(decisions.length, 1);
   assert.equal(decisions[0].decision, "APPROVED");
 });
+
+/** A DELIVERING report whose one delivery the worker refused and held for a human. */
+async function seedHeldDelivery() {
+  const { reportId, verdictId } = await seedPendingReport({ synthesized: true });
+  await dbm.db.update(dbm.report).set({ state: "DELIVERING" }).where(dbm.eq(dbm.report.id, reportId));
+  const [verdictRow] = await dbm.db
+    .select({ contentHash: dbm.verdict.contentHash })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.id, verdictId));
+  const [delivery] = await dbm.db
+    .insert(dbm.outboundDelivery)
+    .values({
+      reportId,
+      verdictId,
+      idempotencyKey: `verdict:${verdictId}`,
+      target: `manual:${seq}`,
+      approvedContentHash: verdictRow.contentHash,
+      state: "FAILED",
+      requiresHumanReview: true,
+      attempts: 1,
+      lastError: "GitHub refused the advisory write (403)",
+    })
+    .returning({ id: dbm.outboundDelivery.id });
+  return { reportId, deliveryId: delivery.id };
+}
+
+test("retryHeldDeliveryAction refuses a caller who is not a reviewer, and changes nothing", async () => {
+  const { reportId, deliveryId } = await seedHeldDelivery();
+  signOut();
+  await assert.rejects(() => actions.retryHeldDeliveryAction(reportId), /NEXT_REDIRECT/);
+  signIn(REVIEWER_ID + 1);
+  await assert.rejects(() => actions.retryHeldDeliveryAction(reportId), /NEXT_REDIRECT/);
+
+  const [row] = await deliveriesFor(reportId);
+  assert.equal(row.id, deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.equal(row.requiresHumanReview, true);
+  assert.equal(deliverCalls.length, 0);
+});
+
+test("retryHeldDeliveryAction re-queues the held row, records who asked, and tries it once", async () => {
+  const { reportId, deliveryId } = await seedHeldDelivery();
+  signIn(REVIEWER_ID, "carol");
+
+  assert.deepEqual(await actions.retryHeldDeliveryAction(reportId), { ok: true });
+
+  const [row] = await deliveriesFor(reportId);
+  assert.equal(row.state, "PENDING");
+  assert.equal(row.requiresHumanReview, false);
+  assert.ok(row.maxAttempts > row.attempts, "the retry has attempts left to claim");
+  assert.deepEqual(
+    deliverCalls.map((c) => c.deliveryId),
+    [deliveryId],
+  );
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  const retried = events.find((e) => e.type === "delivery.retry_requested");
+  assert.ok(retried, "the retry is on the audit trail");
+  assert.equal((retried.data as { reviewer: string }).reviewer, "carol");
+
+  // A second click finds nothing held and changes nothing.
+  const again = await actions.retryHeldDeliveryAction(reportId);
+  assert.equal(again.ok, false);
+  assert.equal(deliverCalls.length, 1);
+});

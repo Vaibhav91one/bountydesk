@@ -905,3 +905,150 @@ test("a token-mint 5xx stays retryable rather than refusing", async () => {
   const rep = await reportRow(fixture.reportId);
   assert.equal(rep.state, "DELIVERING");
 });
+
+/** Hold a row the way refuseDelivery(..., hold) leaves it, without going through a send. */
+async function holdRow(deliveryId: string, attempts = 1) {
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({
+      state: "FAILED",
+      requiresHumanReview: true,
+      attempts,
+      lastError: "held for a human",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    })
+    .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
+}
+
+async function heldFlag(deliveryId: string) {
+  const [row] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
+  return row.rhr;
+}
+
+test("a held delivery retried after the cause is fixed posts once and completes the report", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  const refusing = makeFakeDeps({ listComments: [] });
+  refusing.deps.mintToken = async () => {
+    throw new GitHubApiError(403, "GitHub installation token request failed with 403: forbidden");
+  };
+  await worker.deliverOnce("w-held", { deps: refusing.deps });
+  assert.equal(await heldFlag(fixture.deliveryId), true);
+  // Held means claim() never sees it again on its own.
+  assert.equal(await worker.deliverById(fixture.deliveryId, "w-held-noop", { deps: refusing.deps }), null);
+
+  const result = await retry.retryHeldDelivery(fixture.reportId, "alice");
+  assert.deepEqual(result, { ok: true, deliveryId: fixture.deliveryId });
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  assert.equal(await worker.deliverById(fixture.deliveryId, "w-retried", { deps }), fixture.deliveryId);
+  assert.equal(calls.postComment, 1);
+  assert.equal((await deliveryRow(fixture.deliveryId)).state, "SENT");
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERED");
+  // Both attempts are on record under distinct numbers: the retry never reuses the held one's.
+  assert.deepEqual(
+    (await attemptsFor(fixture.deliveryId)).map((a) => a.attempt).sort(),
+    [1, 2],
+  );
+});
+
+test("a retried delivery whose earlier send already landed is a replay, not a second post", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({
+    listComments: [
+      { body: fixture.payload, authorLogin: "bountydesk-triage[bot]", authorType: "Bot", githubAppId: 123456 },
+    ],
+  });
+  await worker.deliverById(fixture.deliveryId, "w-retry-replay", { deps });
+  assert.equal(calls.postComment, 0, "the delivery marker on the issue makes the retry a replay");
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERED");
+});
+
+test("a retried delivery re-runs the approved-hash gate", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture({ wrongApprovedHash: true });
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  await worker.deliverById(fixture.deliveryId, "w-retry-hash", { deps });
+  assert.equal(calls.mintToken, 0, "a hash mismatch is refused before GitHub is contacted");
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /content hash mismatch/);
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERING");
+});
+
+test("a retried delivery re-runs the approval-decision gate", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture({ noApproval: true });
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  await worker.deliverById(fixture.deliveryId, "w-retry-approval", { deps });
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.postComment, 0);
+  assert.match((await deliveryRow(fixture.deliveryId)).lastError ?? "", /no matching approved decision/);
+});
+
+test("retry refuses a row that is not held, a report not DELIVERING, and a send the provider accepted", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+
+  const pending = await seedFixture();
+  const notHeld = await retry.retryHeldDelivery(pending.reportId, "alice");
+  assert.equal(notHeld.ok, false);
+
+  const early = await seedFixture({ reportState: "AWAITING_APPROVAL" });
+  await holdRow(early.deliveryId);
+  const notDelivering = await retry.retryHeldDelivery(early.reportId, "alice");
+  assert.equal(notDelivering.ok, false);
+  assert.equal(await heldFlag(early.deliveryId), true);
+
+  // A bounced email keeps its provider_message_id; the same idempotency key cannot send it again.
+  const bounced = await seedFixture();
+  await holdRow(bounced.deliveryId);
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ providerMessageId: `re_${randomUUID()}` })
+    .where(dbm.eq(dbm.outboundDelivery.id, bounced.deliveryId));
+  const accepted = await retry.retryHeldDelivery(bounced.reportId, "alice");
+  assert.equal(accepted.ok, false);
+  assert.equal(await heldFlag(bounced.deliveryId), true);
+});
+
+test("retry leaves a duplicate-target hold alone while another delivery owns the verdict", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  // enqueueDelivery holds a second row for the same verdict and target under a different key.
+  const second = await queue.enqueueDelivery({
+    reportId: fixture.reportId,
+    verdictId: fixture.verdictId,
+    idempotencyKey: `verdict:${fixture.verdictId}:again`,
+    target: fixture.sourceRef,
+    approvedContentHash: fakeHash(fixture.payload),
+  });
+  assert.equal(second.disposition, "REVIEW_REQUIRED");
+
+  const result = await retry.retryHeldDelivery(fixture.reportId, "alice");
+  assert.equal(result.ok, false);
+  assert.equal(await heldFlag(second.id), true);
+});

@@ -13,6 +13,7 @@ import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 import { RecheckActions } from "./recheck-actions";
 import { OwnerAdvisoryControl } from "./owner-advisory-control";
+import { RetryDeliveryControl } from "./retry-delivery-control";
 import { TargetControl } from "./target-control";
 
 /** One fact. The value is always something the database holds. */
@@ -133,6 +134,8 @@ export function StatusCard({
           The live session is gone, but the drafted verdict still stands for review.
         </p>
       ) : null}
+
+      <RetryDeliveryControl reportId={reportId} status={status} />
 
       {status.state === "REPRODUCING" && status.recheckSummary ? (
         <RecheckActions reportId={reportId} summary={status.recheckSummary} />

@@ -50,6 +50,14 @@ async function contentsPermission() {
   return row?.contents;
 }
 
+async function advisoriesPermission() {
+  const [row] = await dbm.db
+    .select({ advisories: dbm.githubInstallation.repositoryAdvisoriesPermission })
+    .from(dbm.githubInstallation)
+    .where(dbm.eq(dbm.githubInstallation.installationId, INSTALLATION.id));
+  return row?.advisories;
+}
+
 async function queuedRepoIds(): Promise<number[]> {
   const rows = await dbm.db.select({ repoId: dbm.targetOnboarding.repoId }).from(dbm.targetOnboarding);
   return rows.map((r) => r.repoId).sort();
@@ -69,6 +77,7 @@ test("an install without Contents: read stores visibility, queues only the publi
   });
 
   assert.equal(await contentsPermission(), "none");
+  assert.equal(await advisoriesPermission(), "none");
   assert.equal((await repo(PRIVATE.id)).isPrivate, true);
   assert.equal((await repo(PUBLIC.id)).isPrivate, false);
   assert.deepEqual(await queuedRepoIds(), [PUBLIC.id], "the private repository is not queued for a clone");
@@ -127,10 +136,15 @@ test("reproduction of a target bound to the private repository is POLICY_REFUSED
 test("accepting Contents: read queues the waiting private repositories and lets reproduction through", async () => {
   await lifecycle.applyLifecycle(dbm.db, "installation", {
     action: "new_permissions_accepted",
-    installation: { ...INSTALLATION, permissions: { metadata: "read", issues: "write", contents: "read" } },
+    installation: {
+      ...INSTALLATION,
+      permissions: { metadata: "read", issues: "write", contents: "read", repository_advisories: "write" },
+    },
   });
 
   assert.equal(await contentsPermission(), "read");
+  // The same payload is how an accepted advisories permission reaches the email-to-advisory routing.
+  assert.equal(await advisoriesPermission(), "write");
   // The bound private repository keeps its target and is not rebuilt; the unbound one is queued.
   assert.deepEqual(await queuedRepoIds(), [PUBLIC.id, LATE_PRIVATE.id].sort());
 
@@ -154,6 +168,7 @@ test("a repository event without permissions leaves the stored permission alone"
     repository: { id: PUBLIC.id, full_name: "acme/open-renamed" },
   });
   assert.equal(await contentsPermission(), "read");
+  assert.equal(await advisoriesPermission(), "write");
 });
 
 test("privatized and publicized move visibility and nothing else", async () => {

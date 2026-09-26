@@ -848,7 +848,14 @@ GitHub's 201 or 200 on the create or PATCH, carrying a `ghsa_id`, so the arm com
 in the same transaction like the issue arm. Idempotency is the
 `<!-- bountydesk-delivery:<verdictId> -->` marker read back from the advisory. A revoked grant, or a
 403, 404 or 422 from GitHub, refuses the send and holds the row for a human, and the report stays in
-`DELIVERING`.
+`DELIVERING`. The send-time check is `activeRepository`, not `hasActiveRepositoryGrant`: writing to
+an advisory reads no source, so the private-repository policy (Q29) does not apply to it.
+
+A reviewer can retry a held delivery on any channel from the case file once the cause is fixed
+(`retryHeldDeliveryAction`). It clears the hold and re-queues the same outbox row, so the retry runs
+every send-time gate again and stays idempotent through the delivery marker; it records a
+`delivery.retry_requested` session event. A row the provider already accepted, or one held as a
+duplicate of another automatic delivery, is not retried.
 
 ### Q28: Email reports route to an advisory when the repository supports it (2026-09-26)
 
@@ -857,16 +864,23 @@ When the verdict is about a repository the App is installed on, the maintainers 
 need it, and a draft advisory is where GitHub's fix and CVE flow starts.
 
 At approval, `enqueueApprovedVerdictDelivery` sends an email report's verdict to the advisory
-channel when the report has a grant snapshot, a connected repository, and `hasActiveRepositoryGrant`
-holds. Otherwise it falls back to the email reply to the verified contact (Q25). The choice is
+channel when the report has a grant snapshot, a connected repository, `hasActiveRepositoryGrant`
+holds, and the installation's `repository_advisories` permission is `write`. Otherwise it falls back
+to the email reply to the verified contact (Q25), with that branch's verified-recipient gate
+unchanged. The choice is
 stored per outbox row in `outbound_delivery.channel` (migration 0040), which overrides the report's
 intake channel in the delivery worker. The report keeps its `email` provenance.
 
 The advisory arm's create path opens a draft with the report title as summary, the verdict as
 description, and severity and CWEs from the findings, without credits. A revision PATCHes the same
-draft, found by its marker. The route does not check that the installation has accepted the
-advisories permission: an installation that has not gets a held refusal, not a silent fallback to
-email, so a reviewer sees that the permission is missing.
+draft, found by its marker.
+
+The permission is stored on `github_installation.repository_advisories_permission` (migration 0044)
+exactly like `contents_permission` (Q29): from the lifecycle webhooks, including
+`new_permissions_accepted`, with the reconcile tick as backfill. Routing an installation that has not
+accepted the permission to an advisory would only produce a held send, so it gets the email reply.
+If the permission is withdrawn after approval, the advisory write is refused and held, and a reviewer
+can retry it once the permission is accepted again.
 
 ### Q29: Private repositories reproduce behind Contents: read (2026-09-26)
 

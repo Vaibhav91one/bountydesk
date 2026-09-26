@@ -55,7 +55,8 @@ revision edits the same advisory again.
 
 An email report whose target is bound to a connected repository can deliver as an advisory
 instead of an email reply. At approval, `emailAdvisoryDeliveryTarget` picks the advisory channel
-when the report has a grant snapshot, a connected repository, and `hasActiveRepositoryGrant` holds.
+when the report has a grant snapshot, a connected repository, `hasActiveRepositoryGrant` holds, and
+the installation's `repository_advisories` permission is `write`.
 The outbox row then carries `channel = advisory` (the `outbound_delivery.channel` override,
 migration 0040) and the target `github:<repoId>:advisory:create`; the delivery worker uses the row's
 channel over the report's. Otherwise the email report falls back to the email reply to its verified
@@ -66,15 +67,22 @@ flattened, capped at 1024 characters), the approved verdict as description, and 
 list derived from the findings. No credits are sent, so the reporter's identity stays in
 BountyDesk. A later revision PATCHes the description of that same draft.
 
-The code does not check that the installation has actually accepted the advisories permission when
-it chooses this route. An installation that has not accepted it gets a refused and held send (see
-below), not a fallback to email. The pinned demo target has no connected repository, so its email
-reports always get the email reply.
+The permission is stored on `github_installation.repository_advisories_permission` (migration
+0044), the same way `contents_permission` is: the lifecycle webhooks record it from any installation
+payload that carries permissions, including `new_permissions_accepted`, and the reconcile tick
+backfills it (`syncAccessFacts`). A payload with permissions but no `repository_advisories` records
+`none`, and a payload without permissions leaves the stored value alone. Anything other than `write`,
+null included, sends the email report to the email reply, which keeps its own verified-recipient
+gate: with no verified contact the approval is refused and nothing is queued. The pinned demo target
+has no connected repository, so its email reports always get the email reply.
 
 ## The delivery contract
 
 The recipient is the repository grant. At send time the arm re-reads the report's connected
-repository and installation and requires `activeRepository` to hold. The target in the leased
+repository and installation and requires `activeRepository` to hold. It does not apply the
+private-repository policy (`hasActiveRepositoryGrant`): that policy is about reading source for
+reproduction, and writing a verdict to an advisory reads no source, so it does not need Contents:
+read. The target in the leased
 outbox row must match: on the reply path it must equal the report's `source_ref`, and on the create
 path its repository id must equal the bound repository's.
 
@@ -109,9 +117,20 @@ the advisories permission, cannot see the advisory, or GitHub rejected the edit.
 fix any of these.
 
 A held refusal records a `delivery_attempt` with the error and sets the outbox row to `FAILED` with
-`requires_human_review`, which takes it out of the claim queue for good. The report stays in
-`DELIVERING`, and the case file shows "held for review" with the error. There is no retry action in
-the app yet: re-sending a held row after the permission is accepted is an operator step.
+`requires_human_review`, which takes it out of the claim queue. The report stays in `DELIVERING`, and
+the case file shows "held for review" with the error and a Retry delivery control.
+
+Retry is a reviewer action (`retryHeldDeliveryAction`, `lib/delivery/retry.ts`) that works for a held
+delivery on any channel. Under the report lock it takes the report's newest outbox row, requires the
+report to be `DELIVERING` and the row to be `FAILED` and held, clears the hold, sets it back to
+`PENDING` with a fresh attempt budget, and records a `delivery.retry_requested` session event with
+the reviewer. It then tries the row once; the worker's drain picks it up otherwise. Nothing a send
+depends on changes: the row keeps its verdict, target, approved hash and idempotency key, so the
+attempt runs every send-time gate again (the payload hash, the APPROVED decision, the report state,
+the arm's live grant or recipient check) and finds an earlier send through the delivery marker
+instead of writing twice. Retry refuses a row the provider already accepted (a bounced email keeps its
+`provider_message_id`, and the same idempotency key cannot send it again), and a row held because
+another automatic delivery already owns the same verdict and target.
 
 A target mismatch or a report with no bound repository is refused without the hold flag.
 

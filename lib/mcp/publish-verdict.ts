@@ -9,6 +9,7 @@ import {
   desc,
   eq,
   gt,
+  githubInstallation,
   report,
   REPORT_TERMINAL_STATES,
   sql,
@@ -597,9 +598,10 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
 /**
  * The advisory delivery target for an email report, or null when the reply is the right channel.
  *
- * "Supports advisories" is nothing more than an active grant on a bound connected repository: the
- * App already holds the advisories-write permission, so a repo we can still reach is a repo we can
- * open a draft advisory on. The pinned demo target has no connected repository (its grant snapshot
+ * "Supports advisories" means an active grant on a bound connected repository whose installation
+ * has accepted "Repository security advisories: write". Without that permission the draft could
+ * never be created, and routing there would only produce a held send, so the report gets its email
+ * reply instead (with the reply's own verified-recipient gate). The pinned demo target has no connected repository (its grant snapshot
  * has a null connectedRepositoryId, which hasActiveRepositoryGrant treats as always active), so it
  * is excluded here on purpose, it delivers as an email reply. The returned target names the repo,
  * not a GHSA: an email report has no pre-existing advisory, so the arm creates one, and freezing the
@@ -610,12 +612,16 @@ async function emailAdvisoryDeliveryTarget(reportId: string, tx: Executor): Prom
   const grant = await loadRepositoryGrantSnapshot(reportId, tx);
   if (!grant || !grant.connectedRepositoryId || !hasActiveRepositoryGrant(grant)) return null;
   const [repo] = await tx
-    .select({ repoId: connectedRepository.repoId })
+    .select({
+      repoId: connectedRepository.repoId,
+      advisories: githubInstallation.repositoryAdvisoriesPermission,
+    })
     .from(report)
     .innerJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .innerJoin(githubInstallation, eq(githubInstallation.id, connectedRepository.installationId))
     .where(eq(report.id, reportId))
     .limit(1);
-  if (!repo) return null;
+  if (!repo || repo.advisories !== "write") return null;
   return `github:${repo.repoId}:advisory:create`;
 }
 
@@ -683,7 +689,8 @@ export async function enqueueApprovedVerdictDelivery(
     // delivered as a draft advisory, not an email reply: for a connected repo the advisory is the
     // place a vulnerability is tracked and fixed. This is decided before the email-recipient gates
     // because the advisory route mails nobody; its recipient is the repository, re-verified live by
-    // the advisory arm. An email report with no such binding falls through to the reply.
+    // the advisory arm. An email report with no such binding, or whose installation has not
+    // accepted the advisories write permission, falls through to the reply.
     const advisoryTarget = await emailAdvisoryDeliveryTarget(verdictRow.reportId, tx);
     if (advisoryTarget) {
       deliveryTarget = advisoryTarget;
