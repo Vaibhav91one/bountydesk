@@ -13,7 +13,8 @@ import {
   injectProxyTrust,
   repoSlug,
   resolveBuildSource,
-  snapshotPrebuiltImage,
+  prebuiltImageDockerfile,
+  registryHostOf,
   stageSource,
 } from "./daytona-build-driver";
 
@@ -215,38 +216,34 @@ test("stageSource refuses an archive whose bytes do not hash to the declared dig
   assert.equal(commands.length, 0, "a mismatched archive is never written into the sandbox");
 });
 
-test("snapshotPrebuiltImage registers a snapshot with no build, anchored by the image digest", async () => {
+test("a prebuilt image is rebuilt FROM its pinned digest with the digest baked in as the build marker", () => {
   const imageDigest = `sha256:${"e".repeat(64)}`;
-  const created: Array<{ name: string; image: string }> = [];
-  const deleted: string[] = [];
-  const ops = {
-    async createSnapshot(spec: { name: string; image: string }) {
-      created.push({ name: spec.name, image: spec.image });
-      return { id: "snap-prebuilt", name: spec.name, state: "active" } as never;
-    },
-    async deleteSnapshotByName(name: string) {
-      deleted.push(name);
-    },
-  };
-  const input: BuildInput = {
-    repoFullName: "vendor/app",
-    sourceRef: "image://ghcr.io/vendor/app:1.2.3",
-    source: { kind: "image", imageRef: "ghcr.io/vendor/app:1.2.3", imageDigest },
-    plan: PLAN,
-  };
-  const result = await snapshotPrebuiltImage(input, input.source as Extract<BuildSource, { kind: "image" }>, ops);
+  const dockerfile = prebuiltImageDockerfile({ kind: "image", imageRef: "ghcr.io/vendor/app:1.2.3", imageDigest });
+  // Pulled by digest, never by the mutable tag.
+  assert.ok(dockerfile.startsWith(`FROM ghcr.io/vendor/app@${imageDigest}\n`));
+  assert.ok(!dockerfile.includes(":1.2.3"), "the tag is not used");
+  // The marker buildMarkerCheck reads back is the image digest.
+  assert.ok(dockerfile.includes(`echo '${imageDigest}' > /etc/bountydesk-build-marker`));
+});
 
-  assert.equal(result.imageDigest, imageDigest);
-  assert.equal(result.imageName, "ghcr.io/vendor/app");
-  assert.equal(result.snapshotId, "snap-prebuilt");
-  assert.equal(result.snapshotImageRef, "ghcr.io/vendor/app:1.2.3");
-  // No build happened, so the marker is the image digest, and the recipe hashes to a real digest.
-  assert.equal(result.buildMarker, imageDigest);
-  assert.match(result.buildRecipeDigest, /^sha256:[0-9a-f]{64}$/);
-  assert.equal(result.resolvedCommitSha, undefined);
-  assert.equal(result.sourceArchiveDigest, undefined);
-  assert.deepEqual(created, [{ name: "onboarding-vendor-app", image: "ghcr.io/vendor/app:1.2.3" }]);
-  assert.deepEqual(deleted, ["onboarding-vendor-app"]);
+test("registryHostOf derives the pull host from the ref, leaving Docker Hub to the base allow-list", () => {
+  assert.equal(registryHostOf("ghcr.io/vendor/app:1"), "ghcr.io");
+  assert.equal(registryHostOf("registry.example.com:5000/team/app:2"), "registry.example.com");
+  assert.equal(registryHostOf("localhost:5000/app:tag"), "localhost");
+  assert.equal(registryHostOf("library/nginx:1.27"), undefined);
+  assert.equal(registryHostOf("nginx:1.27"), undefined);
+});
+
+test("a prebuilt image source cannot ask for a compose mesh, before Daytona", async () => {
+  await assert.rejects(
+    createDaytonaBuildDriver().build({
+      repoFullName: "vendor/app",
+      sourceRef: "image://ghcr.io/vendor/app:1",
+      source: { kind: "image", imageRef: "ghcr.io/vendor/app:1", imageDigest: `sha256:${"e".repeat(64)}` },
+      plan: { ...PLAN, strategy: "compose-mesh", services: [] } as unknown as BuildInput["plan"],
+    }),
+    /not a compose mesh/,
+  );
 });
 
 test("imageNameFromRef strips the tag but keeps a registry port", () => {

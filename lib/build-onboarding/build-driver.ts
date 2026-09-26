@@ -14,7 +14,8 @@ import type { BuildPlan } from "./build-plan";
 /**
  * Where the build source comes from, chosen at the capability boundary, never from a caller string.
  * A git repository stages by clone-and-checkout, an uploaded archive stages by writing and extracting
- * its verified bytes, and a prebuilt image needs no staging at all: it is snapshotted as it is. Each
+ * its verified bytes, and a prebuilt image needs no staging: it is pulled by digest and rebuilt with
+ * the build marker baked in, so reproduction can prove it the same way as any other build. Each
  * carries its own immutable anchor (a commit, the archive digest, the image digest), so a source with
  * none is refused before anything runs.
  */
@@ -91,10 +92,6 @@ export type BuildResult = {
   /** The exact source identity used by the build. */
   resolvedCommitSha?: string;
   sourceArchiveDigest?: string;
-  /** The tag the single-image snapshot was registered under, when it is not the default onboarding
-   *  tag. A prebuilt image is snapshotted under its own ref, so the bind step names it exactly rather
-   *  than assuming onboardingSnapshotImageRef. Absent for a repo build, which uses that default. */
-  snapshotImageRef?: string;
   /** Present for a compose-mesh build: every service, the app and its dependencies. The top-level
    *  image fields above mirror the app service, so the single-image consumers keep working. */
   services?: BuiltService[];

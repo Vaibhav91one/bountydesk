@@ -15,8 +15,6 @@ import { onboardingSnapshotImageRef, type BuildResult } from "./build-driver";
  *
  * The image the build authored is authoritative about where the image lives, so the definition's
  * imageName is overridden with the build's before the write, matching the GitHub path (verifyAndWrite).
- * A prebuilt image is snapshotted under its own ref, so the build reports that ref; a repo build uses
- * the default onboarding tag.
  *
  * ponytail: this creates the profile (or reuses an identical one). Rotating a connectionless profile
  * to a new build in place, the way rotateTarget does for a GitHub target, is a later follow-up when a
@@ -26,7 +24,8 @@ export async function bindConnectionlessTargetFromBuild(
   definition: TargetDefinition,
   build: BuildResult,
 ): Promise<ConfiguredTarget> {
-  const snapshotImageRef = build.snapshotImageRef ?? onboardingSnapshotImageRef(build.imageName);
+  // Every source, a prebuilt image included, is pushed and snapshotted under the onboarding tag.
+  const snapshotImageRef = onboardingSnapshotImageRef(build.imageName);
   // A compose-mesh build carries every service; pin them into the config so the reproduction run boots
   // the same mesh, exactly as the GitHub verify-and-write path does.
   const pinnedDefinition: TargetDefinition = build.services

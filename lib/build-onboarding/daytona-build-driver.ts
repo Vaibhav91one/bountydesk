@@ -145,15 +145,12 @@ export function createDaytonaBuildDriver(): BuildDriver {
       // anchor must fail for that reason, not incidentally on a missing snapshot name.
       const source = resolveBuildSource(input);
 
-      // A prebuilt image is not built from source: it is snapshotted as it is, anchored by its own
-      // digest, so it never opens a build sandbox.
-      if (source.kind === "image") {
-        return snapshotPrebuiltImage(input, source);
-      }
-
       const plan = input.plan;
       if (plan.strategy === "not-flattenable") {
         throw new Error(`build called for a not-flattenable repo: ${plan.reason}`);
+      }
+      if (source.kind === "image" && plan.strategy === "compose-mesh") {
+        throw new Error("a prebuilt image source builds one image, not a compose mesh");
       }
 
       const resolvedCommitSha = source.kind === "git" ? source.resolvedCommitSha : undefined;
@@ -161,7 +158,9 @@ export function createDaytonaBuildDriver(): BuildDriver {
 
       const baseSnapshot = requireEnv("BUILD_BASE_SNAPSHOT");
       const registry = resolveRegistry();
-      const allowList = egressAllowList(plan);
+      // A prebuilt image may live on a registry outside the base allow-list; its host comes from the
+      // validated ref, never from the plan or anything a reporter sent.
+      const allowList = egressAllowList(plan, source.kind === "image" ? registryHostOf(source.imageRef) : undefined);
 
       const slug = repoSlug(input.repoFullName);
       const imageName = `${registry.namespace}/${slug}`;
@@ -186,13 +185,15 @@ export function createDaytonaBuildDriver(): BuildDriver {
           : "";
 
       try {
-        const { buildMarker } = await stageSource(run, sandbox, source);
+        // A prebuilt image has no source to stage; its marker is its own digest, baked in below.
+        const { buildMarker } =
+          source.kind === "image" ? { buildMarker: source.imageDigest } : await stageSource(run, sandbox, source);
 
         await startDockerDaemon(sandbox);
 
         // A mesh builds one image per service and registers one snapshot each, so it owns the whole
         // push-and-register flow rather than the single-image path below.
-        if (plan.strategy === "compose-mesh") {
+        if (plan.strategy === "compose-mesh" && source.kind !== "image") {
           const mesh = await buildMesh(sandbox, plan, {
             registry,
             slug,
@@ -203,7 +204,10 @@ export function createDaytonaBuildDriver(): BuildDriver {
           return { ...mesh, buildLog: `${egressNote}${mesh.buildLog}` };
         }
 
-        const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
+        const { dockerfileText, buildLog } =
+          source.kind === "image"
+            ? await buildPrebuiltImage(sandbox, source, imageRef)
+            : await buildImage(sandbox, plan as Exclude<typeof plan, { strategy: "compose-mesh" }>, imageRef, buildMarker);
 
         // The registry introduces the push credential right before the push and drops it right
         // after, so the untrusted build ran with no reusable token in the sandbox.
@@ -245,15 +249,6 @@ export function createDaytonaBuildDriver(): BuildDriver {
     },
   };
 }
-
-/** The provider ops the prebuilt-image path needs, behind an interface so its snapshot register/replace
- *  flow is tested without a live Daytona account. The live wiring is the default. */
-export type SnapshotOps = {
-  createSnapshot(spec: CreateSnapshotSpec): Promise<SnapshotInfo>;
-  deleteSnapshotByName(name: string): Promise<void>;
-};
-
-const liveSnapshotOps: SnapshotOps = { createSnapshot, deleteSnapshotByName };
 
 /**
  * Turn a source into the build sandbox at /work/source and return the marker that pins it. A git
@@ -301,39 +296,46 @@ export async function stageSource(
 }
 
 /**
- * Register a Daytona snapshot for a prebuilt image without building anything. The image is pinned by
- * its own sha256 digest, which the caller resolved and passes as the anchor; the snapshot is named
- * deterministically per source so a re-onboard replaces the prior one rather than colliding on it.
+ * The one-layer Dockerfile a prebuilt image is rebuilt from. Pulling `repo@digest` pins the exact bytes
+ * the caller named: a digest that does not exist on the registry fails the pull, and a tag that has
+ * since moved is never consulted. The marker baked in is the image digest, which is also what the
+ * profile records as its expected build marker, so buildMarkerCheck can re-prove at reproduction that
+ * the booted image is this build. `USER root` matches the other strategies: the marker is written to
+ * /etc and the offline target then runs as root, fine for a test target.
  */
-export async function snapshotPrebuiltImage(
-  input: BuildInput,
+export function prebuiltImageDockerfile(source: Extract<BuildSource, { kind: "image" }>): string {
+  return [
+    `FROM ${imageNameFromRef(source.imageRef)}@${source.imageDigest}`,
+    "USER root",
+    `RUN mkdir -p /etc && echo ${shArgDockerfile(source.imageDigest)} > ${MARKER_PATH}`,
+    "",
+  ].join("\n");
+}
+
+async function buildPrebuiltImage(
+  sandbox: Sandbox,
   source: Extract<BuildSource, { kind: "image" }>,
-  ops: SnapshotOps = liveSnapshotOps,
-): Promise<BuildResult> {
-  const slug = repoSlug(input.repoFullName);
-  const name = `onboarding-${slug}`;
-  await ops.deleteSnapshotByName(name);
-  const snapshot = await ops.createSnapshot({
-    name,
-    image: source.imageRef,
-    cpu: BUILD_CPU,
-    memoryGb: BUILD_MEMORY_GB,
-    diskGb: BUILD_DISK_GB,
-  });
-  return {
-    imageName: imageNameFromRef(source.imageRef),
-    imageDigest: source.imageDigest,
-    snapshotId: snapshot.id,
-    dockerfileText: "",
-    buildLog: `[prebuilt image] registered a snapshot from ${source.imageRef} with no build; identity is the image digest ${source.imageDigest}.\n`,
-    // A prebuilt image has no in-image build marker (nothing was built to bake one into). Its identity
-    // is the image digest, so that is what the recipe and the marker field both carry.
-    buildMarker: source.imageDigest,
-    buildRecipeDigest: buildRecipeDigest(input.plan, source.imageDigest, source.imageDigest, {
-      repoFullName: input.repoFullName,
-    }),
-    snapshotImageRef: source.imageRef,
-  };
+  imageRef: string,
+): Promise<{ dockerfileText: string; buildLog: string }> {
+  const dockerfileText = prebuiltImageDockerfile(source);
+  await writeGenDockerfile(sandbox, dockerfileText);
+  const log = (await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`)).result;
+  return { dockerfileText, buildLog: log.slice(-BUILD_LOG_CAP) };
+}
+
+/**
+ * The registry host a prebuilt image is pulled from, when it names one. A reference whose first path
+ * segment has a dot, a port, or is `localhost` names its registry (ghcr.io/x/y, host:5000/app); anything
+ * else is Docker Hub, which the base allow-list already covers. The port is dropped because the build
+ * allow-list takes bare domains.
+ */
+export function registryHostOf(imageRef: string): string | undefined {
+  const slash = imageRef.indexOf("/");
+  if (slash < 0) return undefined;
+  const first = imageRef.slice(0, slash);
+  if (!first.includes(".") && !first.includes(":") && first !== "localhost") return undefined;
+  const host = first.split(":")[0].toLowerCase();
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host) ? host : undefined;
 }
 
 /**
@@ -377,9 +379,8 @@ export function resolveBuildSource(input: BuildInput): BuildSource {
  * A prebuilt image ref reaches the Daytona API and is stored on the profile, and its untagged name is
  * later compared against a snapshot's imageName. It is server-authored, but this keeps the reference to
  * the characters a registry reference actually uses so a stray value with a space or a shell
- * metacharacter is refused at the boundary rather than carried downstream. The digest is what pins the
- * identity; the tag is the mutable half, and the registered snapshot's digest is re-verified at
- * reproduction (see the prebuilt-image follow-up on the target profile).
+ * metacharacter is refused at the boundary rather than carried downstream. Only the repository half is
+ * used: the image is pulled by digest, so the tag itself is never trusted.
  */
 const SAFE_IMAGE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
@@ -808,11 +809,14 @@ async function inspectMeshStartCommand(
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
 const MAX_EGRESS_DOMAINS = 20;
 
-function egressAllowList(plan: BuildPlan): string[] {
+function egressAllowList(plan: BuildPlan, imageRegistryHost?: string): string[] {
   // The per-ecosystem code map is the source of truth; the old global BUILD_EGRESS_ALLOWLIST env is
   // deliberately not unioned in, both because it defeats the per-ecosystem narrowing and because the
   // union blew past Daytona's 20-domain cap. A repo that needs an extra host declares it on the plan.
-  const hosts = selectEgressHosts({ ecosystem: plan.ecosystem, extraEgressHosts: plan.extraEgressHosts });
+  const hosts = selectEgressHosts({
+    ecosystem: plan.ecosystem,
+    extraEgressHosts: [...(plan.extraEgressHosts ?? []), ...(imageRegistryHost ? [imageRegistryHost] : [])],
+  });
   if (hosts.length > MAX_EGRESS_DOMAINS) {
     throw new Error(
       `build egress needs ${hosts.length} domains, over Daytona's ${MAX_EGRESS_DOMAINS} cap; trim the ${plan.ecosystem} profile or the plan's extra hosts`,

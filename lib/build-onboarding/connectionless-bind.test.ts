@@ -43,32 +43,38 @@ async function storedProfile(id: string) {
   return row;
 }
 
-test("a prebuilt image binds with its own digest as the anchor and no commit or archive digest", async () => {
-  const imageDigest = `sha256:${"a".repeat(64)}`;
+test("a prebuilt image binds with a marker its rebuilt image actually carries, so buildMarkerCheck passes", async () => {
+  const { prebuiltImageDockerfile } = await import("./daytona-build-driver");
+  // The prebuilt image's own digest is the anchor and the marker; the pushed rebuild has its own digest.
+  const prebuiltDigest = `sha256:${"a".repeat(64)}`;
+  const pushedDigest = `sha256:${"7".repeat(64)}`;
+  const dockerfileText = prebuiltImageDockerfile({ kind: "image", imageRef: "ghcr.io/vendor/app:1.2.3", imageDigest: prebuiltDigest });
   const build: BuildResult = {
-    imageName: "ghcr.io/vendor/app",
-    imageDigest,
+    imageName: "ghcr.io/ns/vendor-app",
+    imageDigest: pushedDigest,
     snapshotId: "snap-image",
-    dockerfileText: "",
-    buildLog: "[prebuilt image] ...",
-    buildMarker: imageDigest,
+    dockerfileText,
+    buildLog: "built FROM the pinned digest",
+    buildMarker: prebuiltDigest,
     buildRecipeDigest: `sha256:${"1".repeat(64)}`,
-    snapshotImageRef: "ghcr.io/vendor/app:1.2.3",
   };
 
   const configured = await bind.bindConnectionlessTargetFromBuild(definition("prebuilt-image"), build);
   assert.equal(configured.repositoryId, null);
 
   const row = await storedProfile(configured.targetProfileId);
-  assert.equal(row.imageName, "ghcr.io/vendor/app");
-  assert.equal(row.imageDigest, imageDigest);
+  assert.equal(row.imageName, "ghcr.io/ns/vendor-app");
+  assert.equal(row.imageDigest, pushedDigest);
   assert.equal(row.resolvedCommitSha, null);
   assert.equal(row.sourceArchiveDigest, null);
-  // The snapshot is registered under the image's own ref, so the profile pins that exact tag.
-  assert.equal(
-    (row.config as { provisioning?: { snapshotImageRefOverride?: string } }).provisioning?.snapshotImageRefOverride,
-    "ghcr.io/vendor/app:1.2.3",
-  );
+  const provisioning = (row.config as { provisioning?: { expectedBuildMarker?: string; snapshotImageRefOverride?: string } })
+    .provisioning;
+  // Reproduction's buildMarkerCheck compares what /etc/bountydesk-build-marker holds in the booted image
+  // with the profile's expectedBuildMarker; the rebuilt image bakes exactly that value.
+  assert.equal(provisioning?.expectedBuildMarker, prebuiltDigest);
+  assert.ok(dockerfileText.includes(`echo '${provisioning?.expectedBuildMarker}' > /etc/bountydesk-build-marker`));
+  // Pushed and snapshotted under the onboarding tag like any repo build.
+  assert.equal(provisioning?.snapshotImageRefOverride, "ghcr.io/ns/vendor-app:bountydesk-onboarding");
 });
 
 test("an uploaded tarball binds with its source archive digest as the anchor", async () => {
