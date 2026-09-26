@@ -1,6 +1,7 @@
+import { redactToken, withRepoReadToken } from "@/lib/github/repo-access";
 import type { AnalysisOnlyReason } from "@/lib/reproduction/types";
 
-import { boundedSourceReader, REVIEW_FILES } from "./sandboxability";
+import { boundedSourceReader, REVIEW_FILES, type RepoReadDeps } from "./sandboxability";
 
 /**
  * The tier-3 static review: what a report gets when its target cannot be built or deployed.
@@ -12,8 +13,9 @@ import { boundedSourceReader, REVIEW_FILES } from "./sandboxability";
  * ANALYSIS_ONLY verdict whose findings are its static findings, and that draft goes through the same
  * publish_verdict approval gate as every other verdict.
  *
- * Gathering is fail-open: GitHub being unreachable, a private repo, or a missing ref leaves the corpus
- * empty, and the agent is told to work from the report text. The reason is recorded either way. A
+ * A private repository is read with a contents:read token scoped to it, and one without that grant is
+ * refused before any request (POLICY_REFUSED). Gathering is fail-open: that refusal, GitHub being
+ * unreachable, or a missing ref leaves the corpus empty, and the agent is told to work from the report text. The reason is recorded either way. A
  * review that read source but drafted nothing still ends ANALYSIS_ONLY with that reason on a
  * synthesized verdict. One that read no source and drafted nothing could neither reproduce nor
  * analyze, so the poller routes it to OUT_OF_SCOPE (lib/reports/target-scope.ts). Neither is a dead job.
@@ -80,10 +82,18 @@ export function selectRelevantPaths(paths: string[], reportText: string, limit =
 
 type TreeEntry = { path?: unknown; type?: unknown; size?: unknown };
 
-async function listBlobPaths(repoFullName: string, ref: string, signal: AbortSignal): Promise<string[]> {
+async function listBlobPaths(
+  repoFullName: string,
+  ref: string,
+  signal: AbortSignal,
+  token: string | null,
+): Promise<string[]> {
   const res = await fetch(
     `https://api.github.com/repos/${repoFullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
-    { headers: { Accept: "application/vnd.github+json" }, signal },
+    {
+      headers: { Accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      signal,
+    },
   );
   if (!res.ok) return [];
   const body = (await res.json()) as { tree?: TreeEntry[] };
@@ -102,24 +112,41 @@ async function listBlobPaths(repoFullName: string, ref: string, signal: AbortSig
  */
 export async function gatherStaticSource(
   input: { repoFullName: string; ref: string | null; reportText: string },
-  opts: { signal?: AbortSignal } = {},
+  opts: { signal?: AbortSignal; readDeps?: RepoReadDeps } = {},
 ): Promise<StaticSource> {
   const ref = input.ref ?? "HEAD";
   const result: StaticSource = { ref, tree: [], files: [] };
   const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
   const signal = opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout;
   try {
-    const blobs = await listBlobPaths(input.repoFullName, ref, signal);
-    const paths = blobs.filter((p) => SOURCE_EXTENSION.test(p) && !SKIPPED_DIRS.test(p));
-    result.tree = paths.slice(0, MAX_TREE_PATHS);
-    const reader = boundedSourceReader(input.repoFullName, MAX_FILE_CHARS, ref, signal);
-    const wanted = [...REVIEW_FILES.filter((f) => blobs.includes(f)), ...selectRelevantPaths(paths, input.reportText)];
-    for (const path of [...new Set(wanted)]) {
-      const text = await reader.readFile(path).catch(() => null);
-      if (text !== null && text.trim().length > 0) result.files.push({ path, text });
+    // One token covers the tree listing and every file, and is revoked once they settle.
+    await withRepoReadToken(
+      input.repoFullName,
+      async (token) => {
+        try {
+          const blobs = await listBlobPaths(input.repoFullName, ref, signal, token);
+          const paths = blobs.filter((p) => SOURCE_EXTENSION.test(p) && !SKIPPED_DIRS.test(p));
+          result.tree = paths.slice(0, MAX_TREE_PATHS);
+          const reader = boundedSourceReader(input.repoFullName, MAX_FILE_CHARS, ref, signal, token);
+          const wanted = [...REVIEW_FILES.filter((f) => blobs.includes(f)), ...selectRelevantPaths(paths, input.reportText)];
+          for (const path of [...new Set(wanted)]) {
+            const text = await reader.readFile(path).catch(() => null);
+            if (text !== null && text.trim().length > 0) result.files.push({ path, text });
+          }
+        } catch (error) {
+          throw new Error(redactToken(error instanceof Error ? error.message : String(error), token));
+        }
+      },
+      opts.readDeps,
+    );
+  } catch (error) {
+    // Fall through with whatever was read before the failure. The reason is logged because a
+    // POLICY_REFUSED or a failed mint otherwise looks exactly like an empty repository.
+    if (!opts.signal?.aborted) {
+      console.warn(
+        `static review of ${input.repoFullName} read no further source: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
-  } catch {
-    // Fall through with whatever was read before the failure.
   }
   if (opts.signal?.aborted) throw opts.signal.reason;
   return result;
