@@ -17,19 +17,22 @@ import {
   type SnapshotInfo,
 } from "@/lib/sandbox/daytona";
 
+import { createHash } from "node:crypto";
+
 import type { BuildPlan } from "./build-plan";
 import {
   onboardingSnapshotImageRef,
   type BuildDriver,
   type BuildInput,
   type BuildResult,
+  type BuildSource,
   type BuiltService,
 } from "./build-driver";
 import { synthesizeComposeDockerfile } from "./compose-compiler";
 import { getDatastoreRecipe, type DatastoreCreds } from "./datastore-recipes";
 import { meshBuildPlan } from "./mesh-build-plan";
-import { hasIdentityAnchor, isCommitSha, sourceIdentityDigest } from "./source-identity";
-import { resolveRegistry, type RegistryHandoff } from "./registry";
+import { isCommitSha, isSha256Digest, sourceIdentityDigest } from "./source-identity";
+import { resolveRegistry, type RegistryHandoff, type SandboxRun } from "./registry";
 import { selectEgressHosts } from "./egress-profiles";
 
 /**
@@ -138,39 +141,30 @@ function numEnv(name: string, fallback: number): number {
 export function createDaytonaBuildDriver(): BuildDriver {
   return {
     async build(input: BuildInput): Promise<BuildResult> {
+      // The source is resolved before any provider configuration is read: a source with no immutable
+      // anchor must fail for that reason, not incidentally on a missing snapshot name.
+      const source = resolveBuildSource(input);
+
       const plan = input.plan;
       if (plan.strategy === "not-flattenable") {
         throw new Error(`build called for a not-flattenable repo: ${plan.reason}`);
       }
+      if (source.kind === "image" && plan.strategy === "compose-mesh") {
+        throw new Error("a prebuilt image source builds one image, not a compose mesh");
+      }
 
-      // The source identity is checked before any provider configuration is read: a build with no
-      // immutable anchor must fail for that reason, not incidentally on a missing snapshot name. The
-      // anchor is a commit SHA (git), a source archive digest (an upload), or an image digest.
-      const resolvedCommitSha = input.resolvedCommitSha;
-      if (!hasIdentityAnchor({ resolvedCommitSha, sourceArchiveDigest: input.sourceArchiveDigest })) {
-        throw new Error(
-          "onboarding build requires an identity anchor: a server-resolved 40-character commit SHA or a source archive digest",
-        );
-      }
-      if (!isCommitSha(resolvedCommitSha)) {
-        // This driver stages source by git clone, so it still needs a commit to check out. A source
-        // that arrives as an archive or a prebuilt image is anchored by its digest but staged another
-        // way, which is wired in the non-GitHub build path, not here.
-        throw new Error(
-          "this build driver stages source by git clone and needs a 40-character commit SHA; a source-archive build is not wired in this driver yet",
-        );
-      }
+      const resolvedCommitSha = source.kind === "git" ? source.resolvedCommitSha : undefined;
+      const sourceArchiveDigest = source.kind === "archive" ? source.sourceArchiveDigest : undefined;
 
       const baseSnapshot = requireEnv("BUILD_BASE_SNAPSHOT");
       const registry = resolveRegistry();
-      const allowList = egressAllowList(plan);
+      // A prebuilt image may live on a registry outside the base allow-list; its host comes from the
+      // validated ref, never from the plan or anything a reporter sent.
+      const allowList = egressAllowList(plan, source.kind === "image" ? registryHostOf(source.imageRef) : undefined);
 
       const slug = repoSlug(input.repoFullName);
       const imageName = `${registry.namespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
-      // The clone target is the server-held repository name, not any caller-supplied ref, so nothing
-      // can redirect the clone to a different repository than this onboarding row is for.
-      const cloneUrl = `https://github.com/${input.repoFullName}.git`;
 
       const sandbox = await createBuildSandbox(
         {
@@ -191,29 +185,29 @@ export function createDaytonaBuildDriver(): BuildDriver {
           : "";
 
       try {
-        await run(sandbox, `git clone --no-checkout ${shellArg(cloneUrl)} /work/source`);
-        await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(resolvedCommitSha)}`);
-        const buildMarker = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
-        if (buildMarker.toLowerCase() !== resolvedCommitSha.toLowerCase()) {
-          throw new Error(`cloned source resolved to ${buildMarker}, expected ${resolvedCommitSha}`);
-        }
+        // A prebuilt image has no source to stage; its marker is its own digest, baked in below.
+        const { buildMarker } =
+          source.kind === "image" ? { buildMarker: source.imageDigest } : await stageSource(run, sandbox, source);
 
         await startDockerDaemon(sandbox);
 
         // A mesh builds one image per service and registers one snapshot each, so it owns the whole
         // push-and-register flow rather than the single-image path below.
-        if (plan.strategy === "compose-mesh") {
+        if (plan.strategy === "compose-mesh" && source.kind !== "image") {
           const mesh = await buildMesh(sandbox, plan, {
             registry,
             slug,
             buildMarker,
-            resolvedCommitSha,
-            sourceArchiveDigest: input.sourceArchiveDigest,
+            ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+            ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
           });
           return { ...mesh, buildLog: `${egressNote}${mesh.buildLog}` };
         }
 
-        const { dockerfileText, buildLog } = await buildImage(sandbox, plan, imageRef, buildMarker);
+        const { dockerfileText, buildLog } =
+          source.kind === "image"
+            ? await buildPrebuiltImage(sandbox, source, imageRef)
+            : await buildImage(sandbox, plan as Exclude<typeof plan, { strategy: "compose-mesh" }>, imageRef, buildMarker);
 
         // The registry introduces the push credential right before the push and drops it right
         // after, so the untrusted build ran with no reusable token in the sandbox.
@@ -243,17 +237,163 @@ export function createDaytonaBuildDriver(): BuildDriver {
           buildMarker,
           buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest, {
             repoFullName: input.repoFullName,
-            resolvedCommitSha,
-            sourceArchiveDigest: input.sourceArchiveDigest,
+            ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+            ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
           }),
-          resolvedCommitSha,
-          ...(input.sourceArchiveDigest ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
+          ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+          ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
         };
       } finally {
         await deleteSandbox(sandbox.id).catch(() => undefined);
       }
     },
   };
+}
+
+/**
+ * Turn a source into the build sandbox at /work/source and return the marker that pins it. A git
+ * source clones and checks out the exact commit and re-reads HEAD to prove it landed; an uploaded
+ * archive is written from its verified bytes and its digest re-checked inside the sandbox, so a
+ * corrupt or swapped upload fails here rather than being built. A prebuilt image never reaches this;
+ * it is not staged.
+ */
+export async function stageSource(
+  run: SandboxRun,
+  sandbox: Sandbox,
+  source: Exclude<BuildSource, { kind: "image" }>,
+): Promise<{ buildMarker: string }> {
+  if (source.kind === "git") {
+    await run(sandbox, `git clone --no-checkout ${shellArg(source.cloneUrl)} /work/source`);
+    await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(source.resolvedCommitSha)}`);
+    const head = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
+    if (head.toLowerCase() !== source.resolvedCommitSha.toLowerCase()) {
+      throw new Error(`cloned source resolved to ${head}, expected ${source.resolvedCommitSha}`);
+    }
+    return { buildMarker: source.resolvedCommitSha };
+  }
+
+  // The trusted controller resolved the archive's digest from the bytes it holds; re-hash here so a
+  // pin can never be asserted for bytes that do not match, then re-check inside the sandbox that the
+  // exact bytes landed intact. The marker baked into the image is the archive digest, the immutable
+  // anchor a non-git source has in place of a commit.
+  const actual = `sha256:${createHash("sha256").update(source.archive).digest("hex")}`;
+  if (actual !== source.sourceArchiveDigest.toLowerCase()) {
+    throw new Error(`source archive digest ${actual} does not match the declared ${source.sourceArchiveDigest}`);
+  }
+  // ponytail: the archive is base64'd into one exec argument, fine for the small test-app tarballs
+  // this handles; chunk the write if a large upload ever hits the shell's argument-length cap.
+  const b64 = source.archive.toString("base64");
+  const expectedHex = source.sourceArchiveDigest.slice("sha256:".length).toLowerCase();
+  await run(sandbox, `echo ${shellArg(b64)} | base64 -d > /work/source.tgz`);
+  await run(
+    sandbox,
+    `actual=$(sha256sum /work/source.tgz | cut -d' ' -f1); [ "$actual" = ${shellArg(expectedHex)} ] || { echo "staged archive digest $actual != ${expectedHex}" >&2; exit 1; }`,
+  );
+  // -xf autodetects the compression, so a plain tar and a gzipped tarball both extract. The archive
+  // is expected to hold the project at its root, matching where a clone lands it.
+  await run(sandbox, "mkdir -p /work/source && tar -xf /work/source.tgz -C /work/source");
+  return { buildMarker: source.sourceArchiveDigest };
+}
+
+/**
+ * The one-layer Dockerfile a prebuilt image is rebuilt from. Pulling `repo@digest` pins the exact bytes
+ * the caller named: a digest that does not exist on the registry fails the pull, and a tag that has
+ * since moved is never consulted. The marker baked in is the image digest, which is also what the
+ * profile records as its expected build marker, so buildMarkerCheck can re-prove at reproduction that
+ * the booted image is this build. `USER root` matches the other strategies: the marker is written to
+ * /etc and the offline target then runs as root, fine for a test target.
+ */
+export function prebuiltImageDockerfile(source: Extract<BuildSource, { kind: "image" }>): string {
+  return [
+    `FROM ${imageNameFromRef(source.imageRef)}@${source.imageDigest}`,
+    "USER root",
+    `RUN mkdir -p /etc && echo ${shArgDockerfile(source.imageDigest)} > ${MARKER_PATH}`,
+    "",
+  ].join("\n");
+}
+
+async function buildPrebuiltImage(
+  sandbox: Sandbox,
+  source: Extract<BuildSource, { kind: "image" }>,
+  imageRef: string,
+): Promise<{ dockerfileText: string; buildLog: string }> {
+  const dockerfileText = prebuiltImageDockerfile(source);
+  await writeGenDockerfile(sandbox, dockerfileText);
+  const log = (await run(sandbox, `cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`)).result;
+  return { dockerfileText, buildLog: log.slice(-BUILD_LOG_CAP) };
+}
+
+/**
+ * The registry host a prebuilt image is pulled from, when it names one. A reference whose first path
+ * segment has a dot, a port, or is `localhost` names its registry (ghcr.io/x/y, host:5000/app); anything
+ * else is Docker Hub, which the base allow-list already covers. The port is dropped because the build
+ * allow-list takes bare domains.
+ */
+export function registryHostOf(imageRef: string): string | undefined {
+  const slash = imageRef.indexOf("/");
+  if (slash < 0) return undefined;
+  const first = imageRef.slice(0, slash);
+  if (!first.includes(".") && !first.includes(":") && first !== "localhost") return undefined;
+  const host = first.split(":")[0].toLowerCase();
+  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host) ? host : undefined;
+}
+
+/**
+ * Decide how the source reaches the build. An explicit source (a non-GitHub onboarding path) is
+ * validated for a usable anchor; otherwise the driver falls back to the GitHub clone path, which
+ * needs a server-resolved commit. A source with no immutable anchor is refused here, before any
+ * sandbox or provider call.
+ */
+export function resolveBuildSource(input: BuildInput): BuildSource {
+  const source = input.source;
+  if (source) {
+    if (source.kind === "git" && !isCommitSha(source.resolvedCommitSha)) {
+      throw new Error("a git source requires a server-resolved 40-character commit SHA");
+    }
+    if (source.kind === "archive" && !isSha256Digest(source.sourceArchiveDigest)) {
+      throw new Error("an archive source requires a sha256 source archive digest");
+    }
+    if (
+      source.kind === "image" &&
+      (!isSha256Digest(source.imageDigest) || source.imageRef.includes("@sha256:") || !isSafeImageRef(source.imageRef))
+    ) {
+      throw new Error("a prebuilt image source requires a plain tag reference and its own sha256 digest");
+    }
+    return source;
+  }
+  if (!isCommitSha(input.resolvedCommitSha)) {
+    throw new Error(
+      "onboarding build requires an identity anchor: a server-resolved 40-character commit SHA or a source archive digest",
+    );
+  }
+  return {
+    kind: "git",
+    // The clone target is the server-held repository name, not any caller-supplied ref, so nothing
+    // can redirect the clone to a different repository than this onboarding row is for.
+    cloneUrl: `https://github.com/${input.repoFullName}.git`,
+    resolvedCommitSha: input.resolvedCommitSha,
+  };
+}
+
+/**
+ * A prebuilt image ref reaches the Daytona API and is stored on the profile, and its untagged name is
+ * later compared against a snapshot's imageName. It is server-authored, but this keeps the reference to
+ * the characters a registry reference actually uses so a stray value with a space or a shell
+ * metacharacter is refused at the boundary rather than carried downstream. Only the repository half is
+ * used: the image is pulled by digest, so the tag itself is never trusted.
+ */
+const SAFE_IMAGE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+
+export function isSafeImageRef(ref: string): boolean {
+  return ref.length <= 512 && SAFE_IMAGE_REF.test(ref);
+}
+
+/** Strip the tag off an image reference to get its untagged name, e.g. ghcr.io/x/y:tag -> ghcr.io/x/y.
+ *  A registry port (host:5000/img) is left alone: only a colon in the final path segment is a tag. */
+export function imageNameFromRef(ref: string): string {
+  const slash = ref.lastIndexOf("/");
+  const lastSegColon = ref.indexOf(":", slash + 1);
+  return lastSegColon >= 0 ? ref.slice(0, lastSegColon) : ref;
 }
 
 /** Cap on the captured build log kept on the row for download. BuildKit is chatty; the tail is what a
@@ -290,7 +430,7 @@ export async function buildMesh(
     registry: RegistryHandoff;
     slug: string;
     buildMarker: string;
-    resolvedCommitSha: string;
+    resolvedCommitSha?: string;
     sourceArchiveDigest?: string;
     runtime?: MeshBuildRuntime;
   },
@@ -400,15 +540,15 @@ export async function buildMesh(
     buildLog: appBuildLog.slice(-BUILD_LOG_CAP),
     buildMarker: ctx.buildMarker,
     buildRecipeDigest: buildRecipeDigest(plan, ctx.buildMarker, app.imageDigest, {
-      resolvedCommitSha: ctx.resolvedCommitSha,
-      sourceArchiveDigest: ctx.sourceArchiveDigest,
+      ...(ctx.resolvedCommitSha ? { resolvedCommitSha: ctx.resolvedCommitSha } : {}),
+      ...(ctx.sourceArchiveDigest ? { sourceArchiveDigest: ctx.sourceArchiveDigest } : {}),
       serviceDigests: services.map((service) => ({
         service: service.service,
         imageDigest: service.imageDigest,
         snapshotId: service.snapshotId,
       })),
     }),
-    resolvedCommitSha: ctx.resolvedCommitSha,
+    ...(ctx.resolvedCommitSha ? { resolvedCommitSha: ctx.resolvedCommitSha } : {}),
     ...(ctx.sourceArchiveDigest ? { sourceArchiveDigest: ctx.sourceArchiveDigest } : {}),
     services,
   };
@@ -669,11 +809,14 @@ async function inspectMeshStartCommand(
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
 const MAX_EGRESS_DOMAINS = 20;
 
-function egressAllowList(plan: BuildPlan): string[] {
+function egressAllowList(plan: BuildPlan, imageRegistryHost?: string): string[] {
   // The per-ecosystem code map is the source of truth; the old global BUILD_EGRESS_ALLOWLIST env is
   // deliberately not unioned in, both because it defeats the per-ecosystem narrowing and because the
   // union blew past Daytona's 20-domain cap. A repo that needs an extra host declares it on the plan.
-  const hosts = selectEgressHosts({ ecosystem: plan.ecosystem, extraEgressHosts: plan.extraEgressHosts });
+  const hosts = selectEgressHosts({
+    ecosystem: plan.ecosystem,
+    extraEgressHosts: [...(plan.extraEgressHosts ?? []), ...(imageRegistryHost ? [imageRegistryHost] : [])],
+  });
   if (hosts.length > MAX_EGRESS_DOMAINS) {
     throw new Error(
       `build egress needs ${hosts.length} domains, over Daytona's ${MAX_EGRESS_DOMAINS} cap; trim the ${plan.ecosystem} profile or the plan's extra hosts`,
@@ -726,10 +869,17 @@ function buildRecipeDigest(
     serviceDigests?: Array<{ service: string; imageDigest: string; snapshotId: string }>;
   } = {},
 ): string {
-  const resolvedCommitSha = identity.resolvedCommitSha ?? buildMarker;
+  // A git build's marker is the commit, so it doubles as the commit anchor when one was not passed
+  // in. A non-git build (archive or prebuilt image) has a marker that is not a commit, so it is left
+  // out and the archive or image digest anchors the identity instead.
+  const resolvedCommitSha = isCommitSha(identity.resolvedCommitSha)
+    ? identity.resolvedCommitSha
+    : isCommitSha(buildMarker)
+      ? buildMarker
+      : undefined;
   return sourceIdentityDigest({
     repoFullName: identity.repoFullName ?? "",
-    resolvedCommitSha,
+    ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
     ...(identity.sourceArchiveDigest ? { sourceArchiveDigest: identity.sourceArchiveDigest } : {}),
     plan,
     ...(identity.serviceDigests ? { services: identity.serviceDigests } : {}),

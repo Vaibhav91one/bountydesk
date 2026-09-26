@@ -11,6 +11,19 @@
  */
 import type { BuildPlan } from "./build-plan";
 
+/**
+ * Where the build source comes from, chosen at the capability boundary, never from a caller string.
+ * A git repository stages by clone-and-checkout, an uploaded archive stages by writing and extracting
+ * its verified bytes, and a prebuilt image needs no staging: it is pulled by digest and rebuilt with
+ * the build marker baked in, so reproduction can prove it the same way as any other build. Each
+ * carries its own immutable anchor (a commit, the archive digest, the image digest), so a source with
+ * none is refused before anything runs.
+ */
+export type BuildSource =
+  | { kind: "git"; cloneUrl: string; resolvedCommitSha: string }
+  | { kind: "archive"; archive: Buffer; sourceArchiveDigest: string }
+  | { kind: "image"; imageRef: string; imageDigest: string };
+
 export type BuildInput = {
   /** owner/name, used to name the image and label the sandbox. */
   repoFullName: string;
@@ -20,6 +33,9 @@ export type BuildInput = {
   resolvedCommitSha?: string;
   /** Digest of the trusted source archive, when one was staged. */
   sourceArchiveDigest?: string;
+  /** How the source reaches the build sandbox. Omitted for the GitHub clone path, which the driver
+   *  derives from repoFullName and resolvedCommitSha; a non-GitHub source names it explicitly. */
+  source?: BuildSource;
   /** The classifier's plan, deciding the build strategy, ecosystem egress and (for compose) the
    *  datastores to bundle and seed. Must be a buildable strategy, never `not-flattenable`. */
   plan: BuildPlan;
