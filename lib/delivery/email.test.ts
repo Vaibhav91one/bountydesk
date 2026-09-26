@@ -134,14 +134,11 @@ function makeDeps(send?: (call: number, opts: SendCall) => Promise<{ id: string 
     listComments: async () => {
       throw new Error("email delivery must not read comments");
     },
-    findAdvisoryByMarker: async () => {
-      throw new Error("email delivery must not open an advisory");
-    },
-    createDraftAdvisory: async () => {
-      throw new Error("email delivery must not open an advisory");
+    getAdvisory: async () => {
+      throw new Error("email delivery must not touch an advisory");
     },
     updateAdvisoryDescription: async () => {
-      throw new Error("email delivery must not open an advisory");
+      throw new Error("email delivery must not touch an advisory");
     },
     sendEmail: async (opts) => {
       sent.push(opts);

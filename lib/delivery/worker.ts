@@ -58,8 +58,7 @@ async function defaultDeps(): Promise<DeliveryDeps> {
     postComment: comment.postIssueComment,
     listComments: comment.listIssueComments,
     sendEmail: resend.sendVerdictEmail,
-    findAdvisoryByMarker: advisory.findAdvisoryByMarker,
-    createDraftAdvisory: advisory.createDraftAdvisory,
+    getAdvisory: advisory.getAdvisory,
     updateAdvisoryDescription: advisory.updateAdvisoryDescription,
   };
 }

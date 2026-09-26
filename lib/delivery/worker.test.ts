@@ -226,16 +226,13 @@ function makeFakeDeps(
       if (opts.postComment) return opts.postComment(calls.postComment);
       return { id: 1 };
     },
-    // The GitHub comment arm must never open an advisory; a throw turns each required dep into an
+    // The GitHub comment arm must never touch an advisory; a throw turns each required dep into an
     // assertion rather than dead scaffolding.
-    findAdvisoryByMarker: async () => {
-      throw new Error("github comment delivery must not open an advisory");
-    },
-    createDraftAdvisory: async () => {
-      throw new Error("github comment delivery must not open an advisory");
+    getAdvisory: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
     },
     updateAdvisoryDescription: async () => {
-      throw new Error("github comment delivery must not open an advisory");
+      throw new Error("github comment delivery must not touch an advisory");
     },
   };
   return { deps, calls };

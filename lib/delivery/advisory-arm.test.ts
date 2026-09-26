@@ -2,13 +2,16 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
-import type { Advisory } from "@/lib/github/advisory";
+import { GitHubRequestError, type Advisory, type AdvisoryContent } from "@/lib/github/advisory";
 
 /**
- * The advisory delivery arm against a real Postgres, with the GitHub advisory API faked so create,
- * PATCH, replay and refusal are all deterministic. The shared delivery gates (hash, approval,
+ * The advisory delivery arm against a real Postgres, with the GitHub advisory API faked so the
+ * update, replay and refusal paths are deterministic. The shared delivery gates (hash, approval,
  * marker, report state) run for real through deliverOnce, so the approval-gate checks here are the
  * same code path a GitHub-comment delivery takes, exercised on the advisory channel.
+ *
+ * The key property: an advisory-channel report came from the reporter's own advisory, whose GHSA id
+ * is in the source_ref, so delivery edits that advisory rather than opening a new draft.
  */
 let schema: import("@/lib/db/testing").DisposableSchema;
 
@@ -37,17 +40,22 @@ const FAKE_TOKEN = "ghs_aaaa.bbbbbbbbbbbb.ccccccccccccdddddddd";
 let seq = 0;
 
 /**
- * A stateful stand-in for the three GitHub advisory calls. Advisories live in a map keyed by
- * ghsa_id, so findAdvisoryByMarker searches descriptions exactly as the real cursor-paged endpoint
- * would, and create/PATCH mutate the same store a retry then reads back.
+ * A stand-in for the two GitHub advisory calls, backed by a map keyed by ghsa_id. getAdvisory reads
+ * the reporter's advisory the report names, and updateAdvisoryDescription edits that same row, so a
+ * retry then reads back what the last write left.
  */
-function fakeAdvisoryDeps(seedAdvisories: { ghsaId: string; description: string }[] = []) {
-  const store = new Map<string, { ghsaId: string; htmlUrl: string; description: string }>();
-  for (const a of seedAdvisories) {
-    store.set(a.ghsaId, { ghsaId: a.ghsaId, htmlUrl: `https://github.com/advisories/${a.ghsaId}`, description: a.description });
+function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null) {
+  const store = new Map<string, { ghsaId: string; htmlUrl: string; summary: string; description: string }>();
+  if (seeded) {
+    store.set(seeded.ghsaId, {
+      ghsaId: seeded.ghsaId,
+      htmlUrl: `https://github.com/advisories/${seeded.ghsaId}`,
+      summary: "reporter summary",
+      description: seeded.description,
+    });
   }
-  const calls = { mint: 0, find: 0, create: 0, update: 0 };
-  const deps: Partial<import("./arm").DeliveryDeps> = {
+  const calls = { mint: 0, get: 0, update: 0 };
+  const deps: import("./arm").DeliveryDeps = {
     githubAppId: 123456,
     hashContent: fakeHash,
     mintToken: async () => {
@@ -63,44 +71,30 @@ function fakeAdvisoryDeps(seedAdvisories: { ghsaId: string; description: string 
     listComments: async () => {
       throw new Error("advisory delivery must not read comments");
     },
-    findAdvisoryByMarker: async ({ markers }) => {
-      calls.find++;
-      for (const entry of store.values()) {
-        const marker = markers.find((m) => entry.description.includes(m));
-        if (marker) return { ghsaId: entry.ghsaId, htmlUrl: entry.htmlUrl, marker };
-      }
-      return null;
-    },
-    createDraftAdvisory: async ({ description }): Promise<Advisory> => {
-      calls.create++;
-      const ghsaId = `GHSA-test-${randomUUID().slice(0, 4)}-${calls.create}`;
-      const advisory = { ghsaId, htmlUrl: `https://github.com/advisories/${ghsaId}`, description };
-      store.set(ghsaId, advisory);
-      return { ghsaId, htmlUrl: advisory.htmlUrl };
+    getAdvisory: async ({ ghsaId }): Promise<AdvisoryContent> => {
+      calls.get++;
+      const found = store.get(ghsaId);
+      if (!found) throw new GitHubRequestError(404, "fake: advisory not found");
+      return { ...found };
     },
     updateAdvisoryDescription: async ({ ghsaId, description }): Promise<Advisory> => {
       calls.update++;
       const existing = store.get(ghsaId);
-      if (!existing) throw new Error(`fake: advisory ${ghsaId} does not exist`);
+      if (!existing) throw new GitHubRequestError(404, "fake: advisory not found");
       existing.description = description;
       return { ghsaId, htmlUrl: existing.htmlUrl };
     },
   };
-  return { deps: deps as import("./arm").DeliveryDeps, calls, store };
+  return { deps, calls, store };
 }
 
-/**
- * A fully connected advisory-channel report with a verdict and one outbound_delivery row.
- * `priorMarker`, when set, adds an earlier verdict revision for the report whose marker a
- * pre-seeded advisory can carry, so the PATCH path has two revisions to find between.
- */
+/** A fully connected advisory-channel report with a verdict and one outbound_delivery row. */
 async function seedFixture(
   opts: {
     suspended?: boolean;
     noApproval?: boolean;
     wrongApprovedHash?: boolean;
     reportState?: "DELIVERING" | "AWAITING_APPROVAL";
-    priorMarker?: boolean;
   } = {},
 ) {
   seq += 1;
@@ -144,22 +138,6 @@ async function seedFixture(
     })
     .returning({ id: dbm.report.id });
 
-  let priorMarker: string | null = null;
-  if (opts.priorMarker) {
-    const priorId = randomUUID();
-    priorMarker = `<!-- bountydesk-delivery:${priorId} -->`;
-    const priorPayload = `Earlier revision.\n${priorMarker}`;
-    await dbm.db.insert(dbm.verdict).values({
-      id: priorId,
-      reportId: r.id,
-      outcome: "ANALYSIS_ONLY",
-      summary: "prior",
-      payload: priorPayload,
-      contentHash: fakeHash(priorPayload),
-      revision: 1,
-    });
-  }
-
   const verdictId = randomUUID();
   const marker = `<!-- bountydesk-delivery:${verdictId} -->`;
   const payload = `Analysis of the advisory. No reproduction.\n${marker}`;
@@ -174,7 +152,6 @@ async function seedFixture(
       summary: "summary",
       payload,
       contentHash,
-      revision: opts.priorMarker ? 2 : 1,
     })
     .returning({ id: dbm.verdict.id });
 
@@ -198,7 +175,7 @@ async function seedFixture(
     })
     .returning({ id: dbm.outboundDelivery.id });
 
-  return { reportId: r.id, verdictId: v.id, deliveryId: d.id, payload, marker, priorMarker, ghsaId, sourceRef };
+  return { reportId: r.id, verdictId: v.id, deliveryId: d.id, payload, marker, ghsaId, sourceRef };
 }
 
 /** claim() inside deliverOnce is global; retire every other row first. */
@@ -219,79 +196,93 @@ async function reportState(id: string) {
   return row.state;
 }
 
-test("no existing advisory: the arm opens a draft and the report is delivered", async () => {
+test("delivery edits the reporter's advisory by its GHSA id, not a new draft", async () => {
   await drainOthers();
   const f = await seedFixture();
-  const { deps, calls, store } = fakeAdvisoryDeps();
+  // The reporter's advisory as it stands before the verdict: their original writeup.
+  const { deps, calls, store } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "the reporter's original report" });
 
-  const id = await worker.deliverOnce("adv-create", { deps });
+  const id = await worker.deliverOnce("adv-update", { deps });
   assert.equal(id, f.deliveryId);
-  assert.equal(calls.create, 1);
-  assert.equal(calls.update, 0);
+  assert.equal(calls.get, 1);
+  assert.equal(calls.update, 1);
   assert.equal((await deliveryRow(f.deliveryId)).state, "SENT");
   assert.equal(await reportState(f.reportId), "DELIVERED");
 
-  // The advisory carries the approved payload, byte for byte, marker included.
-  const written = [...store.values()][0];
-  assert.equal(written.description, f.payload);
+  // The advisory the report named now carries the approved payload, byte for byte, marker included.
+  assert.equal(store.size, 1, "no second advisory is opened");
+  assert.equal(store.get(f.ghsaId)?.description, f.payload);
 });
 
-test("crash recovery: an advisory already carrying this verdict's marker is a replay, not a second create", async () => {
+test("crash recovery: an advisory already carrying this verdict's marker is a replay, not a second edit", async () => {
   await drainOthers();
   const f = await seedFixture();
-  // The advisory already exists from a prior attempt that died before committing SENT.
-  const { deps, calls } = fakeAdvisoryDeps([{ ghsaId: f.ghsaId, description: f.payload }]);
+  // A prior attempt already PATCHed the description before it could commit SENT.
+  const { deps, calls } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: f.payload });
 
   const id = await worker.deliverOnce("adv-replay", { deps });
   assert.equal(id, f.deliveryId);
-  assert.equal(calls.create, 0, "a marker already present must never open a second advisory");
-  assert.equal(calls.update, 0);
+  assert.equal(calls.update, 0, "a marker already present must never edit again");
   assert.equal((await deliveryRow(f.deliveryId)).state, "SENT");
   assert.equal(await reportState(f.reportId), "DELIVERED");
 });
 
-test("a later revision PATCHes the advisory an earlier revision opened", async () => {
+test("a later revision PATCHes the same advisory up to the new approved text", async () => {
   await drainOthers();
-  const f = await seedFixture({ priorMarker: true });
-  assert.ok(f.priorMarker);
-  // The advisory opened by the earlier revision, carrying that revision's marker.
-  const { deps, calls, store } = fakeAdvisoryDeps([{ ghsaId: f.ghsaId, description: `Earlier revision.\n${f.priorMarker}` }]);
+  const f = await seedFixture();
+  // The advisory carries an earlier revision's text (a different verdict's marker).
+  const earlier = `Earlier revision.\n<!-- bountydesk-delivery:${randomUUID()} -->`;
+  const { deps, calls, store } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: earlier });
 
-  const id = await worker.deliverOnce("adv-patch", { deps });
+  const id = await worker.deliverOnce("adv-revise", { deps });
   assert.equal(id, f.deliveryId);
-  assert.equal(calls.create, 0, "an existing advisory must be updated, not twinned");
   assert.equal(calls.update, 1);
   assert.equal(store.get(f.ghsaId)?.description, f.payload);
   assert.equal(await reportState(f.reportId), "DELIVERED");
 });
 
+test("an advisory the App cannot read is refused and held, not delivered", async () => {
+  await drainOthers();
+  const f = await seedFixture();
+  // getAdvisory 404s: the installation never accepted advisories:read, or cannot see this one.
+  const { deps, calls } = fakeAdvisoryDeps(null);
+
+  const id = await worker.deliverOnce("adv-404", { deps });
+  assert.equal(id, f.deliveryId);
+  assert.equal(calls.update, 0);
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.equal(row.rhr, true);
+  assert.match(row.lastError ?? "", /refused the advisory edit/);
+  assert.equal(await reportState(f.reportId), "DELIVERING");
+});
+
 test("the grant revoked between intake and send is refused and held, not delivered", async () => {
   await drainOthers();
   const f = await seedFixture({ suspended: true });
-  const { deps, calls } = fakeAdvisoryDeps();
+  const { deps, calls } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "original" });
 
   const id = await worker.deliverOnce("adv-revoked", { deps });
   assert.equal(id, f.deliveryId);
   assert.equal(calls.mint, 0, "a refused repository must never mint a token");
-  assert.equal(calls.create, 0);
+  assert.equal(calls.get, 0);
 
   const row = await deliveryRow(f.deliveryId);
   assert.equal(row.state, "FAILED");
   assert.equal(row.rhr, true, "a lost grant is held for a human to reconnect");
   assert.match(row.lastError ?? "", /no longer connected/);
-  // The report is not delivered; it stays where it was.
   assert.equal(await reportState(f.reportId), "DELIVERING");
 });
 
 test("the approval-gate hash triple-check still holds for the advisory channel", async () => {
   await drainOthers();
   const f = await seedFixture({ wrongApprovedHash: true });
-  const { deps, calls } = fakeAdvisoryDeps();
+  const { deps, calls } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "original" });
 
   await worker.deliverOnce("adv-tampered", { deps });
 
   assert.equal(calls.mint, 0, "a hash mismatch must be caught before any GitHub call");
-  assert.equal(calls.create, 0);
+  assert.equal(calls.get, 0);
   const row = await deliveryRow(f.deliveryId);
   assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /content hash mismatch/);
@@ -300,12 +291,12 @@ test("the approval-gate hash triple-check still holds for the advisory channel",
 test("an outbox row without an approved decision never reaches the advisory API", async () => {
   await drainOthers();
   const f = await seedFixture({ noApproval: true });
-  const { deps, calls } = fakeAdvisoryDeps();
+  const { deps, calls } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "original" });
 
   await worker.deliverOnce("adv-unapproved", { deps });
 
   assert.equal(calls.mint, 0);
-  assert.equal(calls.create, 0);
+  assert.equal(calls.get, 0);
   const row = await deliveryRow(f.deliveryId);
   assert.equal(row.state, "FAILED");
   assert.match(row.lastError ?? "", /approved decision/);

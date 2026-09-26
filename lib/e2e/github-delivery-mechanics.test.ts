@@ -159,14 +159,11 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
       sendEmail: async () => {
         throw new Error("github delivery must not send mail");
       },
-      findAdvisoryByMarker: async () => {
-        throw new Error("github delivery must not open an advisory");
-      },
-      createDraftAdvisory: async () => {
-        throw new Error("github delivery must not open an advisory");
+      getAdvisory: async () => {
+        throw new Error("github delivery must not touch an advisory");
       },
       updateAdvisoryDescription: async () => {
-        throw new Error("github delivery must not open an advisory");
+        throw new Error("github delivery must not touch an advisory");
       },
       githubAppId: 123456,
       hashContent: computeContentHash,
@@ -218,14 +215,11 @@ test("a signed issue goes from webhook to a delivered GitHub comment", async () 
       sendEmail: async () => {
         throw new Error("github delivery must not send mail");
       },
-      findAdvisoryByMarker: async () => {
-        throw new Error("github delivery must not open an advisory");
-      },
-      createDraftAdvisory: async () => {
-        throw new Error("github delivery must not open an advisory");
+      getAdvisory: async () => {
+        throw new Error("github delivery must not touch an advisory");
       },
       updateAdvisoryDescription: async () => {
-        throw new Error("github delivery must not open an advisory");
+        throw new Error("github delivery must not touch an advisory");
       },
       githubAppId: 123456,
       hashContent: computeContentHash,
