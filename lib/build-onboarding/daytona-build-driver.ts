@@ -17,19 +17,22 @@ import {
   type SnapshotInfo,
 } from "@/lib/sandbox/daytona";
 
+import { createHash } from "node:crypto";
+
 import type { BuildPlan } from "./build-plan";
 import {
   onboardingSnapshotImageRef,
   type BuildDriver,
   type BuildInput,
   type BuildResult,
+  type BuildSource,
   type BuiltService,
 } from "./build-driver";
 import { synthesizeComposeDockerfile } from "./compose-compiler";
 import { getDatastoreRecipe, type DatastoreCreds } from "./datastore-recipes";
 import { meshBuildPlan } from "./mesh-build-plan";
-import { hasIdentityAnchor, isCommitSha, sourceIdentityDigest } from "./source-identity";
-import { resolveRegistry, type RegistryHandoff } from "./registry";
+import { isCommitSha, isSha256Digest, sourceIdentityDigest } from "./source-identity";
+import { resolveRegistry, type RegistryHandoff, type SandboxRun } from "./registry";
 import { selectEgressHosts } from "./egress-profiles";
 
 /**
@@ -138,28 +141,23 @@ function numEnv(name: string, fallback: number): number {
 export function createDaytonaBuildDriver(): BuildDriver {
   return {
     async build(input: BuildInput): Promise<BuildResult> {
+      // The source is resolved before any provider configuration is read: a source with no immutable
+      // anchor must fail for that reason, not incidentally on a missing snapshot name.
+      const source = resolveBuildSource(input);
+
+      // A prebuilt image is not built from source: it is snapshotted as it is, anchored by its own
+      // digest, so it never opens a build sandbox.
+      if (source.kind === "image") {
+        return snapshotPrebuiltImage(input, source);
+      }
+
       const plan = input.plan;
       if (plan.strategy === "not-flattenable") {
         throw new Error(`build called for a not-flattenable repo: ${plan.reason}`);
       }
 
-      // The source identity is checked before any provider configuration is read: a build with no
-      // immutable anchor must fail for that reason, not incidentally on a missing snapshot name. The
-      // anchor is a commit SHA (git), a source archive digest (an upload), or an image digest.
-      const resolvedCommitSha = input.resolvedCommitSha;
-      if (!hasIdentityAnchor({ resolvedCommitSha, sourceArchiveDigest: input.sourceArchiveDigest })) {
-        throw new Error(
-          "onboarding build requires an identity anchor: a server-resolved 40-character commit SHA or a source archive digest",
-        );
-      }
-      if (!isCommitSha(resolvedCommitSha)) {
-        // This driver stages source by git clone, so it still needs a commit to check out. A source
-        // that arrives as an archive or a prebuilt image is anchored by its digest but staged another
-        // way, which is wired in the non-GitHub build path, not here.
-        throw new Error(
-          "this build driver stages source by git clone and needs a 40-character commit SHA; a source-archive build is not wired in this driver yet",
-        );
-      }
+      const resolvedCommitSha = source.kind === "git" ? source.resolvedCommitSha : undefined;
+      const sourceArchiveDigest = source.kind === "archive" ? source.sourceArchiveDigest : undefined;
 
       const baseSnapshot = requireEnv("BUILD_BASE_SNAPSHOT");
       const registry = resolveRegistry();
@@ -168,9 +166,6 @@ export function createDaytonaBuildDriver(): BuildDriver {
       const slug = repoSlug(input.repoFullName);
       const imageName = `${registry.namespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
-      // The clone target is the server-held repository name, not any caller-supplied ref, so nothing
-      // can redirect the clone to a different repository than this onboarding row is for.
-      const cloneUrl = `https://github.com/${input.repoFullName}.git`;
 
       const sandbox = await createBuildSandbox(
         {
@@ -191,12 +186,7 @@ export function createDaytonaBuildDriver(): BuildDriver {
           : "";
 
       try {
-        await run(sandbox, `git clone --no-checkout ${shellArg(cloneUrl)} /work/source`);
-        await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(resolvedCommitSha)}`);
-        const buildMarker = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
-        if (buildMarker.toLowerCase() !== resolvedCommitSha.toLowerCase()) {
-          throw new Error(`cloned source resolved to ${buildMarker}, expected ${resolvedCommitSha}`);
-        }
+        const { buildMarker } = await stageSource(run, sandbox, source);
 
         await startDockerDaemon(sandbox);
 
@@ -207,8 +197,8 @@ export function createDaytonaBuildDriver(): BuildDriver {
             registry,
             slug,
             buildMarker,
-            resolvedCommitSha,
-            sourceArchiveDigest: input.sourceArchiveDigest,
+            ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+            ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
           });
           return { ...mesh, buildLog: `${egressNote}${mesh.buildLog}` };
         }
@@ -243,17 +233,149 @@ export function createDaytonaBuildDriver(): BuildDriver {
           buildMarker,
           buildRecipeDigest: buildRecipeDigest(plan, buildMarker, digest, {
             repoFullName: input.repoFullName,
-            resolvedCommitSha,
-            sourceArchiveDigest: input.sourceArchiveDigest,
+            ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+            ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
           }),
-          resolvedCommitSha,
-          ...(input.sourceArchiveDigest ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
+          ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
+          ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
         };
       } finally {
         await deleteSandbox(sandbox.id).catch(() => undefined);
       }
     },
   };
+}
+
+/** The provider ops the prebuilt-image path needs, behind an interface so its snapshot register/replace
+ *  flow is tested without a live Daytona account. The live wiring is the default. */
+export type SnapshotOps = {
+  createSnapshot(spec: CreateSnapshotSpec): Promise<SnapshotInfo>;
+  deleteSnapshotByName(name: string): Promise<void>;
+};
+
+const liveSnapshotOps: SnapshotOps = { createSnapshot, deleteSnapshotByName };
+
+/**
+ * Turn a source into the build sandbox at /work/source and return the marker that pins it. A git
+ * source clones and checks out the exact commit and re-reads HEAD to prove it landed; an uploaded
+ * archive is written from its verified bytes and its digest re-checked inside the sandbox, so a
+ * corrupt or swapped upload fails here rather than being built. A prebuilt image never reaches this;
+ * it is not staged.
+ */
+export async function stageSource(
+  run: SandboxRun,
+  sandbox: Sandbox,
+  source: Exclude<BuildSource, { kind: "image" }>,
+): Promise<{ buildMarker: string }> {
+  if (source.kind === "git") {
+    await run(sandbox, `git clone --no-checkout ${shellArg(source.cloneUrl)} /work/source`);
+    await run(sandbox, `cd /work/source && git checkout --detach ${shellArg(source.resolvedCommitSha)}`);
+    const head = (await run(sandbox, "cd /work/source && git rev-parse HEAD")).result.trim();
+    if (head.toLowerCase() !== source.resolvedCommitSha.toLowerCase()) {
+      throw new Error(`cloned source resolved to ${head}, expected ${source.resolvedCommitSha}`);
+    }
+    return { buildMarker: source.resolvedCommitSha };
+  }
+
+  // The trusted controller resolved the archive's digest from the bytes it holds; re-hash here so a
+  // pin can never be asserted for bytes that do not match, then re-check inside the sandbox that the
+  // exact bytes landed intact. The marker baked into the image is the archive digest, the immutable
+  // anchor a non-git source has in place of a commit.
+  const actual = `sha256:${createHash("sha256").update(source.archive).digest("hex")}`;
+  if (actual !== source.sourceArchiveDigest.toLowerCase()) {
+    throw new Error(`source archive digest ${actual} does not match the declared ${source.sourceArchiveDigest}`);
+  }
+  // ponytail: the archive is base64'd into one exec argument, fine for the small test-app tarballs
+  // this handles; chunk the write if a large upload ever hits the shell's argument-length cap.
+  const b64 = source.archive.toString("base64");
+  const expectedHex = source.sourceArchiveDigest.slice("sha256:".length).toLowerCase();
+  await run(sandbox, `echo ${shellArg(b64)} | base64 -d > /work/source.tgz`);
+  await run(
+    sandbox,
+    `actual=$(sha256sum /work/source.tgz | cut -d' ' -f1); [ "$actual" = ${shellArg(expectedHex)} ] || { echo "staged archive digest $actual != ${expectedHex}" >&2; exit 1; }`,
+  );
+  // -xf autodetects the compression, so a plain tar and a gzipped tarball both extract. The archive
+  // is expected to hold the project at its root, matching where a clone lands it.
+  await run(sandbox, "mkdir -p /work/source && tar -xf /work/source.tgz -C /work/source");
+  return { buildMarker: source.sourceArchiveDigest };
+}
+
+/**
+ * Register a Daytona snapshot for a prebuilt image without building anything. The image is pinned by
+ * its own sha256 digest, which the caller resolved and passes as the anchor; the snapshot is named
+ * deterministically per source so a re-onboard replaces the prior one rather than colliding on it.
+ */
+export async function snapshotPrebuiltImage(
+  input: BuildInput,
+  source: Extract<BuildSource, { kind: "image" }>,
+  ops: SnapshotOps = liveSnapshotOps,
+): Promise<BuildResult> {
+  const slug = repoSlug(input.repoFullName);
+  const name = `onboarding-${slug}`;
+  await ops.deleteSnapshotByName(name);
+  const snapshot = await ops.createSnapshot({
+    name,
+    image: source.imageRef,
+    cpu: BUILD_CPU,
+    memoryGb: BUILD_MEMORY_GB,
+    diskGb: BUILD_DISK_GB,
+  });
+  return {
+    imageName: imageNameFromRef(source.imageRef),
+    imageDigest: source.imageDigest,
+    snapshotId: snapshot.id,
+    dockerfileText: "",
+    buildLog: `[prebuilt image] registered a snapshot from ${source.imageRef} with no build; identity is the image digest ${source.imageDigest}.\n`,
+    // A prebuilt image has no in-image build marker (nothing was built to bake one into). Its identity
+    // is the image digest, so that is what the recipe and the marker field both carry.
+    buildMarker: source.imageDigest,
+    buildRecipeDigest: buildRecipeDigest(input.plan, source.imageDigest, source.imageDigest, {
+      repoFullName: input.repoFullName,
+    }),
+    snapshotImageRef: source.imageRef,
+  };
+}
+
+/**
+ * Decide how the source reaches the build. An explicit source (a non-GitHub onboarding path) is
+ * validated for a usable anchor; otherwise the driver falls back to the GitHub clone path, which
+ * needs a server-resolved commit. A source with no immutable anchor is refused here, before any
+ * sandbox or provider call.
+ */
+export function resolveBuildSource(input: BuildInput): BuildSource {
+  const source = input.source;
+  if (source) {
+    if (source.kind === "git" && !isCommitSha(source.resolvedCommitSha)) {
+      throw new Error("a git source requires a server-resolved 40-character commit SHA");
+    }
+    if (source.kind === "archive" && !isSha256Digest(source.sourceArchiveDigest)) {
+      throw new Error("an archive source requires a sha256 source archive digest");
+    }
+    if (source.kind === "image" && (!isSha256Digest(source.imageDigest) || source.imageRef.includes("@sha256:"))) {
+      throw new Error("a prebuilt image source requires a tag reference and its own sha256 digest");
+    }
+    return source;
+  }
+  if (!isCommitSha(input.resolvedCommitSha)) {
+    throw new Error(
+      "onboarding build requires an identity anchor: a server-resolved 40-character commit SHA or a source archive digest",
+    );
+  }
+  return {
+    kind: "git",
+    // The clone target is the server-held repository name, not any caller-supplied ref, so nothing
+    // can redirect the clone to a different repository than this onboarding row is for.
+    cloneUrl: `https://github.com/${input.repoFullName}.git`,
+    resolvedCommitSha: input.resolvedCommitSha,
+  };
+}
+
+/** Strip the tag off an image reference to get its untagged name, e.g. ghcr.io/x/y:tag -> ghcr.io/x/y.
+ *  A registry port (host:5000/img) is left alone: only a colon in the final path segment is a tag. */
+export function imageNameFromRef(ref: string): string {
+  const slash = ref.lastIndexOf("/");
+  const lastSegColon = ref.indexOf(":", slash + 1);
+  return lastSegColon >= 0 ? ref.slice(0, lastSegColon) : ref;
 }
 
 /** Cap on the captured build log kept on the row for download. BuildKit is chatty; the tail is what a
@@ -290,7 +412,7 @@ export async function buildMesh(
     registry: RegistryHandoff;
     slug: string;
     buildMarker: string;
-    resolvedCommitSha: string;
+    resolvedCommitSha?: string;
     sourceArchiveDigest?: string;
     runtime?: MeshBuildRuntime;
   },
@@ -400,15 +522,15 @@ export async function buildMesh(
     buildLog: appBuildLog.slice(-BUILD_LOG_CAP),
     buildMarker: ctx.buildMarker,
     buildRecipeDigest: buildRecipeDigest(plan, ctx.buildMarker, app.imageDigest, {
-      resolvedCommitSha: ctx.resolvedCommitSha,
-      sourceArchiveDigest: ctx.sourceArchiveDigest,
+      ...(ctx.resolvedCommitSha ? { resolvedCommitSha: ctx.resolvedCommitSha } : {}),
+      ...(ctx.sourceArchiveDigest ? { sourceArchiveDigest: ctx.sourceArchiveDigest } : {}),
       serviceDigests: services.map((service) => ({
         service: service.service,
         imageDigest: service.imageDigest,
         snapshotId: service.snapshotId,
       })),
     }),
-    resolvedCommitSha: ctx.resolvedCommitSha,
+    ...(ctx.resolvedCommitSha ? { resolvedCommitSha: ctx.resolvedCommitSha } : {}),
     ...(ctx.sourceArchiveDigest ? { sourceArchiveDigest: ctx.sourceArchiveDigest } : {}),
     services,
   };
@@ -726,10 +848,17 @@ function buildRecipeDigest(
     serviceDigests?: Array<{ service: string; imageDigest: string; snapshotId: string }>;
   } = {},
 ): string {
-  const resolvedCommitSha = identity.resolvedCommitSha ?? buildMarker;
+  // A git build's marker is the commit, so it doubles as the commit anchor when one was not passed
+  // in. A non-git build (archive or prebuilt image) has a marker that is not a commit, so it is left
+  // out and the archive or image digest anchors the identity instead.
+  const resolvedCommitSha = isCommitSha(identity.resolvedCommitSha)
+    ? identity.resolvedCommitSha
+    : isCommitSha(buildMarker)
+      ? buildMarker
+      : undefined;
   return sourceIdentityDigest({
     repoFullName: identity.repoFullName ?? "",
-    resolvedCommitSha,
+    ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
     ...(identity.sourceArchiveDigest ? { sourceArchiveDigest: identity.sourceArchiveDigest } : {}),
     plan,
     ...(identity.serviceDigests ? { services: identity.serviceDigests } : {}),
