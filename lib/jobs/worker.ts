@@ -190,7 +190,13 @@ async function defaultReadAdvisory(opts: {
 }
 
 /**
- * Turn a repository_advisory delivery into a report.
+ * Turn a repository_advisory delivery into a report, held at the NEEDS_DECISION gate.
+ *
+ * A private vulnerability report can be filed by any GitHub user, so the reporter is untrusted the
+ * same way a public issue opener is. An issue needs an allowlisted reviewer's /reproduce before a
+ * run starts; an advisory has no comment to carry that command, so it waits at NEEDS_DECISION like
+ * an outside email report, and only a reviewer's "Run analysis" spends the sandbox budget. Nothing
+ * is cloned, built or provisioned until then.
  *
  * Access is re-checked here, not just at intake: a suspension or a repository removal can land
  * between the 202 and this run, and the target profile is read from the server, never the payload,
@@ -228,6 +234,7 @@ async function parseAdvisory(lease: Lease, readAdvisory: AdvisoryReader): Promis
     title: summary || `${repository.fullName} advisory ${ghsaId}`,
     body: description,
     reporterHandle: payload.sender?.login ?? null,
+    state: "NEEDS_DECISION",
     connectedRepositoryId: repository.connectedRepositoryId,
     targetProfileId: repository.targetProfileId,
   });
@@ -259,8 +266,11 @@ async function parseGateRelease(lease: Lease, reportId: string): Promise<Lease> 
     .from(report)
     .where(eq(report.id, reportId))
     .limit(1);
-  if (!row || row.channel !== "email") {
-    throw new UnprocessableDelivery(`gate release names no email report ${reportId}`);
+  // Both channels that wait at the gate can be released this way: an outside email report and an
+  // advisory report. The release job itself is enqueued on the email channel as a routing signal,
+  // so this checks the report it names, not the job's channel.
+  if (!row || (row.channel !== "email" && row.channel !== "advisory")) {
+    throw new UnprocessableDelivery(`gate release names no gated report ${reportId}`);
   }
   if (row.state !== "TRIAGING") {
     throw new UnprocessableDelivery(`report ${reportId} is ${row.state}; the gate did not release it`);
@@ -428,6 +438,14 @@ export async function runOnce(
         throw new UnprocessableDelivery("job reached PARSED with no report attached");
       }
       await runWithHeartbeat(hold, lease.reportId, lease, leaseSeconds, signal);
+      await complete(lease);
+      return lease.id;
+    }
+    // An advisory report also waits at the gate, but there is no reporter mailbox to acknowledge and
+    // no email text to triage, so the job just finishes and the report sits at NEEDS_DECISION until a
+    // reviewer releases it. The gate-release job that a reviewer's "Run analysis" enqueues is the one
+    // that takes the branch below and starts the run.
+    if (lease.state === "PARSED" && lease.channel === "advisory") {
       await complete(lease);
       return lease.id;
     }

@@ -190,11 +190,12 @@ async function handleIssue(deliveryId: string, payload: IssuePayload): Promise<R
  * Take in a GitHub security advisory (a private vulnerability report) as its own intake channel.
  *
  * This is per-report intake, like `handleIssue`, not an App-lifecycle event: each advisory becomes
- * one report. It differs from an issue in two ways. There is no `/reproduce` command gate, because
- * a draft advisory is private to the repository's admins and security managers, so a stranger
- * cannot file one to burn the sandbox budget the way they could open a public issue. And only
- * `reported` (a new private report) and `published` start a run; the rest of the advisory lifecycle
- * (edited, withdrawn, and so on) is acknowledged and dropped.
+ * one report. Only `reported` (a new private report) and `published` are taken in; the rest of the
+ * advisory lifecycle (edited, withdrawn, and so on) is acknowledged and dropped. A private
+ * vulnerability report can be filed by any GitHub user, so the report is created but held at the
+ * NEEDS_DECISION gate (see parseAdvisory in lib/jobs/worker.ts): no sandbox run starts until a
+ * reviewer releases it, the same way an outside email report waits. That is why there is no
+ * /reproduce command gate here, unlike an issue.
  *
  * The access check and the enqueue share one transaction, with the same lock handleIssue takes, so
  * a revocation arriving concurrently cannot slip a job past the gate.

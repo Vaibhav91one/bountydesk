@@ -178,15 +178,20 @@ test("a delivery becomes a report and the job finishes", async () => {
   assert.equal(created.targetProfileId, targetProfileId);
 });
 
-test("an advisory delivery becomes a report with the advisory source ref", async () => {
+test("an advisory delivery becomes a report held at the gate, with no run started", async () => {
   await drain();
   const repo = await connectedRepo();
   const ghsaId = "GHSA-worker-aaaa-bbbb";
   const { jobId } = await enqueueAdvisory(repo, ghsaId);
 
   let readWith: { installationId: number; repoId: number; fullName: string; ghsaId: string } | null = null;
+  let ran = false;
   const finishedId = await worker.runOnce("worker-adv", {
-    analysis: analysisDriver(),
+    analysis: analysisDriver({
+      ensureSession: async () => {
+        ran = true;
+      },
+    }),
     readAdvisory: async (opts) => {
       readWith = opts;
       return { summary: "XSS in the search box", description: "advisory body from the API" };
@@ -216,6 +221,44 @@ test("an advisory delivery becomes a report with the advisory source ref", async
   assert.equal(reportRow.title, "XSS in the search box");
   assert.equal(reportRow.body, "advisory body from the API");
   assert.equal(reportRow.targetProfileId, targetProfileId);
+  // The whole point of the finding fix: an untrusted advisory report waits for a reviewer, so no
+  // session is created and no sandbox run starts until then.
+  assert.equal(reportRow.state, "NEEDS_DECISION");
+  assert.equal(ran, false, "no run may start before a reviewer releases the report");
+});
+
+test("a reviewer releasing an advisory report starts the run", async () => {
+  await drain();
+  const gate = await import("@/lib/triage/gate");
+  const repo = await connectedRepo();
+  const { jobId } = await enqueueAdvisory(repo, "GHSA-worker-cccc-dddd");
+
+  await worker.runOnce("worker-adv-hold", {
+    analysis: analysisDriver(),
+    readAdvisory: async () => ({ summary: "advisory", description: "body" }),
+  });
+  const held = await job(jobId);
+  const reportId = held.reportId as string;
+
+  // The reviewer's "Run analysis" action: it moves the report to TRIAGING and queues the release job.
+  const released = await gate.releaseForAnalysis(reportId, "test-reviewer");
+  assert.equal(released.ok, true);
+
+  let ran = false;
+  await worker.runOnce("worker-adv-run", {
+    analysis: analysisDriver({
+      ensureSession: async () => {
+        ran = true;
+      },
+    }),
+  });
+  assert.equal(ran, true, "the released report runs the reproduction pipeline");
+
+  const [reportRow] = await dbm.db
+    .select({ state: dbm.report.state })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, reportId));
+  assert.equal(reportRow.state, "TRIAGING");
 });
 
 test("an advisory for a repository that lost its grant is not made into a report", async () => {
