@@ -10,10 +10,11 @@ import {
   eq,
   githubInstallation,
   report,
+  targetOnboarding,
   targetProfile,
 } from "@/lib/db";
 import type { AnalysisContext, AnalysisDriver } from "@/lib/jobs/worker";
-import { routeUnreproducibleTarget } from "@/lib/reports/target-scope";
+import { recordEvent } from "@/lib/reports/lifecycle";
 import {
   ProvisionCouldNotDeployError,
   provisionMesh,
@@ -24,6 +25,14 @@ import { meshServicesFromConfig, profileAppPort } from "@/lib/targets/authorize-
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
+
+import {
+  gatherStaticSource,
+  STATIC_FALLBACK_EVENT,
+  staticReviewSection,
+  type StaticFallbackReason,
+  type StaticSource,
+} from "./static-review";
 
 const SESSION_CREATION_POLL_MS = 100;
 
@@ -55,11 +64,14 @@ function buildTurnMessage(
   capabilityToken: string,
   target: BoundTarget | null,
   provisioned: boolean,
+  staticSection: string | null,
 ): string {
   const pinnedAt = (t: BoundTarget) =>
     `${t.name}, pinned at image ${t.imageName}@${t.imageDigest}${t.snapshotId ? ` (snapshot ${t.snapshotId})` : ""}`;
 
-  const targetSection = !target
+  const targetSection = staticSection
+    ? staticSection
+    : !target
     ? `No authorized target is bound to this report -- either no target profile is attached, or the connected repository's grant is inactive or revoked. There is nothing to reproduce against. Draft an ANALYSIS_ONLY verdict from the report text alone; do not claim REPRODUCED or NOT_REPRODUCED here.`
     : provisioned
       ? `This report is bound to an authorized target: ${pinnedAt(target)}. A sandbox running it has already been provisioned for you. Reach it exclusively through probe_target (GET/HEAD) and probe_target_write (POST): give either a method, a same-origin path, and optional headers/body, and it forwards the request to your sandbox. The only valid tool capability for this report is ${capabilityToken}. Do not use "bountydesk", the target name, the image name, a host, or a URL as the capability. Your first target request should be exactly probe_target {"capability":"${capabilityToken}","method":"GET","path":"/"}. probe_target_write pauses for human approval before it reaches you, same as any other gated tool; just call it. For a client-side bug that a plain fetch cannot see (DOM or SPA XSS, a location.hash to innerHTML sink, a client-side redirect), use probe_browser {"capability":"${capabilityToken}","path":<same-origin path>,"hashPayload":<the URL fragment after #>}: it renders the page in a real browser in an isolated offline sandbox and reports what executed, so a payload that only fires in the DOM is observable. Use scope-guard, skills and subagents alongside these, then decide the outcome yourself.`
@@ -144,11 +156,12 @@ async function waitForClaimedAgentSession(reportId: string, signal: AbortSignal)
 
 /**
  * The real driver: opens a TrueForge session per report and starts a turn that asks the model
- * to investigate and call publish_verdict. It never decides or persists a verdict, and moves the
- * report's lifecycle state in exactly one case: when a bound target fails to deploy so hard that
- * there is nothing to reproduce against and no later run would fix it, run() routes the report to
- * the terminal OUT_OF_SCOPE (a deterministic scope rejection, made before any verdict exists) and
- * starts no turn. Every verdict outcome still happens only once a separate poller has
+ * to investigate and call publish_verdict. It never decides or persists a verdict and never moves
+ * the report's lifecycle state. A target that cannot be built (the repo's onboarding came to rest
+ * with COULD_NOT_BUILD) or cannot be deployed (provisioning threw ProvisionCouldNotDeployError)
+ * gets a read-only static review turn instead of a reproduction one (lib/analysis/static-review.ts),
+ * and the reason is recorded with the turn so publish-verdict holds that run to ANALYSIS_ONLY.
+ * Every verdict outcome still happens only once a separate poller has
  * independently confirmed, by asking TrueForge itself, that a genuine pending publish_verdict
  * call exists (lib/agent-sessions/poller.ts), and the verdict row it approves is the agent's
  * own drafted conclusion (lib/mcp/publish-verdict.ts), re-authorized against the same
@@ -263,17 +276,23 @@ export function createTrueforgeAnalysisDriver(
           targetImageDigest: targetProfile.imageDigest,
           targetSnapshotId: targetProfile.snapshotId,
           targetConfig: targetProfile.config,
+          targetCommitSha: targetProfile.resolvedCommitSha,
           connectedRepositoryId: report.connectedRepositoryId,
+          repoFullName: connectedRepository.fullName,
           repoActive: connectedRepository.active,
           repoArchivedAt: connectedRepository.archivedAt,
           repoTargetProfileId: connectedRepository.targetProfileId,
           installationSuspendedAt: githubInstallation.suspendedAt,
           installationDeletedAt: githubInstallation.deletedAt,
+          onboardingState: targetOnboarding.state,
+          onboardingReason: targetOnboarding.analysisOnlyReason,
+          onboardingCommitSha: targetOnboarding.resolvedCommitSha,
         })
         .from(report)
         .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
         .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
         .leftJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
+        .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
         .where(eq(report.id, reportId))
         .limit(1);
       if (!context) {
@@ -314,96 +333,106 @@ export function createTrueforgeAnalysisDriver(
       // this report was already provisioned once, so there's nothing to redo -- provisioning
       // again here would boot a second sandbox nobody would ever store a reference to.
       let provisioned: { sandboxId: string; appPort: number; sandboxIds: string[] } | null = null;
-      // Set when a hard deploy failure below routed this bound-target report to OUT_OF_SCOPE. The
-      // report is then terminal and there is no turn to start, so run() returns before the turn
-      // transaction. This is the one case run() moves the report's state, and it moves it to a
-      // scope rejection, never to a verdict outcome, which the agent and poller still own.
-      let routedOutOfScope = false;
-      if (targetInfo && targetInfo.snapshotId) {
-        const [existing] = await db
-          .select({ turnId: agentSession.turnId })
-          .from(agentSession)
-          .where(eq(agentSession.reportId, reportId))
-          .limit(1);
+      const [existing] = await db
+        .select({ turnId: agentSession.turnId })
+        .from(agentSession)
+        .where(eq(agentSession.reportId, reportId))
+        .limit(1);
+      const turnPending = existing !== undefined && !existing.turnId;
 
-        if (existing && !existing.turnId) {
-          const appPort = profileAppPort(context.targetConfig);
-          const provisioning = targetProvisioningFromConfig(
-            targetInfo.name,
-            context.targetConfig,
-          );
-          if (appPort !== null && provisioning) {
-            try {
-              // A compose-mesh target boots every service as its own linked sandbox; probe_target
-              // still reaches only the app, whose sandbox id and port are what get stored below. A
-              // single-image target boots one snapshot exactly as before.
-              const meshServices = meshServicesFromConfig(context.targetConfig);
-              if (meshServices) {
-                const mesh = await provisionMeshFn(
-                  {
-                    targetProfileId: context.targetProfileId as string,
-                    appService: meshServices.find((s) => s.role === "app")!.service,
-                    services: meshServices,
-                    readinessPath: provisioning.readinessPath,
-                    warmupSeconds: provisioning.warmupSeconds,
-                  },
-                  { signal },
-                );
-                provisioned = {
-                  sandboxId: mesh.sandboxId,
-                  appPort: mesh.appPort,
-                  sandboxIds: mesh.sandboxIds,
-                };
-              } else {
-                const single = await provision(
-                  {
-                    imageName: targetInfo.imageName,
-                    imageDigest: targetInfo.imageDigest,
-                    snapshotId: targetInfo.snapshotId,
-                    targetProfileId: context.targetProfileId as string,
-                    ...provisioning,
-                  },
-                  appPort,
-                  { signal },
-                );
-                provisioned = { ...single, sandboxIds: [single.sandboxId] };
-              }
-            } catch (error) {
-              // A genuine cancellation must still propagate as one, not be swallowed into "no
-              // target this run" -- the caller's lease/retry semantics depend on seeing it.
-              if (signal.aborted) throw signal.reason;
-              // A hard deploy failure means the pinned target cannot be built or booted at all, so
-              // there is nothing to reproduce against and no later run would fix it: the report is
-              // out of scope. A transient failure (Daytona down, the app slow to answer) is a
-              // different class -- the target may be reachable next run and the report text still
-              // yields an analysis -- so it falls through to the analysis-only turn as before.
-              if (error instanceof ProvisionCouldNotDeployError) {
-                const routing = await routeUnreproducibleTarget(
-                  reportId,
-                  `target could not be deployed: ${safeErrorText(error)}`,
-                );
-                routedOutOfScope = routing.routed;
-              }
-              if (!routedOutOfScope) {
-                // The run continues without a sandbox, so the reason has to reach a log or nobody
-                // learns why (an inactive target snapshot looked exactly like a missing key).
-                console.error(
-                  `report ${reportId}: sandbox provisioning failed, continuing without one: ${
-                    safeErrorText(error)
-                  }`,
-                );
-                provisioned = null;
-              }
+      // A report on a repo whose onboarding came to rest with COULD_NOT_BUILD has no target to
+      // reproduce against, and never will until the repo changes. It gets the static review, but
+      // only while the repository grant is live: a suspended installation or a removed repository
+      // stops anything further being read from it.
+      const repoGrantLive =
+        context.repoActive === true &&
+        !context.repoArchivedAt &&
+        !context.installationSuspendedAt &&
+        !context.installationDeletedAt;
+      let staticReason: StaticFallbackReason | null =
+        !targetInfo &&
+        repoGrantLive &&
+        (context.onboardingState === "UNSUPPORTED" || context.onboardingState === "FAILED") &&
+        context.onboardingReason === "COULD_NOT_BUILD"
+          ? "COULD_NOT_BUILD"
+          : null;
+
+      if (turnPending && targetInfo && targetInfo.snapshotId) {
+        const appPort = profileAppPort(context.targetConfig);
+        const provisioning = targetProvisioningFromConfig(
+          targetInfo.name,
+          context.targetConfig,
+        );
+        if (appPort !== null && provisioning) {
+          try {
+            // A compose-mesh target boots every service as its own linked sandbox; probe_target
+            // still reaches only the app, whose sandbox id and port are what get stored below. A
+            // single-image target boots one snapshot exactly as before.
+            const meshServices = meshServicesFromConfig(context.targetConfig);
+            if (meshServices) {
+              const mesh = await provisionMeshFn(
+                {
+                  targetProfileId: context.targetProfileId as string,
+                  appService: meshServices.find((s) => s.role === "app")!.service,
+                  services: meshServices,
+                  readinessPath: provisioning.readinessPath,
+                  warmupSeconds: provisioning.warmupSeconds,
+                },
+                { signal },
+              );
+              provisioned = {
+                sandboxId: mesh.sandboxId,
+                appPort: mesh.appPort,
+                sandboxIds: mesh.sandboxIds,
+              };
+            } else {
+              const single = await provision(
+                {
+                  imageName: targetInfo.imageName,
+                  imageDigest: targetInfo.imageDigest,
+                  snapshotId: targetInfo.snapshotId,
+                  targetProfileId: context.targetProfileId as string,
+                  ...provisioning,
+                },
+                appPort,
+                { signal },
+              );
+              provisioned = { ...single, sandboxIds: [single.sandboxId] };
             }
+          } catch (error) {
+            // A genuine cancellation must still propagate as one, not be swallowed into "no
+            // target this run" -- the caller's lease/retry semantics depend on seeing it.
+            if (signal.aborted) throw signal.reason;
+            // A hard deploy failure means the pinned target cannot be booted at all, so this run
+            // becomes a static review of the source. A transient failure (Daytona down, the app
+            // slow to answer) may clear by the next run, so it stays the plain analysis-only turn.
+            if (error instanceof ProvisionCouldNotDeployError) staticReason = "COULD_NOT_DEPLOY";
+            // The run continues without a sandbox, so the reason has to reach a log or nobody
+            // learns why (an inactive target snapshot looked exactly like a missing key).
+            console.error(
+              `report ${reportId}: sandbox provisioning failed, continuing without one: ${
+                safeErrorText(error)
+              }`,
+            );
+            provisioned = null;
           }
         }
       }
 
-      // The bound target is a hard dead end and the report is now terminal (OUT_OF_SCOPE), so
-      // there is no turn to start. Provisioning threw, so nothing was booted and there is no
-      // sandbox to tear down. The poller finishes the already-created session on its next pass
-      // (it cancels a session whose report is terminal).
-      if (routedOutOfScope) return;
+      // Read the source before the row lock below, for the same reason provisioning runs before
+      // it: these are GitHub fetches, not something to hold a lock across. A retry whose turn
+      // already exists skips it, since the transaction below would discard the result anyway.
+      let staticSource: StaticSource | null = null;
+      if (staticReason && turnPending && context.repoFullName) {
+        const pinnedRef =
+          staticReason === "COULD_NOT_DEPLOY"
+            ? (context.targetCommitSha ?? context.onboardingCommitSha)
+            : context.onboardingCommitSha;
+        staticSource = await gatherStaticSource(
+          { repoFullName: context.repoFullName, ref: pinnedRef, reportText: `${context.title}\n${context.body}` },
+          { signal },
+        );
+      }
 
       // The row lock spans the createTurn call on purpose, unlike the delivery worker's GitHub
       // calls: TrueForge is a loopback service this deployment always controls, not a slow or
@@ -469,12 +498,30 @@ export function createTrueforgeAnalysisDriver(
             session.capabilityToken,
             targetInfo,
             provisioned !== null,
+            staticReason ? staticReviewSection(staticReason, context.repoFullName, staticSource) : null,
           );
           const { turnId } = await client.createTurn(
             session.sessionId,
             [{ type: "user.message", content }],
             { signal },
           );
+
+          // Recorded in the same transaction as the turn it describes, so the reason exists exactly
+          // when a static-review turn was started. publish-verdict reads it to hold this run to
+          // ANALYSIS_ONLY and to put the reason on the verdict, including a synthesized one when
+          // the static review itself never drafts anything.
+          if (staticReason) {
+            await recordEvent(
+              reportId,
+              STATIC_FALLBACK_EVENT,
+              {
+                reason: staticReason,
+                ref: staticSource?.ref ?? null,
+                sourceFiles: staticSource?.files.map((f) => f.path) ?? [],
+              },
+              { tx, idempotencyKey: STATIC_FALLBACK_EVENT },
+            );
+          }
 
           // RUNNING means the turn just started and the agent hasn't called anything yet; the
           // poller (lib/agent-sessions/poller.ts) promotes this to INVESTIGATING once it has

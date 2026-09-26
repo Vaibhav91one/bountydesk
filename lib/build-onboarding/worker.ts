@@ -176,7 +176,9 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
         }
 
         if (plan.strategy === "not-flattenable") {
-          await advance(lease, "UNSUPPORTED", { buildPlan: plan });
+          // A report on this repo reads the reason and gets a read-only static review of the source
+          // instead of a reproduction (lib/analysis/static-review.ts).
+          await advance(lease, "UNSUPPORTED", { buildPlan: plan, analysisOnlyReason: "COULD_NOT_BUILD" });
         } else {
           await advance(lease, "PENDING_BUILD", { buildPlan: plan });
         }
@@ -253,7 +255,11 @@ export async function onboardOnce(owner: string, deps: OnboardDeps): Promise<str
       });
       return lease.id;
     }
-    await fail(lease, error instanceof Error ? error.message : String(error)).catch((e) => {
+    // Only the build step failing means the target cannot be built. fail() records the reason once
+    // the attempts run out and the row is FAILED; a classify or verify failure records none, so a
+    // report on that repo is never told its target failed to build.
+    const reason = lease.state === "PENDING_BUILD" ? "COULD_NOT_BUILD" : null;
+    await fail(lease, error instanceof Error ? error.message : String(error), reason).catch((e) => {
       if (!(e instanceof LeaseLostError)) throw e;
     });
   }

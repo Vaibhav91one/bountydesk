@@ -871,18 +871,17 @@ test("run() falls back to the no-target turn message when provisioning fails, an
   assert.equal(session.appPort, null);
 });
 
-test("run() routes a bound target to OUT_OF_SCOPE on a hard deploy failure and starts no turn", async () => {
+test("run() turns a hard deploy failure into a static-review turn instead of ending the report", async () => {
   const target = await seedTargetProfile({ name: "juice-shop-undeployable" });
   const reportId = await seedReport("TRIAGING", target.id);
-  let createTurnCalls = 0;
+  const messages: string[] = [];
   const client = fakeClient({
-    async createTurn() {
-      createTurnCalls++;
+    async createTurn(_sessionId, input) {
+      messages.push((input[0] as { content?: string }).content ?? "");
       return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
     },
   });
-  // A hard deploy failure: the pinned image cannot be built or booted at all, so no later run
-  // fixes it. This is the real signal the driver routes to OUT_OF_SCOPE.
+  // A hard deploy failure: the pinned image cannot be booted at all, so no later run fixes it.
   const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
     throw new provisionModule.ProvisionCouldNotDeployError("sandbox booted the wrong build");
   };
@@ -891,27 +890,22 @@ test("run() routes a bound target to OUT_OF_SCOPE on a hard deploy failure and s
   await d.ensureSession(context(reportId));
   await d.run(context(reportId));
 
-  assert.equal(createTurnCalls, 0, "a report ruled out of scope must not start an analysis turn");
+  assert.equal(messages.length, 1, "the report still gets a turn, now a static review");
+  assert.match(messages[0], /COULD_NOT_DEPLOY/);
 
   const [reportRow] = await dbm.db
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "OUT_OF_SCOPE");
-
-  const [session] = await dbm.db
-    .select()
-    .from(dbm.agentSession)
-    .where(dbm.eq(dbm.agentSession.reportId, reportId));
-  assert.equal(session.turnId, null, "no turn is started for an out-of-scope report");
+  assert.equal(reportRow.state, "TRIAGING", "the driver never moves the report; the verdict path does");
 
   const events = await dbm.db
-    .select({ type: dbm.sessionEvent.type })
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
     .from(dbm.sessionEvent)
     .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
-  assert.ok(
-    events.some((e) => e.type === "target.out_of_scope"),
-    "the scope rejection is recorded on the report",
+  assert.deepEqual(
+    events.filter((e) => e.type === "reproduction.static_fallback").map((e) => (e.data as { reason: string }).reason),
+    ["COULD_NOT_DEPLOY"],
   );
 });
 
@@ -926,7 +920,7 @@ test("run() keeps a bound target ANALYSIS_ONLY on a transient provision failure"
     },
   });
   // Unavailable this run (Daytona down, app slow to answer): the target may be reachable next
-  // run and the report text still yields an analysis, so this must not go out of scope.
+  // run, so this stays the plain analysis-only turn.
   const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
     throw new provisionModule.ProvisionTargetUnavailableError("app did not answer its port in time");
   };
@@ -941,10 +935,18 @@ test("run() keeps a bound target ANALYSIS_ONLY on a transient provision failure"
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "TRIAGING", "a transient failure never marks the report out of scope");
+  assert.equal(reportRow.state, "TRIAGING");
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  assert.ok(
+    !events.some((e) => e.type === "reproduction.static_fallback"),
+    "a transient failure is not a static fallback: the target may answer next run",
+  );
 });
 
-test("run() never routes a no-target report to OUT_OF_SCOPE", async () => {
+test("run() never provisions, or reports a deploy failure for, a no-target report", async () => {
   const reportId = await seedReport("TRIAGING", null);
   let createTurnCalls = 0;
   const client = fakeClient({
@@ -969,7 +971,7 @@ test("run() never routes a no-target report to OUT_OF_SCOPE", async () => {
     .select({ state: dbm.report.state })
     .from(dbm.report)
     .where(dbm.eq(dbm.report.id, reportId));
-  assert.equal(reportRow.state, "TRIAGING", "a no-target report is never ruled out of scope");
+  assert.equal(reportRow.state, "TRIAGING");
 });
 
 test("run() never calls provisioning a second time once a turn already exists", async () => {

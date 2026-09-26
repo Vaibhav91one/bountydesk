@@ -77,6 +77,7 @@ export type OnboardingAdvanceFields = Partial<{
   buildLog: string;
   builtServices: unknown;
   proposedManifest: unknown;
+  analysisOnlyReason: "COULD_NOT_BUILD";
 }>;
 
 export class LeaseLostError extends Error {
@@ -172,6 +173,7 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         attempts: 0,
         nextAttemptAt: sql`now()`,
         lastError: null,
+        analysisOnlyReason: null,
         updatedAt: new Date(),
       },
       setWhere: eq(targetOnboarding.state, "FAILED"),
@@ -345,15 +347,25 @@ export async function advance(
 
 /**
  * Release a failed step for retry, or move it to FAILED once MAX_ATTEMPTS is exhausted. Same
- * exponential backoff as the other queues' fail().
+ * exponential backoff as the other queues' fail(). `analysisOnlyReason` is written only on the move
+ * to FAILED: a step that is still retrying has not given up on the target.
  */
-export async function fail(lease: OnboardingLease, error: string): Promise<void> {
+export async function fail(
+  lease: OnboardingLease,
+  error: string,
+  analysisOnlyReason: "COULD_NOT_BUILD" | null = null,
+): Promise<void> {
   const updated = await db.execute<{ id: string }>(sql`
     update ${targetOnboarding}
        set state = case
                      when ${targetOnboarding.attempts} >= ${MAX_ATTEMPTS}
                      then 'FAILED'
                      else ${lease.state}
+                   end,
+           analysis_only_reason = case
+                     when ${targetOnboarding.attempts} >= ${MAX_ATTEMPTS}
+                     then ${analysisOnlyReason}
+                     else ${targetOnboarding.analysisOnlyReason}
                    end,
            lease_owner      = null,
            lease_expires_at = null,
@@ -386,6 +398,11 @@ export async function sweepExpiredLeases(): Promise<{ released: number; failed: 
              ${targetOnboarding.lastError},
              'build-onboarding worker died on the final attempt'
            ),
+           -- A worker that died on its final build attempt left a build that never finished.
+           analysis_only_reason = case
+             when ${targetOnboarding.state} = 'PENDING_BUILD' then 'COULD_NOT_BUILD'
+             else ${targetOnboarding.analysisOnlyReason}
+           end,
            updated_at       = now()
      where ${targetOnboarding.state} in ('PENDING_PLAN', 'PENDING_BUILD', 'PENDING_MANIFEST', 'APPROVED')
        and ${targetOnboarding.leaseExpiresAt} < now()
