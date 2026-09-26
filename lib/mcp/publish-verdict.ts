@@ -565,6 +565,31 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
 }
 
 /**
+ * The advisory delivery target for an email report, or null when the reply is the right channel.
+ *
+ * "Supports advisories" is nothing more than an active grant on a bound connected repository: the
+ * App already holds the advisories-write permission, so a repo we can still reach is a repo we can
+ * open a draft advisory on. The pinned demo target has no connected repository (its grant snapshot
+ * has a null connectedRepositoryId, which hasActiveRepositoryGrant treats as always active), so it
+ * is excluded here on purpose, it delivers as an email reply. The returned target names the repo,
+ * not a GHSA: an email report has no pre-existing advisory, so the arm creates one, and freezing the
+ * repo id lets the worker refuse a rebind between approval and send the same way the other channels
+ * refuse a moved destination.
+ */
+async function emailAdvisoryDeliveryTarget(reportId: string, tx: Executor): Promise<string | null> {
+  const grant = await loadRepositoryGrantSnapshot(reportId, tx);
+  if (!grant || !grant.connectedRepositoryId || !hasActiveRepositoryGrant(grant)) return null;
+  const [repo] = await tx
+    .select({ repoId: connectedRepository.repoId })
+    .from(report)
+    .innerJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (!repo) return null;
+  return `github:${repo.repoId}:advisory:create`;
+}
+
+/**
  * The shared tail that turns a proven human approval into a queued delivery: check the outcome
  * is publishable, resolve the GitHub target, enqueue the outbound comment bound to the exact
  * approved hash, move the report to DELIVERING, and clear the session's pending markers.
@@ -617,30 +642,42 @@ export async function enqueueApprovedVerdictDelivery(
   // than followed. Refusing before the DELIVERING transition leaves a report that cannot be
   // delivered still approvable, rather than stranding it mid-delivery.
   let deliveryTarget: string;
+  let deliveryChannel: (typeof report.channel.enumValues)[number] | undefined;
   if (reportRow.channel === "github") {
     if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
       return { ok: false, reason: "invalid GitHub delivery target" };
     }
     deliveryTarget = reportRow.sourceRef;
   } else if (reportRow.channel === "email") {
-    const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
-    // The verified-recipient half of the delivery contract: no address that passed inbound
-    // SPF/DKIM means there is nobody we can prove we are replying to, so no outbox row exists.
-    if (!contact) {
-      return { ok: false, reason: "report has no verified reporter contact to deliver to" };
+    // An email report bound to a target whose connected repository still grants access is
+    // delivered as a draft advisory, not an email reply: for a connected repo the advisory is the
+    // place a vulnerability is tracked and fixed. This is decided before the email-recipient gates
+    // because the advisory route mails nobody; its recipient is the repository, re-verified live by
+    // the advisory arm. An email report with no such binding falls through to the reply.
+    const advisoryTarget = await emailAdvisoryDeliveryTarget(verdictRow.reportId, tx);
+    if (advisoryTarget) {
+      deliveryTarget = advisoryTarget;
+      deliveryChannel = "advisory";
+    } else {
+      const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
+      // The verified-recipient half of the delivery contract: no address that passed inbound
+      // SPF/DKIM means there is nobody we can prove we are replying to, so no outbox row exists.
+      if (!contact) {
+        return { ok: false, reason: "report has no verified reporter contact to deliver to" };
+      }
+      if (!/^email:.+/.test(reportRow.sourceRef)) {
+        return { ok: false, reason: "invalid email delivery target" };
+      }
+      // Intake accepts mail from an allowlisted sender, or from an outside sender whose mail passed
+      // SPF and DKIM (recorded as verified_sender). Re-reading it here refuses early, before the
+      // report moves to DELIVERING, if the address no longer qualifies. The worker checks again at
+      // send time; this one is about not stranding the report, that one is about not mailing the
+      // wrong person.
+      if (!(await isVerifiedEmailRecipient(reportRow))) {
+        return { ok: false, reason: `${contact} is no longer an authorised address` };
+      }
+      deliveryTarget = contact;
     }
-    if (!/^email:.+/.test(reportRow.sourceRef)) {
-      return { ok: false, reason: "invalid email delivery target" };
-    }
-    // Intake accepts mail from an allowlisted sender, or from an outside sender whose mail passed
-    // SPF and DKIM (recorded as verified_sender). Re-reading it here refuses early, before the
-    // report moves to DELIVERING, if the address no longer qualifies. The worker checks again at
-    // send time; this one is about not stranding the report, that one is about not mailing the
-    // wrong person.
-    if (!(await isVerifiedEmailRecipient(reportRow))) {
-      return { ok: false, reason: `${contact} is no longer an authorised address` };
-    }
-    deliveryTarget = contact;
   } else if (reportRow.channel === "upload") {
     // Upload rides the email transport, so its delivery target is the same OTP-verified contact and
     // the same recipient re-check. The one difference from email is the source_ref shape: an upload
@@ -683,6 +720,7 @@ export async function enqueueApprovedVerdictDelivery(
       verdictId: verdictRow.id,
       idempotencyKey: `verdict:${verdictRow.id}`,
       target: deliveryTarget,
+      channel: deliveryChannel,
       // The hash this write commits to is the one the caller just verified, not a second,
       // unverified read of the same column: a `verdict` row is immutable, so the two should
       // always agree, but the outbox must never bind to a value nobody checked the moment

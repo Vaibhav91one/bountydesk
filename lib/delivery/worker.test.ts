@@ -234,6 +234,12 @@ function makeFakeDeps(
     updateAdvisoryDescription: async () => {
       throw new Error("github comment delivery must not touch an advisory");
     },
+    createDraftAdvisory: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
+    },
+    findAdvisoryByMarker: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
+    },
   };
   return { deps, calls };
 }
