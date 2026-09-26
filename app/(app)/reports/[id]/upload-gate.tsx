@@ -167,7 +167,7 @@ export function UploadGate({ reportId, state, upload }: { reportId: string; stat
               <label htmlFor="upload-start">Start command</label>
               <Input
                 id="upload-start"
-                placeholder="Optional, the image's own command by default"
+                placeholder="How the app starts, e.g. python app.py"
                 value={startCommand}
                 onChange={(e) => setStartCommand(e.target.value)}
               />
