@@ -247,7 +247,10 @@ test("a 422 on the advisory write is held for a human, not retried", async () =>
   const row = await deliveryRow(f.deliveryId);
   assert.equal(row.state, "FAILED");
   assert.equal(row.rhr, true, "a 422 is not fixed by retrying, so it is held");
-  assert.match(row.lastError ?? "", /refused the advisory write/);
+  // A 422 is a validation error on the drafted advisory, not a permission or feature gap, so the
+  // held message names it as such and does not send a human to change a permission.
+  assert.match(row.lastError ?? "", /validation error rather than a permission problem/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
   assert.equal(await reportState(f.reportId), "DELIVERING");
 });
 

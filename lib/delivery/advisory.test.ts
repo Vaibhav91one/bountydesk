@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before, beforeEach } from "node:test";
 
+import { GitHubApiError } from "@/lib/github/app-auth";
+
 /**
  * The owner advisory sends an approved verdict to a second audience, so what is under test is
  * everything that can stop it: the request gates, the approved hash and marker at send time, a
@@ -309,6 +311,22 @@ test("a 422 is a validation error, failed as such, not read as a permission or f
   assert.match(failed.lastError ?? "", /validation error rather than a permission problem/);
   assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
   assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+});
+
+test("a rate-limited token mint (403) is transient and retried, not failed for good", async () => {
+  const limited = await seed();
+  await advisory.requestOwnerAdvisory(limited.reportId, "r");
+  const { deps } = fakeGitHub();
+  // A secondary rate limit on minting the installation token surfaces as a 403 GitHubApiError with
+  // rateLimited set. It must not be read as a missing permission.
+  const mintToken = async () => {
+    throw new GitHubApiError(403, "secondary rate limit on token mint", true);
+  };
+  await advisory.adviseOnce({ deps: { ...deps, mintToken } });
+  const r = await row(limited.reportId);
+  assert.equal(r.state, "PENDING", "a rate-limited mint stays claimable, not failed for good");
+  assert.doesNotMatch(r.lastError ?? "", /has not granted/);
+  assert.doesNotMatch(r.lastError ?? "", /GitHub Advanced Security/);
 });
 
 test("a GitHub report's owner gets the advisory too, with severity and CWEs from its findings", async () => {

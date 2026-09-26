@@ -16,6 +16,7 @@ import {
   verdict,
 } from "@/lib/db";
 import { ne } from "drizzle-orm";
+import { GitHubApiError } from "@/lib/github/app-auth";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { classifyFindings, type Advisory, type AdvisorySeverity } from "@/lib/github/advisory";
 import { verdictFindings } from "@/lib/reports/case-facts";
@@ -360,8 +361,11 @@ async function send(
     });
     return { state: "SENT", advisory, updated: false };
   } catch (error) {
+    // A rate-limited token mint arrives as a 403 too, but it is transient, so it must not be read as
+    // a permanent refusal. Let it fall through to the re-throw and adviseOnce retries it.
+    const rateLimitedMint = error instanceof GitHubApiError && error.rateLimited;
     const status = (error as { status?: unknown }).status;
-    if (status === 403 || status === 404 || status === 422) {
+    if (!rateLimitedMint && (status === 403 || status === 404 || status === 422)) {
       const message = error instanceof Error ? error.message : String(error);
       const detail =
         status === 422
