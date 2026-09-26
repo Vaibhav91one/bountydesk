@@ -183,3 +183,37 @@ test("a reported advisory without a ghsa_id is refused", async () => {
   assert.match(await response.text(), /no ghsa_id/);
   assert.equal((await advisoryJobs(f)).length, 0);
 });
+
+test("an advisory for a repository removed from the installation is refused", async () => {
+  const f = fixture();
+  await connect(f);
+  // The repository is dropped from the installation between the install and this delivery, so the
+  // grant it once had is gone and a signed advisory for it is refused.
+  await POST(
+    request("installation_repositories", {
+      action: "removed",
+      installation: { id: f.installationId, account: { login: "acme", id: 77 } },
+      repositories_removed: [{ id: f.repoId, full_name: f.fullName }],
+    }),
+  );
+
+  const response = await POST(advisoryEvent(f, "reported"));
+  assert.equal(await response.text(), "repository is not connected");
+  assert.equal((await advisoryJobs(f)).length, 0);
+});
+
+test("a revocation that wins the race stops the advisory job being created", async () => {
+  const f = fixture();
+  await connect(f);
+  // The revocation commits before the delivery arrives, so the access check inside the intake
+  // transaction reads it and refuses. This mirrors the issue-intake race in intake.test.ts.
+  await schema.admin.unsafe(
+    `set search_path to "${schema.name}";
+     update github_installation set suspended_at = now()
+      where installation_id = ${f.installationId}`,
+  );
+
+  const response = await POST(advisoryEvent(f, "reported"));
+  assert.equal(await response.text(), "repository is not connected");
+  assert.equal((await advisoryJobs(f)).length, 0);
+});

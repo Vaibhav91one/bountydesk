@@ -13,6 +13,7 @@ import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 import { RecheckActions } from "./recheck-actions";
 import { OwnerAdvisoryControl } from "./owner-advisory-control";
+import { CancelReportControl } from "./cancel-report-control";
 import { RetryDeliveryControl } from "./retry-delivery-control";
 import { TargetControl } from "./target-control";
 
@@ -136,6 +137,7 @@ export function StatusCard({
       ) : null}
 
       <RetryDeliveryControl reportId={reportId} status={status} />
+      <CancelReportControl reportId={reportId} status={status} />
 
       {status.state === "REPRODUCING" && status.recheckSummary ? (
         <RecheckActions reportId={reportId} summary={status.recheckSummary} />

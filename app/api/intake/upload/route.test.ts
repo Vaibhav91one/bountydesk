@@ -91,3 +91,34 @@ test("an accepted upload is held at the gate on the upload channel", async () =>
   assert.equal(intake.clientIp, "198.51.100.7");
   assert.match(intake.sourceArchiveDigest ?? "", /^sha256:[0-9a-f]{64}$/);
 });
+
+test("a multipart body that cannot be parsed as a form is refused", async () => {
+  // The content type says multipart, so the size and type gates pass, but the bytes are not a valid
+  // multipart body, so the form parser throws and the route answers 400 rather than 500.
+  const response = await POST(
+    new Request("http://localhost/api/intake/upload", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=zzz" },
+      body: "this is not a multipart body",
+    }),
+  );
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /could not be read/);
+});
+
+test("an unexpected error while admitting the upload answers 503, not 500", async () => {
+  // A well-formed upload that passes every input gate, so it reaches admitUpload's transaction. That
+  // transaction is forced to throw to stand in for any unexpected database failure; the route must
+  // fail closed with a retryable 503 rather than leaking a 500.
+  const original = dbm.db.transaction.bind(dbm.db);
+  dbm.db.transaction = (async () => {
+    throw new Error("simulated database failure");
+  }) as typeof dbm.db.transaction;
+  try {
+    const response = await POST(upload({ ...REPORT, dockerfile: new Blob(["FROM nginx:1.27\n"]) }));
+    assert.equal(response.status, 503);
+    assert.match((await response.json()).error, /try again shortly/);
+  } finally {
+    dbm.db.transaction = original;
+  }
+});
