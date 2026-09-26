@@ -160,6 +160,12 @@ export const githubInstallation = pgTable(
      * a public one never reads it.
      */
     contentsPermission: text("contents_permission"),
+    /**
+     * The installation's `repository_advisories` permission, recorded the same way as
+     * contents_permission. An email report is routed to a draft advisory only when this is
+     * "write"; anything else, null included, keeps the email reply.
+     */
+    repositoryAdvisoriesPermission: text("repository_advisories_permission"),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),

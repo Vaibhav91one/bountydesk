@@ -28,9 +28,10 @@ import {
  * One-way-safe, exactly like the webhooks: reconcile can only revoke. It never clears a tombstone,
  * never lifts a suspension, and never restores a target profile. Restoring access is always an
  * operator action, the one signal we can order, so a reconcile pass cannot re-open intake by
- * itself even if it races a real reinstall. It does copy two facts from GitHub onto live rows, the
- * installation's Contents permission and each repository's visibility (syncAccessFacts), but those
- * restore nothing: they only feed the private-repository policy.
+ * itself even if it races a real reinstall. It does copy facts from GitHub onto live rows, the
+ * installation's Contents and repository advisories permissions and each repository's visibility
+ * (syncAccessFacts), but those restore nothing: they feed the private-repository policy and the
+ * email-to-advisory routing choice.
  *
  * Fail safe on every read. A reconcile failure must never revoke: if the truth from GitHub did
  * not fully arrive (a failed page, a rate limit, a 5xx), we leave state as it is and record the
@@ -45,7 +46,13 @@ const MAX_PAGES = 100;
 
 /** The slice of GitHub's installation object reconcile reads. `contents` is the granted Contents
  *  permission ("none" when absent from a permissions object), undefined when GitHub sent none. */
-type LiveInstallation = { id: number; suspended: boolean; contents?: string };
+type LiveInstallation = {
+  id: number;
+  suspended: boolean;
+  contents?: string;
+  /** The granted repository_advisories permission, read the same way as `contents`. */
+  advisories?: string;
+};
 
 /** One repository of an installation. `private` is undefined when GitHub did not say. */
 type LiveRepo = { id: number; private?: boolean };
@@ -118,15 +125,21 @@ async function fetchLiveInstallations(
       if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "number") {
         const suspendedAt = (item as { suspended_at?: unknown }).suspended_at;
         const permissions = (item as { permissions?: unknown }).permissions;
-        const contents =
+        const granted =
           permissions && typeof permissions === "object"
-            ? (permissions as { contents?: unknown }).contents
+            ? (permissions as { contents?: unknown; repository_advisories?: unknown })
             : undefined;
         out.push({
           id: (item as { id: number }).id,
           suspended: typeof suspendedAt === "string",
-          ...(permissions && typeof permissions === "object"
-            ? { contents: typeof contents === "string" ? contents : "none" }
+          ...(granted
+            ? {
+                contents: typeof granted.contents === "string" ? granted.contents : "none",
+                advisories:
+                  typeof granted.repository_advisories === "string"
+                    ? granted.repository_advisories
+                    : "none",
+              }
             : {}),
         });
       }
@@ -180,20 +193,25 @@ async function fetchLiveRepos(
 }
 
 /**
- * Copy GitHub's current Contents permission and repository visibility onto our rows. This is the
- * backfill for rows written before either was stored, and the catch-up for a permission change that
- * sent no webhook. It is not a grant: neither column restores access, a target binding or intake.
- * They only feed the private-repository policy, which then reads what GitHub says right now.
+ * Copy GitHub's current Contents and repository advisories permissions and repository visibility
+ * onto our rows. This is the backfill for rows written before these were stored, and the catch-up
+ * for a permission change that sent no webhook. It is not a grant: none of these columns restores
+ * access, a target binding or intake. They feed the private-repository policy and the choice of
+ * advisory over email reply, both of which then read what GitHub says right now.
  */
 async function syncAccessFacts(
   installationRowId: string,
-  contents: string | undefined,
+  { contents, advisories }: Pick<LiveInstallation, "contents" | "advisories">,
   liveRepos: LiveRepo[],
 ): Promise<void> {
-  if (contents !== undefined) {
+  if (contents !== undefined || advisories !== undefined) {
     await db
       .update(githubInstallation)
-      .set({ contentsPermission: contents, updatedAt: new Date() })
+      .set({
+        ...(contents !== undefined ? { contentsPermission: contents } : {}),
+        ...(advisories !== undefined ? { repositoryAdvisoriesPermission: advisories } : {}),
+        updatedAt: new Date(),
+      })
       .where(eq(githubInstallation.id, installationRowId));
   }
   for (const isPrivate of [true, false]) {
@@ -323,7 +341,7 @@ export async function reconcileGitHubAccess(
       summary.errors.push(`list repositories for installation ${row.installationId}: ${errorMessage(err)}`);
       continue;
     }
-    await syncAccessFacts(row.id, gh.contents, liveRepos);
+    await syncAccessFacts(row.id, gh, liveRepos);
     const liveSet = new Set(liveRepos.map((r) => r.id));
 
     const activeRepos = await db

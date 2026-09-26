@@ -278,7 +278,11 @@ test("reconcile backfills repository visibility and the Contents permission with
   await reconcile.reconcileGitHubAccess({
     fetchImpl: fakeFetch({
       installations: [
-        { id: inst.installationId, suspended_at: null, permissions: { contents: "read", issues: "write" } },
+        {
+          id: inst.installationId,
+          suspended_at: null,
+          permissions: { contents: "read", issues: "write", repository_advisories: "write" },
+        },
       ],
       repos: { repositories: [{ id: privateRepo, private: true }, { id: publicRepo, private: false }] },
     }),
@@ -286,10 +290,14 @@ test("reconcile backfills repository visibility and the Contents permission with
   });
 
   const [installation] = await dbm.db
-    .select({ contents: dbm.githubInstallation.contentsPermission })
+    .select({
+      contents: dbm.githubInstallation.contentsPermission,
+      advisories: dbm.githubInstallation.repositoryAdvisoriesPermission,
+    })
     .from(dbm.githubInstallation)
     .where(dbm.eq(dbm.githubInstallation.id, inst.rowId));
   assert.equal(installation.contents, "read");
+  assert.equal(installation.advisories, "write");
   const visibility = async (repoId: number) =>
     (
       await dbm.db
@@ -306,6 +314,10 @@ test("reconcile backfills repository visibility and the Contents permission with
 
 test("a permissions object without contents records the permission as absent", async () => {
   const inst = await seedInstallation();
+  await dbm.db
+    .update(dbm.githubInstallation)
+    .set({ repositoryAdvisoriesPermission: "write" })
+    .where(dbm.eq(dbm.githubInstallation.id, inst.rowId));
   await reconcile.reconcileGitHubAccess({
     fetchImpl: fakeFetch({
       installations: [{ id: inst.installationId, suspended_at: null, permissions: { issues: "write" } }],
@@ -313,8 +325,14 @@ test("a permissions object without contents records the permission as absent", a
     mintToken: fakeMint,
   });
   const [installation] = await dbm.db
-    .select({ contents: dbm.githubInstallation.contentsPermission })
+    .select({
+      contents: dbm.githubInstallation.contentsPermission,
+      advisories: dbm.githubInstallation.repositoryAdvisoriesPermission,
+    })
     .from(dbm.githubInstallation)
     .where(dbm.eq(dbm.githubInstallation.id, inst.rowId));
   assert.equal(installation.contents, "none");
+  // A withdrawn advisories permission is recorded too, which sends the next email verdict to the
+  // reply instead of a draft advisory.
+  assert.equal(installation.advisories, "none");
 });

@@ -349,6 +349,47 @@ test("an email report bound to a revoked repo falls back to the email reply", as
   assert.equal(delivery.channel, null);
 });
 
+for (const advisories of ["read", "none", null]) {
+  test(`an email report whose installation has advisories permission ${advisories} gets the email reply`, async () => {
+    // Without "Repository security advisories: write" the draft could never be created, so routing
+    // there would only hold the send. The reply goes to the verified contact instead.
+    const { targetProfileId, connectedRepositoryId } = await seedTargetWithGrant({ advisories });
+    const fixture = await seedFixture({
+      approval: "approved",
+      channel: "email",
+      targetProfileId,
+      connectedRepositoryId,
+    });
+
+    const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+    assert.equal(result.ok, true);
+    const [delivery] = await dbm.db
+      .select({ target: dbm.outboundDelivery.target, channel: dbm.outboundDelivery.channel })
+      .from(dbm.outboundDelivery)
+      .where(dbm.eq(dbm.outboundDelivery.verdictId, fixture.verdictId));
+    assert.equal(delivery.target, REPORTER);
+    assert.equal(delivery.channel, null);
+  });
+}
+
+test("the email fallback without the advisories permission keeps its verified-recipient gate", async () => {
+  const { targetProfileId, connectedRepositoryId } = await seedTargetWithGrant({ advisories: "read" });
+  const fixture = await seedFixture({
+    approval: "approved",
+    channel: "email",
+    reporterContact: null,
+    targetProfileId,
+    connectedRepositoryId,
+  });
+
+  const result = await publishVerdictModule.publishVerdict(fixture.capability);
+
+  assert.equal(result.ok, false);
+  assert.match((result as { reason: string }).reason, /no verified reporter contact/);
+  assert.equal(await deliveryCount(fixture.verdictId), 0);
+});
+
 test("an email report with no verified contact stays approvable rather than stranded", async () => {
   const fixture = await seedFixture({
     approval: "approved",
@@ -597,7 +638,7 @@ async function seedDraftableReport(
 /** A bound target profile, optionally behind a connected repository with a specific grant
  * state, the same shape trueforge-driver.test.ts exercises for the deterministic pipeline. */
 async function seedTargetWithGrant(
-  opts: { active?: boolean; suspended?: boolean } = {},
+  opts: { active?: boolean; suspended?: boolean; advisories?: string | null } = {},
 ): Promise<{ targetProfileId: string; connectedRepositoryId: string }> {
   const [target] = await dbm.db
     .insert(dbm.targetProfile)
@@ -617,6 +658,7 @@ async function seedTargetWithGrant(
       accountLogin: `acct-${randomUUID()}`,
       accountId: Number(`8${randomUUID().replace(/\D/g, "").slice(0, 8)}`),
       suspendedAt: opts.suspended ? new Date() : null,
+      repositoryAdvisoriesPermission: opts.advisories === undefined ? "write" : opts.advisories,
     })
     .returning({ id: dbm.githubInstallation.id });
 

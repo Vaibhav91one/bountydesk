@@ -96,6 +96,10 @@ export const advisoryArm: DeliveryArm = async (ctx, deps) => {
 
   // Re-checked live, before a token exists: an uninstall, suspension, or target unbind between
   // approval and now stops the write and holds the row for a human, exactly like githubArm.
+  // This is activeRepository and not hasActiveRepositoryGrant on purpose. The latter adds the
+  // private-repository policy, which is about reading source (Contents: read) for reproduction.
+  // Writing a verdict to the repository's advisory reads no source and does not need Contents: read,
+  // so requiring it here would hold a valid delivery for a permission the write never uses.
   const repository = await activeRepository(installationId, repoId);
   if (!repository) {
     return {

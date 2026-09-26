@@ -52,7 +52,9 @@ Advisories are a private intake and the surface the verdict goes back to: a `rep
 `reported` or `published` delivery becomes an `advisory` report held at `NEEDS_DECISION`, and
 because GitHub has no comments API for advisories, the approved verdict is delivered by editing the
 advisory's description (`docs/advisory-intake.md`). An email report bound to a connected repository
-with a live grant delivers the same way, by opening a draft advisory, instead of an email reply.
+with a live grant, whose installation has accepted Repository security advisories write
+(`github_installation.repository_advisories_permission`), delivers the same way, by opening a draft
+advisory, instead of an email reply.
 Cloning a connected repository does not widen the permissions: a public repository clones
 anonymously, and Contents read is needed only for a private one. The private-repository policy
 accepts and triages the report, then refuses reproduction with `POLICY_REFUSED` (and onboarding refuses to clone) until
@@ -466,7 +468,9 @@ Some of what is built needs a person to switch it on. None of it can be stubbed.
 - GitHub App permissions: Metadata read, Issues read and write, Repository security advisories read
   and write. Add Contents read only for installations that want private repositories reproduced.
   Each installation owner has to accept a changed permission set before it takes effect; until
-  then advisory writes are refused and held, and private repositories stop at `POLICY_REFUSED`.
+  then email reports get the email reply rather than an advisory, advisory writes are refused and
+  held (a reviewer retries them from the case file once the permission is accepted), and private
+  repositories stop at `POLICY_REFUSED`.
 - GitHub App events: `issues`, `repository_advisory`, `installation`, `installation_repositories`
   and `repository`.
 - Private vulnerability reporting turned on in each repository that should take advisory reports.

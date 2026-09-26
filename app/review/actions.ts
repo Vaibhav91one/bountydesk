@@ -16,6 +16,7 @@ import {
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
+import { retryHeldDelivery } from "@/lib/delivery/retry";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import {
   cancelRecheck,
@@ -464,6 +465,33 @@ export async function requestOwnerAdvisoryAction(reportId: string): Promise<Acti
   } catch (error) {
     return thrownActionError(error, "notify");
   }
+}
+
+/**
+ * Re-queue the report's held delivery once the cause is fixed (a permission accepted, a recipient
+ * re-authorised, a repository reconnected). The row keeps its approved hash, target and delivery
+ * marker, and the send runs every gate again, so this chooses when to try, never what is sent.
+ */
+export async function retryHeldDeliveryAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  let deliveryId: string;
+  try {
+    const result = await retryHeldDelivery(reportId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    deliveryId = result.deliveryId;
+  } catch (error) {
+    return thrownActionError(error, "redeliver");
+  }
+  // Best effort, like an approval's immediate post: the row is queued either way, and the worker's
+  // drain picks it up if this attempt does not finish it.
+  try {
+    await deliverById(deliveryId, `review-retry-delivery-${deliveryId}`, { leaseSeconds: 20 });
+  } catch (error) {
+    console.error(`delivery ${deliveryId}: immediate retry failed: ${safeErrorText(error)}`);
+  }
+  revalidateReportViews(reportId);
+  return { ok: true };
 }
 
 /** Run one gate decision, turning a thrown failure into a message that leaks nothing. */

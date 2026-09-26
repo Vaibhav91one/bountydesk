@@ -82,11 +82,15 @@ async function upsertInstallation(
 ): Promise<string> {
   // Recorded only when the payload carries permissions, so an event without them (the repository
   // event's bare installation object) never erases what an earlier one told us. A permissions object
-  // without `contents` means the installation does not hold it.
-  const contentsPermission =
+  // without `contents` (or `repository_advisories`) means the installation does not hold it.
+  const permissions =
     installation.permissions && typeof installation.permissions === "object"
-      ? (installation.permissions.contents ?? "none")
+      ? installation.permissions
       : undefined;
+  const contentsPermission = permissions ? (permissions.contents ?? "none") : undefined;
+  const repositoryAdvisoriesPermission = permissions
+    ? (permissions.repository_advisories ?? "none")
+    : undefined;
   const values = {
     installationId: installation.id,
     accountLogin: installation.account?.login ?? "",
@@ -98,6 +102,7 @@ async function upsertInstallation(
         ? installation.account.type
         : null,
     ...(contentsPermission !== undefined ? { contentsPermission } : {}),
+    ...(repositoryAdvisoriesPermission !== undefined ? { repositoryAdvisoriesPermission } : {}),
   };
 
   const [row] = await tx
@@ -112,6 +117,7 @@ async function upsertInstallation(
         // type does not erase one we already learned.
         ...(values.accountType ? { accountType: values.accountType } : {}),
         ...(contentsPermission !== undefined ? { contentsPermission } : {}),
+        ...(repositoryAdvisoriesPermission !== undefined ? { repositoryAdvisoriesPermission } : {}),
         updatedAt: new Date(),
       },
     })
