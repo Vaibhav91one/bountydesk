@@ -167,3 +167,40 @@ test("a build with no recipe digest is refused before any profile is written", a
     .where(dbm.eq(dbm.targetProfile.name, "no-recipe"));
   assert.equal(rows.length, 0);
 });
+
+test("re-onboarding a connectionless target with changed pins throws rather than rotating in place", async () => {
+  // Rotation of a connectionless profile is unimplemented (docs/onboarding-follow-ups.md). This pins
+  // the current contract: a second bind of the same target name with a different build is a drift the
+  // shared upsert refuses, so a re-onboard cannot silently repoint the profile.
+  const { TargetProfileExistsError } = await import("@/lib/targets/configure");
+  const first: BuildResult = {
+    imageName: "ghcr.io/ns/reonboard",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    snapshotId: "snap-1",
+    dockerfileText: "FROM node:20\n",
+    buildLog: "built once",
+    buildMarker: `sha256:${"b".repeat(64)}`,
+    buildRecipeDigest: `sha256:${"1".repeat(64)}`,
+    sourceArchiveDigest: `sha256:${"b".repeat(64)}`,
+  };
+  const configured = await bind.bindConnectionlessTargetFromBuild(definition("reonboard"), first);
+  assert.ok(configured.targetProfileId);
+
+  // Same target name, a rebuild that produced a different image and recipe.
+  const second: BuildResult = {
+    ...first,
+    imageDigest: `sha256:${"c".repeat(64)}`,
+    snapshotId: "snap-2",
+    buildRecipeDigest: `sha256:${"2".repeat(64)}`,
+  };
+  await assert.rejects(
+    bind.bindConnectionlessTargetFromBuild(definition("reonboard"), second),
+    (error: unknown) =>
+      error instanceof TargetProfileExistsError && /different pinned target settings/.test(error.message),
+  );
+
+  // The original pin is untouched: the failed re-onboard changed nothing.
+  const row = await storedProfile(configured.targetProfileId);
+  assert.equal(row.imageDigest, `sha256:${"a".repeat(64)}`);
+  assert.equal(row.snapshotId, "snap-1");
+});
