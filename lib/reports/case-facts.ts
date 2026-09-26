@@ -42,6 +42,12 @@ export type CaseFile = {
   title: string;
   body: string;
   channel: string;
+  /**
+   * True when this is an email report bound to a repository that delivers verdicts as a draft
+   * advisory rather than an email reply. The intake channel stays `email`; this only decides how
+   * the approval surfaces describe where an approved verdict goes.
+   */
+  deliversAsAdvisory: boolean;
   sourceRef: string;
   sourceLabel: string;
   /** The issue number alone, for the GitHub-style "title #482". Null off GitHub. */

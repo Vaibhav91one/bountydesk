@@ -608,7 +608,10 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
  * repo id lets the worker refuse a rebind between approval and send the same way the other channels
  * refuse a moved destination.
  */
-async function emailAdvisoryDeliveryTarget(reportId: string, tx: Executor): Promise<string | null> {
+export async function emailAdvisoryDeliveryTarget(
+  reportId: string,
+  tx: Executor,
+): Promise<string | null> {
   const grant = await loadRepositoryGrantSnapshot(reportId, tx);
   if (!grant || !grant.connectedRepositoryId || !hasActiveRepositoryGrant(grant)) return null;
   const [repo] = await tx
