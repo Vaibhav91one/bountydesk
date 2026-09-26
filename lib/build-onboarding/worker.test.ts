@@ -156,6 +156,76 @@ async function stateOf(repoId: number): Promise<string> {
   return row.state;
 }
 
+async function reasonOf(repoId: number): Promise<string | null> {
+  const [row] = await dbm.db
+    .select({ reason: dbm.targetOnboarding.analysisOnlyReason })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  return row.reason;
+}
+
+/** Put a claimable row on its last attempt, so the next failure is the one that moves it to FAILED. */
+async function lastAttempt(repoId: number) {
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ attempts: queue.MAX_ATTEMPTS - 1, nextAttemptAt: new Date(0) })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+}
+
+test("a build that keeps failing ends FAILED with COULD_NOT_BUILD, and only on the final attempt", async () => {
+  const repoId = await connectedRepo("acme/broken-build");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/broken-build", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  const broken = deps({ buildDriver: fakeBuildDriver(new Error("npm ci exited 1")) });
+
+  await worker.onboardOnce("w1", broken); // PENDING_PLAN -> PENDING_BUILD
+  await worker.onboardOnce("w1", broken); // first build failure: retried, not given up
+  assert.equal(await stateOf(repoId), "PENDING_BUILD");
+  assert.equal(await reasonOf(repoId), null, "a build still being retried has not failed yet");
+
+  await lastAttempt(repoId);
+  await worker.onboardOnce("w1", broken);
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD");
+
+  // A requeue starts the repo over, so the old reason must not outlive it.
+  await queue.enqueue({ repoId, repoFullName: "acme/broken-build", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  assert.equal(await stateOf(repoId), "PENDING_PLAN");
+  assert.equal(await reasonOf(repoId), null);
+});
+
+test("a FAILED row that never reached the build records no build reason", async () => {
+  const repoId = await connectedRepo("acme/unreadable");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/unreadable", sourceRef: "https://x/u.git", resolvedCommitSha: "a".repeat(40) });
+  await lastAttempt(repoId);
+
+  await worker.onboardOnce("w1", deps({ classify: async () => { throw new Error("GitHub answered 502"); } }));
+
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), null, "a classify failure is not a build failure");
+});
+
+test("a worker that died on its final build attempt is swept to FAILED with COULD_NOT_BUILD", async () => {
+  const repoId = await connectedRepo("acme/died-building");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/died-building", sourceRef: "https://x/d.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({
+      state: "PENDING_BUILD",
+      attempts: queue.MAX_ATTEMPTS,
+      leaseOwner: "dead-worker",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+    })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  await queue.sweepExpiredLeases();
+
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD");
+});
+
 test("classify then build stores the outputs and advances to the manifest step", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
@@ -200,6 +270,7 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
   );
 
   assert.equal(await stateOf(repoId), "UNSUPPORTED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD", "a report on this repo takes the static review");
   assert.equal(built, false, "an unsupported repo is never built");
   // UNSUPPORTED is terminal: a further claim does not pick it up.
   await worker.onboardOnce("w1", deps({}));

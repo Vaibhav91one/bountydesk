@@ -1096,6 +1096,11 @@ export const targetOnboarding = pgTable(
     fence: bigint("fence", { mode: "number" }).notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
     lastError: text("last_error"),
+    /** Why this repo cannot be reproduced against, set only when onboarding comes to rest short of
+     *  a target: `COULD_NOT_BUILD` when the repo is not flattenable (UNSUPPORTED) or its build step
+     *  exhausted its attempts (FAILED). A report on the repo reads it to take the read-only static
+     *  review instead of a reproduction. Null for every other outcome, and cleared on a requeue. */
+    analysisOnlyReason: text("analysis_only_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

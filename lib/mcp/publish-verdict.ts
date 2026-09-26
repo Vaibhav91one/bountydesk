@@ -18,10 +18,12 @@ import {
   verdictSupersession,
   type Executor,
 } from "@/lib/db";
+import type { StaticFallbackReason } from "@/lib/analysis/static-review";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
 import { isVerifiedEmailRecipient } from "@/lib/email/recipient";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
+import { readStaticFallback } from "@/lib/reports/target-scope";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { appendVerdictRevision, ensureInitialVerdict, nextVerdictRevision } from "@/lib/verdicts/lifecycle";
@@ -134,6 +136,15 @@ async function reproductionUnavailabilityEvidence(reportId: string, tx: Executor
   return { reproduction: "unavailable", reason: "no-reproduction-target" };
 }
 
+async function staticFallbackReason(reportId: string, tx: Executor): Promise<StaticFallbackReason | null> {
+  return (await readStaticFallback(reportId, tx))?.reason ?? null;
+}
+
+async function analysisOnlyReasonEvidence(reportId: string, tx: Executor): Promise<{ analysisOnlyReason?: StaticFallbackReason }> {
+  const reason = await staticFallbackReason(reportId, tx);
+  return reason ? { analysisOnlyReason: reason } : {};
+}
+
 export async function synthesizeAnalysisOnlyVerdict(
   reportId: string,
   tx: Executor,
@@ -171,7 +182,11 @@ export async function synthesizeAnalysisOnlyVerdict(
       summary: SYNTHESIZED_ANALYSIS_SUMMARY,
       // The outbound summary stays constant; the evidence (reviewer-facing, not the GitHub comment)
       // carries the server-derived reason reproduction was unavailable.
-      evidence: { source: "server-synthesized", ...(await reproductionUnavailabilityEvidence(reportId, tx)) },
+      evidence: {
+        source: "server-synthesized",
+        ...(await reproductionUnavailabilityEvidence(reportId, tx)),
+        ...(await analysisOnlyReasonEvidence(reportId, tx)),
+      },
       payload: buildAgentDraftedPayload(verdictId, draft),
     },
     tx,
@@ -246,6 +261,17 @@ async function persistAgentDraftedVerdict(
   const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
   if (!allowed.ok) return allowed;
 
+  // A static-review run never had a running target, whatever the agent concluded from the source,
+  // so a definitive outcome is refused here even when the target and its grant are otherwise fine.
+  // Only the initial run is held to this: a later re-check boots the target again on its own terms.
+  const staticReason = await staticFallbackReason(reportId, tx);
+  if (staticReason && draft.outcome !== "ANALYSIS_ONLY") {
+    return {
+      ok: false,
+      reason: `outcome ${draft.outcome} is refused: this run was a static review (${staticReason}) with no running target; only ANALYSIS_ONLY is permitted`,
+    };
+  }
+
   // The image the report was reproduced against, if it has a bound target with a digest. Cited
   // in the approved comment; absent for a target-less report, which simply gets no target line.
   const [targetRow] = await tx
@@ -283,7 +309,11 @@ async function persistAgentDraftedVerdict(
       reportId,
       outcome: draft.outcome,
       summary: draft.summary,
-      evidence: { source: "agent-drafted", findings: draft.findings },
+      evidence: {
+        source: "agent-drafted",
+        findings: draft.findings,
+        ...(staticReason ? { analysisOnlyReason: staticReason } : {}),
+      },
       payload,
     },
     tx,

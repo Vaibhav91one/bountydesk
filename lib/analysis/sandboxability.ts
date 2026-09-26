@@ -31,7 +31,7 @@ const MAX_FILE_CHARS = 4_000;
 /** The files whose presence and contents most reveal how a repo boots: what it is (README), whether it
  *  declares multiple services (compose), its ecosystem and scripts (the language manifests), how it is
  *  launched (Dockerfile, Procfile), and whether it needs credentials to start (.env.example, app.json). */
-const REVIEW_FILES = [
+export const REVIEW_FILES = [
   "README.md",
   "readme.md",
   "docker-compose.yml",
@@ -54,11 +54,17 @@ const REVIEW_FILES = [
 /** Read a file capped at maxBytes with a Range request, so a large README or lockfile does not download
  *  in full for a cheap pre-check. raw.githubusercontent.com honours Range and answers 206 with only the
  *  first bytes; a host that ignores it returns 200, which the slice still bounds. */
-function boundedSourceReader(repoFullName: string, maxBytes: number, ref = "HEAD"): SourceReader {
+export function boundedSourceReader(
+  repoFullName: string,
+  maxBytes: number,
+  ref = "HEAD",
+  signal?: AbortSignal,
+): SourceReader {
   return {
     async readFile(path: string) {
       const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
         headers: { Range: `bytes=0-${maxBytes - 1}` },
+        signal,
       });
       if (res.status === 404) return null;
       if (!res.ok && res.status !== 206) return null;
