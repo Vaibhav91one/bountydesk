@@ -315,8 +315,15 @@ export async function confirmContactCode(reportId: string, code: string): Promis
   return { ok: true };
 }
 
-/** The client address the platform saw. On Vercel the first x-forwarded-for entry is set by the edge. */
+/**
+ * The client address the platform's edge saw. Vercel sets x-real-ip itself, so a requester cannot
+ * choose it. Without it, the last x-forwarded-for entry is the one the nearest proxy appended; the
+ * first is whatever the requester sent, which would let one machine mint a fresh per-address bucket
+ * per request.
+ */
 export function clientAddress(headers: Headers): string | null {
-  const forwarded = headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return forwarded || headers.get("x-real-ip")?.trim() || null;
+  const real = headers.get("x-real-ip")?.trim();
+  if (real) return real;
+  const forwarded = headers.get("x-forwarded-for")?.split(",").at(-1)?.trim();
+  return forwarded || null;
 }

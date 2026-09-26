@@ -208,6 +208,14 @@ test("a prebuilt image from a registry outside the allowlist is refused", async 
   assert.equal((await parse({ imageRef: "ghcr.io/org/app:2", imageDigest: "sha256:short" })).ok, false);
 });
 
+test("the client address comes from the edge, not from a value the requester chose", () => {
+  const h = (init: Record<string, string>) => new Headers(init);
+  assert.equal(intake.clientAddress(h({ "x-real-ip": "203.0.113.5", "x-forwarded-for": "1.2.3.4" })), "203.0.113.5");
+  // A spoofed first hop is ignored; the entry the nearest proxy appended counts.
+  assert.equal(intake.clientAddress(h({ "x-forwarded-for": "1.2.3.4, 203.0.113.6" })), "203.0.113.6");
+  assert.equal(intake.clientAddress(h({})), null);
+});
+
 test("an uploaded Dockerfile is wrapped in a deterministic one-file tarball that tar can read", async () => {
   const content = Buffer.from("FROM alpine:3.20\nCMD [\"sleep\", \"1\"]\n");
   const first = intake.singleFileTar("Dockerfile", content);
