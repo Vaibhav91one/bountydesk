@@ -324,7 +324,9 @@ export async function stageSource(
   // this handles; chunk the write if a large upload ever hits the shell's argument-length cap.
   const b64 = source.archive.toString("base64");
   const expectedHex = source.sourceArchiveDigest.slice("sha256:".length).toLowerCase();
-  await run(sandbox, `echo ${shellArg(b64)} | base64 -d > /work/source.tgz`);
+  // A shell redirect does not create the leading directory, and /work does not pre-exist in the
+  // build image: the git branch only gets away without this because git clone creates /work itself.
+  await run(sandbox, `mkdir -p /work && echo ${shellArg(b64)} | base64 -d > /work/source.tgz`);
   await run(
     sandbox,
     `actual=$(sha256sum /work/source.tgz | cut -d' ' -f1); [ "$actual" = ${shellArg(expectedHex)} ] || { echo "staged archive digest $actual != ${expectedHex}" >&2; exit 1; }`,

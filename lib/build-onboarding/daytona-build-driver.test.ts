@@ -227,6 +227,13 @@ test("stageSource writes and extracts an archive, re-checks its digest in the sa
   assert.ok(commands.some((c) => c.includes("base64 -d > /work/source.tgz")), "writes the archive");
   assert.ok(commands.some((c) => c.includes("sha256sum /work/source.tgz")), "re-checks the digest in-sandbox");
   assert.ok(commands.some((c) => c.includes("tar -xf /work/source.tgz -C /work/source")), "extracts the archive");
+
+  // The write is a shell redirect, which does not create the leading directory, and /work does not
+  // pre-exist in the build image. The command that writes source.tgz must create /work first, or the
+  // real sandbox fails with "can't create /work/source.tgz: nonexistent directory" (only the git
+  // branch is saved by git clone creating /work itself).
+  const writeIndex = commands.findIndex((c) => c.includes("> /work/source.tgz"));
+  assert.ok(commands[writeIndex].includes("mkdir -p /work"), "the source.tgz write creates /work first");
 });
 
 test("stageSource refuses an archive whose bytes do not hash to the declared digest, before any write", async () => {
