@@ -66,8 +66,10 @@ export function resolveRegistry(): RegistryHandoff {
     host: process.env.REGISTRY_HOST?.trim() || "ghcr.io",
     user: process.env.REGISTRY_USER?.trim() || "bountydesk",
     namespace: process.env.REGISTRY_NAMESPACE?.trim() || requireEnv("GHCR_NAMESPACE"),
-    pushToken: process.env.REGISTRY_PUSH_TOKEN?.trim() || requireSecret("GHCR_PUSH_TOKEN"),
-    deleteToken: process.env.REGISTRY_DELETE_TOKEN?.trim() || undefined,
+    // Every token goes through requireSecret so a value accidentally duplicated into a NEXT_PUBLIC_*
+    // variable is caught here, the same guard the GHCR fallback has always had.
+    pushToken: process.env.REGISTRY_PUSH_TOKEN ? requireSecret("REGISTRY_PUSH_TOKEN") : requireSecret("GHCR_PUSH_TOKEN"),
+    deleteToken: process.env.REGISTRY_DELETE_TOKEN ? requireSecret("REGISTRY_DELETE_TOKEN") : undefined,
   });
 }
 
