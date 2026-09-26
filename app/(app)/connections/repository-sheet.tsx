@@ -297,7 +297,8 @@ export function RepositorySheet({
                   ) : null}
                   {/* Keyed by repo so a success message from one repository is not carried into
                       the next one the sheet opens on. */}
-                  {repo.onboardingProgress.state === "FAILED" ? (
+                  {repo.onboardingProgress.state === "FAILED" ||
+                  repo.onboardingProgress.state === "UNSUPPORTED" ? (
                     <RetryOnboardingButton key={repo.repoId} repoId={repo.repoId} />
                   ) : null}
                 </div>

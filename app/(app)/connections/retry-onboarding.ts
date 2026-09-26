@@ -15,12 +15,14 @@ import { privateRepoPolicyRefused } from "@/lib/github/repo-access";
 export type RetryResult = { ok: true } | { ok: false; error: string };
 
 /**
- * Restart a FAILED onboarding from the beginning, the button form of scripts/enqueue-onboarding.ts.
+ * Restart a FAILED or UNSUPPORTED onboarding from the beginning, the button form of
+ * scripts/enqueue-onboarding.ts.
  *
- * Only FAILED. UNSUPPORTED is an honest refusal from the classifier rather than a step that ran
- * out of attempts, and enqueue() deliberately leaves it untouched, so offering a retry there would
- * be a button that does nothing. A repository whose source has changed since can be disconnected
- * and reconnected, which is a new onboarding rather than a retry.
+ * UNSUPPORTED is an honest refusal from the classifier, but it describes the source at the commit it
+ * read. A repository whose owner has since fixed what made it unbuildable has no other way back:
+ * automatic enqueues (a reconnect webhook) deliberately leave UNSUPPORTED alone so a repository that
+ * truly cannot be packaged is not rebuilt in a loop. So a reviewer can ask for it here, and the
+ * requeue clears the resolved commit, so the new source is resolved and classified again.
  *
  * The repository name, and the clone URL built from it, come from connected_repository, never from
  * the client: the form carries only a repo id, and the build worker clones whatever sourceRef this
@@ -82,8 +84,8 @@ export async function retryOnboardingRequest(
       .where(eq(targetOnboarding.repoId, repoId))
       .limit(1)
       .for("update");
-    if (onboarding?.state !== "FAILED") {
-      return { ok: false, error: "Only a failed onboarding can be retried." };
+    if (onboarding?.state !== "FAILED" && onboarding?.state !== "UNSUPPORTED") {
+      return { ok: false, error: "Only a failed or unsupported onboarding can be retried." };
     }
 
     await enqueue(
@@ -93,6 +95,7 @@ export async function retryOnboardingRequest(
         sourceRef: `https://github.com/${repository.fullName}.git`,
       },
       tx,
+      { requeueUnsupported: true },
     );
     return { ok: true };
   });

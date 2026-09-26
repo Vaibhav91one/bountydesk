@@ -97,8 +97,47 @@ test("a non-reviewer or no session changes nothing", async () => {
   assert.equal((await rowOf(repoId)).state, "FAILED");
 });
 
-test("only a FAILED row is retried", async () => {
-  for (const state of ["UNSUPPORTED", "PENDING_BUILD", "AWAITING_APPROVAL", "APPROVED", "CONFIGURED"]) {
+test("a reviewer requeues an UNSUPPORTED row from the start, clearing the refusal and the old commit", async () => {
+  const repoId = await seed("UNSUPPORTED");
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({
+      analysisOnlyReason: "COULD_NOT_BUILD",
+      buildPlan: { strategy: "not-flattenable", reason: "apk mirrors unreachable", ecosystem: "python" },
+      resolvedCommitSha: "a".repeat(40),
+    })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  assert.deepEqual(await mod.retryOnboardingRequest(reviewer, repoId), { ok: true });
+
+  const [row] = await dbm.db
+    .select({
+      state: dbm.targetOnboarding.state,
+      sourceRef: dbm.targetOnboarding.sourceRef,
+      analysisOnlyReason: dbm.targetOnboarding.analysisOnlyReason,
+      buildPlan: dbm.targetOnboarding.buildPlan,
+      resolvedCommitSha: dbm.targetOnboarding.resolvedCommitSha,
+    })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  assert.equal(row.state, "PENDING_PLAN");
+  assert.equal(row.sourceRef, `https://github.com/acme/current-${seq}.git`);
+  assert.equal(row.analysisOnlyReason, null);
+  assert.equal(row.buildPlan, null);
+  assert.equal(row.resolvedCommitSha, null, "the new source is resolved again, not the refused commit");
+});
+
+test("an automatic enqueue leaves an UNSUPPORTED row alone", async () => {
+  const repoId = await seed("UNSUPPORTED");
+  const { enqueue } = await import("@/lib/build-onboarding/queue");
+  await enqueue({ repoId, repoFullName: `acme/current-${seq}`, sourceRef: `https://github.com/acme/current-${seq}.git` });
+  const row = await rowOf(repoId);
+  assert.equal(row.state, "UNSUPPORTED");
+  assert.equal(row.sourceRef, "https://evil.example/elsewhere.git");
+});
+
+test("only a FAILED or UNSUPPORTED row is retried", async () => {
+  for (const state of ["PENDING_BUILD", "AWAITING_APPROVAL", "APPROVED", "CONFIGURED"]) {
     const repoId = await seed(state);
     const result = await mod.retryOnboardingRequest(reviewer, repoId);
     assert.equal(result.ok, false, state);

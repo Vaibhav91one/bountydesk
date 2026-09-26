@@ -11,7 +11,7 @@ export function RetryOnboardingButton({ repoId }: { repoId: number }) {
   const [result, action, pending] = useActionState<RetryResult | null, FormData>(retryOnboarding, null);
 
   const queryClient = useQueryClient();
-  // A list whose only onboarding is FAILED has stopped polling. Refetching shows the row back in
+  // A list whose only onboarding is FAILED or UNSUPPORTED has stopped polling. Refetching shows the row back in
   // PENDING_PLAN, which restarts polling until the new run settles.
   useEffect(() => {
     if (result?.ok) void queryClient.invalidateQueries({ queryKey: ["connections"] });
