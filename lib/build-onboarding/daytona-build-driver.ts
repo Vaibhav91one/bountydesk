@@ -36,6 +36,9 @@ import { resolveRegistry, type RegistryHandoff, type SandboxRun } from "./regist
 import { selectEgressHosts } from "./egress-profiles";
 import { gitCloneCommand, redactToken, repoReadToken } from "@/lib/github/repo-access";
 import { revokeInstallationToken } from "@/lib/github/app-auth";
+import { imageRegistryRefusal, isSafeImageRef, registryHostOf } from "./image-registries";
+
+export { isSafeImageRef, registryHostOf };
 
 /**
  * The one implementation of BuildDriver that touches live infrastructure.
@@ -357,21 +360,6 @@ async function buildPrebuiltImage(
 }
 
 /**
- * The registry host a prebuilt image is pulled from, when it names one. A reference whose first path
- * segment has a dot, a port, or is `localhost` names its registry (ghcr.io/x/y, host:5000/app); anything
- * else is Docker Hub, which the base allow-list already covers. The port is dropped because the build
- * allow-list takes bare domains.
- */
-export function registryHostOf(imageRef: string): string | undefined {
-  const slash = imageRef.indexOf("/");
-  if (slash < 0) return undefined;
-  const first = imageRef.slice(0, slash);
-  if (!first.includes(".") && !first.includes(":") && first !== "localhost") return undefined;
-  const host = first.split(":")[0].toLowerCase();
-  return /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(host) ? host : undefined;
-}
-
-/**
  * Decide how the source reaches the build. An explicit source (a non-GitHub onboarding path) is
  * validated for a usable anchor; otherwise the driver falls back to the GitHub clone path, which
  * needs a server-resolved commit. A source with no immutable anchor is refused here, before any
@@ -392,6 +380,9 @@ export function resolveBuildSource(input: BuildInput): BuildSource {
     ) {
       throw new Error("a prebuilt image source requires a plain tag reference and its own sha256 digest");
     }
+    // The image's registry host joins the build egress allow-list, so it must be one the server allows.
+    const refusal = source.kind === "image" ? imageRegistryRefusal(source.imageRef) : null;
+    if (refusal) throw new Error(refusal);
     return source;
   }
   if (!isCommitSha(input.resolvedCommitSha)) {
@@ -406,19 +397,6 @@ export function resolveBuildSource(input: BuildInput): BuildSource {
     cloneUrl: `https://github.com/${input.repoFullName}.git`,
     resolvedCommitSha: input.resolvedCommitSha,
   };
-}
-
-/**
- * A prebuilt image ref reaches the Daytona API and is stored on the profile, and its untagged name is
- * later compared against a snapshot's imageName. It is server-authored, but this keeps the reference to
- * the characters a registry reference actually uses so a stray value with a space or a shell
- * metacharacter is refused at the boundary rather than carried downstream. Only the repository half is
- * used: the image is pulled by digest, so the tag itself is never trusted.
- */
-const SAFE_IMAGE_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
-
-export function isSafeImageRef(ref: string): boolean {
-  return ref.length <= 512 && SAFE_IMAGE_REF.test(ref);
 }
 
 /** Strip the tag off an image reference to get its untagged name, e.g. ghcr.io/x/y:tag -> ghcr.io/x/y.

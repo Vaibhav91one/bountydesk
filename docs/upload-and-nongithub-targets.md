@@ -169,10 +169,8 @@ rather than approving an unverified command; no new manifest fields are needed b
 
 ### Current state
 
-Upload intake is designed, not built. The upload entry in `app/(app)/integrations/catalog.ts`
-carries `built: false` with the reason that it has the same outbound gap as email once had: no
-verified recipient and no transport receipt, so no delivery. There is no upload intake route and
-no upload page; `app/api/intake/` holds only `email`, `github` and `jobs`.
+This section is the design as it was recorded before upload intake existed; what was built is in
+"Upload intake as built" below.
 
 The email path already satisfies the two-part contract and is the pattern to reuse. The verified
 recipient is a single gate, `isVerifiedEmailRecipient` in `lib/email/recipient.ts`: a contact
@@ -233,6 +231,31 @@ needs the non-GitHub `configureTarget` path above first; delivering an analysis-
 not. An uploaded body or attachment is untrusted input and is parsed the way email intake already
 parses untrusted input, and the verdict email renderer already escapes agent- and target-echoed
 markup, which upload payloads inherit.
+
+## Upload intake as built
+
+The public page `/submit` posts a multipart form to `app/api/intake/upload/route.ts`. The route
+checks the content type and caps the request at 4 MB before parsing anything, then
+`lib/upload/intake.ts` bounds each field and the attached material and applies the outside-email
+daily limits per contact and per domain, plus a per-client-address cap. An accepted upload becomes
+an `upload` report held at `NEEDS_DECISION` with an `upload_intake` row beside it, and the contact is
+mailed a report-scoped code. `app/api/intake/upload/verify/route.ts` confirms the code or mails
+another (three per report), acting only on upload reports and only on the address given at upload.
+
+Target material is optional and at most one of: a tarball with a Dockerfile at its root, a single
+Dockerfile (stored as a deterministic one-file tarball so it rides the archive path), or a prebuilt
+image named with its sha256 digest. A prebuilt image must come from a registry on the server-held
+`PREBUILT_IMAGE_REGISTRIES` list (Docker Hub and GHCR by default), checked at intake and again in
+the build driver, because the image's registry joins the build egress allow-list.
+
+Nothing builds until a reviewer releases the report at the gate with "Build target and run" and
+states the port, readiness path, optional start command and build ecosystem. Those are validated
+through `targetDefinitionFromManifest` into a definition whose name and repository label come from
+the report id and whose scope is the manifest default, loopback only. The `upload-build` worker loop
+(`lib/upload/build.ts`) builds the material through the non-GitHub build path, pins it with
+`bindConnectionlessTargetFromBuild`, binds the report, and queues the same analysis run the gate's
+"Run analysis" queues. A build that fails twice leaves the report unbound, and the run stops at
+`ANALYSIS_ONLY`.
 
 ## Open questions
 

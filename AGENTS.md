@@ -455,16 +455,19 @@ recipient and a transport receipt. Email now satisfies both: the recipient is an
 address, or an outside sender's address that passed inbound SPF and DKIM aligned with its From
 domain and is recorded as the report's `verified_sender`, re-checked at send time, and the receipt is
 Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an accepted send
-earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload has neither
-half yet and so still stops short of delivery. Every verdict is still human-approved, which no
-phase ever turns off. Those hold whether or not there is time on the clock.
+earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload rides the
+same email transport: its recipient is the contact the uploader proved with a report-scoped one-time
+code (recorded as `verified_sender`), and an unconfirmed contact is refused. Every verdict is
+still human-approved, which no phase ever turns off. Those hold whether or not there is time on the clock.
 
 The parked surfaces, so a plan knows where they live:
 
-- Upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
-  `built: false`). Upload is blocked on the outbound contract above; drive was out of scope for
-  the demo rather than merely unbuilt. Email is built in both directions: intake through
-  `app/api/intake/email/route.ts` and the reply through `lib/delivery/email.ts`.
+- Drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`, `built: false`); it
+  was out of scope for the demo rather than merely unbuilt. Email is built in both directions:
+  intake through `app/api/intake/email/route.ts` and the reply through `lib/delivery/email.ts`.
+  Upload is built: the public page `/submit` posts to `app/api/intake/upload/route.ts`, the report
+  waits at `NEEDS_DECISION`, and reviewer-approved target material is built by the `upload-build`
+  worker loop (`lib/upload/build.ts`) and bound through `bindConnectionlessTargetFromBuild`.
 - Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
   called live-proven; the recorded proof used the deterministic canary pipeline.

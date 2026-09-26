@@ -334,11 +334,14 @@ export function ConnectionTabs({
       </TabsContent>
 
       <TabsContent value="upload">
-        <Unbuilt
+        <LiveChannel
           icon={<Folder className="size-6" />}
           title="File upload"
-          body="A report pasted or uploaded straight into the console, for anything that arrived
-            outside a tracker. Designed alongside email intake, and built with it."
+          body="Anyone can submit a report on the public submit page, with optional target material:
+            a source tarball, a Dockerfile, or a prebuilt image. It waits at the gate for a reviewer,
+            and the material is built only when a reviewer approves it."
+          href="/integrations/upload"
+          action="View"
         />
       </TabsContent>
 

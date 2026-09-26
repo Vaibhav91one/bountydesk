@@ -8,6 +8,7 @@ import { readCase } from "@/lib/reports/case";
 import { listTargetProfiles } from "@/lib/targets/bind";
 import { caseLiveView } from "@/lib/reports/case-view";
 import { readGate } from "@/lib/triage/gate";
+import { readUpload } from "@/lib/upload/gate";
 
 import { AdvisoryGate } from "./advisory-gate";
 import { CaseApproval } from "./case-approval";
@@ -15,6 +16,7 @@ import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { CaseView } from "./case-view";
 import { resolveReportId } from "./resolve-id";
 import { TriageGate } from "./triage-gate";
+import { UploadGate } from "./upload-gate";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -128,9 +130,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // The target suggestion is a third read that stays off this path: it walks the github.com
   // links in the body and asks GitHub about each, seconds of network on a cold cache, so it is
   // loaded client-side after paint through /api/reports/[id]/targets (TargetControl).
-  const [targetProfiles, gate] = await Promise.all([
+  const [targetProfiles, gate, upload] = await Promise.all([
     file.target ? Promise.resolve([]) : listTargetProfiles(),
     file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
+    file.channel === "upload" ? readUpload(file.id) : Promise.resolve(null),
   ]);
 
   // Where the report came from, which is not always the repository on the row. A GitHub report
@@ -224,6 +227,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           closingReason={closingReason}
         />
       ) : null}
+
+      {upload ? <UploadGate reportId={file.id} state={file.state} upload={upload} /> : null}
 
       {file.channel === "advisory" ? (
         <AdvisoryGate reportId={file.id} state={file.state} closingReason={closingReason} />

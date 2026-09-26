@@ -152,7 +152,15 @@ const VERIFICATION_FROM = "BountyDesk <no-reply@mail.bountydesk.vaibhav.quest>";
  * delivery does not apply. A non-2xx throws so the action can tell the owner the code did not go
  * out, rather than leaving them waiting for a mail that never sent.
  */
-export async function sendVerificationEmail(to: string, code: string): Promise<void> {
+export async function sendVerificationEmail(
+  to: string,
+  code: string,
+  purpose: "reviewer" | "report-contact" = "reviewer",
+): Promise<void> {
+  const what =
+    purpose === "reviewer"
+      ? "Your BountyDesk reviewer verification code"
+      : "The code that confirms this address for the report you uploaded to BountyDesk";
   const response = await fetch(`${RESEND_API}/emails`, {
     method: "POST",
     headers: {
@@ -164,7 +172,7 @@ export async function sendVerificationEmail(to: string, code: string): Promise<v
       from: VERIFICATION_FROM,
       to: [to],
       subject: `Your BountyDesk verification code: ${code}`,
-      text: `Your BountyDesk reviewer verification code is ${code}.\n\nIt expires in 10 minutes. If you did not expect this, you can ignore this email.`,
+      text: `${what} is ${code}.\n\nIt expires in 10 minutes. If you did not expect this, you can ignore this email.`,
     }),
   });
 
