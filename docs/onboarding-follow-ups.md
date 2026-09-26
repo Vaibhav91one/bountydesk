@@ -161,7 +161,9 @@ a `build_recipe_digest`. Its caller is `bindConnectionlessTargetFromBuild`
 Remaining work:
 
 - Rotation. A re-bind with changed pins throws `TargetProfileExistsError`, and `rotateTarget` and
-  `npm run rotate:target` are GitHub-only, so a connectionless target cannot be rebuilt in place.
+  `npm run rotate:target` are GitHub-only, so a connectionless target cannot be rebuilt in place. This
+  is unimplemented on purpose for now, and `connectionless-bind.test.ts` pins the throw so a future
+  rotation lands as a deliberate change rather than by accident.
 - A tarball without a Dockerfile. The upload build plan always uses `Dockerfile` at the archive root;
   the onboarding agent that writes a Dockerfile for a GitHub repository is not wired to uploads, so
   such a build fails and the report gets the static review of its archive (`COULD_NOT_BUILD`).
