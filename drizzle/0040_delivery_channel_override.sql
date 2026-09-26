@@ -1,0 +1,1 @@
+ALTER TABLE "outbound_delivery" ADD COLUMN "channel" "intake_channel";

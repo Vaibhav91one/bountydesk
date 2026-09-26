@@ -140,6 +140,12 @@ function makeDeps(send?: (call: number, opts: SendCall) => Promise<{ id: string 
     updateAdvisoryDescription: async () => {
       throw new Error("email delivery must not touch an advisory");
     },
+    createDraftAdvisory: async () => {
+      throw new Error("email delivery must not touch an advisory");
+    },
+    findAdvisoryByMarker: async () => {
+      throw new Error("email delivery must not touch an advisory");
+    },
     sendEmail: async (opts) => {
       sent.push(opts);
       if (send) return send(sent.length, opts);

@@ -60,6 +60,8 @@ async function defaultDeps(): Promise<DeliveryDeps> {
     sendEmail: resend.sendVerdictEmail,
     getAdvisory: advisory.getAdvisory,
     updateAdvisoryDescription: advisory.updateAdvisoryDescription,
+    createDraftAdvisory: advisory.createDraftAdvisory,
+    findAdvisoryByMarker: advisory.findAdvisoryByMarker,
   };
 }
 
@@ -413,7 +415,11 @@ async function deliverClaimed(
       return lease.id;
     }
 
-    const arm = ARMS[reportRow.channel];
+    // The outbox row's own channel wins when set: an email report bound to an advisory-capable repo
+    // was routed to the advisory arm at approval, and its report.channel still says email. Null
+    // (every other delivery) falls back to the intake channel.
+    const deliveryChannel = lease.channel ?? reportRow.channel;
+    const arm = ARMS[deliveryChannel];
     const outcome: ArmOutcome = arm
       ? await arm(
           {
@@ -432,7 +438,7 @@ async function deliverClaimed(
           },
           d,
         )
-      : { kind: "refused", message: `unsupported delivery channel: ${reportRow.channel}` };
+      : { kind: "refused", message: `unsupported delivery channel: ${deliveryChannel}` };
 
     if (outcome.kind === "refused") {
       await refuseDelivery(lease, outcome.message, startedAt, outcome.hold ?? false);
