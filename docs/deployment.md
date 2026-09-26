@@ -144,6 +144,14 @@ Running it live needs three things set up, all confirmed against the live Dayton
 Build resources are `BUILD_CPU`, `BUILD_MEMORY_GB`, `BUILD_DISK_GB` (defaults 2 / 4 / 10), raised
 for a larger tier. A build that outgrows them fails with the provider's own limit message.
 
+GHCR is the default registry, not a fixed one. `REGISTRY_HOST`, `REGISTRY_USER`,
+`REGISTRY_NAMESPACE` and `REGISTRY_PUSH_TOKEN` point the build elsewhere, with the `GHCR_*` values as
+fallbacks. A non-GHCR host also needs its pull credential registered in Daytona and its hosts on
+`BUILD_EGRESS_ALLOWLIST`, which the push host does not join by itself. `REGISTRY_DELETE_TOKEN`
+(GHCR, `delete:packages`) lets the build delete its pushed image once the snapshot is active. `PREBUILT_IMAGE_REGISTRIES` limits which registries an
+uploaded prebuilt image may name; set it on Vercel and the worker alike. The GitHub App permissions,
+events and other operator steps are listed under "Operator prerequisites" in `AGENTS.md`.
+
 ## Vercel
 
 PR #69 deliberately redirects every non-landing route on Vercel to the GitHub repository. Keep that

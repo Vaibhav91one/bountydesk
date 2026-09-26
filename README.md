@@ -201,7 +201,7 @@ Copy `env.example` to `.env.local` and fill it in. Only the database block is re
 | Doc | What it is |
 |---|---|
 | [Demo runbook](docs/demo-runbook.md) | Operator path for a live run |
-| [Decisions](docs/decisions.md) | Design record, Q1 to Q21 |
+| [Decisions](docs/decisions.md) | Design record, Q1 to Q32 |
 | [Plan](docs/plan.md) | What is proven and what is still open |
 | [Deployment](docs/deployment.md) | How the app is hosted |
 | [Target profiles](docs/target-profiles.md) | How a target is bound |
