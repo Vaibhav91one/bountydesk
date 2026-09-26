@@ -17,6 +17,7 @@ import {
   registryHostOf,
   stageSource,
 } from "./daytona-build-driver";
+import { selectEgressHosts } from "./egress-profiles";
 
 const SANDBOX = {} as Sandbox;
 const PLAN = {
@@ -281,4 +282,42 @@ test("the slug is a registry-safe, lowercase identifier", () => {
   assert.equal(repoSlug("Acme-Corp/My.Repo_v2"), "acme-corp-my.repo_v2");
   // No leading, trailing, or doubled separators from stripped characters.
   assert.equal(repoSlug("weird/@@name!!"), "weird-name");
+});
+
+test("a prebuilt image is pinned to its digest, so a wrong or absent digest fails the pull and never a moved tag", () => {
+  // The digest's existence cannot be checked offline, so resolveBuildSource admits any well-formed
+  // sha256; the failure is deferred to the live `docker build`, which pulls FROM name@digest. The
+  // deterministic guarantee is that the pull is digest-addressed: a wrong digest can never resolve
+  // through the mutable tag. This mirrors the archive digest-mismatch check, which fails closed on
+  // the declared digest rather than trusting the bytes.
+  const wrongDigest = `sha256:${"9".repeat(64)}`;
+  const source = { kind: "image" as const, imageRef: "ghcr.io/vendor/app:1.2.3", imageDigest: wrongDigest };
+  assert.deepEqual(resolveBuildSource({ repoFullName: "vendor/app", sourceRef: "image://x", source, plan: PLAN }), source);
+
+  const dockerfile = prebuiltImageDockerfile(source);
+  assert.ok(dockerfile.startsWith(`FROM ghcr.io/vendor/app@${wrongDigest}\n`));
+  assert.ok(!dockerfile.includes(":1.2.3"), "the mutable tag is never pulled");
+});
+
+test("a custom PREBUILT_IMAGE_REGISTRIES host is admitted by the driver and joins the build egress allow-list", () => {
+  const source = { kind: "image" as const, imageRef: "quay.io/org/app:1", imageDigest: `sha256:${"a".repeat(64)}` };
+  const base = { repoFullName: "up/load", sourceRef: "image://x", plan: PLAN };
+
+  // The default allow-list is Docker Hub and GHCR, so quay.io is refused at the driver's own gate.
+  const saved = process.env.PREBUILT_IMAGE_REGISTRIES;
+  try {
+    delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    assert.throws(() => resolveBuildSource({ ...base, source }), /quay\.io are not accepted/);
+
+    // With quay.io allow-listed, the driver admits the image, and its host is what the driver unions
+    // into the sandbox egress (egressAllowList adds registryHostOf(imageRef) to selectEgressHosts).
+    process.env.PREBUILT_IMAGE_REGISTRIES = "quay.io";
+    assert.deepEqual(resolveBuildSource({ ...base, source }), source);
+    const host = registryHostOf(source.imageRef);
+    assert.equal(host, "quay.io");
+    assert.ok(selectEgressHosts({ ecosystem: "none", extraEgressHosts: host ? [host] : [] }).includes("quay.io"));
+  } finally {
+    if (saved === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    else process.env.PREBUILT_IMAGE_REGISTRIES = saved;
+  }
 });

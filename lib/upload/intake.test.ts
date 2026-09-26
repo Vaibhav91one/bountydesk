@@ -208,6 +208,17 @@ test("a prebuilt image from a registry outside the allowlist is refused", async 
   assert.equal((await parse({ imageRef: "ghcr.io/org/app:2", imageDigest: "sha256:short" })).ok, false);
 });
 
+test("an uncompressed ustar .tar is accepted as archive material, not just a gzipped one", async () => {
+  // isTarball has two branches: the gzip magic and the ustar magic at byte 257. Only gzip was
+  // exercised before. singleFileTar builds a real uncompressed ustar tar, so this hits the ustar
+  // branch, and the material is archive, distinct from the dockerfile field.
+  const ustarTar = intake.singleFileTar("app.js", Buffer.from("console.log('hi')\n"));
+  assert.equal(ustarTar.subarray(257, 262).toString("latin1"), "ustar");
+  const parsed = await parse({ archive: new Blob([Uint8Array.from(ustarTar)]) });
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
+  assert.equal(parsed.submission.material?.kind, "archive");
+});
+
 test("the client address comes from the edge, not from a value the requester chose", () => {
   const h = (init: Record<string, string>) => new Headers(init);
   assert.equal(intake.clientAddress(h({ "x-real-ip": "203.0.113.5", "x-forwarded-for": "1.2.3.4" })), "203.0.113.5");
