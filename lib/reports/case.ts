@@ -18,6 +18,7 @@ import {
   verdictSupersession,
 } from "@/lib/db";
 import { MAX_ATTEMPTS as HANDOFF_MAX_ATTEMPTS } from "@/lib/approval-submission/queue";
+import { emailAdvisoryDeliveryTarget } from "@/lib/mcp/publish-verdict";
 export {
   isAgentInvestigating,
   oracleDecided,
@@ -394,8 +395,17 @@ export async function readCase(
           ? row.reporterHandle
           : null;
 
+      // An email report bound to an advisory-capable repository delivers by opening a draft
+      // advisory, not by mailing the reporter, and the approval copy has to say which. This is the
+      // same predicate the delivery enqueue uses, called here so the dialog and the actual send
+      // cannot disagree about where an approved verdict goes. Only email reports can be rerouted,
+      // so nothing else pays for the extra read.
+      const deliversAsAdvisory =
+        row.channel === "email" ? (await emailAdvisoryDeliveryTarget(id, tx)) !== null : false;
+
       return {
         ...row,
+        deliversAsAdvisory,
         turnStatus: session?.turnStatus ?? null,
         sessionError: session?.lastError ?? null,
         finalSummary: session?.finalSummary ?? null,

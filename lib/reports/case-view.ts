@@ -105,11 +105,17 @@ export type CaseLiveView = {
   stateLabel: string;
   updatedAt: string;
   /**
-   * Which way this report came in, and therefore where an approved verdict goes: a comment on a
-   * GitHub issue, or a reply to the reporter's own address. The approval surfaces word themselves
-   * off this, so a reviewer signing an email verdict is not told it will be posted to an issue.
+   * Which way this report came in: a GitHub issue, an email, an advisory, or an upload. Intake
+   * facts read off this. Where an approved verdict goes is `deliveryChannel`, which is the same
+   * for every channel except an email report routed to an advisory.
    */
   channel: string;
+  /**
+   * Where an approved verdict actually goes, which the approval surfaces word themselves off so a
+   * reviewer is told the truth at the moment of signing. Equal to `channel` except for an email
+   * report bound to an advisory-capable repository, where it is `advisory`.
+   */
+  deliveryChannel: string;
 
   mascotKey: MascotKey;
   investigating: boolean;
@@ -695,6 +701,7 @@ export function caseLiveView(
     stateLabel: caseStateLabel(file, deliveryState),
     updatedAt: file.updatedAt.toISOString(),
     channel: file.channel,
+    deliveryChannel: file.deliversAsAdvisory ? "advisory" : file.channel,
 
     mascotKey: mascotKeyForState(file.state),
     investigating,

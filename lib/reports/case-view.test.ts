@@ -17,6 +17,7 @@ function caseFile(overrides: Partial<CaseFile> = {}): CaseFile {
     title: "Stored XSS in the review field",
     body: "steps to reproduce",
     channel: "github",
+    deliversAsAdvisory: false,
     sourceRef: "github:Vaibhav91one/juice-shop#18",
     sourceLabel: "#18",
     issueNumber: "18",
@@ -134,6 +135,20 @@ test("a drafted verdict awaiting a reviewer offers the approval and its findings
   assert.equal(step(view, "investigation").note, "1 step recorded");
   assert.equal(step(view, "approval").state, "current");
   assert.equal(step(view, "approval").note, "Waiting on a reviewer");
+});
+
+test("an email report bound to an advisory-capable repo delivers as an advisory, intake stays email", () => {
+  // The bug this guards: the approval copy read off the intake channel, so an email report routed
+  // to a draft advisory was described as an email reply at the moment of signing.
+  const advisory = caseLiveView(caseFile({ channel: "email", deliversAsAdvisory: true }));
+  assert.equal(advisory.channel, "email", "intake facts still name the channel it came in on");
+  assert.equal(advisory.deliveryChannel, "advisory", "approval copy follows where the verdict goes");
+
+  const reply = caseLiveView(caseFile({ channel: "email", deliversAsAdvisory: false }));
+  assert.equal(reply.deliveryChannel, "email", "an email report with no advisory binding still replies");
+
+  const issue = caseLiveView(caseFile({ channel: "github", deliversAsAdvisory: false }));
+  assert.equal(issue.deliveryChannel, "github");
 });
 
 test("approved but not yet delivered says Approved and offers nothing to sign", () => {

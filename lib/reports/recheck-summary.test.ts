@@ -32,6 +32,7 @@ function caseFile(overrides: Partial<FileWithRun> = {}): FileWithRun {
     title: "Stored XSS in the review field",
     body: "steps to reproduce",
     channel: "github",
+    deliversAsAdvisory: false,
     sourceRef: "github:Vaibhav91one/juice-shop#18",
     sourceLabel: "#18",
     issueNumber: "18",
