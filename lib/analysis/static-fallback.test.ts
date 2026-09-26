@@ -450,3 +450,36 @@ test("a FAILED onboarding with no build reason, or a revoked grant, is not a sta
     assert.equal((await fallbackEvents(reportId)).length, 0);
   }
 });
+
+test("a private repository without Contents: read gets no static read and no sandbox (POLICY_REFUSED)", async () => {
+  const unbuildable = await seedRepo({ state: "FAILED", analysisOnlyReason: "COULD_NOT_BUILD" });
+  const bound = await seedRepo(null);
+  const targetProfileId = await seedUndeployableTarget();
+  await dbm.db
+    .update(dbm.connectedRepository)
+    .set({ isPrivate: true })
+    .where(dbm.inArray(dbm.connectedRepository.id, [unbuildable.connectedRepositoryId, bound.connectedRepositoryId]));
+  await dbm.db
+    .update(dbm.connectedRepository)
+    .set({ targetProfileId })
+    .where(dbm.eq(dbm.connectedRepository.id, bound.connectedRepositoryId));
+  globalThis.fetch = (async () => {
+    throw new Error("no source may be read from a refused private repository");
+  }) as typeof fetch;
+  const provision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new Error("a refused private target must not be provisioned");
+  };
+
+  for (const [repo, profile] of [
+    [unbuildable, null],
+    [bound, targetProfileId],
+  ] as const) {
+    const reportId = await seedReport({ connectedRepositoryId: repo.connectedRepositoryId, targetProfileId: profile });
+    const client = driverClient();
+    const d = driver.createTrueforgeAnalysisDriver(client, provision);
+    await d.ensureSession(ctx(reportId));
+    await d.run(ctx(reportId));
+    assert.doesNotMatch(client.messages[0], /COULD_NOT_BUILD|COULD_NOT_DEPLOY/);
+    assert.equal((await fallbackEvents(reportId)).length, 0);
+  }
+});

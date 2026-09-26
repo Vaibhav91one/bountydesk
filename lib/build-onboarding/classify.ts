@@ -649,9 +649,10 @@ export function profileNameFromRepo(repoFullName: string): string {
 }
 
 /**
- * Read files from a public repo over raw.githubusercontent.com. Onboarding only enqueues public
- * repos (grantRepositories filters to `private === false`), so the source needs no token, and the
- * worker has ordinary egress (only the build and reproduction sandboxes are network-restricted).
+ * Read files from a repo over raw.githubusercontent.com: anonymously for a public repo, with a
+ * contents:read installation token for a private one, and refused (POLICY_REFUSED) for a private repo
+ * without that grant. The worker has ordinary egress (only the build and reproduction sandboxes are
+ * network-restricted).
  */
 export function rawSourceReader(repoFullName: string, ref = "HEAD"): SourceReader {
   // One read token per reader, minted on the first read: a classification reads a handful of files

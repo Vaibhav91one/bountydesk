@@ -23,6 +23,7 @@ import {
 } from "@/lib/sandbox/provision";
 import { meshServicesFromConfig, profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
+import { privateRepoPolicyRefused } from "@/lib/github/repo-access";
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
 
@@ -284,6 +285,8 @@ export function createTrueforgeAnalysisDriver(
           repoTargetProfileId: connectedRepository.targetProfileId,
           installationSuspendedAt: githubInstallation.suspendedAt,
           installationDeletedAt: githubInstallation.deletedAt,
+          repoIsPrivate: connectedRepository.isPrivate,
+          installationContentsPermission: githubInstallation.contentsPermission,
           onboardingState: targetOnboarding.state,
           onboardingReason: targetOnboarding.analysisOnlyReason,
           onboardingCommitSha: targetOnboarding.resolvedCommitSha,
@@ -313,6 +316,8 @@ export function createTrueforgeAnalysisDriver(
             repoTargetProfileId: context.repoTargetProfileId,
             installationSuspendedAt: context.installationSuspendedAt,
             installationDeletedAt: context.installationDeletedAt,
+            repoIsPrivate: context.repoIsPrivate,
+            installationContentsPermission: context.installationContentsPermission,
           }
         : null;
       const targetInfo: BoundTarget | null =
@@ -343,12 +348,17 @@ export function createTrueforgeAnalysisDriver(
       // A report on a repo whose onboarding came to rest with COULD_NOT_BUILD has no target to
       // reproduce against, and never will until the repo changes. It gets the static review, but
       // only while the repository grant is live: a suspended installation or a removed repository
-      // stops anything further being read from it.
+      // stops anything further being read from it, and so does the private-repository policy
+      // (POLICY_REFUSED: a private repository whose installation lacks Contents: read).
       const repoGrantLive =
         context.repoActive === true &&
         !context.repoArchivedAt &&
         !context.installationSuspendedAt &&
-        !context.installationDeletedAt;
+        !context.installationDeletedAt &&
+        !privateRepoPolicyRefused({
+          isPrivate: context.repoIsPrivate,
+          contentsPermission: context.installationContentsPermission,
+        });
       let staticReason: StaticFallbackReason | null =
         !targetInfo &&
         repoGrantLive &&
