@@ -27,7 +27,7 @@ import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
 import { adviseOnce } from "@/lib/delivery/advisory";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
-import { onboardOnce } from "@/lib/build-onboarding/worker";
+import { onboardOnce, sweepOrphanSnapshots } from "@/lib/build-onboarding/worker";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
 import { buildUploadOnce } from "@/lib/upload/build";
@@ -95,6 +95,13 @@ const FAST_LOOP_TIMEOUT_MS = 60_000;
  */
 const GITHUB_RECONCILE_INTERVAL_MS = 15 * 60_000;
 const REPORT_EXPIRY_INTERVAL_MS = 60 * 60_000;
+
+/**
+ * A trial snapshot left by an abandoned onboarding costs storage, not correctness, so the sweep that
+ * reclaims it runs rarely. It lists and deletes through the live Daytona API, and a rare pass keeps
+ * that traffic negligible and leaves a long window for an operator to notice a wrong deletion.
+ */
+const SNAPSHOT_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
 
 /**
  * Run fn at most once per intervalMs from a sweep loop that ticks every 30s. The first call runs
@@ -303,6 +310,17 @@ async function main(): Promise<void> {
         const result = await sweepExpiredReports();
         const expired = result.outcomes.filter((o) => o.status === "retired").length;
         if (expired) console.log(`report expiry: expired ${expired} of ${result.candidates} candidates`);
+        return result;
+      }),
+    },
+    {
+      name: "snapshot-sweep",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(SNAPSHOT_SWEEP_INTERVAL_MS, async () => {
+        const result = await sweepOrphanSnapshots();
+        if (result.deleted.length) {
+          console.log(`snapshot sweep: deleted ${result.deleted.length} orphan snapshots: ${result.deleted.join(", ")}`);
+        }
         return result;
       }),
     },

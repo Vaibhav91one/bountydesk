@@ -46,12 +46,16 @@ export { isSafeImageRef, registryHostOf };
  * It boots a Docker-in-Docker build sandbox with a per-ecosystem egress allow-list, clones the
  * source, produces one image according to the build plan's strategy (the repo's own Dockerfile, a
  * published base image, or a compose app compiled with its datastore bundled and seeded), bakes the
- * source commit as a build marker, pushes to a ghcr tag, registers a Daytona snapshot, and tears the
- * sandbox down. Everything network-facing lives here; the rest of the pipeline never grants egress.
+ * source commit as a build marker, pushes to the configured registry, registers a Daytona snapshot,
+ * and tears the sandbox down. Everything network-facing lives here; the rest of the pipeline never
+ * grants egress.
  *
- * Config, all server-held: BUILD_BASE_SNAPSHOT (a DinD snapshot to build inside), GHCR_PUSH_TOKEN,
- * GHCR_NAMESPACE. The egress allow-list is chosen per ecosystem in code (egress-profiles.ts), unioned
- * with an optional BUILD_EGRESS_ALLOWLIST for an ad-hoc host.
+ * Config, all server-held: BUILD_BASE_SNAPSHOT (a DinD snapshot to build inside), and the registry
+ * (registry.ts): REGISTRY_HOST, REGISTRY_USER, REGISTRY_NAMESPACE and REGISTRY_PUSH_TOKEN, with
+ * ghcr.io as the default host and GHCR_NAMESPACE and GHCR_PUSH_TOKEN as the fallbacks, plus an
+ * optional REGISTRY_DELETE_TOKEN to reclaim a pushed image once its snapshot is active. The egress
+ * allow-list is chosen per ecosystem in code (egress-profiles.ts), unioned with an optional
+ * BUILD_EGRESS_ALLOWLIST for an ad-hoc host.
  */
 const BUILD_CPU = numEnv("BUILD_CPU", 2);
 const BUILD_MEMORY_GB = numEnv("BUILD_MEMORY_GB", 4);
@@ -429,7 +433,7 @@ const liveMeshRuntime: MeshBuildRuntime = { run, createSnapshot, deleteSnapshotB
 
 /**
  * Build a compose-mesh: one image per service, one snapshot per service. A service with a build
- * context is built from the repo and pushed to ghcr with the marker baked in; a service that names a
+ * context is built from the repo and pushed to the registry with the marker baked in; a service that names a
  * stock image is pulled (to capture its digest) and its public tag is registered as a snapshot
  * directly. The returned BuildResult mirrors the app service at the top level so the single-image
  * consumers keep working, and carries every service in `services` for the mesh provisioner.

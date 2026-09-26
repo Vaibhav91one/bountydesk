@@ -944,9 +944,11 @@ read no source, and the turn drafted no verdict. A static review that read sourc
 that drafted a verdict, ends `ANALYSIS_ONLY`. `OUT_OF_SCOPE` is never produced from the absence of a
 target alone.
 
-Two limits of what was built. A private repository without Contents: read has no live grant, so it
-gets the plain analysis turn with `POLICY_REFUSED`, not a `COULD_NOT_BUILD` static review. A failed
-upload build is not routed here: it leaves the report unbound and runs the plain analysis turn.
+A private repository without Contents: read has no live grant, so it gets the plain analysis turn
+with `POLICY_REFUSED`, not a `COULD_NOT_BUILD` static review. A failed upload build (Q32) does take
+this path, reading its stored archive in memory instead of GitHub
+(`lib/analysis/archive-source.ts`); a prebuilt image upload has no source and is reviewed from the
+report text.
 
 ### Q32: Upload intake (2026-09-26)
 
@@ -972,7 +974,8 @@ ecosystem. Those go through the same manifest validation as any target, with a n
 report id and loopback-only scope. The `upload-build` worker loop (`lib/upload/build.ts`) builds the
 material through the non-GitHub path (Q30), binds it with `bindConnectionlessTargetFromBuild`, and
 queues the same analysis run the gate's "Run analysis" queues. A build that fails twice leaves the
-report unbound, and the run ends `ANALYSIS_ONLY`.
+report unbound, and the run is the static review of Q31 with `COULD_NOT_BUILD` over the uploaded
+archive.
 
 Delivery rides the email transport: the verdict goes to the contact only if it is the confirmed
 `verified_sender`, re-checked at approval and at send, and `DELIVERED` needs Resend's

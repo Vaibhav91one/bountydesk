@@ -3,7 +3,7 @@
  *
  * Shared by the list and the detail page so the two cannot describe the same channel
  * differently. Everything here is sourced: the permissions are the ones the App requests, the
- * events are the four the webhook route actually handles, and the links go to pages that
+ * events are the five the webhook route actually handles, and the links go to pages that
  * exist. Nothing is filled in to make a panel look complete.
  */
 
@@ -47,12 +47,12 @@ export const INTEGRATIONS: Integration[] = [
           "Metadata, read. Repository name, visibility and archive state, which is how a renamed or archived repository stops being admissible.",
           "Issues, read and write. Read to accept a report, write to post the comment a reviewer approved.",
           "Repository security advisories, read and write. For a report reproduced against this repository, a reviewer can open a private draft advisory so the owner can track the fix without it being public, and update it when a revised verdict is delivered.",
+          "Contents, read, for private repositories only. It is what lets a private repository be cloned, with a token scoped to that one repository and revoked after the clone. An installation that does not grant it still has its private repositories' reports accepted and triaged, and reproduction refuses. A public repository clones without it.",
         ],
       },
       {
         title: "Permissions deliberately not requested",
         bullets: [
-          "Contents, read. Needed only to clone a private repository. Without it a private repository's issue is still accepted and triaged, and reproduction refuses.",
           "Nothing that can write code, open pull requests, or change repository settings.",
         ],
       },
@@ -60,6 +60,7 @@ export const INTEGRATIONS: Integration[] = [
         title: "Events this app acts on",
         bullets: [
           "issues. Creates a report, once per delivery id.",
+          "repository_advisory. A privately reported or published advisory creates a report held for a reviewer, and the approved verdict is written back into the advisory.",
           "installation. A suspended or deleted installation stops intake and delivery at once.",
           "installation_repositories. Adding or removing a repository from the grant.",
           "repository. Rename, transfer, archive.",
@@ -80,7 +81,7 @@ export const INTEGRATIONS: Integration[] = [
   {
     id: "email",
     name: "Email",
-    tagline: "Report intake by email, with no GitHub connection needed.",
+    tagline: "Report intake by email, and the approved verdict mailed back, with no GitHub connection needed.",
     icon: "gmail",
     developer: "BountyDesk",
     built: true,
@@ -90,8 +91,8 @@ export const INTEGRATIONS: Integration[] = [
         body: "A report arrives as an email and is triaged without any GitHub connection. Intake and reproduction are separate: a report with no bound target profile stops at analysis only, whichever channel it came in through.",
       },
       {
-        title: "What is not wired yet",
-        body: "Intake runs: a mail from an authorised sender becomes a report and is triaged. Replying the verdict back does not, because outbound needs a verified recipient identity and a transport receipt before a delivery attempt may be recorded. Until those exist a report from this channel is reviewed in the console and never reaches DELIVERED.",
+        title: "The verdict reply",
+        body: "An approved verdict is mailed back to the reporter. The recipient is an allowlisted address, or an outside sender whose mail passed SPF and DKIM aligned with its From domain, and that is checked again at send time. Provider acceptance is not a receipt: the report reaches DELIVERED only when the provider reports the mail delivered. A report bound to a connected repository with a live grant is delivered as a draft security advisory on that repository instead.",
       },
       {
         title: "What the design already fixes",

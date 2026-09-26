@@ -79,8 +79,8 @@ export default async function HomePage() {
               ) : null}
             </div>
             <p className="text-meta text-muted-foreground">
-              Reports arrive from a connected GitHub repository. Email and file upload are
-              designed channels, not wired yet.
+              Reports arrive from a connected GitHub repository, by email, or through the
+              public upload page.
             </p>
           </div>
 

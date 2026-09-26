@@ -809,3 +809,53 @@ test("collectProtectedSnapshotIds protects live profiles, mesh services, and in-
   assert.ok(ids.has("inflight-snap"), "an in-flight onboarding snapshot is protected");
   assert.equal(ids.has("failed-snap"), false, "a terminal onboarding row's snapshot is not protected");
 });
+
+test("the snapshot sweep deletes an unprotected trial snapshot and never a protected one", async () => {
+  // An earlier test can leave a row mid-build, which would (correctly) make this pass skip.
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED" })
+    .where(dbm.eq(dbm.targetOnboarding.state, "PENDING_BUILD"));
+  await dbm.db.insert(dbm.targetProfile).values({
+    name: "sweep-live",
+    imageDigest: `sha256:${"c".repeat(64)}`,
+    snapshotId: "sweep-live-app",
+    config: { services: [{ snapshotId: "sweep-live-app" }, { snapshotId: "sweep-live-db" }] },
+  });
+  const held = await connectedRepo("acme/sweep-held");
+  await queue.enqueue({ repoId: held, repoFullName: "acme/sweep-held", sourceRef: "https://x/held.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "AWAITING_APPROVAL", snapshotId: "sweep-held" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, held));
+
+  const snapshot = (id: string, name: string) => ({ id, name, imageName: null, state: "active", cpu: null, mem: null, disk: null });
+  const deleted: string[] = [];
+  const ops = {
+    list: async () => [
+      snapshot("sweep-live-app", "onboarding-live"),
+      snapshot("sweep-live-db", "onboarding-live-db"),
+      snapshot("sweep-held", "onboarding-held"),
+      snapshot("sweep-orphan", "onboarding-abandoned"),
+      snapshot("sweep-manual", "juice-shop-v17"),
+    ],
+    deleteById: async (id: string) => void deleted.push(id),
+  };
+
+  const result = await worker.sweepOrphanSnapshots(ops);
+  assert.equal(result.skipped, false);
+  assert.deepEqual(deleted, ["sweep-orphan"], "only the unprotected onboarding snapshot is deleted");
+  assert.deepEqual(result.kept.sort(), ["sweep-held", "sweep-live-app", "sweep-live-db"]);
+
+  // A build in flight has registered a snapshot the database does not know yet, so the pass waits.
+  const building = await connectedRepo("acme/sweep-building");
+  await queue.enqueue({ repoId: building, repoFullName: "acme/sweep-building", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "PENDING_BUILD" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, building));
+  deleted.length = 0;
+  const skipped = await worker.sweepOrphanSnapshots(ops);
+  assert.equal(skipped.skipped, true);
+  assert.deepEqual(deleted, [], "nothing is deleted while a build is in flight");
+});

@@ -483,3 +483,120 @@ test("a private repository without Contents: read gets no static read and no san
     assert.equal((await fallbackEvents(reportId)).length, 0);
   }
 });
+
+/** One ustar file entry; the archive reader does not check header checksums. */
+function tarEntry(name: string, content: string): Buffer {
+  const data = Buffer.from(content);
+  const header = Buffer.alloc(512);
+  header.write(name, 0, 100, "utf8");
+  header.write(`${data.length.toString(8).padStart(11, "0")}\0`, 124, "latin1");
+  header.write("0", 156, "latin1");
+  header.write("ustar\0", 257, "latin1");
+  const padded = Buffer.alloc(Math.ceil(data.length / 512) * 512);
+  data.copy(padded);
+  return Buffer.concat([header, padded]);
+}
+
+/**
+ * An upload released by a reviewer whose build then fails on every attempt, driven through the real
+ * build loop (lib/upload/build.ts) with only the BuildDriver faked. Returns once the row is FAILED.
+ */
+async function failedUploadBuild(material: { kind: "archive"; archive: Buffer } | { kind: "image" }) {
+  const { gzipSync, createHash } = { ...(await import("node:zlib")), ...(await import("node:crypto")) };
+  const gate = await import("@/lib/upload/gate");
+  const build = await import("@/lib/upload/build");
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "upload",
+      sourceRef: `upload:${randomUUID()}`,
+      title: "SQL injection in the search route",
+      body: "routes/search.js builds its query by concatenating the q parameter.",
+      reporterHandle: null,
+      state: "TRIAGING",
+    })
+    .returning({ id: dbm.report.id });
+  const archive = material.kind === "archive" ? gzipSync(material.archive) : null;
+  await dbm.db.insert(dbm.uploadIntake).values({
+    reportId: row.id,
+    senderKey: "someone@outside.test",
+    senderDomain: "outside.test",
+    materialKind: material.kind,
+    archive,
+    sourceArchiveDigest: archive ? `sha256:${createHash("sha256").update(archive).digest("hex")}` : null,
+    imageRef: material.kind === "image" ? "nginx:1.27" : null,
+    imageDigest: material.kind === "image" ? `sha256:${"c".repeat(64)}` : null,
+    reviewedTarget: gate.reviewedUploadTarget(row.id, { port: 8080, readinessPath: "/health" }),
+    approvedBy: "reviewer",
+    buildState: "PENDING",
+  });
+  const failing = {
+    async build(): Promise<never> {
+      throw new Error("docker build exited 1");
+    },
+  };
+  await build.buildUploadOnce({ driver: failing });
+  await build.buildUploadOnce({ driver: failing });
+  const [upload] = await dbm.db
+    .select({ buildState: dbm.uploadIntake.buildState, digest: dbm.uploadIntake.sourceArchiveDigest })
+    .from(dbm.uploadIntake)
+    .where(dbm.eq(dbm.uploadIntake.reportId, row.id));
+  assert.equal(upload.buildState, "FAILED", "the build gave up after its attempt cap");
+  return { reportId: row.id, digest: upload.digest };
+}
+
+test("a failed upload build gets a static review of the stored archive and ends ANALYSIS_ONLY(COULD_NOT_BUILD)", async () => {
+  globalThis.fetch = (async () => {
+    throw new Error("an upload review reads its archive, never GitHub");
+  }) as typeof fetch;
+  const { reportId, digest } = await failedUploadBuild({
+    kind: "archive",
+    archive: Buffer.concat([
+      tarEntry("shop/package.json", '{"name":"shop"}'),
+      tarEntry("shop/routes/search.js", "db.all(`SELECT * FROM products WHERE name LIKE '%${q}%'`)"),
+      tarEntry("shop/lib/basket.js", "module.exports = basket"),
+      Buffer.alloc(1024),
+    ]),
+  });
+
+  const client = driverClient();
+  const d = driver.createTrueforgeAnalysisDriver(client);
+  await d.ensureSession(ctx(reportId));
+  await d.run(ctx(reportId));
+
+  const message = client.messages[0];
+  assert.match(message, /COULD_NOT_BUILD/);
+  assert.match(message, /static review of the uploaded archive/);
+  assert.match(message, /----- FILE: routes\/search\.js -----/, "the file the report names is read from the archive");
+  assert.match(message, /----- FILE: package\.json -----/);
+  assert.doesNotMatch(message, /FILE: lib\/basket\.js/);
+  const events = await fallbackEvents(reportId);
+  assert.deepEqual(events[0].data, { reason: "COULD_NOT_BUILD", ref: digest, sourceFiles: ["package.json", "routes/search.js"] });
+
+  // The run is held to ANALYSIS_ONLY: a REPRODUCED claim becomes the server-authored ANALYSIS_ONLY.
+  const capability = await capabilityOf(reportId);
+  await pollOnly(reportId, pollerClient({ status: "awaiting_approval", pending: [publishCall(capability, "REPRODUCED", [STATIC_FINDING])] }));
+  const { state, verdicts } = await finalState(reportId);
+  assert.equal(state, "ANALYSIS_ONLY");
+  assert.equal(verdicts.length, 1);
+  assert.equal(verdicts[0].outcome, "ANALYSIS_ONLY");
+  assert.equal((verdicts[0].evidence as { analysisOnlyReason: string }).analysisOnlyReason, "COULD_NOT_BUILD");
+});
+
+test("a failed image upload has no source, and a review that drafts nothing ends OUT_OF_SCOPE", async () => {
+  const { reportId } = await failedUploadBuild({ kind: "image" });
+
+  const client = driverClient();
+  const d = driver.createTrueforgeAnalysisDriver(client);
+  await d.ensureSession(ctx(reportId));
+  await d.run(ctx(reportId));
+  assert.match(client.messages[0], /COULD_NOT_BUILD/);
+  assert.match(client.messages[0], /from the report text alone/);
+  assert.deepEqual((await fallbackEvents(reportId))[0].data, { reason: "COULD_NOT_BUILD", ref: null, sourceFiles: [] });
+
+  await pollOnly(reportId, pollerClient({ status: "done_no_action" }));
+  const { state, verdicts } = await finalState(reportId);
+  assert.equal(state, "OUT_OF_SCOPE");
+  assert.equal(verdicts.length, 0);
+  assert.equal(((await outOfScopeEvents(reportId))[0].data as { reason: string }).reason, "COULD_NOT_BUILD");
+});
