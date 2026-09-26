@@ -16,7 +16,7 @@ import {
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
-import { retryHeldDelivery } from "@/lib/delivery/retry";
+import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import {
   cancelRecheck,
@@ -492,6 +492,24 @@ export async function retryHeldDeliveryAction(reportId: string): Promise<ActionR
   }
   revalidateReportViews(reportId);
   return { ok: true };
+}
+
+/**
+ * Close a report stuck in DELIVERING behind a delivery that is held and can never send. This moves
+ * the report to CANCELLED and nothing else: the held outbox row is already unreachable, so there is
+ * no send to cancel, and nothing goes to the reporter.
+ */
+export async function cancelReportAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  try {
+    const result = await cancelHeldReport(reportId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    revalidateReportViews(reportId);
+    return { ok: true };
+  } catch (error) {
+    return thrownActionError(error, "cancel-report");
+  }
 }
 
 /** Run one gate decision, turning a thrown failure into a message that leaks nothing. */
