@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { repoReadToken } from "@/lib/github/repo-access";
+import { withRepoReadToken } from "@/lib/github/repo-access";
 
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 
@@ -43,17 +43,19 @@ export async function resolveRepositoryCommit(repoFullName: string, sourceRef: s
   if (sourceRef && !/^https?:\/\//.test(sourceRef)) url.searchParams.set("sha", sourceRef);
   url.searchParams.set("per_page", "1");
   // A private repository is read with a contents:read token, and one without that grant is refused
-  // here (POLICY_REFUSED), the first step of onboarding that touches the repository.
-  const token = await repoReadToken(repoFullName);
-  const response = await fetch(url, {
-    headers: {
-      accept: "application/vnd.github+json",
-      "user-agent": "bountydesk-onboarding",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
+  // here (POLICY_REFUSED), the first step of onboarding that touches the repository. The token is
+  // revoked once this one read settles.
+  const rows = await withRepoReadToken(repoFullName, async (token) => {
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/vnd.github+json",
+        "user-agent": "bountydesk-onboarding",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!response.ok) throw new Error(`could not resolve ${repoFullName} source commit: GitHub returned ${response.status}`);
+    return (await response.json()) as Array<{ sha?: unknown }>;
   });
-  if (!response.ok) throw new Error(`could not resolve ${repoFullName} source commit: GitHub returned ${response.status}`);
-  const rows = (await response.json()) as Array<{ sha?: unknown }>;
   const sha = rows[0]?.sha;
   if (!isCommitSha(sha)) throw new Error(`GitHub returned no immutable commit for ${repoFullName}`);
   return sha.toLowerCase();

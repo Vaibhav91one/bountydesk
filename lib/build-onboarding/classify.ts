@@ -2,7 +2,7 @@ import path from "node:path";
 
 import yaml from "js-yaml";
 
-import { repoReadToken } from "@/lib/github/repo-access";
+import { withRepoReadToken } from "@/lib/github/repo-access";
 
 import {
   type BuildPlan,
@@ -655,20 +655,19 @@ export function profileNameFromRepo(repoFullName: string): string {
  * network-restricted).
  */
 export function rawSourceReader(repoFullName: string, ref = "HEAD"): SourceReader {
-  // One read token per reader, minted on the first read: a classification reads a handful of files
-  // and minting per file is a rate-limit trigger. The token only ever goes to raw.githubusercontent.com
-  // from this server process. Null for a public repository, which is read anonymously.
-  let auth: Promise<Record<string, string>> | undefined;
-  const authHeaders = () =>
-    (auth ??= repoReadToken(repoFullName).then((token): Record<string, string> => (token ? { authorization: `Bearer ${token}` } : {})));
+  // Each read of a private repository mints its own token and revokes it when the read settles, so
+  // no token outlives the file it fetched. A classification reads a handful of files, so this is a
+  // handful of mints. A public repository is read anonymously and mints nothing.
   return {
-    async readFile(path: string) {
-      const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
-        headers: await authHeaders(),
+    readFile(path: string) {
+      return withRepoReadToken(repoFullName, async (token) => {
+        const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`reading ${path} from ${repoFullName} failed: ${res.status}`);
+        return await res.text();
       });
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`reading ${path} from ${repoFullName} failed: ${res.status}`);
-      return await res.text();
     },
   };
 }

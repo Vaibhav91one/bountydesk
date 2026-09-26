@@ -13,6 +13,7 @@ import {
   privateRepoPolicyRefused,
   redactToken,
   repoReadToken,
+  withRepoReadToken,
   type RepoAccess,
 } from "./repo-access";
 
@@ -75,6 +76,23 @@ test("GitHub refusing the contents permission (422) is the same POLICY_REFUSED",
     throw new GitHubApiError(422, "The permissions requested are not granted to this installation.");
   });
   await assert.rejects(repoReadToken("acme/secret", { loadAccess: access({}), mint }), PolicyRefusedError);
+});
+
+test("a server-side read revokes its token when the read settles, even when it fails", async () => {
+  const revoked: string[] = [];
+  const deps = { loadAccess: access({}), mint: okMint().mint, revoke: async (t: string) => void revoked.push(t) };
+  assert.equal(await withRepoReadToken("acme/secret", async (token) => `read with ${token}`, deps), `read with ${TOKEN}`);
+  await assert.rejects(
+    withRepoReadToken("acme/secret", async () => {
+      throw new Error("404");
+    }, deps),
+    /404/,
+  );
+  assert.deepEqual(revoked, [TOKEN, TOKEN]);
+
+  // A public repository has nothing to revoke.
+  await withRepoReadToken("acme/app", async (token) => assert.equal(token, null), { ...deps, loadAccess: access({ isPrivate: false }) });
+  assert.equal(revoked.length, 2);
 });
 
 test("the anonymous clone command carries no credential", () => {

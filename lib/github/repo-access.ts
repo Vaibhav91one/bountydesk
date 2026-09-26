@@ -1,6 +1,6 @@
 import type { Executor } from "@/lib/db";
 
-import { GitHubApiError, mintInstallationToken } from "./app-auth";
+import { GitHubApiError, mintInstallationToken, revokeInstallationToken } from "./app-auth";
 
 /**
  * The private-repository policy. A public repository is read and cloned anonymously and needs no
@@ -96,6 +96,23 @@ export async function repoReadToken(repoFullName: string, deps: RepoReadTokenDep
   } catch (error) {
     if (error instanceof GitHubApiError && error.status === 422) throw new PolicyRefusedError(repoFullName);
     throw error;
+  }
+}
+
+/**
+ * Run one server-side read with a repository read token (or none, for a public repository) and
+ * revoke the token as soon as the read settles, so no token outlives the request that needed it.
+ */
+export async function withRepoReadToken<T>(
+  repoFullName: string,
+  read: (token: string | null) => Promise<T>,
+  deps: RepoReadTokenDeps & { revoke?: (token: string) => Promise<void> } = {},
+): Promise<T> {
+  const token = await repoReadToken(repoFullName, deps);
+  try {
+    return await read(token);
+  } finally {
+    if (token) await (deps.revoke ?? revokeInstallationToken)(token);
   }
 }
 
