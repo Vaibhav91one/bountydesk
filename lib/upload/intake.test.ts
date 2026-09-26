@@ -120,6 +120,44 @@ test("a report gets a fixed number of codes", async () => {
   assert.equal((await intake.sendContactCode(result.reportId, sendCode)).ok, false);
 });
 
+test("a code that fails to send is not counted, and the uploader can still confirm afterwards", async () => {
+  const failing = async () => {
+    throw new Error("resend 503");
+  };
+  const parsed = await intake.parseUploadForm(form({ ...BASE, contact: "outage@outside.test" }), CONFIG);
+  assert.ok(parsed.ok);
+  const result = await intake.admitUpload(parsed.submission, "198.51.100.13", { sendCode: failing, config: CONFIG });
+  assert.ok(result.accepted);
+  if (!result.accepted) return;
+  assert.equal(result.codeSent, false);
+  assert.equal(await intake.codesSent(result.reportId), 0);
+
+  // More failures than the cap still spend nothing.
+  for (let i = 0; i < intake.UPLOAD_LIMITS.maxCodeSends + 1; i++) {
+    assert.equal((await intake.sendContactCode(result.reportId, failing)).ok, false);
+  }
+  assert.equal(await intake.codesSent(result.reportId), 0);
+
+  assert.deepEqual(await intake.sendContactCode(result.reportId, sendCode), { ok: true });
+  assert.equal(await intake.codesSent(result.reportId), 1);
+  assert.deepEqual(await intake.confirmContactCode(result.reportId, codes.get("outage@outside.test")!), { ok: true });
+  assert.equal(await recipient.isVerifiedEmailRecipient(await reportRow(result.reportId)), true);
+});
+
+test("concurrent resends cannot slip past the cap", async () => {
+  const result = await admit("race@outside.test", "198.51.100.14");
+  assert.ok(result.accepted);
+  if (!result.accepted) return;
+  let mailed = 1;
+  const counting = async () => void (mailed += 1);
+  const outcomes = await Promise.all(
+    Array.from({ length: 6 }, () => intake.sendContactCode(result.reportId, counting)),
+  );
+  assert.equal(outcomes.filter((o) => o.ok).length, intake.UPLOAD_LIMITS.maxCodeSends - 1);
+  assert.equal(mailed, intake.UPLOAD_LIMITS.maxCodeSends);
+  assert.equal(await intake.codesSent(result.reportId), intake.UPLOAD_LIMITS.maxCodeSends);
+});
+
 test("uploads over the per-contact daily limit are refused", async () => {
   // Subaddresses of one mailbox count as one contact.
   for (let i = 0; i < CONFIG.perSenderPerDay; i++) {

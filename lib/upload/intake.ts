@@ -4,7 +4,7 @@ import { EMAIL_SHAPE, normalizeEmail } from "@/lib/auth/otp";
 import { startContactVerification, verifyContactCode } from "@/lib/auth/report-contact";
 import { imageRegistryRefusal, isSafeImageRef } from "@/lib/build-onboarding/image-registries";
 import { isSha256Digest } from "@/lib/build-onboarding/source-identity";
-import { and, db, eq, report, sessionEvent, sql, uploadIntake, type Executor } from "@/lib/db";
+import { and, db, eq, inArray, report, sessionEvent, sql, uploadIntake, type Executor } from "@/lib/db";
 import { readOutsideConfig, type OutsideConfig } from "@/lib/email/outside-config";
 import { normalizeSender, overLimit, senderDomain } from "@/lib/email/outside-intake";
 import { sendVerificationEmail } from "@/lib/email/resend";
@@ -267,28 +267,42 @@ export async function sendContactCode(reportId: string, sendCode: SendCode = def
   if (!row?.contact) return { ok: false, reason: "no such upload" };
   if (row.verified && row.verified === row.contact) return { ok: false, reason: "this contact is already confirmed" };
 
-  // The slot is spent under the report's row lock before anything is mailed, so two requests racing
-  // cannot both read "under the cap", and a send that then fails still counts.
-  const spent = await db.transaction(async (tx) => {
+  // A slot is reserved under the report's row lock before anything is mailed, so two requests racing
+  // cannot both read "under the cap". The cap bounds mail that went out, so a send that fails gives
+  // its slot back. session_event is append-only, so the refund is a second event, not a delete.
+  const reserved = await db.transaction(async (tx) => {
     await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
-    const [{ sent }] = await tx
-      .select({ sent: sql<number>`count(*)::int` })
-      .from(sessionEvent)
-      .where(and(eq(sessionEvent.reportId, reportId), eq(sessionEvent.type, "upload.contact_code_sent")));
-    if (sent >= UPLOAD_LIMITS.maxCodeSends) return false;
-    await recordEvent(reportId, "upload.contact_code_sent", {}, { tx });
+    if ((await codesSent(reportId, tx)) >= UPLOAD_LIMITS.maxCodeSends) return false;
+    await recordEvent(reportId, CODE_SENT, {}, { tx });
     return true;
   });
-  if (!spent) return { ok: false, reason: "no more codes can be sent for this report" };
+  if (!reserved) return { ok: false, reason: "no more codes can be sent for this report" };
 
-  const { code } = await startContactVerification(reportId, row.contact);
   try {
+    const { code } = await startContactVerification(reportId, row.contact);
     await sendCode(row.contact, code);
   } catch (error) {
     console.error(`upload intake: code for ${reportId} did not send: ${safeErrorText(error)}`);
+    // Under the same row lock, so the refund cannot race a concurrent reservation's event seq.
+    await recordEventLocked(reportId, CODE_SEND_FAILED, {});
     return { ok: false, reason: "the code could not be sent; try again shortly" };
   }
   return { ok: true };
+}
+
+export const CODE_SENT = "upload.contact_code_sent";
+export const CODE_SEND_FAILED = "upload.contact_code_send_failed";
+
+/** Codes that actually went out: reservations less the ones refunded because their send failed. */
+export async function codesSent(reportId: string, tx: Executor = db): Promise<number> {
+  const [row] = await tx
+    .select({
+      sent: sql<number>`(count(*) filter (where ${sessionEvent.type} = ${CODE_SENT})
+        - count(*) filter (where ${sessionEvent.type} = ${CODE_SEND_FAILED}))::int`,
+    })
+    .from(sessionEvent)
+    .where(and(eq(sessionEvent.reportId, reportId), inArray(sessionEvent.type, [CODE_SENT, CODE_SEND_FAILED])));
+  return row?.sent ?? 0;
 }
 
 /** Check a code for an upload report's contact. Any other channel's report is refused. */
