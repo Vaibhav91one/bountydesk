@@ -1,7 +1,8 @@
 import { ne } from "drizzle-orm";
 
-import { and, db, desc, eq, outboundDelivery, report, sql } from "@/lib/db";
+import { and, db, desc, eq, type Executor, outboundDelivery, report, sql } from "@/lib/db";
 import { recordEvent } from "@/lib/reports/lifecycle";
+import { retireReports } from "@/lib/reports/retire";
 
 export type RetryHeldResult = { ok: true; deliveryId: string } | { ok: false; reason: string };
 
@@ -101,4 +102,57 @@ export async function retryHeldDelivery(
     );
     return { ok: true, deliveryId: row.id };
   });
+}
+
+export type CancelHeldResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Close a report that is stuck in DELIVERING because its only send is held for review and can
+ * never succeed (a GitHub 404 on a deleted issue, a recipient that no longer exists). Before this,
+ * the sole escape was the operator retire CLI.
+ *
+ * The held outbox row is already out of reach: claim() takes only PENDING rows that are not held,
+ * and the worker refuses any send when the report is not DELIVERING. So cancelling touches neither
+ * outbound_delivery nor the append-only delivery_attempt, it only moves the report to CANCELLED.
+ * retireReports does the state move under the report's row lock and records the report.retired
+ * event; the stillEligible hook, re-checked under that lock, is what keeps this from cancelling a
+ * live report or one whose delivery is not actually held.
+ */
+export async function cancelHeldReport(
+  reportId: string,
+  reviewer: string,
+): Promise<CancelHeldResult> {
+  const [outcome] = await retireReports([reportId], {
+    reason: `cancelled by ${reviewer}: delivery permanently held`,
+    commit: true,
+    stillEligible: async (tx: Executor, id: string) => {
+      const [reportRow] = await tx
+        .select({ state: report.state })
+        .from(report)
+        .where(eq(report.id, id));
+      if (reportRow?.state !== "DELIVERING") return false;
+
+      const [row] = await tx
+        .select({
+          state: outboundDelivery.state,
+          requiresHumanReview: outboundDelivery.requiresHumanReview,
+        })
+        .from(outboundDelivery)
+        .where(eq(outboundDelivery.reportId, id))
+        .orderBy(desc(outboundDelivery.createdAt))
+        .limit(1);
+      return row?.state === "FAILED" && row.requiresHumanReview === true;
+    },
+  });
+
+  switch (outcome.status) {
+    case "retired":
+      return { ok: true };
+    case "missing":
+      return { ok: false, reason: "report not found" };
+    case "already-terminal":
+      return { ok: false, reason: `report is already ${outcome.from}` };
+    default:
+      return { ok: false, reason: "this report has no held delivery to cancel" };
+  }
 }
