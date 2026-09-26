@@ -13,7 +13,6 @@ Still open, in one place:
 - A tarball without a Dockerfile at its root.
 - Building from a non-GitHub git URL.
 - Reclaiming each mesh service's pushed image, and deleting images on registries other than GHCR.
-- Scheduling the trial-snapshot sweep.
 - A self-hosted private registry at multi-tenant scale.
 
 ## Source identity is resolved before customer code runs
@@ -73,16 +72,18 @@ path pushes one image per service and does not yet reclaim them.
 `sweepTrialSnapshots` (`lib/sandbox/daytona.ts`) reclaims build-created snapshots that no live target
 depends on: it deletes `onboarding-` snapshots whose id is not in the protected set, where the set is
 every snapshot a target profile pins (single-image and each mesh service) plus every in-flight
-onboarding row's built snapshot (`collectProtectedSnapshotIds` in `worker.ts`). It is meant to run
-as maintenance, not on the onboarding hot path, so a concurrent build's snapshot cannot be swept
-before the database records it. `sweepOrphanSnapshots` wraps it, but nothing calls that yet: no
-worker loop or script schedules the sweep, so trial snapshots still accumulate until it is run.
+onboarding row's built snapshot (`collectProtectedSnapshotIds` in `worker.ts`). The worker daemon
+runs it through `sweepOrphanSnapshots` as the `snapshot-sweep` maintenance slot in
+`scripts/run-worker-daemon.ts`, at most once every six hours, and logs only when it deletes
+something. A build registers its snapshot before the database records the id (an onboarding when it
+leaves `PENDING_BUILD`, an upload build when it binds the profile), so a pass that finds an onboarding
+row in `PENDING_BUILD` or an upload row in `PENDING` or `BUILDING` deletes nothing and waits for the
+next interval.
 
 Remaining work:
 
 - Reclaim each mesh service's pushed image the way the single-image path does.
 - Add a delete path for registries other than GHCR.
-- Schedule `sweepOrphanSnapshots` as a maintenance job.
 - At multi-tenant scale, self-host a private registry. Zot is a single static binary over
   filesystem or S3 storage and is the lightweight option; Harbor adds per-project RBAC, which is
   per-tenant isolation, plus scanning and retention. This is the proper fix for customer images
@@ -163,7 +164,7 @@ Remaining work:
   `npm run rotate:target` are GitHub-only, so a connectionless target cannot be rebuilt in place.
 - A tarball without a Dockerfile. The upload build plan always uses `Dockerfile` at the archive root;
   the onboarding agent that writes a Dockerfile for a GitHub repository is not wired to uploads, so
-  such a build fails and the report ends `ANALYSIS_ONLY`.
+  such a build fails and the report gets the static review of its archive (`COULD_NOT_BUILD`).
 - A non-GitHub git URL. The `git` source kind accepts any clone URL, but no intake or onboarding path
   produces one.
 

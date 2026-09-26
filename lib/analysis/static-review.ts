@@ -19,6 +19,9 @@ import { boundedSourceReader, REVIEW_FILES, type RepoReadDeps } from "./sandboxa
  * review that read source but drafted nothing still ends ANALYSIS_ONLY with that reason on a
  * synthesized verdict. One that read no source and drafted nothing could neither reproduce nor
  * analyze, so the poller routes it to OUT_OF_SCOPE (lib/reports/target-scope.ts). Neither is a dead job.
+ *
+ * An upload whose build gave up takes the same path with COULD_NOT_BUILD, but its source is the stored
+ * archive, read by lib/analysis/archive-source.ts instead of the GitHub reader here.
  */
 
 /** The session_event type that records a report's static fallback and its reason. publish-verdict
@@ -39,15 +42,15 @@ export type StaticSource = {
   files: Array<{ path: string; text: string }>;
 };
 
-const MAX_TREE_PATHS = 300;
+export const MAX_TREE_PATHS = 300;
 const MAX_SOURCE_FILES = 10;
-const MAX_FILE_CHARS = 6_000;
-const MAX_BLOB_BYTES = 200_000;
+export const MAX_FILE_CHARS = 6_000;
+export const MAX_BLOB_BYTES = 200_000;
 const FETCH_TIMEOUT_MS = 20_000;
 
-const SOURCE_EXTENSION =
+export const SOURCE_EXTENSION =
   /\.(?:[cm]?[jt]sx?|py|rb|php|go|java|kt|scala|cs|rs|c|cc|cpp|h|hpp|swift|ex|exs|erb|ejs|hbs|pug|vue|svelte|html?|sql|ya?ml|json|toml|xml|conf|ini|sh)$/i;
-const SKIPPED_DIRS = /(?:^|\/)(?:node_modules|vendor|dist|build|\.git|coverage|\.next|__pycache__)\//;
+export const SKIPPED_DIRS = /(?:^|\/)(?:node_modules|vendor|dist|build|\.git|coverage|\.next|__pycache__)\//;
 
 /** Words that show up in almost every report and so say nothing about which file it is about. */
 const STOP_WORDS = new Set([
@@ -153,7 +156,7 @@ export async function gatherStaticSource(
 }
 
 const REASON_TEXT: Record<StaticFallbackReason, string> = {
-  COULD_NOT_BUILD: "the connected repository could not be built into a sandboxed target",
+  COULD_NOT_BUILD: "the target's source could not be built into a sandboxed target",
   COULD_NOT_DEPLOY: "the report's pinned target could not be deployed into a sandbox",
 };
 

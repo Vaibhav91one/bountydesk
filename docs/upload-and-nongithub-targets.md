@@ -122,7 +122,8 @@ code or sends another, acting only on upload reports and only on the address giv
 most three codes go out per report, the first included.
 
 The body is parsed in the route process with bounds, not in the sandbox the design described for
-email attachments. An uploaded archive is only unpacked inside the build sandbox.
+email attachments. An uploaded archive is only extracted inside the build sandbox. The one other
+reader is the static review below, which parses it in memory and never extracts or runs it.
 
 Target material is optional and at most one of: a tarball with a Dockerfile at its root, a single
 Dockerfile of at most 64 KB with a `FROM` line (stored as a deterministic one-file tarball so it
@@ -137,10 +138,21 @@ are validated through `targetDefinitionFromManifest` into a definition whose nam
 label come from the report id and whose scope is loopback only. The report moves to `TRIAGING`. The
 `upload-build` worker loop (`lib/upload/build.ts`) builds the material, pins it with
 `bindConnectionlessTargetFromBuild`, binds the report, and queues the same analysis run the gate's
-"Run analysis" queues. A build gets two attempts. One that fails twice, or is skipped because a
-reviewer bound another target meanwhile, leaves the report as it was, and the run proceeds without
-the uploaded target, ending `ANALYSIS_ONLY` if nothing is bound. A failed upload build does not get
-the static review a failed GitHub build gets.
+"Run analysis" queues. A build gets two attempts. One skipped because a reviewer bound another
+target meanwhile leaves that target in place, and the run uses it.
+
+One that fails twice ends the row at `FAILED` with no target bound, and the run is the tier-3 static
+review with `COULD_NOT_BUILD`, the same fallback a failed GitHub build gets (`docs/decisions.md`
+Q31). The source is the stored archive, not GitHub: `gatherArchiveSource` in
+`lib/analysis/archive-source.ts` parses the tarball in memory, reads regular files only (never a
+symlink, hard link or device), refuses any absolute or `..` path and any entry over 200 KB, and stops
+at 64 MB unpacked. The agent gets the file tree, the root manifests and up to ten files the report
+text points at, with a single top-level directory stripped so a `project/` tarball still matches.
+The `reproduction.static_fallback` event records the archive digest as the ref and the files read,
+and `publish_verdict` refuses `REPRODUCED` or `NOT_REPRODUCED` on that run. A prebuilt image has no
+source, so its review works from the report text. The narrowed `OUT_OF_SCOPE` rule applies
+unchanged: a review that read no source and drafted nothing ends `OUT_OF_SCOPE`, and anything else
+ends `ANALYSIS_ONLY`.
 
 The gate also offers "Run analysis" without building, and "Dismiss", which moves the report to
 `DENIED`.

@@ -49,8 +49,8 @@ const DETAIL: Record<StaticFallbackReason, string> = {
  * rest against the database.
  *
  * The refusals keep the state honest. OUT_OF_SCOPE needs a recorded static fallback, which exists
- * only when onboarding recorded COULD_NOT_BUILD or provisioning threw a hard deploy failure, so it
- * is never produced from the mere absence of a target. A review that read source, or a report that
+ * only when onboarding recorded COULD_NOT_BUILD, an upload build gave up, or provisioning threw a
+ * hard deploy failure, so it is never produced from the mere absence of a target. A review that read source, or a report that
  * already has a verdict, stays on the ANALYSIS_ONLY path. A report that already left TRIAGING is
  * left alone. Runs in the caller's transaction, which must hold the report row lock.
  */
