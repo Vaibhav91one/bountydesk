@@ -298,6 +298,19 @@ test("a refusal when the permission is already granted names the missing advisor
   assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
 });
 
+test("a 422 is a validation error, failed as such, not read as a permission or feature problem", async () => {
+  // Permission is "write", so a permission-based read of the refusal would be wrong. A 422 is
+  // GitHub rejecting the request body, which no permission change or feature fixes.
+  const rejected = await seed({ advisoriesPermission: "write" });
+  await advisory.requestOwnerAdvisory(rejected.reportId, "r");
+  await advisory.adviseOnce({ deps: fakeGitHub({ createError: { status: 422 } }).deps });
+  const failed = await row(rejected.reportId);
+  assert.equal(failed.state, "FAILED");
+  assert.match(failed.lastError ?? "", /validation error rather than a permission problem/);
+  assert.doesNotMatch(failed.lastError ?? "", /has not granted/);
+  assert.doesNotMatch(failed.lastError ?? "", /GitHub Advanced Security/);
+});
+
 test("a GitHub report's owner gets the advisory too, with severity and CWEs from its findings", async () => {
   const { reportId, payload } = await seed({ channel: "github" });
   assert.deepEqual(await advisory.requestOwnerAdvisory(reportId, "r"), { ok: true });

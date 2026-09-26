@@ -111,10 +111,15 @@ original in the report body; the advisory no longer shows it.
 A revoked grant is refused and held. If `activeRepository` fails at send (installation suspended or
 deleted, repository removed or archived, target unbound), the arm returns a refusal with hold.
 
-GitHub refusing the write is held. A 403, 404 or 422 from the advisories API, or a 403 or 404 from
-minting the installation token that is not a rate limit, means the installation has not accepted
-the advisories permission, cannot see the advisory, or GitHub rejected the edit. Retrying does not
-fix any of these.
+GitHub refusing the write is held, and the held message names which of three causes it is. A 403 or
+404 from the advisories API, or a 403 or 404 from minting the installation token that is not a rate
+limit, is about reaching the advisory: the installation's recorded `repository_advisories` permission
+tells the two apart. Not `write` means the installation has not accepted the advisories permission,
+so the fix is on the installation; `write` and still refused means the repository has no security
+advisories surface, which for a private repository needs GitHub Advanced Security, so the fix is on
+the repository. A 422 is separate: GitHub accepted the call but rejected the body, a validation error
+on the drafted advisory that no permission change fixes, so the message points a human at the draft.
+Retrying does not fix any of these.
 
 A held refusal records a `delivery_attempt` with the error and sets the outbox row to `FAILED` with
 `requires_human_review`, which takes it out of the claim queue. The report stays in `DELIVERING`, and

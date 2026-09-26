@@ -44,7 +44,10 @@ let seq = 0;
  * the reporter's advisory the report names, and updateAdvisoryDescription edits that same row, so a
  * retry then reads back what the last write left.
  */
-function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null) {
+function fakeAdvisoryDeps(
+  seeded: { ghsaId: string; description: string } | null,
+  opts: { updateStatus?: number } = {},
+) {
   const store = new Map<string, { ghsaId: string; htmlUrl: string; summary: string; description: string }>();
   if (seeded) {
     store.set(seeded.ghsaId, {
@@ -80,6 +83,7 @@ function fakeAdvisoryDeps(seeded: { ghsaId: string; description: string } | null
     },
     updateAdvisoryDescription: async ({ ghsaId, description }): Promise<Advisory> => {
       calls.update++;
+      if (opts.updateStatus) throw new GitHubRequestError(opts.updateStatus, "fake: github rejected the edit");
       const existing = store.get(ghsaId);
       if (!existing) throw new GitHubRequestError(404, "fake: advisory not found");
       existing.description = description;
@@ -316,6 +320,21 @@ test("a refusal when the permission is already granted names the missing advisor
   assert.match(row.lastError ?? "", /does not have security advisories available/);
   assert.match(row.lastError ?? "", /GitHub Advanced Security/);
   assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+});
+
+test("a 422 is a validation error, held as such, not read as a permission or feature problem", async () => {
+  await drainOthers();
+  // The installation has the write, so the permission branch would send the wrong person to the
+  // wrong place. A 422 is GitHub rejecting the request body, not a permission or feature gap.
+  const f = await seedFixture({ advisoriesPermission: "write" });
+  const { deps } = fakeAdvisoryDeps({ ghsaId: f.ghsaId, description: "the reporter's original report" }, { updateStatus: 422 });
+
+  await worker.deliverOnce("adv-422", { deps });
+  const row = await deliveryRow(f.deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.match(row.lastError ?? "", /validation error rather than a permission problem/);
+  assert.doesNotMatch(row.lastError ?? "", /accept "Repository security advisories: write"/);
+  assert.doesNotMatch(row.lastError ?? "", /GitHub Advanced Security/);
 });
 
 test("the grant revoked between intake and send is refused and held, not delivered", async () => {
