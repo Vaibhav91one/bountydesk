@@ -146,6 +146,109 @@ function parseDelivery(lease: Lease): {
   };
 }
 
+type AdvisoryDelivery = {
+  action?: string;
+  repository_advisory?: { ghsa_id?: string };
+  sender?: { login?: string };
+  repository?: { id?: number; full_name?: string };
+  installation?: { id?: number };
+};
+
+/**
+ * Reads a draft advisory's title and body. Injected so a test can drive parseAdvisory without a
+ * live GitHub App: the default mints an installation token and reads the advisory through the API.
+ */
+export type AdvisoryReader = (opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}) => Promise<{ summary: string; description: string }>;
+
+async function defaultReadAdvisory(opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}): Promise<{ summary: string; description: string }> {
+  const [{ mintInstallationToken }, { getAdvisory }] = await Promise.all([
+    import("@/lib/github/app-auth"),
+    import("@/lib/github/advisory"),
+  ]);
+  const { token } = await mintInstallationToken(opts.installationId, opts.repoId, {
+    signal: opts.signal,
+  });
+  const { summary, description } = await getAdvisory({
+    token,
+    fullName: opts.fullName,
+    ghsaId: opts.ghsaId,
+    signal: opts.signal,
+  });
+  return { summary, description };
+}
+
+/**
+ * Turn a repository_advisory delivery into a report, held at the NEEDS_DECISION gate.
+ *
+ * A private vulnerability report can be filed by any GitHub user, so the reporter is untrusted the
+ * same way a public issue opener is. An issue needs an allowlisted reviewer's /reproduce before a
+ * run starts; an advisory has no comment to carry that command, so it waits at NEEDS_DECISION like
+ * an outside email report, and only a reviewer's "Run analysis" spends the sandbox budget. Nothing
+ * is cloned, built or provisioned until then.
+ *
+ * Access is re-checked here, not just at intake: a suspension or a repository removal can land
+ * between the 202 and this run, and the target profile is read from the server, never the payload,
+ * exactly as the issue path does. A report whose repository has since lost its grant can only reach
+ * ANALYSIS_ONLY downstream (see the repository-grant gate), which is the "no bound target, no
+ * REPRODUCED" invariant, so nothing here has to special-case it.
+ */
+async function parseAdvisory(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
+  const payload = lease.payload as AdvisoryDelivery;
+  const ghsaId = payload.repository_advisory?.ghsa_id;
+  const installationId = payload.installation?.id;
+  if (!ghsaId) throw new UnprocessableDelivery("advisory delivery carries no ghsa_id");
+  if (!installationId) throw new UnprocessableDelivery("advisory delivery carries no installation id");
+
+  const repository = await activeRepository(installationId, payload.repository?.id);
+  if (!repository) {
+    throw new UnprocessableDelivery(
+      `repository ${payload.repository?.full_name ?? "?"} is no longer connected`,
+    );
+  }
+
+  const { summary, description } = await readAdvisory({
+    installationId,
+    repoId: repository.repoId,
+    fullName: repository.fullName,
+    ghsaId,
+    signal: undefined,
+  });
+
+  const sourceRef = `github:${repository.repoId}:advisory:${ghsaId}`;
+
+  const reportId = await ensureReport({
+    channel: lease.channel,
+    sourceRef,
+    title: summary || `${repository.fullName} advisory ${ghsaId}`,
+    body: description,
+    reporterHandle: payload.sender?.login ?? null,
+    state: "NEEDS_DECISION",
+    connectedRepositoryId: repository.connectedRepositoryId,
+    targetProfileId: repository.targetProfileId,
+  });
+
+  await recordEvent(
+    reportId,
+    "intake.accepted",
+    { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
+    { idempotencyKey: `${lease.id}:intake.accepted` },
+  );
+
+  return advance(lease, "PARSED", { reportId });
+}
+
 type EmailJobPayload = InboundEmail | OutsideEmailPayload | GateAnalysisPayload;
 
 function isOutside(payload: unknown): payload is OutsideEmailPayload {
@@ -163,8 +266,11 @@ async function parseGateRelease(lease: Lease, reportId: string): Promise<Lease> 
     .from(report)
     .where(eq(report.id, reportId))
     .limit(1);
-  if (!row || row.channel !== "email") {
-    throw new UnprocessableDelivery(`gate release names no email report ${reportId}`);
+  // Both channels that wait at the gate can be released this way: an outside email report and an
+  // advisory report. The release job itself is enqueued on the email channel as a routing signal,
+  // so this checks the report it names, not the job's channel.
+  if (!row || (row.channel !== "email" && row.channel !== "advisory")) {
+    throw new UnprocessableDelivery(`gate release names no gated report ${reportId}`);
   }
   if (row.state !== "TRIAGING") {
     throw new UnprocessableDelivery(`report ${reportId} is ${row.state}; the gate did not release it`);
@@ -235,8 +341,9 @@ async function parseEmail(lease: Lease): Promise<Lease> {
   return advance(lease, "PARSED", { reportId });
 }
 
-async function parse(lease: Lease): Promise<Lease> {
+async function parse(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
   if (lease.channel === "email") return parseEmail(lease);
+  if (lease.channel === "advisory") return parseAdvisory(lease, readAdvisory);
 
   const { payload, issueNumber, title, body, reporterHandle } = parseDelivery(lease);
 
@@ -292,12 +399,15 @@ export async function runOnce(
   {
     analysis,
     hold = defaultHold,
+    readAdvisory = defaultReadAdvisory,
     leaseSeconds = 60,
     signal,
   }: {
     analysis: AnalysisDriver;
     /** The gate step for an outside email report; injectable so tests need no TrueForge. */
     hold?: (context: AnalysisContext) => Promise<void>;
+    /** Reads an advisory's title and body; injectable so tests need no live GitHub App. */
+    readAdvisory?: AdvisoryReader;
     leaseSeconds?: number;
     signal?: AbortSignal;
   },
@@ -318,7 +428,7 @@ export async function runOnce(
   let lease = claimed;
 
   try {
-    if (lease.state === "RECEIVED") lease = await parse(lease);
+    if (lease.state === "RECEIVED") lease = await parse(lease, readAdvisory);
     signal?.throwIfAborted();
     // An outside sender's report stops here. The analysis driver never sees it: no session, no
     // sandbox, no clone. The job finishes once the acknowledgement and triage are recorded, and
@@ -328,6 +438,14 @@ export async function runOnce(
         throw new UnprocessableDelivery("job reached PARSED with no report attached");
       }
       await runWithHeartbeat(hold, lease.reportId, lease, leaseSeconds, signal);
+      await complete(lease);
+      return lease.id;
+    }
+    // An advisory report also waits at the gate, but there is no reporter mailbox to acknowledge and
+    // no email text to triage, so the job just finishes and the report sits at NEEDS_DECISION until a
+    // reviewer releases it. The gate-release job that a reviewer's "Run analysis" enqueues is the one
+    // that takes the branch below and starts the run.
+    if (lease.state === "PARSED" && lease.channel === "advisory") {
       await complete(lease);
       return lease.id;
     }

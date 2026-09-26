@@ -24,6 +24,19 @@ type GateResult =
   | { kind: "unauthorized" }
   | { kind: "enqueued"; disposition: string };
 
+type AdvisoryPayload = {
+  action?: string;
+  repository_advisory?: { ghsa_id?: string };
+  sender?: { id?: number; login?: string };
+  repository?: { id?: number; full_name?: string };
+  installation?: { id?: number };
+};
+
+type AdvisoryGateResult =
+  | { kind: "not_connected" }
+  | { kind: "no_advisory" }
+  | { kind: "enqueued"; disposition: string };
+
 /**
  * The GitHub App webhook endpoint.
  *
@@ -64,6 +77,10 @@ export async function POST(request: Request): Promise<Response> {
 
   if (event === "issues") {
     return handleIssue(deliveryId, payload as IssuePayload);
+  }
+
+  if (event === "repository_advisory") {
+    return handleAdvisory(deliveryId, payload as AdvisoryPayload);
   }
 
   // A subscription we do not act on. Accepting it keeps GitHub's delivery log clean, and
@@ -164,6 +181,52 @@ async function handleIssue(deliveryId: string, payload: IssuePayload): Promise<R
 
   if (result.kind === "unauthorized") {
     return new Response("reproduce command ignored: sender not authorized", { status: 202 });
+  }
+
+  return new Response(result.disposition, { status: 202 });
+}
+
+/**
+ * Take in a GitHub security advisory (a private vulnerability report) as its own intake channel.
+ *
+ * This is per-report intake, like `handleIssue`, not an App-lifecycle event: each advisory becomes
+ * one report. Only `reported` (a new private report) and `published` are taken in; the rest of the
+ * advisory lifecycle (edited, withdrawn, and so on) is acknowledged and dropped. A private
+ * vulnerability report can be filed by any GitHub user, so the report is created but held at the
+ * NEEDS_DECISION gate (see parseAdvisory in lib/jobs/worker.ts): no sandbox run starts until a
+ * reviewer releases it, the same way an outside email report waits. That is why there is no
+ * /reproduce command gate here, unlike an issue.
+ *
+ * The access check and the enqueue share one transaction, with the same lock handleIssue takes, so
+ * a revocation arriving concurrently cannot slip a job past the gate.
+ */
+async function handleAdvisory(deliveryId: string, payload: AdvisoryPayload): Promise<Response> {
+  if (payload.action !== "reported" && payload.action !== "published") {
+    return new Response(`ignored repository_advisory action ${payload.action}`, { status: 202 });
+  }
+
+  const result = await db.transaction(async (tx): Promise<AdvisoryGateResult> => {
+    const repository = await activeRepository(
+      payload.installation?.id,
+      payload.repository?.id,
+      { tx, lock: true },
+    );
+    if (!repository) return { kind: "not_connected" };
+
+    // The GHSA id anchors the report identity (source_ref) and the worker reads the advisory body
+    // by it. A payload without one is malformed, not a report.
+    if (!payload.repository_advisory?.ghsa_id) return { kind: "no_advisory" };
+
+    const { disposition } = await enqueue({ channel: "advisory", deliveryId, payload }, tx);
+    return { kind: "enqueued", disposition };
+  });
+
+  if (result.kind === "not_connected") {
+    return new Response("repository is not connected", { status: 202 });
+  }
+
+  if (result.kind === "no_advisory") {
+    return new Response("repository_advisory carries no ghsa_id", { status: 202 });
   }
 
   return new Response(result.disposition, { status: 202 });

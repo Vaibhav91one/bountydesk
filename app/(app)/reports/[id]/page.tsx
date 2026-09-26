@@ -9,6 +9,7 @@ import { listTargetProfiles } from "@/lib/targets/bind";
 import { caseLiveView } from "@/lib/reports/case-view";
 import { readGate } from "@/lib/triage/gate";
 
+import { AdvisoryGate } from "./advisory-gate";
 import { CaseApproval } from "./case-approval";
 import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { CaseView } from "./case-view";
@@ -222,6 +223,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           gate={gate}
           closingReason={closingReason}
         />
+      ) : null}
+
+      {file.channel === "advisory" ? (
+        <AdvisoryGate reportId={file.id} state={file.state} closingReason={closingReason} />
       ) : null}
 
       <CaseView

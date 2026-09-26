@@ -134,6 +134,12 @@ function makeDeps(send?: (call: number, opts: SendCall) => Promise<{ id: string 
     listComments: async () => {
       throw new Error("email delivery must not read comments");
     },
+    getAdvisory: async () => {
+      throw new Error("email delivery must not touch an advisory");
+    },
+    updateAdvisoryDescription: async () => {
+      throw new Error("email delivery must not touch an advisory");
+    },
     sendEmail: async (opts) => {
       sent.push(opts);
       if (send) return send(sent.length, opts);

@@ -353,6 +353,12 @@ test("intake job -> TrueForge turn -> approval -> publish_verdict -> delivered",
       sendEmail: async () => {
         throw new Error("github delivery must not send mail");
       },
+      getAdvisory: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
+      updateAdvisoryDescription: async () => {
+        throw new Error("github delivery must not touch an advisory");
+      },
       githubAppId: 123456,
       hashContent: computeContentHash,
       mintToken: async () => ({ token: "fake-installation-token", expiresAt: new Date().toISOString() }),

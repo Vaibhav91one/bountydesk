@@ -1,3 +1,4 @@
+import type { Advisory, AdvisoryContent } from "@/lib/github/advisory";
 import type { IssueComment } from "@/lib/github/comment";
 
 import type { DeliveryLease } from "./queue";
@@ -39,6 +40,26 @@ export type DeliveryDeps = {
     headers?: Record<string, string>;
     signal?: AbortSignal;
   }) => Promise<{ id: string }>;
+  /**
+   * The advisory transport's two GitHub calls. Required for the same reason sendEmail is: an absent
+   * one would silently turn advisory delivery into a no-op. The GitHub and email tests stub them
+   * with a throw, which doubles as an assertion that those arms never touch an advisory. There is no
+   * create here: an advisory-channel report came from the reporter's own advisory, so its verdict is
+   * written back onto that advisory (named by the source_ref's GHSA id), never a new draft.
+   */
+  getAdvisory: (opts: {
+    token: string;
+    fullName: string;
+    ghsaId: string;
+    signal?: AbortSignal;
+  }) => Promise<AdvisoryContent>;
+  updateAdvisoryDescription: (opts: {
+    token: string;
+    fullName: string;
+    ghsaId: string;
+    description: string;
+    signal?: AbortSignal;
+  }) => Promise<Advisory>;
 };
 
 /**
@@ -53,7 +74,7 @@ export type DeliveryContext = {
   payload: string;
   report: {
     id: string;
-    channel: "github" | "email" | "manual" | "upload";
+    channel: "github" | "email" | "manual" | "upload" | "advisory";
     sourceRef: string;
     /** Reporter-controlled: for email it is their own subject line, so treat it as untrusted. */
     title: string;
