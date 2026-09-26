@@ -499,3 +499,26 @@ test("a notice is never sent to a contact that intake did not verify", async () 
   assert.equal(result.status, "refused");
   assert.equal(mail.calls.length, 0);
 });
+
+test("denyAtGate closes a gated advisory report without any reply", async () => {
+  seq += 1;
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "advisory",
+      sourceRef: `github:${900000 + seq}:advisory:GHSA-deny-${seq}-aaaa`,
+      title: `advisory ${seq}`,
+      body: "body",
+      state: "NEEDS_DECISION",
+      connectedRepositoryId: null,
+      targetProfileId: null,
+    })
+    .returning({ id: dbm.report.id });
+
+  assert.deepEqual(await gate.denyAtGate(row.id, "reviewer"), { ok: true });
+  assert.equal((await reportById(row.id)).state, "DENIED");
+  assert.ok((await eventTypes(row.id)).includes("intake.rejected"));
+
+  // It only acts once: a second dismiss finds the report already gone from the gate.
+  assert.equal((await gate.denyAtGate(row.id, "reviewer")).ok, false);
+});

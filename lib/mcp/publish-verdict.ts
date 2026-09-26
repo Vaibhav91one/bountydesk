@@ -656,6 +656,16 @@ export async function enqueueApprovedVerdictDelivery(
       return { ok: false, reason: `${contact} is no longer an authorised address` };
     }
     deliveryTarget = contact;
+  } else if (reportRow.channel === "advisory") {
+    // The verdict is written back by editing the repository's security advisory, so the delivery
+    // target is the report's own source_ref (the repo id plus the GHSA id), exactly as the GitHub
+    // channel targets its issue. The recipient is the connected repository, re-verified live at
+    // send time by the advisory arm's activeRepository check; a grant revoked before then is
+    // refused and held there rather than delivered.
+    if (!/^github:\d+:advisory:.+/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid advisory delivery target" };
+    }
+    deliveryTarget = reportRow.sourceRef;
   } else {
     return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
   }

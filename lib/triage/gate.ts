@@ -229,6 +229,22 @@ export async function releaseForAnalysis(reportId: string, reviewer: string): Pr
 }
 
 /**
+ * Dismiss a gated report that has no reporter mailbox to answer, which today means an advisory
+ * report. It closes as DENIED and records the same intake.rejected event a reject does, so the case
+ * file names the reason, but it sends nothing: an advisory reporter is reached by editing the
+ * advisory on an approved verdict, never by a canned gate reply, so there is no reply to send here.
+ */
+export async function denyAtGate(reportId: string, reviewer: string): Promise<GateResult> {
+  return db.transaction(async (tx): Promise<GateResult> => {
+    const gate = await lockAtGate(tx, reportId);
+    if (!gate.ok) return gate;
+    await transition(reportId, "NEEDS_DECISION", "DENIED", tx);
+    await recordEvent(reportId, "intake.rejected", { reviewer }, { tx });
+    return { ok: true };
+  });
+}
+
+/**
  * Mark duplicate: link the report to an existing one, close it, and send the fixed duplicate
  * reply. The reviewer's click is the approval of that fixed text; nothing else ever sends it.
  *

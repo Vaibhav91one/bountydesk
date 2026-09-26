@@ -64,6 +64,10 @@ export const intakeChannel = pgEnum("intake_channel", [
   // the email transport; the channel stays distinct for honest provenance and for the unique
   // (channel, source_ref) index.
   "upload",
+  // A GitHub security advisory (private vulnerability report). GitHub advisories have no comments
+  // API, so the verdict is written back by editing the advisory itself; the channel is distinct so
+  // that outbound path is chosen for these and only these.
+  "advisory",
 ]);
 
 export const verdictOutcome = pgEnum("verdict_outcome", [

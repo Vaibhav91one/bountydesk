@@ -34,6 +34,7 @@ import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import {
+  denyAtGate,
   markDuplicateAtGate,
   rejectAtGate,
   releaseForAnalysis,
@@ -494,6 +495,12 @@ export async function rejectAtGateAction(reportId: string, spam: boolean): Promi
 export async function runAnalysisAction(reportId: string): Promise<ActionResult> {
   const session = await requireReviewer();
   return gateDecision(reportId, () => releaseForAnalysis(reportId, session.login));
+}
+
+/** Dismiss a gated advisory report: close it as denied, with no reporter reply to send. */
+export async function dismissAdvisoryAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => denyAtGate(reportId, session.login));
 }
 
 /**
