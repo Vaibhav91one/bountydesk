@@ -12,6 +12,8 @@ import {
 } from "@/lib/db";
 import { enqueue as enqueueOnboarding } from "@/lib/build-onboarding/queue";
 
+import { hasContentsRead } from "./repo-access";
+
 /**
  * The App-lifecycle side of intake: who installed us, on which repositories, and whether
  * that access is still live.
@@ -39,13 +41,16 @@ import { enqueue as enqueueOnboarding } from "@/lib/build-onboarding/queue";
 type InstallationPayload = {
   id: number;
   account?: { login?: string; id?: number; type?: string } | null;
+  /** The permissions the account granted, on `installation` and `installation_repositories`
+   *  payloads. The `repository` event's installation object omits it. */
+  permissions?: Record<string, string> | null;
 };
 
 type RepositoryPayload = {
   id: number;
   full_name: string;
-  /** GitHub sends this on every repository object in installation webhooks. Absent is treated
-   *  as private (fail closed): onboarding only builds a repository it can clone anonymously. */
+  /** GitHub sends this on every repository object in installation webhooks. Absent is stored as
+   *  unknown (null), and an unknown repository is never queued for onboarding (fail closed). */
   private?: boolean;
 };
 
@@ -75,6 +80,13 @@ async function upsertInstallation(
   tx: Executor,
   installation: InstallationPayload,
 ): Promise<string> {
+  // Recorded only when the payload carries permissions, so an event without them (the repository
+  // event's bare installation object) never erases what an earlier one told us. A permissions object
+  // without `contents` means the installation does not hold it.
+  const contentsPermission =
+    installation.permissions && typeof installation.permissions === "object"
+      ? (installation.permissions.contents ?? "none")
+      : undefined;
   const values = {
     installationId: installation.id,
     accountLogin: installation.account?.login ?? "",
@@ -85,6 +97,7 @@ async function upsertInstallation(
       installation.account?.type === "User" || installation.account?.type === "Organization"
         ? installation.account.type
         : null,
+    ...(contentsPermission !== undefined ? { contentsPermission } : {}),
   };
 
   const [row] = await tx
@@ -98,6 +111,7 @@ async function upsertInstallation(
         // Only overwrite with a value GitHub actually sent, so a payload without an account
         // type does not erase one we already learned.
         ...(values.accountType ? { accountType: values.accountType } : {}),
+        ...(contentsPermission !== undefined ? { contentsPermission } : {}),
         updatedAt: new Date(),
       },
     })
@@ -127,6 +141,7 @@ async function grantRepositories(
         installationId: installationRowId,
         repoId: repo.id,
         fullName: repo.full_name,
+        isPrivate: typeof repo.private === "boolean" ? repo.private : null,
       })),
     )
     .onConflictDoUpdate({
@@ -134,24 +149,58 @@ async function grantRepositories(
       set: {
         installationId: installationRowId,
         fullName: sql`excluded.full_name`,
+        // A payload without `private` keeps the visibility we already know.
+        isPrivate: sql`coalesce(excluded.is_private, ${connectedRepository.isPrivate})`,
         active: true,
         updatedAt: new Date(),
       },
     });
 
-  // A repository granted but not yet bound to a target cannot be reproduced against
-  // (activeRepository requires target_profile_id). Kick off onboarding for exactly those, in the
-  // same transaction so a redelivered webhook does not double it (enqueue is idempotent on
-  // repo_id anyway). A repo that already has a target is skipped: rebuilding a live target is a
-  // separate, human-initiated rotation, not something a connect webhook should trigger.
-  //
-  // Only public repositories: the App holds no Contents permission, so a private repo cannot be
-  // cloned anonymously and its build would only ever fail. The private-repository policy refuses
-  // reproduction until Contents is deliberately granted (see AGENTS.md), which is not built, so a
-  // private repo is left unbound rather than queued for a build that cannot succeed. A repo whose
-  // payload omits `private` is treated as private and skipped, failing closed.
-  const publicRepoIds = repositories.filter((repo) => repo.private === false).map((repo) => repo.id);
-  if (publicRepoIds.length === 0) return;
+  await enqueueOnboardable(tx, installationRowId, repositories.map((repo) => repo.id));
+}
+
+/**
+ * Queue onboarding for the granted, unbound repositories of one installation that can be cloned: a
+ * public repository always, a private one only while the installation holds Contents: read. A
+ * private repository without it is left unbound, because the private-repository policy refuses its
+ * clone (POLICY_REFUSED); it is picked up here once the permission is accepted. A repository whose
+ * visibility is unknown is skipped, failing closed.
+ *
+ * A repository granted but not yet bound to a target cannot be reproduced against
+ * (activeRepository requires target_profile_id). This runs in the webhook's transaction so a
+ * redelivery does not double it (enqueue is idempotent on repo_id anyway). A repo that already has a
+ * target is skipped: rebuilding a live target is a separate, human-initiated rotation, not something
+ * a connect webhook should trigger.
+ */
+async function enqueueOnboardable(
+  tx: Executor,
+  installationRowId: string,
+  repoIds: number[] | "private",
+): Promise<void> {
+  if (Array.isArray(repoIds) && repoIds.length === 0) return;
+
+  const [installation] = await tx
+    .select({ contentsPermission: githubInstallation.contentsPermission })
+    .from(githubInstallation)
+    .where(
+      and(
+        eq(githubInstallation.id, installationRowId),
+        isNull(githubInstallation.suspendedAt),
+        isNull(githubInstallation.deletedAt),
+      ),
+    )
+    .limit(1);
+  // A suspended or uninstalled installation onboards nothing, whatever event arrived late.
+  if (!installation) return;
+  const canReadPrivate = hasContentsRead(installation?.contentsPermission);
+  if (repoIds === "private" && !canReadPrivate) return;
+
+  const visibility =
+    repoIds === "private"
+      ? eq(connectedRepository.isPrivate, true)
+      : canReadPrivate
+        ? isNotNull(connectedRepository.isPrivate)
+        : eq(connectedRepository.isPrivate, false);
 
   const unbound = await tx
     .select({ repoId: connectedRepository.repoId, fullName: connectedRepository.fullName })
@@ -159,8 +208,10 @@ async function grantRepositories(
     .where(
       and(
         eq(connectedRepository.installationId, installationRowId),
-        inArray(connectedRepository.repoId, publicRepoIds),
+        eq(connectedRepository.active, true),
         isNull(connectedRepository.targetProfileId),
+        visibility,
+        ...(Array.isArray(repoIds) ? [inArray(connectedRepository.repoId, repoIds)] : []),
       ),
     );
 
@@ -208,10 +259,20 @@ async function handleInstallation(tx: Executor, payload: LifecyclePayload): Prom
   if (!installation) return;
 
   switch (payload.action) {
-    case "created":
-    case "new_permissions_accepted": {
+    case "created": {
       const rowId = await upsertInstallation(tx, installation);
       await grantRepositories(tx, rowId, payload.repositories ?? []);
+      return;
+    }
+
+    case "new_permissions_accepted": {
+      // The upsert records the newly accepted permissions. If they include Contents: read, the
+      // private repositories that were left unbound can now be cloned, so they are queued here; a
+      // private target that is already bound needs nothing, since reproduction reads the permission
+      // live. This payload usually carries no repository list, so the queue comes from our rows.
+      const rowId = await upsertInstallation(tx, installation);
+      await grantRepositories(tx, rowId, payload.repositories ?? []);
+      await enqueueOnboardable(tx, rowId, "private");
       return;
     }
 
@@ -297,6 +358,17 @@ async function handleRepository(tx: Executor, payload: LifecyclePayload): Promis
         .where(eq(connectedRepository.repoId, repository.id));
       return;
 
+    case "privatized":
+    case "publicized":
+      // A visibility change is not a revocation: the installation stays granted, and treating "went
+      // private" as one would strand exactly the repositories most likely to be filing security
+      // reports. It only moves the private-repository policy, which reads this column.
+      await tx
+        .update(connectedRepository)
+        .set({ isPrivate: payload.action === "privatized", updatedAt: new Date() })
+        .where(eq(connectedRepository.repoId, repository.id));
+      return;
+
     case "unarchived":
       // Clears the archive mark and nothing else. A repository removed from the installation,
       // or one whose target binding was withdrawn, stays out of intake.
@@ -306,10 +378,6 @@ async function handleRepository(tx: Executor, payload: LifecyclePayload): Promis
         .where(eq(connectedRepository.repoId, repository.id));
       return;
   }
-
-  // Visibility changes (privatized, publicized) are deliberately not handled. A GitHub App
-  // installation stays granted across them, and treating "went private" as a revocation
-  // would strand exactly the repositories most likely to be filing security reports.
 }
 
 export async function applyLifecycle(

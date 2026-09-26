@@ -10,6 +10,7 @@ import {
   isNull,
   targetOnboarding,
 } from "@/lib/db";
+import { privateRepoPolicyRefused } from "@/lib/github/repo-access";
 
 export type RetryResult = { ok: true } | { ok: false; error: string };
 
@@ -45,7 +46,11 @@ export async function retryOnboardingRequest(
     // FOR SHARE holds the grant against a revocation webhook until the requeue commits, in the same
     // connected_repository-then-target_onboarding order the connect webhook locks them in.
     const [repository] = await tx
-      .select({ fullName: connectedRepository.fullName })
+      .select({
+        fullName: connectedRepository.fullName,
+        isPrivate: connectedRepository.isPrivate,
+        contentsPermission: githubInstallation.contentsPermission,
+      })
       .from(connectedRepository)
       .innerJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
       .where(
@@ -61,6 +66,14 @@ export async function retryOnboardingRequest(
       .for("share");
     if (!repository) {
       return { ok: false, error: "That repository is not connected right now, so it cannot be onboarded." };
+    }
+    if (privateRepoPolicyRefused(repository)) {
+      return {
+        ok: false,
+        error:
+          "That repository is private and the GitHub App has not been granted Contents: read, so it cannot be cloned. " +
+          "Accept the Contents: read permission on the installation and onboarding starts on its own.",
+      };
     }
 
     const [onboarding] = await tx

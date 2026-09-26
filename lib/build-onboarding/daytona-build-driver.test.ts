@@ -181,6 +181,31 @@ test("stageSource stages a git source by clone and checkout, and proves the comm
   assert.ok(commands.some((c) => c.includes(`git checkout --detach '${commit}'`)));
 });
 
+test("stageSource clones a private source through the credential helper, never with the token in the URL", async () => {
+  const commit = "b".repeat(40);
+  const token = "ghs_stageSourceToken";
+  const { run, commands } = fakeRun([["git rev-parse HEAD", `${commit}\n`]]);
+  await stageSource(run, SANDBOX, { kind: "git", cloneUrl: "https://github.com/acme/secret.git", resolvedCommitSha: commit }, token);
+  const clone = commands.find((c) => c.includes(" clone --no-checkout "));
+  assert.ok(clone?.includes("credential.https://github.com.helper="));
+  assert.ok(clone?.includes("'https://github.com/acme/secret.git'"));
+  assert.ok(!clone?.includes(`${token}@`), "no token in the clone URL");
+  // Only the clone sees the token; checkout and the HEAD check run without it.
+  assert.equal(commands.filter((c) => c.includes(token)).length, 1);
+});
+
+test("a failed private clone surfaces no token, even if the output echoed it", async () => {
+  const token = "ghs_leakyCloneToken";
+  const run = async (_sandbox: Sandbox, command: string) => {
+    if (command.includes(" clone ")) throw new Error(`build command failed (exit 128): fatal: bad credential ${token}`);
+    return { exitCode: 0, result: "" };
+  };
+  await assert.rejects(
+    stageSource(run, SANDBOX, { kind: "git", cloneUrl: "https://github.com/acme/secret.git", resolvedCommitSha: "b".repeat(40) }, token),
+    (error: unknown) => error instanceof Error && !error.message.includes(token) && /\[redacted\]/.test(error.message),
+  );
+});
+
 test("stageSource refuses a git source whose checked-out HEAD is not the requested commit", async () => {
   const { run } = fakeRun([["git rev-parse HEAD", `${"c".repeat(40)}\n`]]);
   await assert.rejects(

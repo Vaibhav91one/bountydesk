@@ -2,6 +2,8 @@ import { db, eq, targetOnboarding } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
 import { parseBuildPlan, type Ecosystem } from "@/lib/build-onboarding/build-plan";
 import { selectEgressHosts } from "@/lib/build-onboarding/egress-profiles";
+import { revokeInstallationToken } from "@/lib/github/app-auth";
+import { gitCloneCommand, redactToken, repoReadToken } from "@/lib/github/repo-access";
 import {
   createBuildSandbox,
   deleteSandbox,
@@ -103,7 +105,21 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
   if (!row.resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(row.resolvedCommitSha)) {
     return failOpen(row.id, sandbox.id, "the server has not resolved an immutable source commit");
   }
-  const clone = await runInit(sandbox, `git clone --no-checkout ${shArg(cloneUrl)} /work/source`);
+  // A private repository clones with a read token minted for this clone alone and revoked before the
+  // agent can run anything in the sandbox. Without Contents: read it is refused (POLICY_REFUSED).
+  let token: string | null;
+  try {
+    token = await repoReadToken(row.repoFullName);
+  } catch (error) {
+    return failOpen(row.id, sandbox.id, error instanceof Error ? error.message : String(error));
+  }
+  let clone: { exitCode: number; output: string };
+  try {
+    clone = await runInit(sandbox, gitCloneCommand(cloneUrl, "/work/source", token));
+  } finally {
+    if (token) await revokeInstallationToken(token);
+  }
+  clone = { ...clone, output: redactToken(clone.output, token) };
   if (clone.exitCode === 0) {
     const checkout = await runInit(
       sandbox,

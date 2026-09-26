@@ -178,12 +178,46 @@ async function requestInstallationToken(
 export async function mintInstallationToken(
   installationId: number,
   repoId: number,
-  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+  opts?: {
+    fetchImpl?: typeof fetch;
+    signal?: AbortSignal;
+    /** Narrow the token to these permissions. GitHub refuses (422) a permission the installation
+     *  was never granted, so asking for `{ contents: "read" }` also proves the grant exists. */
+    permissions?: Record<string, "read" | "write">;
+  },
 ): Promise<InstallationToken> {
   if (!Number.isInteger(repoId) || repoId <= 0) {
     throw new Error(`repoId must be a positive integer, got ${repoId}`);
   }
-  return requestInstallationToken(installationId, { repository_ids: [repoId] }, opts);
+  return requestInstallationToken(
+    installationId,
+    { repository_ids: [repoId], ...(opts?.permissions ? { permissions: opts.permissions } : {}) },
+    opts,
+  );
+}
+
+/**
+ * Revoke an installation token before it expires. A clone into a build sandbox is followed by the
+ * repository's own code running there, so a token that was ever inside it should be dead by then.
+ * Best-effort: the token expires within the hour anyway, so this never throws.
+ */
+export async function revokeInstallationToken(
+  token: string,
+  opts?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+): Promise<void> {
+  try {
+    await (opts?.fetchImpl ?? fetch)("https://api.github.com/installation/token", {
+      method: "DELETE",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "x-github-api-version": "2022-11-28",
+      },
+      signal: requestSignal(opts?.signal),
+    });
+  } catch {
+    // Expiry is the backstop.
+  }
 }
 
 /**

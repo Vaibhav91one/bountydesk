@@ -2,6 +2,8 @@ import path from "node:path";
 
 import yaml from "js-yaml";
 
+import { withRepoReadToken } from "@/lib/github/repo-access";
+
 import {
   type BuildPlan,
   type ComposeDatastore,
@@ -647,17 +649,25 @@ export function profileNameFromRepo(repoFullName: string): string {
 }
 
 /**
- * Read files from a public repo over raw.githubusercontent.com. Onboarding only enqueues public
- * repos (grantRepositories filters to `private === false`), so the source needs no token, and the
- * worker has ordinary egress (only the build and reproduction sandboxes are network-restricted).
+ * Read files from a repo over raw.githubusercontent.com: anonymously for a public repo, with a
+ * contents:read installation token for a private one, and refused (POLICY_REFUSED) for a private repo
+ * without that grant. The worker has ordinary egress (only the build and reproduction sandboxes are
+ * network-restricted).
  */
 export function rawSourceReader(repoFullName: string, ref = "HEAD"): SourceReader {
+  // Each read of a private repository mints its own token and revokes it when the read settles, so
+  // no token outlives the file it fetched. A classification reads a handful of files, so this is a
+  // handful of mints. A public repository is read anonymously and mints nothing.
   return {
-    async readFile(path: string) {
-      const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`);
-      if (res.status === 404) return null;
-      if (!res.ok) throw new Error(`reading ${path} from ${repoFullName} failed: ${res.status}`);
-      return await res.text();
+    readFile(path: string) {
+      return withRepoReadToken(repoFullName, async (token) => {
+        const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
+          headers: token ? { authorization: `Bearer ${token}` } : {},
+        });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`reading ${path} from ${repoFullName} failed: ${res.status}`);
+        return await res.text();
+      });
     },
   };
 }

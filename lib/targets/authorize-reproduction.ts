@@ -1,4 +1,5 @@
 import type { AnalysisOnlyReason, ReproductionRecipe } from "@/lib/reproduction/types";
+import { privateRepoPolicyRefused } from "@/lib/github/repo-access";
 import type { MeshServiceAuth } from "@/lib/sandbox/provision";
 import {
   targetProvisioningFromConfig,
@@ -131,10 +132,8 @@ export async function authorizeReproductionTarget(input: {
   targetProfileId: string;
   recipeId: string;
 }): Promise<ReproductionAuthorization> {
-  const [{ db, eq, targetProfile }, { getRecipesForTarget }] = await Promise.all([
-    import("@/lib/db"),
-    import("./recipes"),
-  ]);
+  const [{ connectedRepository, db, eq, githubInstallation, targetProfile }, { getRecipesForTarget }] =
+    await Promise.all([import("@/lib/db"), import("./recipes")]);
 
   const [profile] = await db
     .select({
@@ -150,6 +149,19 @@ export async function authorizeReproductionTarget(input: {
     .limit(1);
 
   if (!profile) return { ok: false, reason: "NO_BOUND_TARGET" };
+
+  // The private-repository policy, read live so accepting Contents: read on the installation lets
+  // the next run through with no row edits. Every repository bound to this profile is checked: the
+  // profile holds that repository's code, so one private binding without the grant refuses it.
+  const bindings = await db
+    .select({
+      isPrivate: connectedRepository.isPrivate,
+      contentsPermission: githubInstallation.contentsPermission,
+    })
+    .from(connectedRepository)
+    .innerJoin(githubInstallation, eq(connectedRepository.installationId, githubInstallation.id))
+    .where(eq(connectedRepository.targetProfileId, profile.id));
+  if (bindings.some(privateRepoPolicyRefused)) return { ok: false, reason: "POLICY_REFUSED" };
   if (!profile.imageName) return { ok: false, reason: "COULD_NOT_DEPLOY" };
   const appPort = profileAppPort(profile.config);
   if (!appPort) return { ok: false, reason: "NO_APPROVED_ORACLE" };

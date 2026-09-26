@@ -231,6 +231,16 @@ not built: current GitHub intake requires a bound target profile, and repository
 not stored. Adding a permission asks each installation owner to approve it. Installations that
 do not approve continue with their old permissions, so existing issue intake does not stop.
 
+Amended 2026-09-26: the private-repository policy is built. `connected_repository.is_private` and
+`github_installation.contents_permission` come from the lifecycle webhooks and the reconcile tick.
+A private repository whose installation lacks Contents: read is refused at the grant check
+(`hasActiveRepositoryGrant`, so no probe and no REPRODUCED or NOT_REPRODUCED draft), at
+`authorizeReproductionTarget` (`ANALYSIS_ONLY` with `POLICY_REFUSED`), and at onboarding, where
+nothing is cloned. With the permission, onboarding reads and clones with a single-repository,
+contents:read installation token that is revoked after the clone. Accepting the permission
+(`new_permissions_accepted`) queues the waiting private repositories and lets the next
+reproduction through without any row edits.
+
 **Token model — no stored PAT, no broad OAuth repo token.** To post a comment: authenticate the App → generate an installation access token (~1h TTL) → post the approved comment idempotently → discard the token. Nothing long-lived is persisted.
 
 **Intake stays the same shape.** `POST /api/intake/github`, `X-Hub-Signature-256` (App webhook secret, platform-owned), `X-GitHub-Delivery` for idempotency, raw-body HMAC, 202 only after a durable commit. The App payload carries the installation, so BountyDesk resolves **`installation_id` → org → repo → TargetProfile server-side** — the issue/agent never supplies its own target.
