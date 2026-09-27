@@ -120,6 +120,15 @@ const SNAPSHOT_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
 const IDLE_BACKOFF_MS = 15_000;
 
 /**
+ * The agent-sessions loop keeps a shorter idle backoff. It re-polls a running TrueForge turn on its
+ * own cadence (POLL_BACKOFF_MS, 5s, in lib/agent-sessions/poller.ts): a claim releases the lease
+ * with nextPollAt 5s out, so the loop's next attempt usually finds nothing due yet and falls into
+ * the idle sleep. At the 15s default that would stretch every step of a live reproduction to ~15s,
+ * so this loop stays at 5s to match the poller while the rest back off.
+ */
+const AGENT_SESSIONS_IDLE_BACKOFF_MS = 5_000;
+
+/**
  * Run fn at most once per intervalMs from a sweep loop that ticks every 30s. The first call runs
  * straight away, so a fresh deploy reconciles on boot. A failure still waits out the interval.
  */
@@ -238,6 +247,7 @@ async function main(): Promise<void> {
         }),
       sweepOnce: sweepAgentSessions,
       claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+      idleBackoffMs: AGENT_SESSIONS_IDLE_BACKOFF_MS,
     },
     {
       name: "approval-submission",

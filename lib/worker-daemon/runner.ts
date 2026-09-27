@@ -194,6 +194,10 @@ export type QueueSpec = {
   /** Fail this queue's claim if it has not returned in this long. Set for the queues whose claim
    *  is fast; omit for jobs and build-onboarding, whose claim runs the whole job or build. */
   claimTimeoutMs?: number;
+  /** Idle poll backoff for this queue, overriding the daemon-wide default. Set it for a queue that
+   *  drives its own sub-second cadence (agent-sessions re-polls a running turn every few seconds),
+   *  so the shared idle backoff does not slow it down. */
+  idleBackoffMs?: number;
 };
 
 export type RunDaemonOptions = {
@@ -222,7 +226,7 @@ export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Pr
         sleep: opts.sleep,
         jitter: opts.jitter,
         logger: opts.logger,
-        idleBackoffMs: opts.idleBackoffMs,
+        idleBackoffMs: queue.idleBackoffMs ?? opts.idleBackoffMs,
         errorBackoffMs: opts.errorBackoffMs,
         onProgress: opts.onProgress,
         claimTimeoutMs: queue.claimTimeoutMs,
