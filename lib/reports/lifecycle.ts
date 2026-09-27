@@ -131,13 +131,29 @@ export async function findRepliedToReport(
   return row?.id ?? null;
 }
 
+/** How many times a seq collision is retried before the write is allowed to fail. */
+const SEQ_ALLOCATION_RETRIES = 25;
+
+/** True for the unique violation on session_event_report_seq_key, wrapped by the driver or not. */
+function isSeqUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; constraint_name?: string; message?: string; cause?: unknown };
+  const named = e?.constraint_name === "session_event_report_seq_key"
+    || (e?.message?.includes("session_event_report_seq_key") ?? false);
+  if (e?.code === "23505" && named) return true;
+  return e?.cause ? isSeqUniqueViolation(e.cause) : false;
+}
+
 /**
  * Append to the audit trail.
  *
- * ponytail: the sequence comes from max(seq) + 1 on the report, which is a race under
- * concurrent writers for one report. The unique (report_id, seq) index turns that race into
- * a failed insert rather than a gap or a duplicate, and the MVP runs one turn per report at
- * a time by design. If that changes, give this a per-report sequence generator.
+ * seq is the per-report max(seq) + 1, which two concurrent writers can read the same way and
+ * then collide on the unique (report_id, seq) index. We serialise that without locking the
+ * report row: sweepRecheckRuns and other callers hold investigation_run locks when they call in,
+ * so locking the report row here would invert the report -> investigation_run order that
+ * abandonVerdictConflict takes and deadlock. Instead the unique index is the arbiter. A colliding
+ * insert is rejected, and we recompute the max and retry. Each attempt runs in its own savepoint
+ * (or its own transaction when no `tx` is passed), so a rejected insert rolls back on its own and
+ * leaves the caller's transaction usable for the retry.
  */
 export async function recordEvent(
   reportId: string,
@@ -145,32 +161,39 @@ export async function recordEvent(
   data: Record<string, unknown> = {},
   {
     idempotencyKey,
-    tx = db,
+    tx,
   }: { idempotencyKey?: string; tx?: Executor } = {},
 ): Promise<void> {
-  const insert = tx.insert(sessionEvent).values({
-    reportId,
-    seq: sql`(select coalesce(max(seq), 0) + 1 from session_event where report_id = ${reportId})`,
-    type,
-    eventKey: idempotencyKey,
-    data,
-  });
-
-  if (idempotencyKey) {
-    await insert.onConflictDoNothing({
-      target: [sessionEvent.reportId, sessionEvent.eventKey],
-    });
-    return;
+  const runner = tx ?? db;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await runner.transaction(async (exec) => {
+        const insert = exec.insert(sessionEvent).values({
+          reportId,
+          seq: sql`(select coalesce(max(seq), 0) + 1 from session_event where report_id = ${reportId})`,
+          type,
+          eventKey: idempotencyKey,
+          data,
+        });
+        if (idempotencyKey) {
+          await insert.onConflictDoNothing({
+            target: [sessionEvent.reportId, sessionEvent.eventKey],
+          });
+        } else {
+          await insert;
+        }
+      });
+      return;
+    } catch (err) {
+      if (attempt < SEQ_ALLOCATION_RETRIES && isSeqUniqueViolation(err)) continue;
+      throw err;
+    }
   }
-
-  await insert;
 }
 
 /**
- * recordEvent under the report's row lock, for a writer that can run while a reviewer acts on the
- * same report. The reviewer actions at the outside-email gate hold this lock while they write
- * their own event, so taking it here serialises the max(seq) + 1 above instead of letting the two
- * inserts collide on (report_id, seq).
+ * Kept for callers that spell out the intent. recordEvent serialises seq allocation for every
+ * writer through the unique index, so this is a plain alias with the idempotency key positional.
  */
 export async function recordEventLocked(
   reportId: string,
@@ -178,10 +201,7 @@ export async function recordEventLocked(
   data: Record<string, unknown> = {},
   idempotencyKey?: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
-    await recordEvent(reportId, type, data, { idempotencyKey, tx });
-  });
+  await recordEvent(reportId, type, data, { idempotencyKey });
 }
 
 export async function reportState(reportId: string, tx: Executor = db): Promise<ReportState | null> {
