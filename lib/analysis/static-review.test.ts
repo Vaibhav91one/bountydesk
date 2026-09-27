@@ -24,7 +24,7 @@ test("an unreachable GitHub yields an empty corpus and a text-only static review
       { repoFullName: "owner/repo", ref: null, reportText: "search" },
       { readDeps: publicRepo },
     );
-    assert.deepEqual(source, { ref: "HEAD", tree: [], files: [] });
+    assert.deepEqual(source, { ref: "HEAD", tree: [], files: [], advisories: [] });
     const section = staticReviewSection("COULD_NOT_BUILD", "owner/repo", source);
     assert.match(section, /COULD_NOT_BUILD/);
     assert.match(section, /from the report text alone/);

@@ -210,7 +210,7 @@ test("the sandboxability review embeds a private repository's files and revokes 
 
 test("a private repository without Contents: read is refused with zero fetches", async () => {
   const source = await staticReview.gatherStaticSource({ repoFullName: REFUSED.full_name, ref: null, reportText: "x" });
-  assert.deepEqual(source, { ref: "HEAD", tree: [], files: [] });
+  assert.deepEqual(source, { ref: "HEAD", tree: [], files: [], advisories: [] });
   assert.match(warnings.join("\n"), /POLICY_REFUSED/);
 
   const row = await onboardingRow(REFUSED);
