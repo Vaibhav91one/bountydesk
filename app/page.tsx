@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Folder, Sparkle } from "@phosphor-icons/react/ssr";
-import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Gmail, GitHubLight } from "developer-icons";
 
 import { RollingIcon } from "@/components/rolling-icon";
 import { MASCOT_ON_CARD } from "@/components/queue-board";
@@ -421,7 +421,6 @@ const CHANNEL_ICONS: Record<
 > = {
   github: GitHubLight,
   gmail: Gmail,
-  onedrive: OneDrive,
   folder: Folder,
 };
 
@@ -585,8 +584,8 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* Intake channels. The reference puts a logo wall here; ours is the four ways a report
-            can arrive, three of which are honestly unavailable. */}
+        {/* Intake channels. The reference puts a logo wall here; ours is the ways a report
+            can arrive. */}
         <section className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-20">
           <h2 className="text-title text-foreground">
             Reports arrive from where they arrive

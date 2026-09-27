@@ -1,6 +1,6 @@
 "use client";
 
-import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Gmail, GitHubLight } from "developer-icons";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { startTransition, useState } from "react";
@@ -81,13 +81,6 @@ export type RepositoryRow = {
 };
 
 /**
- * A tab for a channel that has a design and no route.
- *
- * It says what the channel will do and that it does not do it yet, in that order. A blank
- * panel would read as a loading failure, and a panel that described the feature without the
- * caveat would read as a promise.
- */
-/**
  * A tab for a channel that is wired and has its access managed somewhere else.
  *
  * Email has no repository table to show: what decides whether a report is accepted is the
@@ -122,31 +115,6 @@ function LiveChannel({
       <Button size="sm" variant="outline" nativeButton={false} render={<Link href={href} />}>
         {action}
       </Button>
-    </div>
-  );
-}
-
-function Unbuilt({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="flex flex-col items-start gap-4 rounded-xl border border-border/50 bg-card p-8">
-      <span className="flex size-12 items-center justify-center rounded-xl border border-border/50 bg-background">
-        {icon}
-      </span>
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2.5">
-          <h2 className="text-heading text-foreground">{title}</h2>
-          <Badge variant="outline">Coming soon</Badge>
-        </div>
-        <p className="max-w-2xl text-body text-muted-foreground">{body}</p>
-      </div>
     </div>
   );
 }
@@ -242,7 +210,7 @@ export function ConnectionTabs({
 
   return (
     <Tabs defaultValue="repositories" className="gap-6">
-      {/* The strip scrolls, the page does not: four tabs do not fit 390px. The rule and the
+      {/* The strip scrolls, the page does not: the tabs do not fit 390px. The rule and the
           overflow live on the wrapper so the border still spans the full width and the active
           tab's underline is not clipped by the scroll box. */}
       <div className="overflow-x-auto border-b border-border/50 pb-1.5">
@@ -255,9 +223,6 @@ export function ConnectionTabs({
           </TabsTrigger>
           <TabsTrigger value="upload" className="flex-none">
             <Folder /> File upload
-          </TabsTrigger>
-          <TabsTrigger value="drive" className="flex-none">
-            <OneDrive /> Drive
           </TabsTrigger>
         </TabsList>
       </div>
@@ -342,15 +307,6 @@ export function ConnectionTabs({
             and the material is built only when a reviewer approves it."
           href="/integrations/upload"
           action="View"
-        />
-      </TabsContent>
-
-      <TabsContent value="drive">
-        <Unbuilt
-          icon={<OneDrive className="size-6" />}
-          title="Drive"
-          body="Pulling reports out of a shared drive is not in this version. It is listed so the
-            answer is on the page rather than a thing you have to go and ask about."
         />
       </TabsContent>
     </Tabs>

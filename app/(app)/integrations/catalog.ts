@@ -7,7 +7,7 @@
  * exist. Nothing is filled in to make a panel look complete.
  */
 
-export type IntegrationIcon = "github" | "gmail" | "onedrive" | "folder";
+export type IntegrationIcon = "github" | "gmail" | "folder";
 
 export type IntegrationLink = { label: string; href: string; external?: boolean };
 
@@ -138,21 +138,6 @@ export const INTEGRATIONS: Integration[] = [
       { label: "Submit page", href: "/submit" },
       { label: "Design record", href: SOURCE, external: true },
     ],
-  },
-  {
-    id: "drive",
-    name: "Drive",
-    tagline: "Pulling reports from a shared drive folder.",
-    icon: "onedrive",
-    developer: "BountyDesk",
-    built: false,
-    sections: [
-      {
-        title: "Overview",
-        body: "Pulling reports from a shared drive folder. It is on the channel map in the design file and is not in scope for this version, which is a different thing from designed and not built.",
-      },
-    ],
-    links: [],
   },
 ];
 

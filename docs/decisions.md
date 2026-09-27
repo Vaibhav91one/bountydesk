@@ -585,7 +585,7 @@ Every older page was rewritten to the decided architecture, then scanned for ret
 - The agentic code review module, kept separate from onboarding; the sandboxability pre-check and
   the static review (Q31) are read-only and leave a seam for it.
 - The agent-driven pentest workbench (`docs/pentest-workbench.md`).
-- Drive intake is dropped, not deferred: the catalog lists it as out of scope for this version.
+- Drive intake is dropped, not deferred: it is not a channel this version offers.
 
 ---
 

@@ -13,10 +13,10 @@ export const metadata = { title: "Integrations · BountyDesk" };
 /**
  * One row per platform, never per installation or per repository.
  *
- * This screen answers "what can BountyDesk talk to", which has four answers however many
+ * This screen answers "what can BountyDesk talk to", which has three answers however many
  * accounts are connected. Listing every installation and every repository here turned one
- * connected account into three rows that all said GitHub, and buried the three channels that
- * are not GitHub underneath them.
+ * connected account into three rows that all said GitHub, and buried the channels that are
+ * not GitHub underneath them.
  *
  * Which repositories are admissible, and what each is bound to, is the Connections screen.
  */
@@ -66,14 +66,6 @@ export default async function IntegrationsPage() {
       icon: "folder",
       installed: true,
       action: { kind: "link", href: "/integrations/upload", label: "View" },
-    },
-    {
-      id: "drive",
-      name: "Drive",
-      detail: "Pulling reports from a shared drive folder. Coming soon.",
-      icon: "onedrive",
-      installed: false,
-      action: { kind: "link", href: "/integrations/drive", label: "View" },
     },
   ];
 

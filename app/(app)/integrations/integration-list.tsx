@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import Link from "next/link";
-import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Gmail, GitHubLight } from "developer-icons";
 import { Folder, MagnifyingGlass } from "@phosphor-icons/react/ssr";
 
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,6 @@ import {
 const ICONS = {
   github: GitHubLight,
   gmail: Gmail,
-  onedrive: OneDrive,
   folder: Folder,
 } as const;
 
@@ -125,9 +124,7 @@ export function IntegrationList({ rows }: { rows: IntegrationRow[] }) {
 
               <div className="flex min-w-40 flex-1 flex-col">
                 {/* The name is the link, not the row: the row carries a button of its own, and
-                    a button nested inside a link is invalid markup. Every channel has a page,
-                    including the three that are not built, because what a channel will do and
-                    why it does not do it yet is exactly what somebody clicking wants. */}
+                    a button nested inside a link is invalid markup. Every channel has a page. */}
                 <Link
                   href={`/integrations/${row.id}`}
                   className="w-fit cursor-pointer text-body font-medium text-foreground underline-offset-4 transition-colors hover:text-brand-soft hover:underline"

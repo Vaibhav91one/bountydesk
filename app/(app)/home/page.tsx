@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Gmail, GitHubLight } from "developer-icons";
 import { ArrowRight, Check, CheckCircle, Folder, Plus } from "@phosphor-icons/react/ssr";
 
 import { Badge } from "@/components/ui/badge";
@@ -19,16 +19,13 @@ export const metadata = { title: "Home · BountyDesk" };
 /**
  * Report sources, in the order they are likely to matter.
  *
- * `state` is what is true today: GitHub and email are wired, the other two are not. `live` is
- * for a channel that is on as soon as it is built, with no per-account connection to count;
- * GitHub is the exception, since it is only really on once an installation exists.
- * developer-icons carries no Google Drive, so OneDrive stands in for the brand, and a folder is
- * not a brand at all so it comes from Phosphor.
+ * `state` is what is true today. `live` is for a channel that is on as soon as it is built,
+ * with no per-account connection to count; GitHub is the exception, since it is only really on
+ * once an installation exists. The folder icon is not a brand, so it comes from Phosphor.
  */
 const INTEGRATIONS = [
   { key: "github", name: "GitHub", icon: GitHubLight, state: "not connected", live: false },
   { key: "email", name: "Email", icon: Gmail, state: "accepting reports", live: true },
-  { key: "drive", name: "Drive", icon: OneDrive, state: "coming soon", live: false },
   { key: "upload", name: "File upload", icon: Folder, state: "accepting reports", live: true },
 ] as const;
 
