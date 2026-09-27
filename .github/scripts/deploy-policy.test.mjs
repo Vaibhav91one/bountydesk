@@ -36,12 +36,24 @@ test("deploys queue in order and are never cancelled part way", () => {
   assert.doesNotMatch(workflow, /cancel-in-progress: true/);
 });
 
-test("only main reaches production", () => {
-  assert.match(workflow, /^ {4}branches: \[main\]$/m);
+test("only a green CI run from a push to main reaches production", () => {
+  // Deploy is gated on the CI workflow finishing, not a raw push, so a squash commit that fails
+  // build never migrates the database.
+  assert.match(workflow, /^on:\n {2}workflow_run:\n {4}workflows: \[CI\]\n {4}types: \[completed\]$/m);
+  assert.doesNotMatch(workflow, /^on:\n {2}push:/m, "deploy must not run straight from a push");
   assert.doesNotMatch(workflow, /pull_request/);
-  // workflow_dispatch can be started from any branch, so each job checks the ref itself.
-  assert.equal((workflow.match(/^ {4}if: github\.ref == 'refs\/heads\/main'$/gm) ?? []).length, 2);
+  // Both jobs gate on the same three facts: CI succeeded, the run came from a push (not a pull
+  // request whose head_branch would be the PR branch), and it was on main.
+  for (const guard of ["conclusion == 'success'", "workflow_run.event == 'push'", "head_branch == 'main'"]) {
+    const count = (workflow.match(new RegExp(guard.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
+    assert.equal(count, 2, `${guard} must guard both jobs`);
+  }
   assert.match(workflow, /^ {4}needs: migrate$/m);
+  // A manual dispatch is still limited to main, and both jobs carry that guard.
+  assert.equal(
+    (workflow.match(/github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/g) ?? []).length,
+    2,
+  );
 });
 
 test("secrets are referenced only where they are used, never inlined", () => {

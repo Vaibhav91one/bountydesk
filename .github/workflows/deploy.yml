@@ -1,10 +1,16 @@
 name: Deploy
 
-# Every merge to main applies pending migrations to production, then pushes the Zerops worker. The
+# After CI passes on main, apply pending migrations to production, then push the Zerops worker. The
 # Next.js app deploys on its own through Vercel's Git integration and is not handled here.
+#
+# This runs on workflow_run, not on push, so a merge only reaches production once its CI run has
+# actually gone green: a squash commit that fails build never migrates the database. The gate below
+# checks the CI run succeeded, came from a push (not a pull request), and was on main. A manual
+# workflow_dispatch is allowed from main only.
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch: {}
 
 permissions:
@@ -20,14 +26,23 @@ concurrency:
 
 jobs:
   migrate:
-    # workflow_dispatch can be started from any branch. Only main is allowed to reach production.
-    if: github.ref == 'refs/heads/main'
+    # Only a green CI run from a push to main reaches production. A PR-triggered CI run (its
+    # head_branch is the PR branch) and a failed run are both excluded. Manual dispatch is main only.
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_branch == 'main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      # Check out the exact commit CI validated, not whatever main points at now, so the migration
+      # matches the code that just passed. workflow_dispatch has no run to name, so it takes main.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.23.2
@@ -44,18 +59,24 @@ jobs:
 
   worker:
     needs: migrate
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      (github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+        && github.event.workflow_run.event == 'push'
+        && github.event.workflow_run.head_branch == 'main')
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       ZCLI_VERSION: v1.1.2
       ZCLI_SHA256: b85d5cda8158d2be2e4eb42f4ed27ed0896f5d03ad31366c0da8fba48f49ffd7
     steps:
-      # A fresh checkout has no node_modules, .env.local or scratch files, which is what keeps the
-      # upload small. Zerops runs npm ci itself (zerops.yml).
+      # A fresh checkout of the validated commit has no node_modules, .env.local or scratch files,
+      # which is what keeps the upload small. Zerops runs npm ci itself (zerops.yml).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       # The binary goes to RUNNER_TEMP, outside the workspace, so --no-git does not upload it.
       - name: Install zcli
         run: |
