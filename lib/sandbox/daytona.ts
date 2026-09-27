@@ -323,7 +323,11 @@ export async function listSandboxes(labels: Record<string, string>): Promise<San
   let cursor: string | null = null;
 
   do {
-    const query = new URLSearchParams({ labels: JSON.stringify(labels) });
+    // An empty filter means list everything, so the labels param is omitted rather than sent as
+    // {}: the API reads labels={} as "match a sandbox that has no labels", which would hide every
+    // labelled sandbox from a caller that wanted them all.
+    const query = new URLSearchParams();
+    if (Object.keys(labels).length > 0) query.set("labels", JSON.stringify(labels));
     if (cursor) query.set("cursor", cursor);
 
     const page: { items: Sandbox[]; nextCursor: string | null } = await call(`/sandbox?${query}`);
