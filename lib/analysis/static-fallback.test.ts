@@ -62,6 +62,11 @@ function fakeGitHub(repoFullName: string, files: Record<string, string>): string
   const requested: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request) => {
     const url = String(input instanceof Request ? input.url : input);
+    // The dependency scan's OSV lookup is a host-side service, not a source read, so keep it out of
+    // `requested` (which the pinned-commit assertion checks) and answer with no advisories.
+    if (url === "https://api.osv.dev/v1/querybatch") {
+      return new Response(JSON.stringify({ results: [] }), { status: 200 });
+    }
     requested.push(url);
     if (url === `https://api.github.com/repos/${repoFullName}/git/trees/${COMMIT}?recursive=1`) {
       const tree = Object.keys(files).map((path) => ({ path, type: "blob", size: files[path].length }));
