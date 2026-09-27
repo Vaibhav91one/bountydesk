@@ -120,6 +120,15 @@ test("a pathological single-line go.mod parses fast and yields nothing (no quadr
   assert.ok(Date.now() - started < 1_000, "parsing a hostile go.mod line stays well under a second");
 });
 
+test("a pathological pom.xml parses fast and yields nothing (no quadratic backtracking)", () => {
+  // Many <dependency> openings with no closes is the ReDoS shape for a lazy [\s\S]*? over the doc.
+  const evil = "<dependency>".repeat(16_000); // ~192 KB, near the blob cap
+  const started = Date.now();
+  const deps = parseDependencies([{ path: "pom.xml", text: evil }]);
+  assert.deepEqual(deps, []);
+  assert.ok(Date.now() - started < 1_000, "parsing a hostile pom.xml stays well under a second");
+});
+
 test("malformed input yields nothing and never throws", () => {
   assert.deepEqual(parseDependencies([{ path: "package.json", text: "{ not json" }]), []);
   assert.deepEqual(parseDependencies([{ path: "package-lock.json", text: "]}{" }]), []);

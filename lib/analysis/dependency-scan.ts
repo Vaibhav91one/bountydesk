@@ -333,14 +333,31 @@ function parseTomlPackages(text: string, ecosystem: OsvEcosystem): Dependency[] 
   return out;
 }
 
+const POM_OPEN = "<dependency>";
+const POM_CLOSE = "</dependency>";
+
+function pomField(block: string, tag: string): string | undefined {
+  // Single-class, anchored-by-literal-tags match over a bounded block, so it cannot backtrack.
+  return block.match(new RegExp(`<${tag}>([^<]+)</${tag}>`))?.[1]?.trim();
+}
+
 function parsePomXml(text: string): Dependency[] {
   const out: Dependency[] = [];
-  const re = /<dependency>([\s\S]*?)<\/dependency>/g;
-  let block: RegExpExecArray | null;
-  while ((block = re.exec(text)) !== null) {
-    const g = block[1]!.match(/<groupId>([^<]+)<\/groupId>/)?.[1]?.trim();
-    const a = block[1]!.match(/<artifactId>([^<]+)<\/artifactId>/)?.[1]?.trim();
-    const v = block[1]!.match(/<version>([^<]+)<\/version>/)?.[1]?.trim();
+  // Walk <dependency>...</dependency> blocks by index instead of a lazy regex over the whole document.
+  // A crafted pom of repeated openings with no closes would make [\s\S]*? rescan to the end for every
+  // opening, which is quadratic on input up to the blob cap and stalls the shared worker's event loop.
+  // indexOf advances past each close, so the scan is linear.
+  let from = 0;
+  for (;;) {
+    const open = text.indexOf(POM_OPEN, from);
+    if (open < 0) break;
+    const close = text.indexOf(POM_CLOSE, open + POM_OPEN.length);
+    if (close < 0) break;
+    const block = text.slice(open + POM_OPEN.length, close);
+    from = close + POM_CLOSE.length;
+    const g = pomField(block, "groupId");
+    const a = pomField(block, "artifactId");
+    const v = pomField(block, "version");
     // A property placeholder version (${...}) cannot be resolved without the full POM, so skip it.
     if (g && a && v && !v.includes("${")) out.push({ ecosystem: "Maven", name: `${g}:${a}`, version: v });
   }
