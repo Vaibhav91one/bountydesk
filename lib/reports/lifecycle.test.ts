@@ -72,3 +72,55 @@ test("no tokens and no verified sender both short-circuit to null", async () => 
   assert.equal(await lifecycle.findRepliedToReport([], "hopper@example.com"), null);
   assert.equal(await lifecycle.findRepliedToReport([parent.messageId], null), null);
 });
+
+/**
+ * Concurrent writers for one report must not collide on (report_id, seq). Before recordEvent
+ * took the report row lock, a poller-style unlocked write racing a gate-style write could read
+ * the same max(seq) and surface a unique violation on session_event_report_seq_key. This fires
+ * both paths at once and asserts every write lands on a distinct, contiguous seq.
+ */
+test("concurrent event writers get distinct contiguous seqs with no unique violation", async () => {
+  const parent = await seedParent("concurrent@example.com");
+  const writers = 40;
+
+  await Promise.all(
+    Array.from({ length: writers }, (_, i) =>
+      // Alternate the poller-style unlocked path and the gate-style locked path against one report.
+      i % 2 === 0
+        ? lifecycle.recordEvent(parent.id, `poller.event.${i}`)
+        : lifecycle.recordEventLocked(parent.id, `gate.event.${i}`),
+    ),
+  );
+
+  const rows = await dbm.db
+    .select({ seq: dbm.sessionEvent.seq })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, parent.id))
+    .orderBy(dbm.sessionEvent.seq);
+
+  const seqs = rows.map((r) => r.seq);
+  assert.equal(seqs.length, writers);
+  assert.deepEqual(seqs, Array.from({ length: writers }, (_, i) => i + 1));
+});
+
+/**
+ * The idempotency key still dedupes under contention: the same key fired concurrently inserts
+ * exactly once and never trips the seq index while doing so.
+ */
+test("a repeated idempotency key inserts once under concurrent writers", async () => {
+  const parent = await seedParent("idempotent@example.com");
+
+  await Promise.all(
+    Array.from({ length: 20 }, () =>
+      lifecycle.recordEvent(parent.id, "agent.tool_call", {}, { idempotencyKey: "same-key" }),
+    ),
+  );
+
+  const rows = await dbm.db
+    .select({ seq: dbm.sessionEvent.seq })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, parent.id));
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].seq, 1);
+});

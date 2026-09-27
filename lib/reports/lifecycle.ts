@@ -134,10 +134,15 @@ export async function findRepliedToReport(
 /**
  * Append to the audit trail.
  *
- * ponytail: the sequence comes from max(seq) + 1 on the report, which is a race under
- * concurrent writers for one report. The unique (report_id, seq) index turns that race into
- * a failed insert rather than a gap or a duplicate, and the MVP runs one turn per report at
- * a time by design. If that changes, give this a per-report sequence generator.
+ * seq is max(seq) + 1 per report, which is a race under concurrent writers: two writers can
+ * read the same max and collide on the unique (report_id, seq) index. So every writer takes
+ * the report row lock before allocating, which serialises the allocation regardless of which
+ * path (poller, gate, intake, delivery) is writing. The lock is on the single report row, and
+ * that is the only row any of these paths locks, so it cannot deadlock.
+ *
+ * With no `tx`, the lock and insert run in their own transaction. With a `tx`, the caller's
+ * transaction takes the lock; re-locking a row this transaction already holds (e.g. after
+ * `transition`) is a no-op.
  */
 export async function recordEvent(
   reportId: string,
@@ -145,9 +150,16 @@ export async function recordEvent(
   data: Record<string, unknown> = {},
   {
     idempotencyKey,
-    tx = db,
+    tx,
   }: { idempotencyKey?: string; tx?: Executor } = {},
 ): Promise<void> {
+  if (!tx) {
+    await db.transaction((t) => recordEvent(reportId, type, data, { idempotencyKey, tx: t }));
+    return;
+  }
+
+  await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
+
   const insert = tx.insert(sessionEvent).values({
     reportId,
     seq: sql`(select coalesce(max(seq), 0) + 1 from session_event where report_id = ${reportId})`,
@@ -167,10 +179,8 @@ export async function recordEvent(
 }
 
 /**
- * recordEvent under the report's row lock, for a writer that can run while a reviewer acts on the
- * same report. The reviewer actions at the outside-email gate hold this lock while they write
- * their own event, so taking it here serialises the max(seq) + 1 above instead of letting the two
- * inserts collide on (report_id, seq).
+ * Kept for callers that spell out the intent. recordEvent now serialises seq allocation for
+ * every writer, so this is a plain alias with the idempotency key as a positional argument.
  */
 export async function recordEventLocked(
   reportId: string,
@@ -178,10 +188,7 @@ export async function recordEventLocked(
   data: Record<string, unknown> = {},
   idempotencyKey?: string,
 ): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.select({ id: report.id }).from(report).where(eq(report.id, reportId)).for("update");
-    await recordEvent(reportId, type, data, { idempotencyKey, tx });
-  });
+  await recordEvent(reportId, type, data, { idempotencyKey });
 }
 
 export async function reportState(reportId: string, tx: Executor = db): Promise<ReportState | null> {
