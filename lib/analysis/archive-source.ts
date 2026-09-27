@@ -163,5 +163,7 @@ export function gatherArchiveSource(
     const text = data.toString("utf8").slice(0, MAX_FILE_CHARS);
     if (text.trim().length > 0) out.push({ path, text });
   }
-  return { ref: input.digest ?? "uploaded archive", tree: paths.slice(0, MAX_TREE_PATHS), files: out };
+  // The OSV dependency scan is wired into the GitHub static pass (gatherStaticSource), not this
+  // synchronous archive reader. Uploaded-archive advisories are a follow-up, so leave it empty here.
+  return { ref: input.digest ?? "uploaded archive", tree: paths.slice(0, MAX_TREE_PATHS), files: out, advisories: [] };
 }
