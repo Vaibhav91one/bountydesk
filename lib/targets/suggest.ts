@@ -16,6 +16,7 @@ import {
 } from "@/lib/db";
 import { installUrl } from "@/lib/auth/oauth";
 import { manageRepositoriesUrl } from "@/lib/github/connections";
+import { otherHostReferences, type RepoLink } from "@/lib/reports/repo-links";
 import { grantIsLive } from "@/lib/targets/bind";
 import { lookupRepositories, type RepositoryLookup } from "@/lib/targets/repository-lookup";
 
@@ -142,6 +143,12 @@ export type TargetSuggestion = {
    * install page when there is none. Only filled when something is unconnected.
    */
   connectLinks: { account: string; href: string }[];
+  /**
+   * Repositories the report links on a host other than GitHub (GitLab, Bitbucket). Display only:
+   * targets come from GitHub App installs, so these cannot be bound or reproduced against. They are
+   * carried so a reviewer sees the reference labelled and clickable rather than losing it.
+   */
+  referencedElsewhere: RepoLink[];
 };
 
 // Most advanced first: when a link matches several connected repositories (the project itself
@@ -163,9 +170,12 @@ export type SuggestOptions = {
 };
 
 export async function suggestTargets(body: string, opts: SuggestOptions = {}): Promise<TargetSuggestion> {
+  // Read off the body with no network, so a report that only links GitLab or Bitbucket still shows
+  // the reference even though it has no GitHub mention to look up.
+  const referencedElsewhere = otherHostReferences(body);
   const mentions = repositoryMentions(body);
   if (mentions.length === 0) {
-    return { matched: [], possibleMatches: [], unconnected: [], progress: [], connectLinks: [] };
+    return { matched: [], possibleMatches: [], unconnected: [], progress: [], connectLinks: [], referencedElsewhere };
   }
 
   const lookups = await lookupQuietly(mentions, MENTION_MISSING_SECONDS, opts.fetchImpl);
@@ -313,7 +323,8 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
   });
 
   const unconnected = progress.filter((p) => p.status !== "ready").map((p) => p.name);
-  if (unconnected.length === 0) return { matched, possibleMatches, unconnected, progress, connectLinks: [] };
+  if (unconnected.length === 0)
+    return { matched, possibleMatches, unconnected, progress, connectLinks: [], referencedElsewhere };
 
   const installations = await liveInstallations();
   const guide = opts.guide?.toLowerCase();
@@ -323,7 +334,14 @@ export async function suggestTargets(body: string, opts: SuggestOptions = {}): P
   if (guided && guidedKnown && !guidedKnown.missing) {
     guided.forkedAs = await findFork(guidedKnown.canonical ?? guided.name, installations, opts.fetchImpl);
   }
-  return { matched, possibleMatches, unconnected, progress, connectLinks: connectLinks(installations) };
+  return {
+    matched,
+    possibleMatches,
+    unconnected,
+    progress,
+    connectLinks: connectLinks(installations),
+    referencedElsewhere,
+  };
 }
 
 function repoPart(fullName: string): string {

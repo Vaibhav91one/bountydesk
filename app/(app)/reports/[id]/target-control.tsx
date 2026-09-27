@@ -137,6 +137,7 @@ export function TargetControl({
           <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
         ) : null}
         {guide}
+        <ReferencedElsewhere links={suggestion?.referencedElsewhere ?? []} />
       </div>
     );
   }
@@ -203,8 +204,36 @@ export function TargetControl({
         </span>
       ) : null}
       {guide}
+      <ReferencedElsewhere links={suggestion?.referencedElsewhere ?? []} />
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
+  );
+}
+
+/**
+ * Repositories the report links on a host other than GitHub. Shown so the reference is not lost,
+ * with no Connect or Bind action beside it: targets come from GitHub App installs, so BountyDesk
+ * cannot reproduce against a GitLab or Bitbucket link. Plain external links, opened in a new tab.
+ */
+function ReferencedElsewhere({ links }: { links: TargetSuggestion["referencedElsewhere"] }) {
+  if (links.length === 0) return null;
+  return (
+    <p className="w-full basis-full whitespace-normal break-words text-meta text-muted-foreground">
+      Also referenced (not reproducible here):{" "}
+      {links.map((link, i) => (
+        <span key={link.url}>
+          {i > 0 ? ", " : null}
+          <a
+            href={link.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {link.label} {link.name}
+          </a>
+        </span>
+      ))}
+    </p>
   );
 }
 
