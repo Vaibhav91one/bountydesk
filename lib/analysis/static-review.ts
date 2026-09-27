@@ -140,13 +140,19 @@ export async function gatherStaticSource(
             const text = await reader.readFile(path).catch(() => null);
             if (text !== null && text.trim().length > 0) result.files.push({ path, text });
           }
-          // Host-side OSV lookup on the declared dependencies, reusing this same scoped token. Reads are
-          // gated on the tree listing (already filtered to blobs at or under MAX_BLOB_BYTES), so an
-          // oversize lockfile is never fetched even if a server ignores the reader's Range header.
+          // Only scan a public repository. token is null here exactly when the repo is read
+          // anonymously (public); a private repo is read with a minted scoped token, and one without
+          // the Contents:read grant has already thrown POLICY_REFUSED before this callback. A private
+          // repo's declared dependency names and exact versions are private metadata, so they must not
+          // be POSTed to the public OSV service; skipping leaves advisories empty. Reads are gated on
+          // the tree listing (already filtered to blobs at or under MAX_BLOB_BYTES), so an oversize
+          // lockfile is never fetched even if a server ignores the reader's Range header.
           // scanDependencies never throws, so a slow or unreachable OSV leaves advisories empty without
           // failing the review.
-          const scanReader = boundedSourceReader(input.repoFullName, MAX_BLOB_BYTES, ref, signal, token);
-          result.advisories = await scanDependencies(scanReader, { signal, availablePaths: new Set(blobs) });
+          if (token === null) {
+            const scanReader = boundedSourceReader(input.repoFullName, MAX_BLOB_BYTES, ref, signal, token);
+            result.advisories = await scanDependencies(scanReader, { signal, availablePaths: new Set(blobs) });
+          }
         } catch (error) {
           throw new Error(redactToken(error instanceof Error ? error.message : String(error), token));
         }

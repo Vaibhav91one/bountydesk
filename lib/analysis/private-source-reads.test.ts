@@ -257,3 +257,52 @@ test("a public repository is still read anonymously and mints nothing", async ()
   assert.equal(mints().length, 0);
   assert.ok(reads().every((c) => c.auth === null));
 });
+
+test("the OSV dependency scan runs for a public repo but never a private one", async () => {
+  const osvCalls: Array<{ body: string | null }> = [];
+  // A self-contained mock: a manifest in the tree, a mintable token for the private repo, and the OSV
+  // endpoint. gatherStaticSource decides public vs private from whether a token was minted, which is
+  // the same signal the private-repo policy uses.
+  function serveRepo(repo: { full_name: string; private: boolean }) {
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      const auth = new Headers(init?.headers).get("authorization");
+      if (url === "https://api.osv.dev/v1/querybatch") {
+        osvCalls.push({ body: typeof init?.body === "string" ? init.body : null });
+        return Response.json({ results: [{ vulns: [{ id: "GHSA-x" }] }] });
+      }
+      if (url.startsWith("https://api.github.com/app/installations/") && method === "POST") {
+        return Response.json({ token: TOKEN, expires_at: new Date(Date.now() + 3_600_000).toISOString() });
+      }
+      if (url === "https://api.github.com/installation/token" && method === "DELETE") return new Response(null, { status: 204 });
+      const okAuth = !repo.private || auth === `Bearer ${TOKEN}`;
+      if (url.startsWith(`https://api.github.com/repos/${repo.full_name}/git/trees/`)) {
+        if (!okAuth) return new Response("Not Found", { status: 404 });
+        return Response.json({ tree: [{ path: "package.json", type: "blob", size: 40 }] });
+      }
+      const raw = `https://raw.githubusercontent.com/${repo.full_name}/HEAD/`;
+      if (url.startsWith(raw)) {
+        if (!okAuth) return new Response("404", { status: 404 });
+        return url.slice(raw.length) === "package.json"
+          ? new Response(`{"dependencies":{"lodash":"4.17.15"}}`, { status: 206 })
+          : new Response("404", { status: 404 });
+      }
+      throw new Error(`unexpected fetch in test: ${method} ${url}`);
+    }) as typeof fetch;
+  }
+
+  serveRepo({ full_name: OPEN.full_name, private: false });
+  const pub = await staticReview.gatherStaticSource({ repoFullName: OPEN.full_name, ref: null, reportText: "x" });
+  assert.equal(osvCalls.length, 1, "a public repo's dependencies are looked up");
+  assert.deepEqual(pub.advisories.map((a) => a.name), ["lodash"]);
+  assert.match(osvCalls[0].body ?? "", /lodash/);
+
+  osvCalls.length = 0;
+  serveRepo({ full_name: READABLE.full_name, private: true });
+  const priv = await staticReview.gatherStaticSource({ repoFullName: READABLE.full_name, ref: null, reportText: "x" });
+  assert.equal(osvCalls.length, 0, "a private repo's dependency names never reach OSV");
+  assert.deepEqual(priv.advisories, []);
+  // The private source was still read, so the skip is a privacy decision, not a failed read.
+  assert.ok(priv.files.some((f) => f.path === "package.json"), "the private manifest was read for the static review");
+});
