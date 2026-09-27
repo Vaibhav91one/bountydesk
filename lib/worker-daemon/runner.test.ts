@@ -239,6 +239,36 @@ test("runDaemon runs every queue's loop and sweeper concurrently and resolves af
   assert.ok(swept.a > 0 && swept.b > 0, "both queues' sweepers must have run");
 });
 
+test("runDaemon lets a queue override the idle backoff with its own value", async () => {
+  const controller = new AbortController();
+  const sleeps: number[] = [];
+
+  const q = (name: string, extra: Partial<QueueSpec> = {}): QueueSpec => ({
+    name,
+    claimOnce: async () => null,
+    sweepOnce: async () => {},
+    ...extra,
+  });
+
+  setTimeout(() => controller.abort(), 20);
+
+  await runDaemon([q("fast", { idleBackoffMs: 7 }), q("slow")], {
+    signal: controller.signal,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      await noWaitSleep();
+    },
+    // jitter of 0.5 makes withJitter return the base value unchanged.
+    jitter: () => 0.5,
+    logger: silentLogger(),
+    idleBackoffMs: 3,
+    sweepIntervalMs: 1000,
+  });
+
+  assert.ok(sleeps.includes(7), "the override queue backs off on its own value");
+  assert.ok(sleeps.includes(3), "a queue with no override uses the daemon default");
+});
+
 test("runLoop reports progress for every iteration, whatever the iteration did", async () => {
   const controller = new AbortController();
   const progress: string[] = [];

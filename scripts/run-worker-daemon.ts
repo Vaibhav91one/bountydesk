@@ -104,6 +104,31 @@ const REPORT_EXPIRY_INTERVAL_MS = 60 * 60_000;
 const SNAPSHOT_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
 
 /**
+ * How long an idle claim loop waits before polling again. The runner default is 2s, so a dozen
+ * claim loops issue several SELECT ... FOR UPDATE SKIP LOCKED per second around the clock even with
+ * nothing to do, and that constant traffic is what drains the database's Disk IO budget. A triage
+ * queue is not latency critical (intake still returns 202 at once; only the background pickup
+ * waits), so idle loops back off to 15s. That alone is the bulk of the saving, since the claim
+ * loops far outnumber and outpace the sweepers.
+ *
+ * The sweep tick is deliberately left at the runner default (30s). A sweep is wrapped in a 60s
+ * timeout, and runSweeper records progress only after a sweep settles, so the worst gap between two
+ * progress marks is intervalMs + 60s. At 30s that is 90s, right at STALL_BUDGET_MS; raising the
+ * interval would push a single hung sweep (a dead pooler socket) past the budget and make /healthz
+ * flag the loop stale, which restart-loops the worker. So only the idle backoff moves.
+ */
+const IDLE_BACKOFF_MS = 15_000;
+
+/**
+ * The agent-sessions loop keeps a shorter idle backoff. It re-polls a running TrueForge turn on its
+ * own cadence (POLL_BACKOFF_MS, 5s, in lib/agent-sessions/poller.ts): a claim releases the lease
+ * with nextPollAt 5s out, so the loop's next attempt usually finds nothing due yet and falls into
+ * the idle sleep. At the 15s default that would stretch every step of a live reproduction to ~15s,
+ * so this loop stays at 5s to match the poller while the rest back off.
+ */
+const AGENT_SESSIONS_IDLE_BACKOFF_MS = 5_000;
+
+/**
  * Run fn at most once per intervalMs from a sweep loop that ticks every 30s. The first call runs
  * straight away, so a fresh deploy reconciles on boot. A failure still waits out the interval.
  */
@@ -222,6 +247,7 @@ async function main(): Promise<void> {
         }),
       sweepOnce: sweepAgentSessions,
       claimTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+      idleBackoffMs: AGENT_SESSIONS_IDLE_BACKOFF_MS,
     },
     {
       name: "approval-submission",
@@ -346,6 +372,7 @@ async function main(): Promise<void> {
     signal: controller.signal,
     onProgress: (name, outcome) => heartbeat.record(name, Date.now(), outcome),
     sweepTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+    idleBackoffMs: IDLE_BACKOFF_MS,
   });
   console.log("worker daemon stopped");
 }
