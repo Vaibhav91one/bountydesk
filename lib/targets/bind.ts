@@ -98,6 +98,11 @@ export async function bindTarget(
     if (isTerminal(state)) {
       return { ok: false, reason: `report is ${state}; a closed report cannot change target` };
     }
+    // An outside report at the gate has not been cleared for any run yet. Binding first would make
+    // "Run analysis" start a reproduction against the target, which is not what that button says.
+    if (state === "NEEDS_DECISION") {
+      return { ok: false, reason: "decide on the report at the gate before binding a target" };
+    }
     // Mid-delivery the approved verdict is already on its way out, and its outcome was gated on
     // whatever target the report had when it was drafted.
     if (state === "DELIVERING") {

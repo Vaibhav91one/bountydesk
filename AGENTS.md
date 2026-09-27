@@ -35,18 +35,35 @@ any payload whose content hash differs from the approved one. Nothing is ever au
 semantically similar reports go to a human as top-k candidates, and only exact delivery
 replays are automatic no-ops.
 
-Intake and reproduction are separate. A report enters through one of three independent
-channels: GitHub issues, email, or file upload. Email and upload need no GitHub connection to
-create and triage a report. Reproduction is what needs a server-authorised `TargetProfile`, and
-a report without one stops at `ANALYSIS_ONLY` with nothing cloned, built, deployed or probed.
+Intake and reproduction are separate. A report enters through one of four independent
+channels (`intake_channel`): `github` (issues), `advisory` (GitHub security advisories filed
+through private vulnerability reporting), `email`, and `upload` (the public `/submit` page). Drive
+intake is dropped. Email and upload need no GitHub connection to create and triage a report.
+Reproduction is what needs a server-authorised `TargetProfile`, and a report without one stops at
+`ANALYSIS_ONLY` with nothing cloned, built, deployed or probed. A target can come from a connected
+GitHub repository, public or private, or from a non-GitHub source (an archive, a single Dockerfile,
+or a prebuilt image pinned by digest) bound through `configureConnectionlessTarget`
+(`docs/decisions.md` Q30).
 
 Connectivity is the GitHub App model, not manual webhooks. OAuth login is identity, the App
-install is repo access. Least privilege is Metadata read plus Issues read and write. Cloning a
-connected repository does not widen that: a public repository clones anonymously, and Contents
-read would be needed only for a private one. The intended private-repository policy accepts and
-triages the signed issue, then refuses reproduction with `POLICY_REFUSED` until that permission
-is deliberately added and accepted. This is not built: current GitHub intake requires a bound
-target profile, and repository visibility is not stored. The webhook secret belongs to the
+install is repo access. Least privilege is Metadata read, Issues read and write, and Repository
+security advisories read and write, with the `issues`, `repository_advisory` and lifecycle events.
+Advisories are a private intake and the surface the verdict goes back to: a `repository_advisory`
+`reported` or `published` delivery becomes an `advisory` report held at `NEEDS_DECISION`, and
+because GitHub has no comments API for advisories, the approved verdict is delivered by editing the
+advisory's description (`docs/advisory-intake.md`). An email report bound to a connected repository
+with a live grant, whose installation has accepted Repository security advisories write
+(`github_installation.repository_advisories_permission`), delivers the same way, by opening a draft
+advisory, instead of an email reply.
+Cloning a connected repository does not widen the permissions: a public repository clones
+anonymously, and Contents read is needed only for a private one. The private-repository policy
+accepts and triages the report, then refuses reproduction with `POLICY_REFUSED` (and onboarding refuses to clone) until
+that permission is deliberately added and accepted. Visibility is stored on
+`connected_repository.is_private` and the granted permission on
+`github_installation.contents_permission`, both from the lifecycle webhooks with the reconcile tick
+as backfill. A private clone uses an installation token scoped to that one repository and narrowed
+to contents:read, passed through a credential helper rather than the URL and revoked right after
+the clone (`lib/github/repo-access.ts`). The webhook secret belongs to the
 platform, and `installation_id → repo → TargetProfile` resolves server-side. Mint short-lived
 installation tokens per delivery and discard them. Keep access in sync from the `installation`,
 `installation_repositories`, and `repository` lifecycle webhooks: a suspended or deleted
@@ -54,10 +71,18 @@ installation, or a removed repository, must stop intake and delivery at once.
 
 Job execution and report lifecycle are separate enums. Job execution runs
 `RECEIVED → PARSED → SESSION_CREATED → RUNNING → DONE | DEAD_LETTER`. Leasing (`lease_owner`,
-`lease_expires_at`, `attempts`, `fence`) is orthogonal to that, not a state of its own. The
-frozen MVP report enum is `TRIAGING | REPRODUCING | ANALYSIS_ONLY | AWAITING_APPROVAL |
+`lease_expires_at`, `attempts`, `fence`) is orthogonal to that, not a state of its own. An
+outside email or advisory report held at the intake gate finishes its job at `PARSED → DONE`; an
+upload report is created by its route directly, with no job. The frozen
+report enum is `TRIAGING | NEEDS_DECISION | REPRODUCING | ANALYSIS_ONLY | AWAITING_APPROVAL |
 DELIVERING | DELIVERED | DENIED | OUT_OF_SCOPE | CANCELLED | EXPIRED`, and the last five are
-terminal. There is no reporter-reply state: the reviewer chat is the only conversation channel,
+terminal. `NEEDS_DECISION` is the gate an outside (non-allowlisted) email report, every advisory
+report and every upload report waits at before anything runs on it; only a reviewer moves it on, to
+`TRIAGING` or `DENIED` (`docs/decisions.md` Q25, Q27, Q32). `OUT_OF_SCOPE` is narrow: an operator
+quarantine that rules a bound target out of scope, or a static review of a target that could not be
+built or deployed which read no source and drafted nothing (Q31). A target that cannot be built or
+deployed otherwise ends `ANALYSIS_ONLY` with a static review, and a missing target never produces
+`OUT_OF_SCOPE`. There is no reporter-reply state: the reviewer chat is the only conversation channel,
 so `AWAITING_REPORTER` is not part of the enum. `DEAD_LETTER` belongs to job execution only.
 
 The durable jobs table is the queue. Idempotency is the unique `(channel, delivery_id)`, and
@@ -122,12 +147,14 @@ authorizes a verdict, target, approval, delivery, or merge.
 
 Merge acceptance requires a pull request, a green `build` check, and resolved conversations.
 
-It reviews a same-repository pull request when it opens, reopens or is marked ready, and again when
-the owner, a member or a collaborator comments `/review`. It is not a required status check. A PR
-counts as reviewed when its summary comment carries `<!-- claude-review head=<sha> -->` for the
-current head; after later pushes, comment `/review` to review the new head. Fork PRs are not
-reviewed, which is expected, not a CI failure. If the review fails or is missing, a human may merge
-with the required `build` check and human review, but must not describe the PR as reviewed by it.
+It reviews a same-repository pull request when it opens, reopens or is marked ready, on every push,
+and again when the owner, a member or a collaborator comments `/review`. A new push cancels a review
+still running on the old head. It is not a required status check. A PR counts as reviewed when its
+summary comment carries `<!-- claude-review head=<sha> -->` for the current head; the workflow's
+read-only `head-check` job compares the latest marker with the head after each review and fails,
+advisory only, when it is missing or stale. Fork PRs are not reviewed, which is expected, not a CI
+failure. If the review fails or is missing, a human may merge with the required `build` check and
+human review, but must not describe the PR as reviewed by it.
 
 A pull request cannot change its own review policy. The workflow runs from the default branch on
 `pull_request_target` and `issue_comment`, the default branch is checked out as the working tree,
@@ -428,37 +455,65 @@ approve one text while GitHub receives another.
 
 ## Design record
 
-The committed source of truth is [`docs/decisions.md`](docs/decisions.md) covering Q1 to Q21,
-[`docs/demo-runbook.md`](docs/demo-runbook.md), and [`docs/plan.md`](docs/plan.md). When this
-summary is ambiguous, defer to those records and ask rather than guess.
+The committed source of truth is [`docs/decisions.md`](docs/decisions.md) covering Q1 to Q32,
+[`docs/demo-runbook.md`](docs/demo-runbook.md), and [`docs/plan.md`](docs/plan.md). The advisory
+channel is in [`docs/advisory-intake.md`](docs/advisory-intake.md), and upload and non-GitHub
+targets in [`docs/upload-and-nongithub-targets.md`](docs/upload-and-nongithub-targets.md). When
+this summary is ambiguous, defer to those records and ask rather than guess.
 
-## Backlog, now active work
+## Operator prerequisites
 
-The hackathon MVP window is closed. The items below were held out of it for time, and they are
-open work now, not deferred: build them when a task reaches them rather than pointing at a freeze.
-This is only about the ones held for time. The production deferrals in `docs/decisions.md`'s
-"Deferred (real product)" (black-box and live-target reproduction, multi-tenancy and RBAC) are
-scope decisions, not the time-box, and stay deferred there.
+Some of what is built needs a person to switch it on. None of it can be stubbed.
 
-What the end of the window does not change is the safety invariants, which were never about the
-schedule. No channel records a `DeliveryAttempt` or reaches `DELIVERED` without a verified
-recipient and a transport receipt. Email now satisfies both: the recipient is the address that
-passed inbound SPF/DKIM, re-checked against the allowlist at send time, and the receipt is
-Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an accepted send
-earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload has neither
-half yet and so still stops short of delivery. Every verdict is still human-approved, which no
-phase ever turns off. Those hold whether or not there is time on the clock.
+- GitHub App permissions: Metadata read, Issues read and write, Repository security advisories read
+  and write. Add Contents read only for installations that want private repositories reproduced.
+  Each installation owner has to accept a changed permission set before it takes effect; until
+  then email reports get the email reply rather than an advisory, advisory writes are refused and
+  held (a reviewer retries them from the case file once the permission is accepted), and private
+  repositories stop at `POLICY_REFUSED`.
+- GitHub App events: `issues`, `repository_advisory`, `installation`, `installation_repositories`
+  and `repository`.
+- Private vulnerability reporting turned on in each repository that should take advisory reports.
+  That is a repository setting, and the repository must also be connected with a bound target.
+- Optional env, on the worker unless noted: `REGISTRY_HOST`, `REGISTRY_USER`,
+  `REGISTRY_NAMESPACE` and `REGISTRY_PUSH_TOKEN` point the build at a registry other than GHCR (the `GHCR_*` values are the
+  fallbacks); `REGISTRY_DELETE_TOKEN` (a `delete:packages` token) lets the build delete its pushed
+  image once the snapshot is active; `PREBUILT_IMAGE_REGISTRIES` lists the registries a prebuilt
+  image may come from (default `docker.io,ghcr.io`), and must be set on both Vercel and the worker
+  because both check it. See `env.example`.
+- Migrations are run by hand. Merging a migration passes `build` but does not touch the production
+  database: run `npm run db:migrate` with `DIRECT_URL` from a trusted machine after it merges.
+- Worker code (delivery, jobs, build onboarding, the upload build loop) runs on the Zerops worker, so
+  a merge to `main` does not deploy it; the worker needs its own push.
 
-The parked surfaces, so a plan knows where they live:
+## Backlog
 
-- Upload and drive intake, designed and not wired (`app/(app)/integrations/catalog.ts`,
-  `built: false`). Upload is blocked on the outbound contract above; drive was out of scope for
-  the demo rather than merely unbuilt. Email is built in both directions: intake through
-  `app/api/intake/email/route.ts` and the reply through `lib/delivery/email.ts`.
-- The private-repository policy (`POLICY_REFUSED`), described below in the connectivity section.
-- Google sign-in (`app/login/page.tsx`), and the placeholder legal pages.
+The hackathon MVP window is closed, and the items it held back for time are built: email both
+ways, outside email intake, upload intake, advisory intake and delivery, private repositories,
+non-GitHub targets, the static fallback, Google sign-in, and the legal pages.
+
+What never changes is the safety invariants. No channel records a `DeliveryAttempt` or reaches
+`DELIVERED` without a verified recipient and a transport receipt. Email's recipient is an
+allowlisted address, or an outside sender's address that passed inbound SPF and DKIM aligned with
+its From domain and is recorded as the report's `verified_sender`, re-checked at send time; the
+receipt is Resend's `email.delivered` webhook. Provider acceptance is not that receipt, so an
+accepted send earns `SENT` with a null `delivered_at` and the report waits in `DELIVERING`. Upload
+rides the same email transport: its recipient is the contact the uploader proved with a
+report-scoped one-time code (recorded as `verified_sender`), and an unconfirmed contact is refused.
+An advisory's recipient is the repository grant, re-checked at send, and its receipt is GitHub's
+2xx on the edit or create. Every verdict is still human-approved.
+
+Still open or deferred, so a plan knows where they stand:
+
 - The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
   called live-proven; the recorded proof used the deterministic canary pipeline.
+- The open onboarding items in [`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md):
+  rotating a connectionless profile, a tarball without a Dockerfile, reclaiming mesh images, and
+  scheduling the trial-snapshot sweep.
+- Deferred by scope, not time (`docs/decisions.md` "Deferred (real product)"): multi-target
+  expansion, the agentic code review module (kept separate from onboarding), black-box and
+  live-target reproduction, RBAC and multi-tenancy, and the pentest agent
+  (`docs/pentest-workbench.md`).
 
 Multi-target setup is manifest-driven. The frozen Juice Shop demo profile may stay in the
 server registry, but new targets should come from a validated target manifest or an onboarding
@@ -467,10 +522,15 @@ installation creates the connected repo, a build worker clones that repo in a bu
 dependency egress, the platform reads or asks an onboarding agent to propose target metadata,
 builds and verifies a Daytona snapshot, then writes or rotates the server-side `TargetProfile`.
 The later reproduction run still uses a no-egress sandbox and the agent still interacts with the
-target only through `probe_target` and approval-gated `probe_target_write`. The pipeline is built
-and live-proven through build, snapshot, manifest proposal and approval; the open follow-ups from
-that first run, a pluggable and ephemeral registry handoff to replace the GHCR-specific one, the
-onboarding agent's start-command model, and non-GitHub target writes, are in
+target only through `probe_target` and `probe_target_write`. `probe_target_write` is auto-approved
+inside the sandbox rather than paused for a human: the only network a write probe can reach is that
+reproduction sandbox, offline under `networkBlockAll` with no egress and torn down after the run, so
+there is nothing outside it for a human to protect. The human gate that guards the outside world is
+`publish_verdict`. See `docs/decisions.md` (Q16 for the offline sandbox, Q11 for the gate) and
+`autoApproveWriteProbe` in `lib/agent-sessions/poller.ts`. The pipeline is built
+and live-proven through build, snapshot, manifest proposal and approval. The follow-ups from that
+first run (the pluggable registry handoff, image reclaim, start-command verify and non-GitHub target
+writes) are built, and what is still open is in
 [`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md).
 
 Target repositories must stay passive test applications. Do not rely on repo-local scripts such

@@ -2,10 +2,37 @@ import { requireSecret } from "@/lib/env";
 
 const RESEND_API = "https://api.resend.com";
 
+/**
+ * Every Resend fetch carries a signal, and not only as a timeout. Inside a Next.js route, fetch
+ * dedupes a signal-less GET by tee()ing its body and keeping one branch. Cancelling the other
+ * branch then waits for that kept branch forever, which is how intake hung to Vercel's 300s limit.
+ * A signal opts the call out of the dedupe (next/dist/server/lib/dedupe-fetch.js).
+ */
+const RESEND_TIMEOUT_MS = 20_000;
+
+/** Resend's verdict on one sender check. Anything but "pass" is treated as a failure. */
+export type AuthResult = "pass" | "fail" | "gray" | "processing_failed" | "unknown";
+
 export type InboundBody = {
   text: string;
   html: string;
+  /**
+   * SPF and DKIM as Resend's receiving MX judged them. The webhook does not carry these, only
+   * the receiving API does. A field Resend omitted reads as "unknown", which fails closed.
+   */
+  spf: AuthResult;
+  dkim: AuthResult;
+  /** Text plus HTML plus the attachments' declared sizes, for the outside-sender size cap. */
+  sizeBytes: number;
+  /** Short-lived signed URL of the raw MIME message, for reading its header block. */
+  rawUrl: string | null;
 };
+
+const AUTH_RESULTS: readonly AuthResult[] = ["pass", "fail", "gray", "processing_failed", "unknown"];
+
+function authResult(value: unknown): AuthResult {
+  return AUTH_RESULTS.includes(value as AuthResult) ? (value as AuthResult) : "unknown";
+}
 
 /**
  * Fetch the body of a received email from Resend.
@@ -27,6 +54,7 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
         authorization: `Bearer ${requireSecret("RESEND_API_KEY")}`,
         "user-agent": "bountydesk-worker",
       },
+      signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
     });
   } catch (cause) {
     // A network-level failure (DNS, connection reset) rejects here rather than returning a
@@ -41,18 +69,72 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
     );
   }
 
-  let payload: { text?: unknown; html?: unknown };
+  let payload: {
+    text?: unknown;
+    html?: unknown;
+    authentication?: { spf?: unknown; dkim?: unknown } | null;
+    attachments?: unknown;
+    raw?: { download_url?: unknown } | null;
+  };
   try {
-    payload = (await response.json()) as { text?: unknown; html?: unknown };
+    payload = (await response.json()) as typeof payload;
   } catch (cause) {
     // A 2xx with a body that is not JSON should not surface as a bare SyntaxError. Same context as
     // the other failure paths so the worker's retry is legible.
     throw new Error(`resend receiving fetch for ${resendEmailId} returned unparseable JSON`, { cause });
   }
+  const text = typeof payload.text === "string" ? payload.text : "";
+  const html = typeof payload.html === "string" ? payload.html : "";
+  const attachmentBytes = Array.isArray(payload.attachments)
+    ? payload.attachments.reduce<number>((sum, attachment) => {
+        const size = (attachment as { size?: unknown } | null)?.size;
+        return sum + (typeof size === "number" && size > 0 ? size : 0);
+      }, 0)
+    : 0;
   return {
-    text: typeof payload.text === "string" ? payload.text : "",
-    html: typeof payload.html === "string" ? payload.html : "",
+    text,
+    html,
+    spf: authResult(payload.authentication?.spf),
+    dkim: authResult(payload.authentication?.dkim),
+    sizeBytes: Buffer.byteLength(text) + Buffer.byteLength(html) + attachmentBytes,
+    rawUrl: typeof payload.raw?.download_url === "string" ? payload.raw.download_url : null,
   };
+}
+
+/** The header block is small; a message whose headers run past this is not one we accept. */
+const MAX_HEADER_BYTES = 64 * 1024;
+
+/**
+ * Read only the header block of a received message from its signed raw URL.
+ *
+ * The body is never needed here, so the stream is cancelled at the first blank line, or at the
+ * cap, whichever comes first. The URL is a pre-signed CDN link: no API key goes with it. A
+ * non-2xx throws so intake answers 5xx and Resend redelivers.
+ */
+export async function fetchRawHeaders(rawUrl: string): Promise<string> {
+  const response = await fetch(rawUrl, {
+    headers: { "user-agent": "bountydesk-app" },
+    signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
+  });
+  if (!response.ok || !response.body) {
+    throw new Error(`raw message fetch failed: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (/\r?\n\r?\n/.test(text) || text.length >= MAX_HEADER_BYTES) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  // A chunk can carry the start of the body too; nothing past the blank line is returned.
+  const end = text.search(/\r?\n\r?\n/);
+  return (end >= 0 ? text.slice(0, end) : text).slice(0, MAX_HEADER_BYTES);
 }
 
 /**
@@ -70,7 +152,15 @@ const VERIFICATION_FROM = "BountyDesk <no-reply@mail.bountydesk.vaibhav.quest>";
  * delivery does not apply. A non-2xx throws so the action can tell the owner the code did not go
  * out, rather than leaving them waiting for a mail that never sent.
  */
-export async function sendVerificationEmail(to: string, code: string): Promise<void> {
+export async function sendVerificationEmail(
+  to: string,
+  code: string,
+  purpose: "reviewer" | "report-contact" = "reviewer",
+): Promise<void> {
+  const what =
+    purpose === "reviewer"
+      ? "Your BountyDesk reviewer verification code"
+      : "The code that confirms this address for the report you uploaded to BountyDesk";
   const response = await fetch(`${RESEND_API}/emails`, {
     method: "POST",
     headers: {
@@ -82,7 +172,7 @@ export async function sendVerificationEmail(to: string, code: string): Promise<v
       from: VERIFICATION_FROM,
       to: [to],
       subject: `Your BountyDesk verification code: ${code}`,
-      text: `Your BountyDesk reviewer verification code is ${code}.\n\nIt expires in 10 minutes. If you did not expect this, you can ignore this email.`,
+      text: `${what} is ${code}.\n\nIt expires in 10 minutes. If you did not expect this, you can ignore this email.`,
     }),
   });
 
@@ -156,7 +246,8 @@ export async function sendVerdictEmail(opts: {
   to: string;
   subject: string;
   text: string;
-  html: string;
+  /** Omitted for a plain-text notice (the acknowledgement and the duplicate reply). */
+  html?: string;
   idempotencyKey: string;
   headers?: Record<string, string>;
   signal?: AbortSignal;
@@ -176,7 +267,7 @@ export async function sendVerdictEmail(opts: {
         to: [opts.to],
         subject: opts.subject,
         text: opts.text,
-        html: opts.html,
+        ...(opts.html ? { html: opts.html } : {}),
         ...(opts.headers ? { headers: opts.headers } : {}),
       }),
       signal: opts.signal,

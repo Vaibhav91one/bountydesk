@@ -988,6 +988,112 @@ test("teardown still runs when an unexpected error happens after provisioning", 
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
+test("readiness falls back to a listen-socket check when the image has no curl or wget", async () => {
+  resetSpies();
+  // python:3.11-slim and other minimal bases ship neither client; the port-listen fallback must
+  // still let a bound app read as ready.
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
+    }
+    if (command.includes("command -v curl")) return { exitCode: 0, result: "TOOL=none\n" };
+    if (command.includes("/proc/net/tcp")) return { exitCode: 0, result: "LISTEN\n" };
+    return { exitCode: 0, result: "" };
+  };
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1] })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  // Port 3000 is 0BB8 in the uppercase, zero-padded hex the fallback greps /proc/net/tcp for.
+  assert.ok(
+    executeCalls.some((c) => c.includes("/proc/net/tcp") && c.includes(":0BB8") && c.includes("0A")),
+    "readiness must use the /proc listen-socket fallback when no HTTP client exists",
+  );
+  assert.ok(
+    !executeCalls.some((c) => c.includes("curl -s -o /dev/null -w")),
+    "the curl HTTP probe must not run in an image that has no curl",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("readiness with no HTTP client and no listener times out with the app-log diagnostic", async () => {
+  resetSpies();
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: `${JUICE_SHOP_EXPECTED_BUILD_MARKER}\n` };
+    }
+    if (command.includes("command -v curl")) return { exitCode: 0, result: "TOOL=none\n" };
+    if (command.includes("/proc/net/tcp")) return { exitCode: 0, result: "000\n" };
+    return { exitCode: 0, result: "" };
+  };
+
+  const outcome = await reproduce(reproduceInput());
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+  assert.ok(
+    executeCalls.some((c) => c.includes("-- log:")),
+    "the clientless timeout diagnostic must tail the app log",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("readiness still prefers the curl HTTP probe when curl is present", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput({ imageDigest: FAKE_SNAPSHOT.imageName!.split("@")[1] })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(
+    executeCalls.some((c) => c.includes("curl -s -o /dev/null -w")),
+    "curl must be the readiness probe when the image has it",
+  );
+  assert.ok(
+    !executeCalls.some((c) => c.includes("/proc/net/tcp")),
+    "the listen-socket fallback must not run when an HTTP client is available",
+  );
+});
+
+test("verifyNoEgress accepts a clientless image when networkBlockAll is verified, and still rejects an unblocked one", async () => {
+  resetSpies();
+  executeImpl = async (_sandbox, command) => {
+    executeCalls.push(command);
+    if (command.includes("command -v curl")) return { exitCode: 0, result: "TOOL=none\n" };
+    return { exitCode: 0, result: "" };
+  };
+  const { verifyNoEgress } = await import("./provision");
+
+  // networkBlockAll true and no client: the missing client alone must not fail the check, and no
+  // outbound probe should be attempted since there is nothing to attempt it with.
+  await verifyNoEgress(FAKE_SANDBOX);
+  assert.ok(
+    !executeCalls.some((c) => c.includes("bountydesk-egress")),
+    "no outbound egress probe should run when the image has no HTTP client",
+  );
+
+  // networkBlockAll false still fails closed regardless of client availability.
+  await assert.rejects(
+    () => verifyNoEgress({ ...FAKE_SANDBOX, networkBlockAll: false }),
+    /networkBlockAll false/,
+  );
+});
+
 function withFollowUpAuthorization() {
   authorizeImpl = async (input) => {
     authorizeCalls.push(input);

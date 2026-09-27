@@ -31,6 +31,7 @@ import type { MascotKey } from "@/lib/mascot/catalog";
  */
 export const MASCOT_ON_CARD = new Set([
   "TRIAGING",
+  "NEEDS_DECISION",
   "REPRODUCING",
   "ANALYSIS_ONLY",
   "AWAITING_APPROVAL",

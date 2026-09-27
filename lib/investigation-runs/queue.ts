@@ -400,6 +400,8 @@ export async function runRecheckOnce(
       repoTargetProfileId: connectedRepository.targetProfileId,
       installationSuspendedAt: githubInstallation.suspendedAt,
       installationDeletedAt: githubInstallation.deletedAt,
+      repoIsPrivate: connectedRepository.isPrivate,
+      installationContentsPermission: githubInstallation.contentsPermission,
       targetProfileId: report.targetProfileId,
       targetName: targetProfile.name,
       targetImageName: targetProfile.imageName,
@@ -450,6 +452,8 @@ export async function runRecheckOnce(
         repoTargetProfileId: context.repoTargetProfileId,
         installationSuspendedAt: context.installationSuspendedAt,
         installationDeletedAt: context.installationDeletedAt,
+        repoIsPrivate: context.repoIsPrivate,
+        installationContentsPermission: context.installationContentsPermission,
       }
     : null;
   if (!grantSnapshot || !hasActiveRepositoryGrant(grantSnapshot)) {

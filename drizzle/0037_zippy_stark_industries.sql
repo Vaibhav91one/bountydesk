@@ -1,0 +1,2 @@
+ALTER TABLE "report" ADD COLUMN "replies_to_report_id" uuid;--> statement-breakpoint
+ALTER TABLE "report" ADD CONSTRAINT "report_replies_to_report_id_report_id_fk" FOREIGN KEY ("replies_to_report_id") REFERENCES "public"."report"("id") ON DELETE no action ON UPDATE no action;

@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   bigint,
   boolean,
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -33,6 +35,8 @@ export const jobExecutionState = pgEnum("job_execution_state", [
 
 export const reportLifecycleState = pgEnum("report_lifecycle_state", [
   "TRIAGING",
+  // An outside email report waits here for a human before anything runs on it.
+  "NEEDS_DECISION",
   "REPRODUCING",
   "ANALYSIS_ONLY",
   "AWAITING_APPROVAL",
@@ -57,6 +61,14 @@ export const intakeChannel = pgEnum("intake_channel", [
   "github",
   "email",
   "manual",
+  // An uploaded report. Its verdict is delivered to an OTP-verified email contact, so upload rides
+  // the email transport; the channel stays distinct for honest provenance and for the unique
+  // (channel, source_ref) index.
+  "upload",
+  // A GitHub security advisory (private vulnerability report). GitHub advisories have no comments
+  // API, so the verdict is written back by editing the advisory itself; the channel is distinct so
+  // that outbound path is chosen for these and only these.
+  "advisory",
 ]);
 
 export const verdictOutcome = pgEnum("verdict_outcome", [
@@ -114,6 +126,7 @@ export const reviewerChatMessageSender = pgEnum("reviewer_chat_message_sender", 
 ]);
 
 const id = () => uuid("id").primaryKey().defaultRandom();
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 const createdAt = () =>
   timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 const updatedAt = () =>
@@ -140,6 +153,19 @@ export const githubInstallation = pgTable(
      * no answer, and guessing one would be worse than falling back.
      */
     accountType: text("account_type"),
+    /**
+     * The installation's `contents` permission as GitHub last reported it ("read" or "write"),
+     * "none" when GitHub sent permissions without it, and null when no payload has carried
+     * permissions yet. Reproducing or cloning a private repository needs "read" or "write" here;
+     * a public one never reads it.
+     */
+    contentsPermission: text("contents_permission"),
+    /**
+     * The installation's `repository_advisories` permission, recorded the same way as
+     * contents_permission. An email report is routed to a draft advisory only when this is
+     * "write"; anything else, null included, keeps the email reply.
+     */
+    repositoryAdvisoriesPermission: text("repository_advisories_permission"),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -176,6 +202,13 @@ export const connectedRepository = pgTable(
      * are what let a report's link find the fork's target. Display and matching only: nothing
      * about access or scope is decided from them.
      */
+    /**
+     * GitHub's `private` flag from the last webhook or reconcile read. Null means not observed
+     * yet (a row written before this column existed), which the clone treats as public: an
+     * anonymous clone of a repository that is really private simply fails, so the unknown case
+     * never mints a token or leaks anything.
+     */
+    isPrivate: boolean("is_private"),
     parentFullName: text("parent_full_name"),
     sourceFullName: text("source_full_name"),
     createdAt: createdAt(),
@@ -186,6 +219,38 @@ export const connectedRepository = pgTable(
     index("connected_repository_installation_idx").on(t.installationId),
     index("connected_repository_parent_idx").on(sql`lower(${t.parentFullName})`),
     index("connected_repository_source_idx").on(sql`lower(${t.sourceFullName})`),
+  ],
+);
+
+/**
+ * What GitHub last said about a public repository name, read anonymously and kept until
+ * `expires_at`. Keyed by the lowercased `owner/repo` that was asked about: a name a report linked,
+ * or the name a fork of it would have under an installed account.
+ *
+ * A cache and nothing more. The case file re-reads its target suggestion every few seconds, and
+ * GitHub allows 60 anonymous requests an hour per IP, so a name is fetched at most once per expiry
+ * no matter how many polls or server instances ask. Rows only ever steer which server-held target
+ * a suggestion highlights; nothing about access or scope is decided from them.
+ */
+export const githubRepositoryLookup = pgTable(
+  "github_repository_lookup",
+  {
+    name: text("name").primaryKey(),
+    /** pending (first fetch in flight), found, missing (GitHub answered 404) or error. */
+    state: text("state").notNull(),
+    /** GitHub's current name, which differs from `name` when the repository was renamed or moved. */
+    fullName: text("full_name"),
+    /** Set only when the repository is a fork. */
+    parentFullName: text("parent_full_name"),
+    sourceFullName: text("source_full_name"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    check(
+      "github_repository_lookup_state_check",
+      sql`${t.state} in ('pending', 'found', 'missing', 'error')`,
+    ),
   ],
 );
 
@@ -268,6 +333,32 @@ export const reviewer = pgTable(
   (t) => [uniqueIndex("reviewer_email_key").on(t.email)],
 );
 
+/**
+ * The tunable knobs for outside-sender email intake (lib/email/outside-intake.ts).
+ *
+ * One row holds the whole config, because there is one intake to tune. When the row is absent the
+ * code falls back to OUTSIDE_LIMITS plus a built-in free-mail exempt list, so an empty table is a
+ * valid state and never a reason to reject mail. An exempt domain is not charged against the shared
+ * per-domain bucket: a whole free-mail provider would otherwise spend one 20/day pool between
+ * unrelated senders. The per-sender cap and the size cap still apply to everyone.
+ */
+export const outsideIntakeConfig = pgTable(
+  "outside_intake_config",
+  {
+    // Fixed id, not a random uuid: the check pins it to 1 so the table is a true singleton. Two
+    // owners saving at once, or one request retried, converge on the one row through onConflictDoUpdate
+    // instead of both inserting and leaving readOutsideConfig to pick between rows nondeterministically.
+    id: integer("id").primaryKey().default(1),
+    perSenderPerDay: integer("per_sender_per_day").notNull(),
+    perDomainPerDay: integer("per_domain_per_day").notNull(),
+    maxBytes: integer("max_bytes").notNull(),
+    exemptDomains: text("exempt_domains").array().notNull().default(sql`'{}'::text[]`),
+    updatedAt: updatedAt(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => [check("outside_intake_config_singleton", sql`${t.id} = 1`)],
+);
+
 export const report = pgTable(
   "report",
   {
@@ -284,6 +375,32 @@ export const report = pgTable(
      * GitHub, whose delivery target is the issue. Delivery (Phase 5) refuses to send without it.
      */
     reporterContact: text("reporter_contact"),
+    /**
+     * The address that passed SPF and DKIM when an outside (non-allowlisted) sender's mail was
+     * accepted. Null for GitHub and for allowlisted senders, whose authority is the allowlist.
+     * Delivery accepts `reporter_contact` as a recipient while it still equals this value.
+     */
+    verifiedSender: text("verified_sender"),
+    /**
+     * Report-scoped one-time-code verification of reporter_contact, for a channel that has no
+     * inbound SPF/DKIM to prove the address (upload). The uploader supplies an email, receives a
+     * code, and enters it; only then does verify set verified_sender to that address so
+     * isVerifiedEmailRecipient passes at send time. Only the hash is stored, with a short expiry and
+     * an attempt cap, the same shape the reviewer allowlist uses. Null for GitHub and email, whose
+     * authority is the allowlist or the inbound SPF/DKIM check.
+     */
+    contactCodeHash: text("contact_code_hash"),
+    contactCodeExpiresAt: timestamp("contact_code_expires_at", { withTimezone: true }),
+    contactCodeAttempts: integer("contact_code_attempts").notNull().default(0),
+    /** Set when a reviewer closed this report at the gate as a duplicate of another report. */
+    duplicateOfReportId: uuid("duplicate_of_report_id").references((): AnyPgColumn => report.id),
+    /**
+     * Set when this email report arrived as a reply threaded to an earlier one: its In-Reply-To or
+     * References named the parent's message id and both carry the same SPF/DKIM-verified sender.
+     * It links the thread on the case file and never gates anything; a reply still creates its own
+     * report and still stops at the same intake gate. Null for a first message and for GitHub.
+     */
+    repliesToReportId: uuid("replies_to_report_id").references((): AnyPgColumn => report.id),
     state: reportLifecycleState("state").notNull().default("TRIAGING"),
     connectedRepositoryId: uuid("connected_repository_id").references(
       () => connectedRepository.id,
@@ -619,6 +736,15 @@ export const outboundDelivery = pgTable(
       .notNull()
       .references(() => verdict.id, { onDelete: "restrict" }),
     state: deliveryState("state").notNull().default("PENDING"),
+    /**
+     * The transport that carries this delivery, when it differs from the report's intake channel.
+     * Null means "use report.channel", which is every delivery except one: an email report bound to
+     * an advisory-capable repository is delivered as a draft advisory, not an email reply, and this
+     * column is how the worker picks the advisory arm for a report whose channel column still says
+     * email. It is frozen here at approval, alongside target, so a routing decision a human approved
+     * cannot drift before the worker acts on it.
+     */
+    channel: intakeChannel("channel"),
     /** Stable marker embedded in the comment; makes a retry a no-op rather than a duplicate. */
     idempotencyKey: text("idempotency_key").notNull(),
     target: text("target").notNull(),
@@ -701,8 +827,13 @@ export const deliveryAttempt = pgTable(
 );
 
 /**
- * A private draft security advisory opened on the connected repository for an email report,
+ * A private draft security advisory opened on the connected repository for a reproduced report,
  * after its verdict was delivered to the reporter.
+ *
+ * One row per report, since the owner tracks one advisory per vulnerability. verdict_id and
+ * approved_content_hash name the revision the advisory should carry: asking again after a later
+ * revision is delivered repoints them and sets the row PENDING, and the sender then replaces the
+ * description of the advisory ghsa_id already names instead of opening another.
  *
  * Separate from outbound_delivery on purpose: that outbox is what moves a report to DELIVERED,
  * and this runs only once the report is already there. Like the outbox it has no body column;
@@ -987,6 +1118,11 @@ export const targetOnboarding = pgTable(
     fence: bigint("fence", { mode: "number" }).notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().defaultNow(),
     lastError: text("last_error"),
+    /** Why this repo cannot be reproduced against, set only when onboarding comes to rest short of
+     *  a target: `COULD_NOT_BUILD` when the repo is not flattenable (UNSUPPORTED) or its build step
+     *  exhausted its attempts (FAILED). A report on the repo reads it to take the read-only static
+     *  review instead of a reproduction. Null for every other outcome, and cleared on a requeue. */
+    analysisOnlyReason: text("analysis_only_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1103,5 +1239,61 @@ export const artifact = pgTable(
     uniqueIndex("artifact_verdict_kind_key").on(t.verdictId, t.kind),
     index("artifact_report_idx").on(t.reportId),
     index("artifact_verdict_idx").on(t.verdictId),
+  ],
+);
+
+/**
+ * What an upload brought with it besides the report text: who sent it (for the intake limits) and,
+ * optionally, target material to build a reproduction target from.
+ *
+ * The material is untrusted and inert here. Nothing builds it until a reviewer releases the report
+ * and approves a target definition, which sets build_state to PENDING and stores that definition in
+ * reviewed_target; the build loop (lib/upload/build.ts) is the only reader after that. The archive is
+ * kept in the database because the upload is capped at a few megabytes and the build needs the exact
+ * bytes its digest names.
+ */
+export const uploadIntake = pgTable(
+  "upload_intake",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    /** The normalized contact mailbox and its domain, counted by the per-sender and per-domain caps. */
+    senderKey: text("sender_key").notNull(),
+    senderDomain: text("sender_domain").notNull(),
+    /** The submitting client address, counted by the per-address cap. */
+    clientIp: text("client_ip"),
+    /** archive, dockerfile or image; null when the upload carried no target material. */
+    materialKind: text("material_kind"),
+    /** The tarball, or a one-file tarball holding the uploaded Dockerfile. */
+    archive: bytea("archive"),
+    sourceArchiveDigest: text("source_archive_digest"),
+    imageRef: text("image_ref"),
+    imageDigest: text("image_digest"),
+    materialBytes: integer("material_bytes"),
+    /** The reviewer-approved target definition and build plan. Null until a reviewer approves one. */
+    reviewedTarget: jsonb("reviewed_target"),
+    approvedBy: text("approved_by"),
+    /** Null until approved; then PENDING, BUILDING, BUILT or FAILED. */
+    buildState: text("build_state"),
+    buildLeaseExpiresAt: timestamp("build_lease_expires_at", { withTimezone: true }),
+    buildAttempts: integer("build_attempts").notNull().default(0),
+    buildError: text("build_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("upload_intake_report_key").on(t.reportId),
+    index("upload_intake_created_idx").on(t.createdAt),
+    index("upload_intake_build_state_idx").on(t.buildState),
+    check(
+      "upload_intake_material_kind_check",
+      sql`${t.materialKind} is null or ${t.materialKind} in ('archive', 'dockerfile', 'image')`,
+    ),
+    check(
+      "upload_intake_build_state_check",
+      sql`${t.buildState} is null or ${t.buildState} in ('PENDING', 'BUILDING', 'BUILT', 'FAILED')`,
+    ),
   ],
 );

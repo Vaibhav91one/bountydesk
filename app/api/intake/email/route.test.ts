@@ -46,6 +46,22 @@ mock.module("@/lib/email/receipts", {
   },
 });
 
+// Outside-sender screening (SPF, DKIM, limits, size) is covered against a real database in
+// lib/email/outside-intake.test.ts. Here it is stubbed so this test proves only which senders
+// reach it and what the route answers for each outcome.
+type Admission = { accepted: true } | { accepted: false; reason: string };
+let admission: Admission | Error = { accepted: true };
+const screened: string[] = [];
+mock.module("@/lib/email/outside-intake", {
+  namedExports: {
+    admitOutsideEmail: async (email: { fromEmail: string }) => {
+      screened.push(email.fromEmail);
+      if (admission instanceof Error) throw admission;
+      return admission;
+    },
+  },
+});
+
 let POST: typeof import("./route").POST;
 
 before(async () => {
@@ -55,6 +71,8 @@ before(async () => {
 beforeEach(() => {
   enqueued.length = 0;
   receipted.length = 0;
+  screened.length = 0;
+  admission = { accepted: true };
 });
 
 function signedRequest(from: string) {
@@ -81,18 +99,38 @@ function signedBody(payload: unknown) {
   });
 }
 
-test("a signed message from a non-allowlisted sender is dropped, never enqueued", async () => {
+test("a non-allowlisted sender that fails screening is dropped with a 202, never enqueued", async () => {
+  admission = { accepted: false, reason: "sender not authenticated (spf fail, dkim pass)" };
   const res = await POST(signedRequest("stranger@example.com"));
   assert.equal(res.status, 202);
-  assert.match(await res.text(), /not authorized/);
+  assert.match(await res.text(), /not authenticated/);
+  assert.deepEqual(screened, ["stranger@example.com"]);
   assert.equal(enqueued.length, 0);
 });
 
-test("a signed message from an allowlisted sender is enqueued", async () => {
+test("a non-allowlisted sender that passes screening is accepted through the outside path", async () => {
+  const res = await POST(signedRequest("researcher@example.org"));
+  assert.equal(res.status, 202);
+  assert.equal(await res.text(), "accepted");
+  assert.deepEqual(screened, ["researcher@example.org"]);
+  // admitOutsideEmail does its own enqueue with the outside payload; the plain path must not.
+  assert.equal(enqueued.length, 0);
+});
+
+test("a screening failure answers 503 so Resend redelivers", async () => {
+  admission = new Error("resend receiving fetch failed to connect");
+  const res = await POST(signedRequest("researcher@example.org"));
+  assert.equal(res.status, 503);
+  assert.equal(enqueued.length, 0);
+});
+
+test("a signed message from an allowlisted sender is enqueued, unscreened and unchanged", async () => {
   const res = await POST(signedRequest("Allowed@Example.com"));
   assert.equal(res.status, 202);
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0].channel, "email");
+  assert.equal(screened.length, 0, "the allowlisted path never reaches outside screening");
+  assert.equal((enqueued[0] as { payload?: { intake?: string } }).payload?.intake, undefined);
 });
 
 test("an unsigned message is rejected before the allowlist is consulted", async () => {

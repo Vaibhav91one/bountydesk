@@ -44,6 +44,7 @@ import {
   timeoutSignal,
   type PortPreviewUrl,
 } from "./provision";
+import { runBrowserOracle } from "./browser-probe";
 import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
 
 export { positiveIntegerEnv };
@@ -317,6 +318,58 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     const canary = generateCanary();
     const canaryHash = sha256Hex(canary);
+
+    // A client-side (DOM/SPA XSS) recipe cannot be judged by HTTP calls: the bug only fires once a
+    // browser runs the page's JavaScript. Such a recipe carries browserExploit instead of the HTTP
+    // fixture/negativeControl/exploit legs, and the whole oracle is one render pair in an isolated,
+    // offline browser sandbox. runBrowserOracle owns the isolation and the canary-in-fragment
+    // argument (see lib/sandbox/browser-probe.ts); this maps its decision onto the same evidence
+    // shape and the same decideOutcome the HTTP path uses. The browser sandbox reaches the target
+    // by the target's own sandbox id over a private link, so no preview URL is needed here.
+    if (recipe.browserExploit) {
+      const browser = await runBrowserOracle(
+        { targetSandboxId: sandboxId, targetPort: provisioned.appPort },
+        recipe.browserExploit,
+        canary,
+        { signal: opts?.signal },
+      );
+      throwIfAborted(opts?.signal);
+      const noBody: RequestBodyEvidence = { dispatched: false, sha256: null };
+      const at = new Date().toISOString();
+      if (!browser.ok) {
+        // A browser leg that could not render is a reachability failure, the same class as a
+        // target that never answered, never a guessed verdict.
+        return analysisOnly("TARGET_UNAVAILABLE", { recipeId, sandboxId, canaryHash });
+      }
+      const evidence: ReproductionEvidence = {
+        recipeId,
+        sandboxId,
+        // No HTTP fixture on this path: the "fixture" question is only "did the target render",
+        // which the negative control's own navigation answers, so it is recorded there.
+        fixture: { ranToCompletion: browser.negativeControl.ranToCompletion, at },
+        negativeControl: {
+          ranToCompletion: browser.negativeControl.ranToCompletion,
+          canaryFound: browser.negativeControl.canaryFound,
+          at,
+        },
+        exploit: {
+          ranToCompletion: browser.exploit.ranToCompletion,
+          canaryFound: browser.exploit.canaryFound,
+          at,
+        },
+        canaryHash,
+        // The payload rides in the URL fragment, not a request body, so there is no dispatched
+        // body to hash on any leg.
+        requestBodyHashes: { fixture: noBody, negativeControl: noBody, exploit: noBody },
+      };
+      if (browser.decision === "ANALYSIS_ONLY") {
+        const reason: AnalysisOnlyReason = browser.negativeControl.ranToCompletion
+          ? "NO_APPROVED_ORACLE"
+          : "TARGET_UNAVAILABLE";
+        return analysisOnly(reason, evidence);
+      }
+      return { outcome: browser.decision, evidence };
+    }
 
     let preview: PortPreviewUrl;
     try {

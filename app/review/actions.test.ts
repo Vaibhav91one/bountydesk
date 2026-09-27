@@ -45,9 +45,33 @@ mock.module("@/lib/delivery/worker", {
   },
 });
 
+// The gate actions mail the reporter through sendVerdictEmail. A real send would reach Resend with
+// a live key from .env.local, so it is faked here. ResendSendError and EMAIL_ASSET_ORIGIN are
+// re-declared because mock.module replaces the whole module, and lib/delivery/email imports both at
+// load; a plain Error from the fake is not an instance of this class, so notice.ts rethrows it and
+// the gate reports the failure as a partial-send reason.
+type ResendCall = { to: string; subject: string; text: string; idempotencyKey: string };
+let resendCalls: ResendCall[] = [];
+let resendFails = false;
+class FakeResendSendError extends Error {
+  readonly disposition = "transient";
+}
+mock.module("@/lib/email/resend", {
+  namedExports: {
+    sendVerdictEmail: async (opts: ResendCall) => {
+      resendCalls.push({ to: opts.to, subject: opts.subject, text: opts.text, idempotencyKey: opts.idempotencyKey });
+      if (resendFails) throw new Error("connection reset");
+      return { id: `re_${resendCalls.length}` };
+    },
+    ResendSendError: FakeResendSendError,
+    EMAIL_ASSET_ORIGIN: "https://app.test",
+  },
+});
+
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
 let actions: typeof import("./actions");
+let notice: typeof import("@/lib/email/notice");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -55,6 +79,7 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   actions = await import("./actions");
+  notice = await import("@/lib/email/notice");
 });
 
 after(async () => {
@@ -64,6 +89,8 @@ after(async () => {
 
 beforeEach(() => {
   deliverCalls = [];
+  resendCalls = [];
+  resendFails = false;
 });
 
 // The first arg keeps the old shape: REVIEWER_ID is the allowlisted reviewer (the DAL would return
@@ -535,4 +562,227 @@ test("requestRecheckAction refuses guidance from an unauthenticated caller", asy
     /NEXT_REDIRECT/,
   );
   assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});
+
+async function seedGatedReport() {
+  seq += 1;
+  const contact = `outsider${seq}@outside.test`;
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:<gated-${seq}@mail.test>`,
+      title: `Gated ${seq}`,
+      body: "body",
+      state: "NEEDS_DECISION",
+      reporterContact: contact,
+      verifiedSender: contact,
+    })
+    .returning({ id: dbm.report.id });
+  return { id: row.id, contact };
+}
+
+async function hasEvent(reportId: string, type: string): Promise<boolean> {
+  const [row] = await dbm.db
+    .select({ id: dbm.sessionEvent.id })
+    .from(dbm.sessionEvent)
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, reportId), dbm.eq(dbm.sessionEvent.type, type)))
+    .limit(1);
+  return Boolean(row);
+}
+
+test("the gate actions refuse a caller who is not a reviewer, and change nothing", async () => {
+  signOut();
+  const { id: reportId } = await seedGatedReport();
+  const { reportId: original } = await seedPendingReport();
+
+  await assert.rejects(() => actions.rejectAtGateAction(reportId, true), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.runAnalysisAction(reportId), /NEXT_REDIRECT/);
+  await assert.rejects(() => actions.markDuplicateAction(reportId, original), /NEXT_REDIRECT/);
+
+  assert.equal(await reportState(reportId), "NEEDS_DECISION");
+  assert.equal(resendCalls.length, 0, "a refused caller never triggers a reply");
+});
+
+test("a reviewer's gate decision moves the report and records who made it", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  const released = await seedGatedReport();
+
+  assert.deepEqual(await actions.rejectAtGateAction(rejected.id, false), { ok: true });
+  assert.deepEqual(await actions.runAnalysisAction(released.id), { ok: true });
+
+  assert.equal(await reportState(rejected.id), "DENIED");
+  assert.equal(await reportState(released.id), "TRIAGING");
+  const [event] = await dbm.db
+    .select({ data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.and(dbm.eq(dbm.sessionEvent.reportId, rejected.id), dbm.eq(dbm.sessionEvent.type, "intake.rejected")));
+  assert.deepEqual(event.data, { reviewer: "gatekeeper" });
+
+  // A malformed id never reaches the database.
+  assert.equal((await actions.runAnalysisAction("not-a-uuid")).ok, false);
+  assert.equal((await actions.markDuplicateAction(rejected.id, "not-a-uuid")).ok, false);
+});
+
+test("rejecting mails the fixed reply to the verified sender; marking spam stays silent", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  const spam = await seedGatedReport();
+
+  assert.deepEqual(await actions.rejectAtGateAction(rejected.id, false), { ok: true });
+  assert.equal(resendCalls.length, 1);
+  assert.equal(resendCalls[0].to, rejected.contact);
+  assert.equal(resendCalls[0].text, notice.NOTICES.rejected.text);
+  assert.ok(await hasEvent(rejected.id, "intake.rejected_sent"));
+
+  resendCalls = [];
+  assert.deepEqual(await actions.rejectAtGateAction(spam.id, true), { ok: true });
+  assert.equal(resendCalls.length, 0, "spam gets no reply");
+  assert.ok(await hasEvent(spam.id, "intake.marked_spam"));
+  assert.ok(!(await hasEvent(spam.id, "intake.rejected_sent")));
+});
+
+test("a reject whose reply fails after the close surfaces the reason and stays denied", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const rejected = await seedGatedReport();
+  resendFails = true;
+
+  const result = await actions.rejectAtGateAction(rejected.id, false);
+
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /Closed as rejected/);
+  assert.equal(await reportState(rejected.id), "DENIED", "the close is not rolled back");
+  assert.ok(await hasEvent(rejected.id, "intake.rejected"));
+  assert.ok(!(await hasEvent(rejected.id, "intake.rejected_sent")));
+});
+
+/**
+ * Replace db.transaction with a fault so the approval action meets a dropped connection. The own
+ * property shadows the prototype method decide() calls, and deleting it restores the real one.
+ */
+function faultTransaction(fault: (call: number) => Promise<unknown> | "real") {
+  const real = dbm.db.transaction.bind(dbm.db);
+  let calls = 0;
+  (dbm.db as { transaction: unknown }).transaction = (...args: unknown[]) => {
+    calls += 1;
+    const outcome = fault(calls);
+    return outcome === "real" ? (real as (...a: unknown[]) => unknown)(...args) : outcome;
+  };
+  return {
+    calls: () => calls,
+    restore: () => {
+      delete (dbm.db as { transaction?: unknown }).transaction;
+    },
+  };
+}
+
+test("allowVerdict returns a friendly error instead of throwing when the DB connection drops", async () => {
+  signIn(REVIEWER_ID);
+  const { reportId, verdictId } = await seedPendingReport();
+
+  const dropped = Object.assign(new Error("Connection ended unexpectedly"), { code: "CONNECTION_ENDED" });
+  // Both the initial attempt and the one retry hit a dead pooler socket.
+  const fault = faultTransaction(() => Promise.reject(dropped));
+  let result;
+  try {
+    result = await actions.allowVerdict(reportId, verdictId);
+  } finally {
+    fault.restore();
+  }
+
+  assert.equal(result.ok, false, "a transient DB failure must not surface as a thrown 500");
+  assert.match(result.error ?? "", /database call failed/i);
+  assert.equal(fault.calls(), 2, "the initial attempt plus exactly one retry");
+  // The transaction rolled back both times, so nothing was recorded and the report is untouched.
+  assert.equal((await decisionsFor(verdictId)).length, 0);
+  assert.equal(await reportState(reportId), "AWAITING_APPROVAL");
+});
+
+test("allowVerdict retries once and records the decision when the first DB attempt drops", async () => {
+  signIn(REVIEWER_ID, "iris");
+  const { reportId, verdictId } = await seedPendingReport();
+
+  const dropped = Object.assign(new Error("write CONNECTION_CLOSED"), { code: "CONNECTION_CLOSED" });
+  const fault = faultTransaction((call) => (call === 1 ? Promise.reject(dropped) : "real"));
+  let result;
+  try {
+    result = await actions.allowVerdict(reportId, verdictId);
+  } finally {
+    fault.restore();
+  }
+
+  assert.equal(result.ok, true);
+  assert.equal(fault.calls(), 2);
+  const decisions = await decisionsFor(verdictId);
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0].decision, "APPROVED");
+});
+
+/** A DELIVERING report whose one delivery the worker refused and held for a human. */
+async function seedHeldDelivery() {
+  const { reportId, verdictId } = await seedPendingReport({ synthesized: true });
+  await dbm.db.update(dbm.report).set({ state: "DELIVERING" }).where(dbm.eq(dbm.report.id, reportId));
+  const [verdictRow] = await dbm.db
+    .select({ contentHash: dbm.verdict.contentHash })
+    .from(dbm.verdict)
+    .where(dbm.eq(dbm.verdict.id, verdictId));
+  const [delivery] = await dbm.db
+    .insert(dbm.outboundDelivery)
+    .values({
+      reportId,
+      verdictId,
+      idempotencyKey: `verdict:${verdictId}`,
+      target: `manual:${seq}`,
+      approvedContentHash: verdictRow.contentHash,
+      state: "FAILED",
+      requiresHumanReview: true,
+      attempts: 1,
+      lastError: "GitHub refused the advisory write (403)",
+    })
+    .returning({ id: dbm.outboundDelivery.id });
+  return { reportId, deliveryId: delivery.id };
+}
+
+test("retryHeldDeliveryAction refuses a caller who is not a reviewer, and changes nothing", async () => {
+  const { reportId, deliveryId } = await seedHeldDelivery();
+  signOut();
+  await assert.rejects(() => actions.retryHeldDeliveryAction(reportId), /NEXT_REDIRECT/);
+  signIn(REVIEWER_ID + 1);
+  await assert.rejects(() => actions.retryHeldDeliveryAction(reportId), /NEXT_REDIRECT/);
+
+  const [row] = await deliveriesFor(reportId);
+  assert.equal(row.id, deliveryId);
+  assert.equal(row.state, "FAILED");
+  assert.equal(row.requiresHumanReview, true);
+  assert.equal(deliverCalls.length, 0);
+});
+
+test("retryHeldDeliveryAction re-queues the held row, records who asked, and tries it once", async () => {
+  const { reportId, deliveryId } = await seedHeldDelivery();
+  signIn(REVIEWER_ID, "carol");
+
+  assert.deepEqual(await actions.retryHeldDeliveryAction(reportId), { ok: true });
+
+  const [row] = await deliveriesFor(reportId);
+  assert.equal(row.state, "PENDING");
+  assert.equal(row.requiresHumanReview, false);
+  assert.ok(row.maxAttempts > row.attempts, "the retry has attempts left to claim");
+  assert.deepEqual(
+    deliverCalls.map((c) => c.deliveryId),
+    [deliveryId],
+  );
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  const retried = events.find((e) => e.type === "delivery.retry_requested");
+  assert.ok(retried, "the retry is on the audit trail");
+  assert.equal((retried.data as { reviewer: string }).reviewer, "carol");
+
+  // A second click finds nothing held and changes nothing.
+  const again = await actions.retryHeldDeliveryAction(reportId);
+  assert.equal(again.ok, false);
+  assert.equal(deliverCalls.length, 1);
 });

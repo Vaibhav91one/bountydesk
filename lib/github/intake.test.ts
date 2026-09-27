@@ -490,3 +490,64 @@ test("a revocation that wins the race stops the job being created", async () => 
   assert.equal(await response.text(), "repository is not connected");
   assert.equal(await jobCount(f), 0);
 });
+
+test("a signed delivery whose body is not JSON is rejected after the signature check", async () => {
+  const raw = "not json at all";
+  const signature = `sha256=${createHmac("sha256", SECRET).update(raw).digest("hex")}`;
+  const response = await POST(
+    new Request("https://bountydesk.test/api/intake/github", {
+      method: "POST",
+      body: raw,
+      headers: {
+        "content-type": "application/json",
+        "x-github-event": "issues",
+        "x-github-delivery": `nonjson-${deliveries++}`,
+        "x-hub-signature-256": signature,
+      },
+    }),
+  );
+  assert.equal(response.status, 400);
+  assert.equal(await response.text(), "body is not JSON");
+});
+
+test("closing an issue clears a stale intake failure still showing for it", async () => {
+  const f = fixture();
+  const issueNumber = 7;
+  const sourceRef = `github:${f.repoId}:issue:${issueNumber}`;
+  const [rep] = await dbm.db
+    .insert(dbm.report)
+    .values({ channel: "github", sourceRef, title: "failed report", body: "body", state: "TRIAGING" })
+    .returning({ id: dbm.report.id });
+  await dbm.db.insert(dbm.inboundJob).values({
+    channel: "github",
+    deliveryId: `dead-${f.repoId}`,
+    state: "DEAD_LETTER",
+    payload: { repository: { id: f.repoId } },
+    reportId: rep.id,
+  });
+
+  const closed = request("issues", {
+    action: "closed",
+    issue: { number: issueNumber },
+    repository: { id: f.repoId, full_name: f.fullName },
+    installation: { id: f.installationId },
+  });
+  const response = await POST(closed);
+  assert.equal(response.status, 202);
+  assert.match(await response.text(), /cleared 1 intake failure/);
+
+  const [job] = await dbm.db
+    .select({ dismissedAt: dbm.inboundJob.dismissedAt, state: dbm.inboundJob.state })
+    .from(dbm.inboundJob)
+    .where(dbm.eq(dbm.inboundJob.reportId, rep.id));
+  assert.ok(job.dismissedAt, "the stale job is dismissed");
+  assert.equal(job.state, "DEAD_LETTER", "dismissing does not change the job's execution state");
+});
+
+test("a closed issue with no issue or repository to match is a clean no-op", async () => {
+  const response = await POST(
+    request("issues", { action: "closed", repository: { full_name: "acme/x" } }),
+  );
+  assert.equal(response.status, 202);
+  assert.match(await response.text(), /no issue or repository to match/);
+});

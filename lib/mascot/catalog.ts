@@ -30,6 +30,8 @@ export type MascotKey = (typeof MASCOT_STATES)[number];
  */
 export const MASCOT_FOR_STATE: Record<string, MascotKey> = {
   TRIAGING: "ingest",
+  // Same pose as awaiting approval: nothing runs until a person answers.
+  NEEDS_DECISION: "awaiting-approval",
   REPRODUCING: "reproducing",
   ANALYSIS_ONLY: "scanning",
   AWAITING_APPROVAL: "awaiting-approval",

@@ -42,6 +42,12 @@ export type CaseFile = {
   title: string;
   body: string;
   channel: string;
+  /**
+   * True when this is an email report bound to a repository that delivers verdicts as a draft
+   * advisory rather than an email reply. The intake channel stays `email`; this only decides how
+   * the approval surfaces describe where an approved verdict goes.
+   */
+  deliversAsAdvisory: boolean;
   sourceRef: string;
   sourceLabel: string;
   /** The issue number alone, for the GitHub-style "title #482". Null off GitHub. */
@@ -54,6 +60,8 @@ export type CaseFile = {
   /** The reporter's GitHub profile, and their avatar. Null when the handle is not a login. */
   reporterUrl: string | null;
   reporterAvatarUrl: string | null;
+  /** The earlier report this one replied to (email threading), for a link back. Null otherwise. */
+  repliesTo: { id: string; title: string } | null;
   state: ReportState;
   createdAt: Date;
   updatedAt: Date;
@@ -78,8 +86,16 @@ export type CaseFile = {
   /** Every revision on record, newest first. Length 0 for a report with no verdict yet. */
   verdictHistory: CaseVerdictHistoryEntry[];
   approval: { decision: string; reviewer: string; note: string | null; decidedAt: Date } | null;
-  /** The private draft advisory opened on the repository after an email delivery, if any. */
-  ownerAdvisory: { state: string; htmlUrl: string | null; lastError: string | null } | null;
+  /**
+   * The private draft advisory opened on the repository after delivery, if any. verdictId is the
+   * revision it carries, or is being sent with; a later delivered revision can replace it.
+   */
+  ownerAdvisory: {
+    state: string;
+    verdictId: string;
+    htmlUrl: string | null;
+    lastError: string | null;
+  } | null;
   delivery: {
     state: string;
     attempts: number;

@@ -62,9 +62,9 @@ export default async function IntegrationsPage() {
     {
       id: "upload",
       name: "File upload",
-      detail: "Report intake by upload. Coming soon.",
+      detail: "Report intake by public upload, with optional target material to build.",
       icon: "folder",
-      installed: false,
+      installed: true,
       action: { kind: "link", href: "/integrations/upload", label: "View" },
     },
     {

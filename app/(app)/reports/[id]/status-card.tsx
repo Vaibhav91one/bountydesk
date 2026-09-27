@@ -13,6 +13,8 @@ import type { TargetSuggestion } from "@/lib/targets/suggest";
 
 import { RecheckActions } from "./recheck-actions";
 import { OwnerAdvisoryControl } from "./owner-advisory-control";
+import { CancelReportControl } from "./cancel-report-control";
+import { RetryDeliveryControl } from "./retry-delivery-control";
 import { TargetControl } from "./target-control";
 
 /** One fact. The value is always something the database holds. */
@@ -89,9 +91,14 @@ export function StatusCard({
         <div className="grid min-w-0 flex-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
           <Fact label="Status">{status.stateLabel}</Fact>
           <Fact label="Bound target">
-            <TargetControl reportId={reportId} status={status} profiles={targetProfiles}
-              suggestion={suggestion}
-            />
+            {/* bindTarget refuses a gated report, so the picker would only fail. */}
+            {status.state === "NEEDS_DECISION" ? (
+              "None until a decision"
+            ) : (
+              <TargetControl reportId={reportId} status={status} profiles={targetProfiles}
+                suggestion={suggestion}
+              />
+            )}
           </Fact>
           <Fact label="Intake">{intakeRepository ?? channelLabel(status.channel)}</Fact>
           <Fact label={status.verdict?.verdictLabel ?? "Agent Bounty says"}>
@@ -106,7 +113,7 @@ export function StatusCard({
               ? "None yet"
               : `${status.eventCount} ${status.eventCount === 1 ? "event" : "events"}`}
           </Fact>
-          {status.channel === "email" && repositoryFullName ? (
+          {(status.channel === "email" || status.channel === "github") && repositoryFullName ? (
             <Fact label="Repository owner">
               <OwnerAdvisoryControl
                 reportId={reportId}
@@ -128,6 +135,9 @@ export function StatusCard({
           The live session is gone, but the drafted verdict still stands for review.
         </p>
       ) : null}
+
+      <RetryDeliveryControl reportId={reportId} status={status} />
+      <CancelReportControl reportId={reportId} status={status} />
 
       {status.state === "REPRODUCING" && status.recheckSummary ? (
         <RecheckActions reportId={reportId} summary={status.recheckSummary} />

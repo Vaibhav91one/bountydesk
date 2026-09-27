@@ -2,6 +2,8 @@ import { db, eq, targetOnboarding } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
 import { parseBuildPlan, type Ecosystem } from "@/lib/build-onboarding/build-plan";
 import { selectEgressHosts } from "@/lib/build-onboarding/egress-profiles";
+import { revokeInstallationToken } from "@/lib/github/app-auth";
+import { gitCloneCommand, redactToken, repoReadToken } from "@/lib/github/repo-access";
 import {
   createBuildSandbox,
   deleteSandbox,
@@ -103,7 +105,21 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
   if (!row.resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(row.resolvedCommitSha)) {
     return failOpen(row.id, sandbox.id, "the server has not resolved an immutable source commit");
   }
-  const clone = await runInit(sandbox, `git clone --no-checkout ${shArg(cloneUrl)} /work/source`);
+  // A private repository clones with a read token minted for this clone alone and revoked before the
+  // agent can run anything in the sandbox. Without Contents: read it is refused (POLICY_REFUSED).
+  let token: string | null;
+  try {
+    token = await repoReadToken(row.repoFullName);
+  } catch (error) {
+    return failOpen(row.id, sandbox.id, error instanceof Error ? error.message : String(error));
+  }
+  let clone: { exitCode: number; output: string };
+  try {
+    clone = await runInit(sandbox, gitCloneCommand(cloneUrl, "/work/source", token));
+  } finally {
+    if (token) await revokeInstallationToken(token);
+  }
+  clone = { ...clone, output: redactToken(clone.output, token) };
   if (clone.exitCode === 0) {
     const checkout = await runInit(
       sandbox,
@@ -230,6 +246,16 @@ export type CommitComposeMeshInput = {
 export async function commitComposeMesh(input: CommitComposeMeshInput): Promise<BuildToolResult> {
   const row = await resolveOnboarding(input.capability);
   if (!row) return { ok: false, reason: "unknown capability" };
+
+  // A mesh command or entrypoint override is read by the classifier from the repo's compose file,
+  // never taken from the agent: the agent sets a start command through the CMD of the Dockerfile it
+  // authors, which the build inspects like any other image.
+  if (
+    Array.isArray(input.services) &&
+    input.services.some((s) => s && typeof s === "object" && ("command" in s || "entrypoint" in s))
+  ) {
+    return { ok: false, reason: "services may not set command or entrypoint; put the start command in the Dockerfile's CMD" };
+  }
 
   let plan;
   try {

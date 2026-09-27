@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseTargetManifest, reviewableManifest, targetDefinitionFromManifest } from "./manifest";
+import { parseTargetManifest, reviewableManifest, targetDefinitionFromManifest, validateStartCommand } from "./manifest";
 
 test("a target manifest becomes a platform target definition", () => {
   const definition = parseTargetManifest(
@@ -56,6 +56,36 @@ test("a target manifest rejects non-loopback or overbroad authority", () => {
   ]) {
     assert.throws(() => targetDefinitionFromManifest(bad), /target manifest/);
   }
+});
+
+test("a manifest imageName accepts any registry host, and a tag is still refused", () => {
+  const definition = parseTargetManifest(
+    JSON.stringify({
+      name: "widget",
+      repoFullName: "acme/widget",
+      imageName: "registry.example.com:5000/acme/widget",
+      baseUrl: "http://localhost:3000",
+      readinessPath: "/",
+    }),
+  );
+  assert.equal(definition.imageName, "registry.example.com:5000/acme/widget");
+
+  assert.throws(
+    () =>
+      targetDefinitionFromManifest({
+        name: "widget",
+        repoFullName: "acme/widget",
+        imageName: "registry.example.com/acme/widget:latest",
+        baseUrl: "http://localhost:3000",
+        readinessPath: "/",
+      }),
+    /untagged/,
+  );
+});
+
+test("validateStartCommand is exported for the write-time re-check", () => {
+  assert.doesNotThrow(() => validateStartCommand("node server.js"));
+  assert.throws(() => validateStartCommand("docker run x"), /docker or podman/);
 });
 
 test("a proposed manifest's nested runtime is shown to the reviewer, and flat fields win", () => {

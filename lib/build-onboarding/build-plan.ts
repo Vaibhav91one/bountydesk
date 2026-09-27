@@ -72,8 +72,9 @@ export type ComposeDatastore = {
  * datastore into a single image, a mesh keeps every service separate: each is built or pulled at
  * onboarding, snapshotted, and at reproduction runs as its own linked sandbox. The app service is
  * the one the agent probes; a dependency (a database, a cache) is reached by the app over the
- * private link group, addressed by the dependency's sandbox id, which the provisioner substitutes
- * for the compose service name at boot. So the plan records the compose graph, not loopback wiring.
+ * private link group under its compose service name, which the provisioner maps in /etc/hosts to the
+ * link ip it looks up by the dependency's sandbox id. So the plan records the compose graph, not
+ * loopback wiring.
  */
 export type ComposeMeshService = {
   /** The compose service name, e.g. "db" or "vote". Peers reference it by this name. */
@@ -91,12 +92,17 @@ export type ComposeMeshService = {
   build?: { context: string; dockerfile?: string; dockerfileText?: string };
   /** Pull a published image (a stock datastore such as postgres:16). Exactly one of build/image. */
   image?: string;
-  /** The service's environment. A value that names another compose service (a DB host) is rewritten
-   *  to that peer's sandbox id at provision time, so it is kept verbatim here. */
+  /** The service's environment. A value that names another compose service (a DB host) is kept
+   *  verbatim: the provisioner maps that name to the peer's link ip in /etc/hosts. */
   env?: Record<string, string>;
-  /** Compose service names this service connects to, from depends_on or a host-valued env, so the
-   *  provisioner knows which peer sandbox ids to inject before the service starts. */
+  /** Compose service names this service connects to, from depends_on or a service named as a host in
+   *  its env, command or entrypoint, so the provisioner knows which names to map before it starts. */
   peers?: string[];
+  /** The compose `command` and `entrypoint` as exec argv, read by the classifier from the repo's
+   *  compose file. Absent means the image default; `[]` is Compose's explicit empty override. The
+   *  build combines them with the image's own ENTRYPOINT and CMD into the service's start command. */
+  command?: string[];
+  entrypoint?: string[];
 };
 
 /** The runtime shape the reproduction sandbox needs, independent of how the image was built. This is
@@ -468,6 +474,8 @@ function parseMeshServices(input: unknown, appService: string): ComposeMeshServi
       ...(hasImage ? { image: parseMeshImage(s.image, i) } : {}),
       ...(s.env !== undefined ? { env: parseBuildArgs(s.env) } : {}),
       ...(s.peers !== undefined ? { peers: parseMeshPeers(s.peers, i) } : {}),
+      ...(s.command !== undefined ? { command: parseMeshArgv(s.command, `services[${i}].command`) } : {}),
+      ...(s.entrypoint !== undefined ? { entrypoint: parseMeshArgv(s.entrypoint, `services[${i}].entrypoint`) } : {}),
     };
     return built;
   });
@@ -527,6 +535,17 @@ function parseMeshImage(input: unknown, i: number): string {
 function parseMeshPeers(input: unknown, i: number): string[] {
   if (!Array.isArray(input)) throw new Error(`build plan services[${i}].peers must be an array`);
   return input.map((p, j) => serviceName(typeof p === "string" ? p : "", `services[${i}].peers[${j}]`));
+}
+
+/** An exec argv from a compose command or entrypoint. It ends up quoted into one start-command line,
+ *  so each argument is single-line and the whole is bounded. An empty list is a valid override. */
+function parseMeshArgv(input: unknown, key: string): string[] {
+  if (!Array.isArray(input) || input.some((arg) => typeof arg !== "string" || /[\r\n]/.test(arg))) {
+    throw new Error(`build plan ${key} must be an array of single-line strings`);
+  }
+  // The provisioner refuses a start command over 1000 characters, so refuse it here, before a build.
+  if (input.join(" ").length > 1_000) throw new Error(`build plan ${key} must be under 1000 characters`);
+  return input as string[];
 }
 
 function parseBuildArgs(input: unknown): Record<string, string> {

@@ -51,7 +51,7 @@ export function CaseApproval({
       summary={status.verdict.summary}
       revision={status.verdict.revision}
       destination={status.destination}
-      channel={status.channel}
+      channel={status.deliveryChannel}
       findings={status.verdict.findings}
       recheckSummary={status.recheckSummary}
       speaker="awaiting-approval"

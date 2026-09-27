@@ -240,3 +240,29 @@ test("provisionMesh leaves an image-only dependency without a marker check", asy
   );
   assert.ok(calls.some((call) => call.startsWith("sb-web:cat /etc/bountydesk-build-marker")));
 });
+
+test("provisionMesh maps a compose service name to its peer and keeps a quoted start command whole", async () => {
+  reset();
+  // NodeGoat's shape: the app names its dependency "mongo" in a URI and a wait loop, and its start
+  // command is `sh -c <script>`, quoted by the build driver. printf stands in for the entrypoint so
+  // the launch line can be run here and its argv read back.
+  const script = "until nc -z -w 2 mongo 27017 && echo 'mongo ready'; do sleep 2; done";
+  const topology = auth();
+  topology.services = [
+    { ...topology.services[0]!, service: "web", peers: ["mongo"], startCommand: `printf '%s\\n' sh -c 'until nc -z -w 2 mongo 27017 && echo '\\''mongo ready'\\''; do sleep 2; done'` },
+    { ...topology.services[1]!, service: "mongo", port: 27017, startCommand: "docker-entrypoint.sh mongod" },
+  ];
+  await provisionMesh(topology);
+
+  // The app's /etc/hosts gets "<link ip> mongo", looked up by the mongo sandbox's id.
+  const wiring = calls.find((call) => call.startsWith("sb-web:") && call.includes("/etc/hosts"));
+  assert.ok(wiring?.includes("getent hosts 'sb-db'"));
+  assert.ok(wiring?.includes('echo "$ip mongo" >> /etc/hosts'));
+
+  // The launch wraps the line in `setsid sh -c '...'`; unwrapping one shell level must hand the
+  // inner sh the script as a single argument.
+  const launch = calls.find((call) => call.startsWith("sb-web:setsid sh -c "))!;
+  const shLine = launch.slice("sb-web:setsid ".length, launch.indexOf(" </dev/null"));
+  const { execFileSync } = await import("node:child_process");
+  assert.equal(execFileSync("sh", ["-c", shLine], { encoding: "utf8" }), `sh\n-c\n${script}\n`);
+});

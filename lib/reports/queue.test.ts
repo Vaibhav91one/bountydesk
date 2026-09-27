@@ -177,6 +177,7 @@ test("every lifecycle state lands in exactly one column", () => {
     "DELIVERING",
     "DENIED",
     "EXPIRED",
+    "NEEDS_DECISION",
     "OUT_OF_SCOPE",
     "REPRODUCING",
     "TRIAGING",

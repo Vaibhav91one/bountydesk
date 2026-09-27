@@ -1,5 +1,6 @@
 const STATE_LABEL: Record<string, string> = {
   TRIAGING: "Triaging",
+  NEEDS_DECISION: "Needs decision",
   REPRODUCING: "Reproducing",
   ANALYSIS_ONLY: "Analysis only",
   AWAITING_APPROVAL: "Awaiting approval",

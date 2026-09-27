@@ -5,6 +5,7 @@ import type { Sandbox, SnapshotInfo } from "@/lib/sandbox/daytona";
 
 import { parseBuildPlan } from "./build-plan";
 import { buildMesh, type MeshBuildRuntime } from "./daytona-build-driver";
+import { createRegistry } from "./registry";
 
 /**
  * buildMesh's orchestration, exercised through the injected runtime so no live Daytona account or
@@ -75,9 +76,9 @@ function meshPlan() {
   return plan;
 }
 
+const PUSH_TOKEN = "push-token-secret";
 const CTX = {
-  ghcrNamespace: "ghcr.io/example",
-  pushToken: "push-token-secret",
+  registry: createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/example", pushToken: PUSH_TOKEN }),
   slug: "owner-vuln-bank",
   buildMarker: "a".repeat(40),
   resolvedCommitSha: "a".repeat(40),
@@ -118,10 +119,10 @@ test("buildMesh keeps the push credential inside the login/push/logout window on
   const { runtime, commands } = makeRuntime();
   await buildMesh(SANDBOX, meshPlan(), { ...CTX, runtime });
 
-  const tokenUses = commands.filter((entry) => entry.command.includes(CTX.pushToken));
+  const tokenUses = commands.filter((entry) => entry.command.includes(PUSH_TOKEN));
   assert.ok(tokenUses.length > 0, "the push path must log in with the token");
   for (const entry of tokenUses) {
-    assert.match(entry.command, /docker login ghcr\.io/);
+    assert.match(entry.command, /docker login 'ghcr\.io'/);
   }
   // Every login is followed by a push then a logout on the same sandbox.
   const logins = commands.filter((entry) => entry.command.includes("docker login"));
@@ -135,6 +136,57 @@ test("buildMesh captures the service start command with its working directory", 
   const result = await buildMesh(SANDBOX, meshPlan(), { ...CTX, runtime });
   const app = result.services!.find((service) => service.role === "app")!;
   assert.equal(app.startCommand, "cd /app && /usr/local/bin/docker-entrypoint.sh postgres");
+});
+
+test("buildMesh starts a service with its compose command, quoted for sh -c (NodeGoat)", async () => {
+  const script =
+    "until nc -z -w 2 mongo 27017 && echo 'mongo is ready for connections' && node artifacts/db-reset.js && npm start; do sleep 2; done";
+  const plan = parseBuildPlan({
+    strategy: "compose-mesh",
+    ecosystem: "node",
+    composePath: "docker-compose.yml",
+    appService: "web",
+    services: [
+      { service: "web", role: "app", port: 4000, build: { context: "." }, peers: ["mongo"], command: ["sh", "-c", script] },
+      { service: "mongo", role: "dependency", port: 27017, image: "mongo:4.4", command: ["mongod", "--bind_ip_all"] },
+    ],
+    runtime: { name: "nodegoat", baseUrl: "http://localhost:4000", readinessPath: "/" },
+  });
+  if (plan.strategy !== "compose-mesh") throw new Error("narrowing");
+  const { runtime } = makeRuntime();
+  const result = await buildMesh(SANDBOX, plan, { ...CTX, runtime });
+  const web = result.services!.find((service) => service.service === "web")!;
+  const mongo = result.services!.find((service) => service.service === "mongo")!;
+
+  // The image's ENTRYPOINT stays, the compose command replaces its CMD.
+  assert.equal(
+    web.startCommand,
+    `cd /app && /usr/local/bin/docker-entrypoint.sh sh -c 'until nc -z -w 2 mongo 27017 && echo '\\''mongo is ready for connections'\\'' && node artifacts/db-reset.js && npm start; do sleep 2; done'`,
+  );
+  assert.equal(mongo.startCommand, "cd /app && /usr/local/bin/docker-entrypoint.sh mongod --bind_ip_all");
+
+  // The provisioner runs the line with sh -c; the shell must hand the script to the inner sh whole.
+  const { execFileSync } = await import("node:child_process");
+  const argv = execFileSync("sh", ["-c", `printf '%s\\n' ${web.startCommand.replace(/^cd \/app && /, "")}`], {
+    encoding: "utf8",
+  });
+  assert.equal(argv, `/usr/local/bin/docker-entrypoint.sh\nsh\n-c\n${script}\n`);
+});
+
+test("meshStartCommand applies Compose's entrypoint and command override rules", async () => {
+  const { meshStartCommand } = await import("./daytona-build-driver");
+  const image = { entrypoint: ["docker-entrypoint.sh"], cmd: ["node"], workdir: "/home/node/app" };
+  assert.equal(meshStartCommand(image), "cd /home/node/app && docker-entrypoint.sh node");
+  assert.equal(meshStartCommand(image, { command: ["npm", "start"] }), "cd /home/node/app && docker-entrypoint.sh npm start");
+  // A set entrypoint drops the image's CMD unless a command is given too.
+  assert.equal(meshStartCommand(image, { entrypoint: ["/run.sh"] }), "cd /home/node/app && /run.sh");
+  assert.equal(meshStartCommand(image, { entrypoint: ["/run.sh"], command: ["--fast"] }), "cd /home/node/app && /run.sh --fast");
+  // An empty entrypoint clears it; an empty command clears CMD.
+  assert.equal(meshStartCommand(image, { entrypoint: [], command: ["node", "server.js"] }), "cd /home/node/app && node server.js");
+  assert.equal(meshStartCommand(image, { command: [] }), "cd /home/node/app && docker-entrypoint.sh");
+  assert.equal(meshStartCommand({ entrypoint: [], cmd: [], workdir: "/" }), undefined);
+  // A working directory with a space is quoted too.
+  assert.equal(meshStartCommand({ entrypoint: [], cmd: ["./start.sh"], workdir: "/my app" }), "cd '/my app' && ./start.sh");
 });
 
 test("buildMesh retries a snapshot name that Daytona still reports as a conflict", async () => {

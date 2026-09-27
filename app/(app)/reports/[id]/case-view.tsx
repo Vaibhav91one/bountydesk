@@ -163,7 +163,7 @@ export function CaseView({
           revision={status.verdict.revision}
           contentHash={status.verdict.contentHash}
           destination={status.destination}
-          channel={status.channel}
+          channel={status.deliveryChannel}
           speaker="awaiting-approval"
           speakerScope="record-speaker"
           superseded={status.verdict.superseded}

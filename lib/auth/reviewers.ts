@@ -1,7 +1,13 @@
-import crypto from "node:crypto";
-
 import { and, db, eq, isNotNull, reviewer } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
+import {
+  CODE_TTL_MS,
+  codeMatches,
+  EMAIL_SHAPE,
+  generateCode,
+  hashCode,
+  MAX_CODE_ATTEMPTS,
+} from "./otp";
 
 /**
  * Who may operate BountyDesk.
@@ -111,14 +117,6 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
   return [...ownerEntries, ...memberEntries];
 }
 
-const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const CODE_TTL_MS = 10 * 60 * 1000;
-const MAX_CODE_ATTEMPTS = 5;
-
-function hashCode(code: string): string {
-  return crypto.createHash("sha256").update(code).digest("hex");
-}
-
 export type StartVerificationResult =
   | { status: "code_sent"; code: string }
   | { status: "already_verified" };
@@ -152,8 +150,7 @@ export async function startVerification(
     .limit(1);
   if (existing?.verifiedAt) return { status: "already_verified" };
 
-  // A leading zero is a valid code, so keep it a fixed-width string rather than a number.
-  const code = crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+  const code = generateCode();
   const values = {
     email: normalized,
     addedByEmail: normalize(addedByEmail),
@@ -208,10 +205,7 @@ export async function verifyCode(email: string, code: string): Promise<VerifyRes
     return { ok: false, error: "Too many attempts. Send a new code." };
   }
 
-  const expected = Buffer.from(row.codeHash, "hex");
-  const actual = Buffer.from(hashCode(submitted), "hex");
-  const matches = expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-  if (!matches) {
+  if (!codeMatches(row.codeHash, submitted)) {
     await db
       .update(reviewer)
       .set({ codeAttempts: row.codeAttempts + 1 })

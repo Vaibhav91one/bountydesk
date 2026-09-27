@@ -363,6 +363,26 @@ test("requestRecheck from ANALYSIS_ONLY with a parked verdict opens a guidance r
   assert.equal(session.turnStatus, "CANCELLED");
 });
 
+test("requestRecheck from AWAITING_APPROVAL supersedes the pending verdict and reproduces", async () => {
+  const { reportId, verdictId } = await seedParkedAnalysisOnly({ state: "AWAITING_APPROVAL" });
+
+  const result = await recheck.requestRecheck(reportId, verdictId, "check the auth flow again", "reviewer-1");
+  if (!result.ok) assert.fail(`re-check refused: ${result.reason}`);
+
+  assert.equal(await reportStateOf(reportId), "REPRODUCING");
+  const run = await runRow(result.runId);
+  assert.equal(run.status, "PENDING");
+  assert.equal(run.reason, "REVIEWER_GUIDANCE");
+
+  const [session] = await dbm.db
+    .select()
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.reportId, reportId))
+    .limit(1);
+  assert.equal(session.pendingVerdictId, null, "the parked tuple is cleared");
+  assert.equal(session.turnStatus, "CANCELLED");
+});
+
 test("requestRecheck from ANALYSIS_ONLY without a parked verdict is refused", async () => {
   const { reportId, verdictId } = await seedParkedAnalysisOnly({ withPending: false });
 

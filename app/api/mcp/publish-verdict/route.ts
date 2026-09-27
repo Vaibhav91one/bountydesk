@@ -5,6 +5,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { mcpServerSecret } from "@/lib/env";
 import { publishVerdict, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
+import { probeBrowser, probeBrowserInputSchema } from "@/lib/mcp/probe-browser";
 import { probeTarget, probeTargetReadInputSchema, probeTargetWriteInputSchema } from "@/lib/mcp/probe-target";
 
 // node:crypto and the Postgres connection publishVerdict opens both need the Node runtime.
@@ -87,6 +88,39 @@ function buildServer(): McpServer {
       const result = await probeTarget({ capability, method, path, headers, body }, { approvedForWrite: true });
       if (result.ok) {
         return { content: [{ type: "text", text: JSON.stringify({ status: result.status, body: result.body }) }] };
+      }
+      return {
+        isError: true,
+        content: [{ type: "text", text: result.reason }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "probe_browser",
+    {
+      description:
+        "Render one page of this session's provisioned target in a real headless browser and hand back what it observed: the post-load DOM, the page's console output, and whether a JavaScript dialog fired. Use this for a client-side bug probe_target cannot see (DOM/SPA XSS, a hash-to-sink flow), not for ordinary requests. Give a same-origin path (before any '#') and an optional hashPayload (the URL fragment, after '#', where a client-side payload belongs); never a URL, host or token. The browser runs offline, isolated to this one target, so no separate approval is needed. Refuses cleanly when no sandbox was provisioned or the browser probe is not configured.",
+      inputSchema: probeBrowserInputSchema.shape,
+    },
+    async ({ capability, path, hashPayload }) => {
+      const result = await probeBrowser({ capability, path, hashPayload });
+      if (result.ok) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                navigated: result.navigated,
+                title: result.title,
+                dom: result.dom,
+                consoleText: result.consoleText,
+                dialogFired: result.dialogFired,
+                dialogMessages: result.dialogMessages,
+              }),
+            },
+          ],
+        };
       }
       return {
         isError: true,

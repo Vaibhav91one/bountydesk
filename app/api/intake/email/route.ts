@@ -1,5 +1,7 @@
 import { isReviewerEmail } from "@/lib/auth/reviewers";
 import { parseInboundEmail, verifyResendWebhook, type SvixHeaders } from "@/lib/email/inbound";
+import { admitOutsideEmail } from "@/lib/email/outside-intake";
+import { safeErrorText } from "@/lib/errors/safe-error";
 import { applyDeliveryReceipt } from "@/lib/email/receipts";
 import { readBoundedBody } from "@/lib/github/webhook";
 import { enqueue } from "@/lib/jobs/queue";
@@ -11,7 +13,8 @@ import { enqueue } from "@/lib/jobs/queue";
  * Svix signature, and only then parse. An unsigned or forged delivery reaches no parser, no queue
  * and no database. A verified message is committed to the jobs table before this returns, so the
  * 202 is a promise kept across a restart; the worker builds the report and, with no bound target,
- * it stops at analysis only. Idempotency is the provider message id.
+ * it stops at analysis only. An outside sender's report stops earlier, at the NEEDS_DECISION
+ * gate, until a reviewer decides. Idempotency is the provider message id.
  */
 export async function POST(request: Request): Promise<Response> {
   const raw = await readBoundedBody(request);
@@ -50,14 +53,28 @@ export async function POST(request: Request): Promise<Response> {
     return new Response(`ignored ${event.type}`, { status: 202 });
   }
 
-  // Only handle mail from an authorized sender. Anyone can email the intake address, and without
-  // this gate every stranger's message becomes a report the triage agent runs on. The allowlist is
-  // the same one that authorizes the dashboard, checked here on the verified sender. A stranger is
-  // dropped, not errored: 202 so Resend stops retrying, no queue row, no triage.
-  if (!(await isReviewerEmail(email.fromEmail))) {
-    return new Response("ignored: sender not authorized", { status: 202 });
+  // An allowlisted sender, the same allowlist that authorizes the dashboard, goes straight to the
+  // queue and gets the automatic analysis-only run.
+  if (await isReviewerEmail(email.fromEmail)) {
+    await enqueue({ channel: "email", deliveryId: email.messageId, payload: email });
+    return new Response("accepted", { status: 202 });
   }
 
-  await enqueue({ channel: "email", deliveryId: email.messageId, payload: email });
+  // Anyone else has to pass SPF, DKIM, the daily limits and the size cap, and even then the
+  // report waits for a human before anything runs on it. A message that fails is dropped with a
+  // 202 so Resend stops retrying: no queue row, no report.
+  let admission;
+  try {
+    admission = await admitOutsideEmail(email);
+  } catch (error) {
+    // The sender could not be checked (Resend unreachable). A 5xx makes Resend redeliver, which
+    // is better than dropping a message nobody looked at or accepting one nobody verified.
+    console.error(`email intake: could not screen ${email.messageId}: ${safeErrorText(error)}`);
+    return new Response("could not verify sender", { status: 503 });
+  }
+  if (!admission.accepted) {
+    console.warn(`email intake: dropped ${email.messageId} from ${email.fromEmail}: ${admission.reason}`);
+    return new Response(`ignored: ${admission.reason}`, { status: 202 });
+  }
   return new Response("accepted", { status: 202 });
 }

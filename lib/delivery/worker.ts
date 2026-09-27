@@ -9,9 +9,11 @@ import {
   verdict,
   type Executor,
 } from "@/lib/db";
+import { GitHubApiError } from "@/lib/github/app-auth";
 import { activeRepository } from "@/lib/github/lifecycle";
 import { transition } from "@/lib/reports/lifecycle";
 
+import { advisoryArm } from "./advisory-arm";
 import { emailArm } from "./email";
 import {
   claim,
@@ -41,11 +43,12 @@ function errorMessage(err: unknown): string {
 }
 
 async function defaultDeps(): Promise<DeliveryDeps> {
-  const [hash, appAuth, comment, resend] = await Promise.all([
+  const [hash, appAuth, comment, resend, advisory] = await Promise.all([
     import("@/lib/verdicts/hash"),
     import("@/lib/github/app-auth"),
     import("@/lib/github/comment"),
     import("@/lib/email/resend"),
+    import("@/lib/github/advisory"),
   ]);
 
   return {
@@ -55,6 +58,10 @@ async function defaultDeps(): Promise<DeliveryDeps> {
     postComment: comment.postIssueComment,
     listComments: comment.listIssueComments,
     sendEmail: resend.sendVerdictEmail,
+    getAdvisory: advisory.getAdvisory,
+    updateAdvisoryDescription: advisory.updateAdvisoryDescription,
+    createDraftAdvisory: advisory.createDraftAdvisory,
+    findAdvisoryByMarker: advisory.findAdvisoryByMarker,
   };
 }
 
@@ -171,39 +178,59 @@ const githubArm: DeliveryArm = async (ctx, d) => {
     };
   }
 
-  const result = await runWithHeartbeat(
-    lease,
-    ctx.leaseSeconds,
-    async (signal) => {
-      const { token } = await d.mintToken(installationId, repoId, { signal });
-      const comments = await d.listComments({
-        token,
-        fullName: repository.fullName,
-        issueNumber,
-        signal,
-      });
+  let result: { kind: "replayed" } | { kind: "posted"; posted: { id: number } };
+  try {
+    result = await runWithHeartbeat(
+      lease,
+      ctx.leaseSeconds,
+      async (signal) => {
+        const { token } = await d.mintToken(installationId, repoId, { signal });
+        const comments = await d.listComments({
+          token,
+          fullName: repository.fullName,
+          issueNumber,
+          signal,
+        });
 
-      if (
-        comments.some(
-          (comment) =>
-            comment.body === ctx.payload &&
-            comment.authorType === "Bot" &&
-            comment.githubAppId === d.githubAppId,
+        if (
+          comments.some(
+            (comment) =>
+              comment.body === ctx.payload &&
+              comment.authorType === "Bot" &&
+              comment.githubAppId === d.githubAppId,
+          )
         )
-      )
-        return { kind: "replayed" } as const;
+          return { kind: "replayed" } as const;
 
-      const posted = await d.postComment({
-        token,
-        fullName: repository.fullName,
-        issueNumber,
-        body: ctx.payload,
-        signal,
-      });
-      return { kind: "posted", posted } as const;
-    },
-    ctx.signal,
-  );
+        const posted = await d.postComment({
+          token,
+          fullName: repository.fullName,
+          issueNumber,
+          body: ctx.payload,
+          signal,
+        });
+        return { kind: "posted", posted } as const;
+      },
+      ctx.signal,
+    );
+  } catch (err) {
+    // A 403 or 404 minting the installation token is authoritative, not transient: the App is no
+    // longer authorized for this repository, or the installation is gone. activeRepository passed
+    // just above, so the webhook that should have caught this was dropped or arrived out of order.
+    // Only mintToken throws GitHubApiError in this block (comment.ts throws plain Errors), so this
+    // catches exactly the token-mint case. Refuse it like the pre-mint activeRepository failure
+    // instead of retrying against an install that will keep refusing, and hold it: reconnecting is
+    // a human's action, and the reconcile backstop will withdraw the stale grant on its next tick.
+    // A rate-limited 403 is not a refusal and falls through to the retry path.
+    if (err instanceof GitHubApiError && !err.rateLimited && (err.status === 403 || err.status === 404)) {
+      return {
+        kind: "refused",
+        hold: true,
+        message: `repository ${repository.fullName} is no longer connected (minting an installation token returned ${err.status}); a human has to reconnect it`,
+      };
+    }
+    throw err;
+  }
 
   // Crash recovery: the comment already went out on a prior attempt that died before the
   // worker could commit SENT/DELIVERED. Posting again would duplicate it.
@@ -224,9 +251,14 @@ const githubArm: DeliveryArm = async (ctx, d) => {
   };
 };
 
-const ARMS: Partial<Record<"github" | "email" | "manual", DeliveryArm>> = {
+const ARMS: Partial<Record<"github" | "email" | "manual" | "upload" | "advisory", DeliveryArm>> = {
   github: githubArm,
   email: emailArm,
+  // An upload has an OTP-verified email contact and no thread to reply into, which is exactly what
+  // emailArm handles: threadingHeaders returns nothing for a non-email: source_ref, and the
+  // recipient re-check reads verified_sender the same way.
+  upload: emailArm,
+  advisory: advisoryArm,
 };
 
 /**
@@ -383,7 +415,11 @@ async function deliverClaimed(
       return lease.id;
     }
 
-    const arm = ARMS[reportRow.channel];
+    // The outbox row's own channel wins when set: an email report bound to an advisory-capable repo
+    // was routed to the advisory arm at approval, and its report.channel still says email. Null
+    // (every other delivery) falls back to the intake channel.
+    const deliveryChannel = lease.channel ?? reportRow.channel;
+    const arm = ARMS[deliveryChannel];
     const outcome: ArmOutcome = arm
       ? await arm(
           {
@@ -402,7 +438,7 @@ async function deliverClaimed(
           },
           d,
         )
-      : { kind: "refused", message: `unsupported delivery channel: ${reportRow.channel}` };
+      : { kind: "refused", message: `unsupported delivery channel: ${deliveryChannel}` };
 
     if (outcome.kind === "refused") {
       await refuseDelivery(lease, outcome.message, startedAt, outcome.hold ?? false);

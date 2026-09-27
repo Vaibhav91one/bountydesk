@@ -16,6 +16,7 @@ import {
 } from "@/lib/db";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
+import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
 import {
   cancelRecheck,
@@ -28,9 +29,20 @@ import {
 } from "@/lib/investigation-runs/recheck-guidance";
 import { ReportStateConflictError, transition } from "@/lib/reports/lifecycle";
 import { isReportId } from "@/lib/reports/case";
+import { resolveReportId } from "@/app/(app)/reports/[id]/resolve-id";
 import { bindTarget } from "@/lib/targets/bind";
+import type { Ecosystem } from "@/lib/build-onboarding/build-plan";
+import { approveUploadTarget } from "@/lib/upload/gate";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
+import { safeErrorText } from "@/lib/errors/safe-error";
+import {
+  denyAtGate,
+  markDuplicateAtGate,
+  rejectAtGate,
+  releaseForAnalysis,
+  type GateResult,
+} from "@/lib/triage/gate";
 
 export type ActionResult = { ok: boolean; error?: string };
 
@@ -41,6 +53,42 @@ export type ActionResult = { ok: boolean; error?: string };
  * the rollback.
  */
 class DecisionRefused extends Error {}
+
+/**
+ * A dropped-connection failure, the one class worth one retry.
+ *
+ * The Supabase transaction pooler hands back a socket it has already closed, and the first
+ * statement on it fails with a connection error rather than a query error. A fresh connection
+ * succeeds, so `decide` retries once. A constraint violation, a lock timeout or any other query
+ * error is not this, and is surfaced rather than retried.
+ */
+const TRANSIENT_CODES = new Set([
+  "ECONNRESET",
+  "EPIPE",
+  "ETIMEDOUT",
+  "CONNECTION_CLOSED",
+  "CONNECTION_ENDED",
+  "CONNECTION_DESTROYED",
+  "CONNECT_TIMEOUT",
+]);
+
+function isTransientConnectionError(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string" && TRANSIENT_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  return (
+    message.includes("connection terminated") ||
+    message.includes("connection closed") ||
+    message.includes("connection ended") ||
+    message.includes("econnreset") ||
+    message.includes("write after end") ||
+    message.includes("socket")
+  );
+}
+
+// The dialog appends its own "Nothing was recorded; reload..." line, so this stays short and does
+// not repeat it.
+const DECISION_FAILED = "Could not record that decision because the database call failed";
 
 function revalidateReportViews(reportId: string) {
   for (const path of ["/board", `/reports/${reportId}`, "/reports", "/home"]) {
@@ -75,8 +123,12 @@ async function decide(
   note: string | undefined,
 ): Promise<ActionResult> {
   let immediateDeliveryId: string | null = null;
-  try {
-    const result = await db.transaction(async (tx) => {
+
+  const runOnce = () =>
+    db.transaction(async (tx): Promise<ActionResult> => {
+      // Reset per attempt: a retried transaction re-enqueues its own delivery, and the id from a
+      // rolled-back attempt names a row that no longer exists.
+      immediateDeliveryId = null;
       const [reportRow] = await tx
         .select({ state: report.state })
         .from(report)
@@ -267,27 +319,51 @@ async function decide(
 
       return { ok: true };
     });
-    if (result.ok && immediateDeliveryId) {
-      try {
-        await deliverById(
-          immediateDeliveryId,
-          `review-action-delivery-${immediateDeliveryId}`,
-          { leaseSeconds: 20 },
-        );
-      } catch (error) {
-        console.error(
-          `delivery ${immediateDeliveryId}: immediate post after approval failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      }
-    }
-    revalidateReportViews(reportId);
-    return result;
+
+  // A transient connection error mid-transaction rolls the whole thing back, so a single retry is
+  // safe: it either records the decision cleanly or fails again and is surfaced. An unexpected
+  // error is turned into a friendly result rather than a raw 500, so the reviewer sees a message
+  // in the dialog and can reload, and the report is never left stuck with no explanation.
+  let result: ActionResult;
+  try {
+    result = await runOnce();
   } catch (error) {
     if (error instanceof DecisionRefused) return { ok: false, error: error.message };
-    throw error;
+    if (isTransientConnectionError(error)) {
+      try {
+        result = await runOnce();
+      } catch (retryError) {
+        if (retryError instanceof DecisionRefused) return { ok: false, error: retryError.message };
+        console.error(
+          `approval decision for report ${reportId} failed after retry: ${safeErrorText(retryError)}`,
+        );
+        return { ok: false, error: DECISION_FAILED };
+      }
+    } else {
+      console.error(
+        `approval decision for report ${reportId} failed: ${safeErrorText(error)}`,
+      );
+      return { ok: false, error: DECISION_FAILED };
+    }
   }
+
+  if (result.ok && immediateDeliveryId) {
+    try {
+      await deliverById(
+        immediateDeliveryId,
+        `review-action-delivery-${immediateDeliveryId}`,
+        { leaseSeconds: 20 },
+      );
+    } catch (error) {
+      console.error(
+        `delivery ${immediateDeliveryId}: immediate post after approval failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+  revalidateReportViews(reportId);
+  return result;
 }
 
 /**
@@ -389,6 +465,130 @@ export async function requestOwnerAdvisoryAction(reportId: string): Promise<Acti
   } catch (error) {
     return thrownActionError(error, "notify");
   }
+}
+
+/**
+ * Re-queue the report's held delivery once the cause is fixed (a permission accepted, a recipient
+ * re-authorised, a repository reconnected). The row keeps its approved hash, target and delivery
+ * marker, and the send runs every gate again, so this chooses when to try, never what is sent.
+ */
+export async function retryHeldDeliveryAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  let deliveryId: string;
+  try {
+    const result = await retryHeldDelivery(reportId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    deliveryId = result.deliveryId;
+  } catch (error) {
+    return thrownActionError(error, "redeliver");
+  }
+  // Best effort, like an approval's immediate post: the row is queued either way, and the worker's
+  // drain picks it up if this attempt does not finish it.
+  try {
+    await deliverById(deliveryId, `review-retry-delivery-${deliveryId}`, { leaseSeconds: 20 });
+  } catch (error) {
+    console.error(`delivery ${deliveryId}: immediate retry failed: ${safeErrorText(error)}`);
+  }
+  revalidateReportViews(reportId);
+  return { ok: true };
+}
+
+/**
+ * Close a report stuck in DELIVERING behind a delivery that is held and can never send. This moves
+ * the report to CANCELLED and nothing else: the held outbox row is already unreachable, so there is
+ * no send to cancel, and nothing goes to the reporter.
+ */
+export async function cancelReportAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  try {
+    const result = await cancelHeldReport(reportId, session.login);
+    if (!result.ok) return { ok: false, error: result.reason };
+    revalidateReportViews(reportId);
+    return { ok: true };
+  } catch (error) {
+    return thrownActionError(error, "cancel-report");
+  }
+}
+
+/** Run one gate decision, turning a thrown failure into a message that leaks nothing. */
+async function gateDecision(
+  reportId: string,
+  decide: () => Promise<GateResult>,
+): Promise<ActionResult> {
+  if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
+  try {
+    const result = await decide();
+    revalidateReportViews(reportId);
+    return result.ok ? { ok: true } : { ok: false, error: result.reason };
+  } catch (error) {
+    console.error(`gate decision on report ${reportId} failed: ${safeErrorText(error)}`);
+    return { ok: false, error: "Could not record that decision." };
+  }
+}
+
+/**
+ * Reject an outside report at the NEEDS_DECISION gate, or mark it as spam. Both close it as DENIED.
+ * A reject sends the reporter the fixed out-of-scope reply; spam stays silent. gateDecision surfaces
+ * the reason rejectAtGate returns, so a close that committed but whose reply failed reports that
+ * partial state rather than the generic failure message.
+ */
+export async function rejectAtGateAction(reportId: string, spam: boolean): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => rejectAtGate(reportId, session.login, spam === true));
+}
+
+/** Release an outside report from the gate into the normal analysis-only run. */
+export async function runAnalysisAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => releaseForAnalysis(reportId, session.login));
+}
+
+/**
+ * Dismiss a gated advisory or upload report: close it as denied and send nothing. An upload's
+ * contact may be unproven, so it gets no canned reply either.
+ */
+export async function dismissAdvisoryAction(reportId: string): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () => denyAtGate(reportId, session.login));
+}
+
+/**
+ * Release an upload report and queue its target material for a build, with the target settings the
+ * reviewer approved. The settings are validated server-side into a target definition; the build and
+ * the analysis run happen on the worker.
+ */
+export async function approveUploadTargetAction(
+  reportId: string,
+  input: { port: number; readinessPath: string; startCommand?: string; ecosystem?: string },
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  return gateDecision(reportId, () =>
+    approveUploadTarget(reportId, session.login, {
+      port: Number(input.port),
+      readinessPath: String(input.readinessPath ?? ""),
+      ...(input.startCommand ? { startCommand: String(input.startCommand) } : {}),
+      ...(input.ecosystem ? { ecosystem: input.ecosystem as Ecosystem } : {}),
+    }),
+  );
+}
+
+/**
+ * Close an outside report as a duplicate of an existing one and send the fixed duplicate reply.
+ * The reviewer's click is the approval of that fixed text. Calling it again on a report already
+ * closed as that duplicate re-sends a reply that failed, and closes nothing twice.
+ */
+export async function markDuplicateAction(
+  reportId: string,
+  duplicateOfId: string,
+): Promise<ActionResult> {
+  const session = await requireReviewer();
+  // Accept the short id printed on a case file (`#725dcfed`), not just the full uuid: a reviewer
+  // pastes what they can see. A prefix that names no report, or more than one, is refused here.
+  const resolved = await resolveReportId(duplicateOfId);
+  if (!resolved) return { ok: false, error: "That is not a report id." };
+  return gateDecision(reportId, () => markDuplicateAtGate(reportId, resolved, session.login));
 }
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {

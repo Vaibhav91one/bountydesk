@@ -1,4 +1,4 @@
-import { db, eq, report } from "@/lib/db";
+import { db, eq, report, type Executor } from "@/lib/db";
 
 import { recordEvent, transition } from "./lifecycle";
 import { isTerminal, type ReportState } from "./states";
@@ -20,12 +20,21 @@ export type RetirementState = Extract<ReportState, "CANCELLED" | "EXPIRED">;
 
 export type RetireOutcome =
   | { reportId: string; status: "retired" | "would-retire"; from: ReportState }
-  | { reportId: string; status: "already-terminal"; from: ReportState }
+  | { reportId: string; status: "already-terminal" | "no-longer-eligible"; from: ReportState }
   | { reportId: string; status: "missing" };
 
 export async function retireReports(
   reportIds: readonly string[],
-  opts: { reason: string; to?: RetirementState; commit?: boolean },
+  opts: {
+    reason: string;
+    to?: RetirementState;
+    commit?: boolean;
+    /**
+     * Re-checked under the report's row lock, for a caller that picked the ids by a condition that
+     * can go stale between its select and this write (the expiry sweep's age and live-session test).
+     */
+    stillEligible?: (tx: Executor, reportId: string) => Promise<boolean>;
+  },
 ): Promise<RetireOutcome[]> {
   const to = opts.to ?? "CANCELLED";
   const outcomes: RetireOutcome[] = [];
@@ -43,6 +52,9 @@ export async function retireReports(
       if (!row) return { reportId, status: "missing" };
       if (isTerminal(row.state)) {
         return { reportId, status: "already-terminal", from: row.state };
+      }
+      if (opts.stillEligible && !(await opts.stillEligible(tx, reportId))) {
+        return { reportId, status: "no-longer-eligible", from: row.state };
       }
       if (!opts.commit) return { reportId, status: "would-retire", from: row.state };
 

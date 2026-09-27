@@ -113,7 +113,8 @@ export function caseRefetchInterval(status: CaseLiveView): number | false {
   }
 
   if (TERMINAL_STATES.includes(status.state)) return false;
-  if (status.state === "AWAITING_APPROVAL") return 5000;
+  // Both wait on a person, so there is little to watch for.
+  if (status.state === "AWAITING_APPROVAL" || status.state === "NEEDS_DECISION") return 5000;
 
   // A failed re-check does not move until a reviewer retries or cancels it. It keeps a slow
   // watch, not none, because either action changes the report and the page should follow.

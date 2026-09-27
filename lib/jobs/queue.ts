@@ -24,7 +24,9 @@ export function isTerminal(state: JobExecutionState): boolean {
  */
 const ALLOWED_TRANSITIONS: Record<JobExecutionState, readonly JobExecutionState[]> = {
   RECEIVED: ["PARSED"],
-  PARSED: ["SESSION_CREATED"],
+  // PARSED -> DONE is an outside email report held at the NEEDS_DECISION gate: the report exists,
+  // and there is deliberately no session to create until a reviewer releases it.
+  PARSED: ["SESSION_CREATED", "DONE"],
   SESSION_CREATED: ["RUNNING"],
   RUNNING: ["DONE"],
   DONE: [],

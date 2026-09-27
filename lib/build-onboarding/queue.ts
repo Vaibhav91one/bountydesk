@@ -77,6 +77,7 @@ export type OnboardingAdvanceFields = Partial<{
   buildLog: string;
   builtServices: unknown;
   proposedManifest: unknown;
+  analysisOnlyReason: "COULD_NOT_BUILD";
 }>;
 
 export class LeaseLostError extends Error {
@@ -132,7 +133,11 @@ export async function setResolvedSourceIdentity(
   if (updated.length === 0) throw new LeaseLostError(lease.id);
 }
 
-export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<void> {
+export async function enqueue(
+  input: EnqueueInput,
+  tx: Executor = db,
+  opts: { requeueUnsupported?: boolean } = {},
+): Promise<void> {
   await tx
     .insert(targetOnboarding)
     .values({
@@ -145,8 +150,8 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
     })
     .onConflictDoUpdate({
       target: targetOnboarding.repoId,
-      // A FAILED onboarding is requeued from the start with the corrected source, its build
-      // outputs and attempt budget cleared. Any other existing state (a build in flight, a
+      // A FAILED onboarding (or, on a reviewer's request, an UNSUPPORTED one) is requeued from the
+      // start with the corrected source, its build outputs and attempt budget cleared. Any other existing state (a build in flight, a
       // proposal awaiting a human, a configured target) is left exactly as it is: the setWhere
       // below makes the update a no-op for those, so this stays idempotent for work in progress.
       set: {
@@ -170,11 +175,17 @@ export async function enqueue(input: EnqueueInput, tx: Executor = db): Promise<v
         approvedBy: null,
         approvedAt: null,
         attempts: 0,
-        nextAttemptAt: new Date(),
+        nextAttemptAt: sql`now()`,
         lastError: null,
+        analysisOnlyReason: null,
         updatedAt: new Date(),
       },
-      setWhere: eq(targetOnboarding.state, "FAILED"),
+      // An UNSUPPORTED row is requeued only when a reviewer asks for it (the source may have been
+      // fixed since the classifier refused it). An automatic enqueue, such as a reconnect webhook,
+      // leaves it alone so an honestly unsupported repository is not rebuilt in a loop.
+      setWhere: opts.requeueUnsupported
+        ? inArray(targetOnboarding.state, ["FAILED", "UNSUPPORTED"])
+        : eq(targetOnboarding.state, "FAILED"),
     });
 }
 
@@ -328,9 +339,11 @@ export async function advance(
       state: toState,
       ...fields,
       // Each step gets its own attempt budget: a step that succeeded should not carry its claim
-      // count into the next, and the next step is claimable immediately.
+      // count into the next, and the next step is claimable immediately. Database time, not
+      // new Date(): claim() compares against now(), and a worker whose clock runs ahead of the
+      // database would otherwise park the row in the future until the clocks agree.
       attempts: 0,
-      nextAttemptAt: new Date(),
+      nextAttemptAt: sql`now()`,
       leaseOwner: null,
       leaseExpiresAt: null,
       lastError: null,
@@ -343,15 +356,25 @@ export async function advance(
 
 /**
  * Release a failed step for retry, or move it to FAILED once MAX_ATTEMPTS is exhausted. Same
- * exponential backoff as the other queues' fail().
+ * exponential backoff as the other queues' fail(). `analysisOnlyReason` is written only on the move
+ * to FAILED: a step that is still retrying has not given up on the target.
  */
-export async function fail(lease: OnboardingLease, error: string): Promise<void> {
+export async function fail(
+  lease: OnboardingLease,
+  error: string,
+  analysisOnlyReason: "COULD_NOT_BUILD" | null = null,
+): Promise<void> {
   const updated = await db.execute<{ id: string }>(sql`
     update ${targetOnboarding}
        set state = case
                      when ${targetOnboarding.attempts} >= ${MAX_ATTEMPTS}
                      then 'FAILED'
                      else ${lease.state}
+                   end,
+           analysis_only_reason = case
+                     when ${targetOnboarding.attempts} >= ${MAX_ATTEMPTS}
+                     then ${analysisOnlyReason}
+                     else ${targetOnboarding.analysisOnlyReason}
                    end,
            lease_owner      = null,
            lease_expires_at = null,
@@ -384,6 +407,11 @@ export async function sweepExpiredLeases(): Promise<{ released: number; failed: 
              ${targetOnboarding.lastError},
              'build-onboarding worker died on the final attempt'
            ),
+           -- A worker that died on its final build attempt left a build that never finished.
+           analysis_only_reason = case
+             when ${targetOnboarding.state} = 'PENDING_BUILD' then 'COULD_NOT_BUILD'
+             else ${targetOnboarding.analysisOnlyReason}
+           end,
            updated_at       = now()
      where ${targetOnboarding.state} in ('PENDING_PLAN', 'PENDING_BUILD', 'PENDING_MANIFEST', 'APPROVED')
        and ${targetOnboarding.leaseExpiresAt} < now()
@@ -397,7 +425,7 @@ export async function sweepExpiredLeases(): Promise<{ released: number; failed: 
     .where(
       and(
         inArray(targetOnboarding.state, CLAIMABLE),
-        lte(targetOnboarding.leaseExpiresAt, new Date()),
+        lte(targetOnboarding.leaseExpiresAt, sql`now()`),
         sql`${targetOnboarding.attempts} < ${MAX_ATTEMPTS}`,
       ),
     )

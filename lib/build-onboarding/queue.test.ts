@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { after, before } from "node:test";
+import test, { after, before, mock } from "node:test";
 
 /**
  * Real Postgres, same reasoning as lib/approval-submission/queue.test.ts: SKIP LOCKED, the
@@ -231,4 +231,41 @@ test("enqueue requeues a FAILED row but leaves an in-progress one alone", async 
     .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
   assert.equal(inFlight.state, "AWAITING_APPROVAL");
   assert.equal(inFlight.sourceRef, "https://x/r-fixed.git");
+});
+
+/** Run fn with this process's Date an hour ahead of the database, the skew a developer laptop can
+ *  have against a remote Postgres. */
+async function withClockAhead(fn: () => Promise<void>): Promise<void> {
+  mock.timers.enable({ apis: ["Date"], now: Date.now() + 60 * 60 * 1000 });
+  try {
+    await fn();
+  } finally {
+    mock.timers.reset();
+  }
+}
+
+test("a worker clock ahead of the database does not park the next step in the future", async () => {
+  await drainAll();
+  const row = await seed("PENDING_PLAN");
+  const first = await queue.claim("w-skew", 60);
+  assert.equal(first?.repoId, row.repoId);
+
+  // claim() compares next_attempt_at with the database's now(), so a step that stamped it from a
+  // fast local clock would leave the row unclaimable until the clocks agreed.
+  await withClockAhead(() => queue.advance(first!, "PENDING_BUILD"));
+  const next = await queue.claim("w-skew", 60);
+  assert.equal(next?.repoId, row.repoId);
+  assert.equal(next?.state, "PENDING_BUILD");
+
+  // The same holds for a FAILED row requeued by enqueue().
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED", leaseOwner: null, leaseExpiresAt: null })
+    .where(dbm.eq(dbm.targetOnboarding.id, row.id));
+  await withClockAhead(() =>
+    queue.enqueue({ repoId: row.repoId, repoFullName: "acme/skew", sourceRef: "https://x/skew.git" }),
+  );
+  const requeued = await queue.claim("w-skew", 60);
+  assert.equal(requeued?.repoId, row.repoId);
+  assert.equal(requeued?.state, "PENDING_PLAN");
 });

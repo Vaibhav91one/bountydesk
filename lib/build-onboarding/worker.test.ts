@@ -156,6 +156,76 @@ async function stateOf(repoId: number): Promise<string> {
   return row.state;
 }
 
+async function reasonOf(repoId: number): Promise<string | null> {
+  const [row] = await dbm.db
+    .select({ reason: dbm.targetOnboarding.analysisOnlyReason })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  return row.reason;
+}
+
+/** Put a claimable row on its last attempt, so the next failure is the one that moves it to FAILED. */
+async function lastAttempt(repoId: number) {
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ attempts: queue.MAX_ATTEMPTS - 1, nextAttemptAt: new Date(0) })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+}
+
+test("a build that keeps failing ends FAILED with COULD_NOT_BUILD, and only on the final attempt", async () => {
+  const repoId = await connectedRepo("acme/broken-build");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/broken-build", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  const broken = deps({ buildDriver: fakeBuildDriver(new Error("npm ci exited 1")) });
+
+  await worker.onboardOnce("w1", broken); // PENDING_PLAN -> PENDING_BUILD
+  await worker.onboardOnce("w1", broken); // first build failure: retried, not given up
+  assert.equal(await stateOf(repoId), "PENDING_BUILD");
+  assert.equal(await reasonOf(repoId), null, "a build still being retried has not failed yet");
+
+  await lastAttempt(repoId);
+  await worker.onboardOnce("w1", broken);
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD");
+
+  // A requeue starts the repo over, so the old reason must not outlive it.
+  await queue.enqueue({ repoId, repoFullName: "acme/broken-build", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  assert.equal(await stateOf(repoId), "PENDING_PLAN");
+  assert.equal(await reasonOf(repoId), null);
+});
+
+test("a FAILED row that never reached the build records no build reason", async () => {
+  const repoId = await connectedRepo("acme/unreadable");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/unreadable", sourceRef: "https://x/u.git", resolvedCommitSha: "a".repeat(40) });
+  await lastAttempt(repoId);
+
+  await worker.onboardOnce("w1", deps({ classify: async () => { throw new Error("GitHub answered 502"); } }));
+
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), null, "a classify failure is not a build failure");
+});
+
+test("a worker that died on its final build attempt is swept to FAILED with COULD_NOT_BUILD", async () => {
+  const repoId = await connectedRepo("acme/died-building");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/died-building", sourceRef: "https://x/d.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({
+      state: "PENDING_BUILD",
+      attempts: queue.MAX_ATTEMPTS,
+      leaseOwner: "dead-worker",
+      leaseExpiresAt: new Date(Date.now() - 60_000),
+    })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  await queue.sweepExpiredLeases();
+
+  assert.equal(await stateOf(repoId), "FAILED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD");
+});
+
 test("classify then build stores the outputs and advances to the manifest step", async () => {
   const repoId = await connectedRepo("acme/widget");
   await drain();
@@ -200,6 +270,7 @@ test("a repo the classifier cannot flatten lands in UNSUPPORTED, no build", asyn
   );
 
   assert.equal(await stateOf(repoId), "UNSUPPORTED");
+  assert.equal(await reasonOf(repoId), "COULD_NOT_BUILD", "a report on this repo takes the static review");
   assert.equal(built, false, "an unsupported repo is never built");
   // UNSUPPORTED is terminal: a further claim does not pick it up.
   await worker.onboardOnce("w1", deps({}));
@@ -601,4 +672,190 @@ test("a mesh verify tears down every sandbox even when one delete fails", async 
 
   assert.deepEqual([...attempted].sort(), ["sb-db", "sb-web"], "every sandbox is attempted");
   assert.equal(await stateOf(repoId), "APPROVED", "an orphaned sandbox must not be recorded as configured");
+});
+
+const startCmdPlan: BuildPlan = {
+  strategy: "dockerfile",
+  ecosystem: "node",
+  dockerfilePath: "Dockerfile",
+  buildContext: ".",
+  seed: { kind: "none" },
+  runtime: { name: "startcmd", baseUrl: "http://localhost:3000", readinessPath: "/", startCommand: "node server.js" },
+};
+
+async function toApproved(repoName: string, over: Partial<OnboardDeps>): Promise<number> {
+  const repoId = await connectedRepo(repoName);
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: repoName, sourceRef: `https://x/${repoName}.git`, resolvedCommitSha: "a".repeat(40) });
+  await worker.onboardOnce("w1", deps(over)); // PENDING_PLAN -> PENDING_BUILD
+  await worker.onboardOnce("w1", deps(over)); // PENDING_BUILD -> PENDING_MANIFEST
+  await worker.onboardOnce("w1", deps(over)); // PENDING_MANIFEST -> AWAITING_APPROVAL
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "APPROVED", approvedBy: "octocat", approvedAt: new Date() })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  return repoId;
+}
+
+test("the approved row boots the proposed start command before writing the profile", async () => {
+  const over = { classify: async () => startCmdPlan };
+  const repoId = await toApproved("acme/startcmd", over);
+
+  let seen: string | undefined;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      ...over,
+      provision: async (auth) => {
+        seen = auth.startCommand;
+        return { sandboxId: "sbx", appPort: 3000 };
+      },
+    }),
+  );
+
+  assert.equal(seen, "node server.js", "the proposed start command reaches the offline boot");
+  assert.equal(await stateOf(repoId), "CONFIGURED");
+});
+
+test("a start command that does not boot leaves the approved row unwritten", async () => {
+  const over = { classify: async () => startCmdPlan };
+  const repoId = await toApproved("acme/nostart", over);
+
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      ...over,
+      provision: async () => {
+        throw new Error("did not answer on port 3000 within 90000ms");
+      },
+    }),
+  );
+
+  assert.equal(await stateOf(repoId), "APPROVED", "a start command that never readies is not stored");
+  const [repo] = await dbm.db
+    .select({ targetProfileId: dbm.connectedRepository.targetProfileId })
+    .from(dbm.connectedRepository)
+    .where(dbm.eq(dbm.connectedRepository.repoId, repoId));
+  assert.equal(repo.targetProfileId, null);
+});
+
+test("a start command tampered to a host command after approval is refused before boot", async () => {
+  const over = { classify: async () => startCmdPlan };
+  const repoId = await connectedRepo("acme/tamper");
+  await drain();
+  await queue.enqueue({ repoId, repoFullName: "acme/tamper", sourceRef: "https://x/tamper.git", resolvedCommitSha: "a".repeat(40) });
+  await worker.onboardOnce("w1", deps(over));
+  await worker.onboardOnce("w1", deps(over));
+  await worker.onboardOnce("w1", deps(over)); // -> AWAITING_APPROVAL
+
+  const [row] = await dbm.db
+    .select({ manifest: dbm.targetOnboarding.proposedManifest })
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+  const manifest = row.manifest as { provisioning?: Record<string, unknown> };
+  const tampered = { ...manifest, provisioning: { ...(manifest.provisioning ?? {}), startCommand: "docker run --rm target" } };
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "APPROVED", approvedBy: "octocat", approvedAt: new Date(), proposedManifest: tampered })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
+
+  let provisioned = false;
+  await worker.onboardOnce(
+    "w1",
+    deps({
+      ...over,
+      provision: async () => {
+        provisioned = true;
+        return { sandboxId: "sbx", appPort: 3000 };
+      },
+    }),
+  );
+
+  assert.equal(provisioned, false, "a host-level start command never reaches the boot");
+  assert.equal(await stateOf(repoId), "APPROVED", "the tampered row is not written as a target");
+});
+
+test("collectProtectedSnapshotIds protects live profiles, mesh services, and in-flight onboarding", async () => {
+  await dbm.db.insert(dbm.targetProfile).values({
+    name: "prot-single",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    snapshotId: "prof-single",
+    config: {},
+  });
+  await dbm.db.insert(dbm.targetProfile).values({
+    name: "prot-mesh",
+    imageDigest: `sha256:${"b".repeat(64)}`,
+    snapshotId: "prof-mesh-app",
+    config: { services: [{ snapshotId: "prof-mesh-app" }, { snapshotId: "prof-mesh-db" }] },
+  });
+
+  const inflight = await connectedRepo("acme/inflight");
+  await queue.enqueue({ repoId: inflight, repoFullName: "acme/inflight", sourceRef: "https://x/inflight.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "AWAITING_APPROVAL", snapshotId: "inflight-snap" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, inflight));
+
+  const failed = await connectedRepo("acme/failed");
+  await queue.enqueue({ repoId: failed, repoFullName: "acme/failed", sourceRef: "https://x/failed.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED", snapshotId: "failed-snap" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, failed));
+
+  const ids = await worker.collectProtectedSnapshotIds();
+  assert.ok(ids.has("prof-single"), "a single-image profile snapshot is protected");
+  assert.ok(ids.has("prof-mesh-app") && ids.has("prof-mesh-db"), "every mesh service snapshot is protected");
+  assert.ok(ids.has("inflight-snap"), "an in-flight onboarding snapshot is protected");
+  assert.equal(ids.has("failed-snap"), false, "a terminal onboarding row's snapshot is not protected");
+});
+
+test("the snapshot sweep deletes an unprotected trial snapshot and never a protected one", async () => {
+  // An earlier test can leave a row mid-build, which would (correctly) make this pass skip.
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED" })
+    .where(dbm.eq(dbm.targetOnboarding.state, "PENDING_BUILD"));
+  await dbm.db.insert(dbm.targetProfile).values({
+    name: "sweep-live",
+    imageDigest: `sha256:${"c".repeat(64)}`,
+    snapshotId: "sweep-live-app",
+    config: { services: [{ snapshotId: "sweep-live-app" }, { snapshotId: "sweep-live-db" }] },
+  });
+  const held = await connectedRepo("acme/sweep-held");
+  await queue.enqueue({ repoId: held, repoFullName: "acme/sweep-held", sourceRef: "https://x/held.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "AWAITING_APPROVAL", snapshotId: "sweep-held" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, held));
+
+  const snapshot = (id: string, name: string) => ({ id, name, imageName: null, state: "active", cpu: null, mem: null, disk: null });
+  const deleted: string[] = [];
+  const ops = {
+    list: async () => [
+      snapshot("sweep-live-app", "onboarding-live"),
+      snapshot("sweep-live-db", "onboarding-live-db"),
+      snapshot("sweep-held", "onboarding-held"),
+      snapshot("sweep-orphan", "onboarding-abandoned"),
+      snapshot("sweep-manual", "juice-shop-v17"),
+    ],
+    deleteById: async (id: string) => void deleted.push(id),
+  };
+
+  const result = await worker.sweepOrphanSnapshots(ops);
+  assert.equal(result.skipped, false);
+  assert.deepEqual(deleted, ["sweep-orphan"], "only the unprotected onboarding snapshot is deleted");
+  assert.deepEqual(result.kept.sort(), ["sweep-held", "sweep-live-app", "sweep-live-db"]);
+
+  // A build in flight has registered a snapshot the database does not know yet, so the pass waits.
+  const building = await connectedRepo("acme/sweep-building");
+  await queue.enqueue({ repoId: building, repoFullName: "acme/sweep-building", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "PENDING_BUILD" })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, building));
+  deleted.length = 0;
+  const skipped = await worker.sweepOrphanSnapshots(ops);
+  assert.equal(skipped.skipped, true);
+  assert.deepEqual(deleted, [], "nothing is deleted while a build is in flight");
 });

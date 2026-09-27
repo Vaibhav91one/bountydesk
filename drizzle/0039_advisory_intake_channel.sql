@@ -1,0 +1,1 @@
+ALTER TYPE "public"."intake_channel" ADD VALUE 'advisory';

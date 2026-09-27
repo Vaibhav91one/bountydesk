@@ -153,7 +153,12 @@ export function ApprovalDialog({
           : await denyVerdict(reportId, verdictId, reason ?? undefined);
       setActing(null);
       setResult(answer);
-      if (!answer.ok) return;
+      if (!answer.ok) {
+        // The action refused or the database call failed. Re-read so the card can never keep showing
+        // a stale "Approval needed" over a report that actually moved, or the reverse.
+        await refreshReportViews(queryClient, reportId);
+        return;
+      }
 
       setDecision(kind === "allow" ? "ALLOWED" : "DENIED");
       setOpen(false);
@@ -170,6 +175,8 @@ export function ApprovalDialog({
         ok: false,
         error: error instanceof Error ? error.message : "The decision could not be completed.",
       });
+      // Same reason as the refused branch: a thrown call leaves the card's state in doubt, so re-read.
+      await refreshReportViews(queryClient, reportId);
     }
   }
 

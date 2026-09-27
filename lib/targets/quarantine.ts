@@ -1,6 +1,21 @@
 import { connectedRepository, db, eq, report, targetProfile, verdict } from "@/lib/db";
 import { recordEvent, transition } from "@/lib/reports/lifecycle";
 
+/**
+ * Why the profile is being removed, which decides where its bound reports land.
+ *
+ * "invalid-target" (the default) is a target that could not be trusted or provisioned: a stale
+ * row written before fail-closed validation existed. Nothing is wrong with the report, only with
+ * its target, so it drops to ANALYSIS_ONLY and a human decides.
+ *
+ * "out-of-scope" is a scope determination: the bound repository or target is outside the
+ * bounty's authorised scope. That is a deterministic rejection made before any verdict exists, so
+ * the report moves to the terminal OUT_OF_SCOPE. This branch only ever runs for a report that has
+ * a bound target (quarantine selects reports by target profile id), so it never produces
+ * OUT_OF_SCOPE from the mere absence of a target, and never weakens no-target -> ANALYSIS_ONLY.
+ */
+export type QuarantineDisposition = "invalid-target" | "out-of-scope";
+
 export type QuarantineStaleTargetProfileInput = {
   /** The logical profile name, e.g. "juice-shop-v17.3.0". Looked up, not taken by row id. */
   profileName: string;
@@ -8,6 +23,8 @@ export type QuarantineStaleTargetProfileInput = {
   expectedImageDigest: string;
   expectedSnapshotId: string;
   reason: string;
+  /** Defaults to "invalid-target". See QuarantineDisposition. */
+  disposition?: QuarantineDisposition;
 };
 
 export type QuarantineStaleTargetProfileResult = {
@@ -34,9 +51,10 @@ export type QuarantineStaleTargetProfileResult = {
  * it would look cleaned up while still being reachable through a report that was skipped.
  *
  * The report itself is kept. Deleting an authenticated intake record would erase the evidence
- * that it was ever received; ANALYSIS_ONLY plus the target.invalidated audit event says what
- * happened without pretending the report never existed. It is not expected to be reused for
- * reproduction afterwards — a verified target gets a fresh report once one exists.
+ * that it was ever received; the new state plus an audit event says what happened without
+ * pretending the report never existed. Where it lands depends on `disposition`: ANALYSIS_ONLY
+ * for an invalid target, terminal OUT_OF_SCOPE for a scope rejection. It is not expected to be
+ * reused for reproduction afterwards — a verified target gets a fresh report once one exists.
  */
 export async function quarantineStaleTargetProfile(
   input: QuarantineStaleTargetProfileInput,
@@ -93,11 +111,18 @@ export async function quarantineStaleTargetProfile(
       }
     }
 
+    // A scope determination is terminal (OUT_OF_SCOPE); a bad or unprovisionable target is not
+    // the report's fault, so it drops to ANALYSIS_ONLY for a human. Both cases have a bound
+    // target here, so OUT_OF_SCOPE is never produced from the absence of one.
+    const outOfScope = input.disposition === "out-of-scope";
+    const to = outOfScope ? "OUT_OF_SCOPE" : "ANALYSIS_ONLY";
+    const eventType = outOfScope ? "target.out_of_scope" : "target.invalidated";
+
     for (const r of reports) {
-      await transition(r.id, "TRIAGING", "ANALYSIS_ONLY", tx);
+      await transition(r.id, "TRIAGING", to, tx);
       await recordEvent(
         r.id,
-        "target.invalidated",
+        eventType,
         { targetProfileId: profile.id, targetProfileName: profile.name, reason: input.reason },
         { tx },
       );

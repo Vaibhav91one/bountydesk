@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Info } from "@phosphor-icons/react/ssr";
 
 import { bindTargetAction, requestRecheckAction } from "@/app/review/actions";
@@ -56,21 +56,28 @@ export function TargetControl({
 }) {
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
-  // Re-read while the report names a repository that is not ready yet, so a fork that finishes
-  // onboarding appears in the picker, already selected, without a reload.
-  const waiting = !status.target && (initialSuggestion?.unconnected.length ?? 0) > 0;
-  const { data } = useQuery({
-    queryKey: ["report-targets", reportId],
+  const [guideFor, setGuideFor] = useState<string | null>(null);
+  // The open guide's link is part of the request because only that link is checked on GitHub for
+  // a fork not connected yet. Switching links keeps showing the last answer until the new one lands.
+  const initial = { profiles: initialProfiles, suggestion: initialSuggestion };
+  const { data = initial } = useQuery({
+    queryKey: ["report-targets", reportId, guideFor],
     queryFn: () =>
       fetchLive<{ profiles: TargetProfileOption[]; suggestion: TargetSuggestion | null }>(
-        `/api/reports/${reportId}/targets`,
+        `/api/reports/${reportId}/targets${guideFor ? `?guide=${encodeURIComponent(guideFor)}` : ""}`,
       ),
-    initialData: { profiles: initialProfiles, suggestion: initialSuggestion },
-    refetchInterval: (query) =>
-      waiting && (query.state.data?.suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false,
+    initialData: guideFor ? undefined : initial,
+    placeholderData: keepPreviousData,
+    // The suggestion is loaded here rather than at server render, so it starts null and the fetch
+    // on mount fills it. Poll only while the report names a repository not ready yet, read off the
+    // fetched data so a fork that finishes onboarding appears in the picker without a reload.
+    refetchInterval: (query) => {
+      if (status.target) return false;
+      const suggestion = (query.state.data ?? initial).suggestion;
+      return (suggestion?.unconnected.length ?? 0) > 0 ? 5000 : false;
+    },
   });
   const { profiles, suggestion } = data;
-  const [guideFor, setGuideFor] = useState<string | null>(null);
   // Binding authorises execution against a target, so it never happens without a click on Bind,
   // and the picker is never pre-filled with an arbitrary first profile. The one exception is a
   // target matched from a link in the report, and that choice is labelled with the link it came
@@ -83,12 +90,21 @@ export function TargetControl({
   // that becomes ready while the page is open is selected too.
   const [picked, setChoice] = useState<string | null>(null);
   const choice = picked ?? suggested?.profileId ?? null;
+  // A target that only shares a repository name with a link GitHub has nothing at. That is as
+  // likely a private or unrelated repository as a renamed one, so it is named here and the picker
+  // stays empty: the reviewer has to choose it.
+  const possible = suggested
+    ? null
+    : (suggestion?.possibleMatches ?? []).find((match) => profiles.some((profile) => profile.id === match.profileId)) ??
+      null;
   const [error, setError] = useState<string | null>(null);
 
   const guide =
     guideFor && suggestion ? (
       <ConnectGuide
         upstream={guideFor}
+        choices={suggestion.unconnected}
+        onChoose={setGuideFor}
         progress={suggestion.progress.find((p) => p.name === guideFor) ?? null}
         connectLinks={suggestion.connectLinks}
         open
@@ -121,6 +137,7 @@ export function TargetControl({
           <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
         ) : null}
         {guide}
+        <ReferencedElsewhere links={suggestion?.referencedElsewhere ?? []} />
       </div>
     );
   }
@@ -164,19 +181,12 @@ export function TargetControl({
           <Tooltip>
             <TooltipTrigger
               render={
-                <span
-                  className="inline-flex text-muted-foreground"
-                  aria-label={`Suggested because the report links ${suggested.fullName}`}
-                />
+                <span className="inline-flex text-muted-foreground" aria-label={suggestionNote(suggested)} />
               }
             >
               <Info className="size-4" />
             </TooltipTrigger>
-            <TooltipContent>
-              {suggested.fullName.toLowerCase() === suggested.mention.toLowerCase()
-                ? `Suggested because the report links ${suggested.fullName}`
-                : `Suggested because the report links ${suggested.mention}, and its fork ${suggested.fullName} is connected`}
-            </TooltipContent>
+            <TooltipContent>{suggestionNote(suggested)}</TooltipContent>
           </Tooltip>
         ) : null}
         <Button size="sm" onClick={bind} disabled={!choice || pending}>
@@ -187,10 +197,52 @@ export function TargetControl({
           <ConnectButton onClick={() => setGuideFor(suggestion.unconnected[0])} />
         ) : null}
       </div>
+      {possible ? (
+        <span className="whitespace-normal break-words text-meta text-muted-foreground">
+          Possible match by name: {possible.profileName} ({possible.fullName}). {possible.mention} was not
+          found on GitHub, so it may be renamed, private or a different project.
+        </span>
+      ) : null}
       {guide}
+      <ReferencedElsewhere links={suggestion?.referencedElsewhere ?? []} />
       {error ? <span className="whitespace-normal break-words text-meta text-destructive">{error}</span> : null}
     </div>
   );
+}
+
+/**
+ * Repositories the report links on a host other than GitHub. Shown so the reference is not lost,
+ * with no Connect or Bind action beside it: targets come from GitHub App installs, so BountyDesk
+ * cannot reproduce against a GitLab or Bitbucket link. Plain external links, opened in a new tab.
+ */
+function ReferencedElsewhere({ links }: { links: TargetSuggestion["referencedElsewhere"] }) {
+  if (links.length === 0) return null;
+  return (
+    <p className="w-full basis-full whitespace-normal break-words text-meta text-muted-foreground">
+      Also referenced (not reproducible here):{" "}
+      {links.map((link, i) => (
+        <span key={link.url}>
+          {i > 0 ? ", " : null}
+          <a
+            href={link.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-foreground"
+          >
+            {link.label} {link.name}
+          </a>
+        </span>
+      ))}
+    </p>
+  );
+}
+
+/** Why the picker opened on this target, so a suggestion is never a default nobody can explain. */
+function suggestionNote(match: TargetSuggestion["matched"][number]): string {
+  const link = match.canonical ? `${match.mention} (now ${match.canonical})` : match.mention;
+  return match.via === "fork"
+    ? `Suggested because the report links ${link}, and its fork ${match.fullName} is connected`
+    : `Suggested because the report links ${link}`;
 }
 
 function ConnectButton({ onClick }: { onClick: () => void }) {

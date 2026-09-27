@@ -43,6 +43,21 @@ test("an email verdict is described as a reply to the reporter", () => {
   assert.equal(deliveredLabel("email"), "Reply delivered");
 });
 
+test("an upload verdict reads as an email reply, never an issue comment", () => {
+  // Upload rides the email transport, so its approval copy must match email, not fall back to the
+  // GitHub default.
+  for (const copy of EMAIL_FACING) {
+    const text = copy("upload");
+    assert.doesNotMatch(text, /issue/i, `"${text}" mentions an issue on the upload channel`);
+    assert.doesNotMatch(text, /comment/i, `"${text}" calls an upload reply a comment`);
+  }
+  assert.equal(deliverableNoun("upload"), "reply");
+  assert.equal(destinationPhrase("upload"), "to the reporter");
+  assert.match(approveConsequence("upload"), /emails the drafted reply to the reporter/);
+  assert.equal(deliveredLabel("upload"), "Reply delivered");
+  assert.equal(channelLabel("upload"), "Upload");
+});
+
 test("every approve consequence still says the action cannot be undone", () => {
   // The warning is the reason the sentence exists; a channel variant must not drop it.
   for (const channel of ["github", "email", "manual", "something-new"]) {

@@ -27,15 +27,18 @@ import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
 import { adviseOnce } from "@/lib/delivery/advisory";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
-import { onboardOnce } from "@/lib/build-onboarding/worker";
+import { onboardOnce, sweepOrphanSnapshots } from "@/lib/build-onboarding/worker";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
+import { buildUploadOnce } from "@/lib/upload/build";
 import {
   reviewerChatEnabled,
   sweepExpiredLeases as sweepReviewerChat,
 } from "@/lib/reviewer-chat/queue";
 import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
 import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue";
+import { reconcileGitHubAccess } from "@/lib/github/reconcile";
+import { sweepExpiredReports } from "@/lib/reports/expiry";
 
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
@@ -84,6 +87,34 @@ const FAILING_BUDGET_MS = 180_000;
  * minutes-long runs are legitimate and are covered by their own wide stall budgets.
  */
 const FAST_LOOP_TIMEOUT_MS = 60_000;
+
+/**
+ * The GitHub reconcile costs one API call per live installation, and the lifecycle webhooks
+ * already revoke access within seconds, so this only bounds how long a dropped webhook can go
+ * unnoticed. The expiry TTL is 30 days, so an hourly pass is plenty.
+ */
+const GITHUB_RECONCILE_INTERVAL_MS = 15 * 60_000;
+const REPORT_EXPIRY_INTERVAL_MS = 60 * 60_000;
+
+/**
+ * A trial snapshot left by an abandoned onboarding costs storage, not correctness, so the sweep that
+ * reclaims it runs rarely. It lists and deletes through the live Daytona API, and a rare pass keeps
+ * that traffic negligible and leaves a long window for an operator to notice a wrong deletion.
+ */
+const SNAPSHOT_SWEEP_INTERVAL_MS = 6 * 60 * 60_000;
+
+/**
+ * Run fn at most once per intervalMs from a sweep loop that ticks every 30s. The first call runs
+ * straight away, so a fresh deploy reconciles on boot. A failure still waits out the interval.
+ */
+function atMostEvery(intervalMs: number, fn: () => Promise<unknown>): () => Promise<unknown> {
+  let last = -Infinity;
+  return async () => {
+    if (Date.now() - last < intervalMs) return null;
+    last = Date.now();
+    return fn();
+  };
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? (err.stack ?? err.message) : String(err);
@@ -229,6 +260,13 @@ async function main(): Promise<void> {
         }),
       sweepOnce: sweepOnboarding,
     },
+    {
+      // A reviewer-approved upload's target build. Its claim re-takes an expired lease itself, so
+      // there is nothing to sweep.
+      name: "upload-build",
+      claimOnce: (signal) => buildUploadOnce({ driver: buildDriver, signal }),
+      sweepOnce: async () => null,
+    },
     ...(reviewerChatEnabled()
       ? [{
           name: "reviewer-chat",
@@ -252,6 +290,40 @@ async function main(): Promise<void> {
         ),
       sweepOnce: () => sweepRecheckRuns(),
     },
+    {
+      // Periodic maintenance with nothing to claim: the work lives in the sweeper slot, which
+      // runDaemon already drives on an interval and /healthz already watches.
+      name: "github-reconcile",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(GITHUB_RECONCILE_INTERVAL_MS, async () => {
+        const summary = await reconcileGitHubAccess({ signal: AbortSignal.timeout(FAST_LOOP_TIMEOUT_MS - 5_000) });
+        if (summary.installationsRevoked || summary.repositoriesRevoked || summary.errors.length) {
+          console.log(`github reconcile: ${JSON.stringify(summary)}`);
+        }
+        return summary;
+      }),
+    },
+    {
+      name: "report-expiry",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(REPORT_EXPIRY_INTERVAL_MS, async () => {
+        const result = await sweepExpiredReports();
+        const expired = result.outcomes.filter((o) => o.status === "retired").length;
+        if (expired) console.log(`report expiry: expired ${expired} of ${result.candidates} candidates`);
+        return result;
+      }),
+    },
+    {
+      name: "snapshot-sweep",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(SNAPSHOT_SWEEP_INTERVAL_MS, async () => {
+        const result = await sweepOrphanSnapshots();
+        if (result.deleted.length) {
+          console.log(`snapshot sweep: deleted ${result.deleted.length} orphan snapshots: ${result.deleted.join(", ")}`);
+        }
+        return result;
+      }),
+    },
   ];
 
   // runDaemon runs a claim loop and a sweeper per queue, and /healthz watches all of them, so
@@ -263,6 +335,7 @@ async function main(): Promise<void> {
     budgets: {
       jobs: JOBS_STALL_BUDGET_MS,
       "build-onboarding": BUILD_ONBOARDING_STALL_BUDGET_MS,
+      "upload-build": BUILD_ONBOARDING_STALL_BUDGET_MS,
     },
     failureBudgetMs: FAILING_BUDGET_MS,
   });

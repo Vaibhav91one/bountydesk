@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isCommitSha, resolveRepositoryLineage, sourceIdentityDigest } from "./source-identity";
+import {
+  hasIdentityAnchor,
+  isCommitSha,
+  isSha256Digest,
+  resolveRepositoryLineage,
+  sourceIdentityDigest,
+} from "./source-identity";
 
 test("commit identity accepts only full SHA values", () => {
   assert.equal(isCommitSha("a".repeat(40)), true);
@@ -53,6 +59,33 @@ test("the recipe digest changes with each identity input", () => {
 
   // A mutable ref is refused outright rather than hashed into a stable-looking identity.
   assert.throws(() => sourceIdentityDigest({ ...base, resolvedCommitSha: "HEAD" }), /full commit SHA/);
+});
+
+test("identity is anchored by a commit SHA, a source archive digest, or an image digest", () => {
+  const plan = { strategy: "image" };
+  assert.match(sourceIdentityDigest({ repoFullName: "acme/app", resolvedCommitSha: "a".repeat(40), plan }), /^sha256:/);
+  assert.match(sourceIdentityDigest({ repoFullName: "", sourceArchiveDigest: `sha256:${"b".repeat(64)}`, plan }), /^sha256:/);
+  assert.match(sourceIdentityDigest({ repoFullName: "", imageDigest: `sha256:${"c".repeat(64)}`, plan }), /^sha256:/);
+
+  // No anchor at all is refused.
+  assert.throws(() => sourceIdentityDigest({ repoFullName: "acme/app", plan }), /requires a commit SHA/);
+  // A present but mutable commit ref is refused even when another anchor is available.
+  assert.throws(
+    () => sourceIdentityDigest({ repoFullName: "", resolvedCommitSha: "HEAD", imageDigest: `sha256:${"c".repeat(64)}`, plan }),
+    /full commit SHA/,
+  );
+});
+
+test("hasIdentityAnchor and isSha256Digest recognise each anchor and reject junk", () => {
+  assert.equal(isSha256Digest(`sha256:${"a".repeat(64)}`), true);
+  assert.equal(isSha256Digest(`sha256:${"a".repeat(63)}`), false);
+  assert.equal(isSha256Digest("not-a-digest"), false);
+
+  assert.equal(hasIdentityAnchor({ resolvedCommitSha: "a".repeat(40) }), true);
+  assert.equal(hasIdentityAnchor({ sourceArchiveDigest: `sha256:${"b".repeat(64)}` }), true);
+  assert.equal(hasIdentityAnchor({ imageDigest: `sha256:${"c".repeat(64)}` }), true);
+  assert.equal(hasIdentityAnchor({ resolvedCommitSha: "HEAD" }), false);
+  assert.equal(hasIdentityAnchor({}), false);
 });
 
 const reply = (body: unknown, status = 200) =>

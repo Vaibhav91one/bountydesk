@@ -8,13 +8,14 @@ export const runtime = "nodejs";
 
 /**
  * The target picker's options and the report's link suggestions, polled while a reviewer works
- * through connecting a repository, so a fork that finishes onboarding shows up without a reload.
+ * through connecting a repository, so a fork that is created, connected or finishes onboarding
+ * shows up without a reload.
  *
  * 401 rather than requireReviewer's redirect, for the same reason as the status route: a fetch
  * follows the redirect and would try to parse the login page as JSON.
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const session = await currentSession();
@@ -34,6 +35,9 @@ export async function GET(
   // report is read for links.
   const unbound = row.targetProfileId === null;
   const profiles = unbound ? await listTargetProfiles() : [];
-  const suggestion = unbound && row.channel === "email" ? await suggestTargets(row.body) : null;
+  // The link a reviewer has the Connect guide open on, which is the only one checked for a fork
+  // not yet connected. suggestTargets ignores a value that is not one of the body's own links.
+  const guide = new URL(request.url).searchParams.get("guide");
+  const suggestion = unbound && row.channel === "email" ? await suggestTargets(row.body, { guide }) : null;
   return Response.json({ profiles, suggestion }, { headers: { "cache-control": "no-store" } });
 }

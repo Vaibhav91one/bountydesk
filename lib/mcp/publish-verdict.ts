@@ -9,6 +9,7 @@ import {
   desc,
   eq,
   gt,
+  githubInstallation,
   report,
   REPORT_TERMINAL_STATES,
   sql,
@@ -18,10 +19,12 @@ import {
   verdictSupersession,
   type Executor,
 } from "@/lib/db";
+import type { StaticFallbackReason } from "@/lib/analysis/static-review";
 import { recordVerdictArtifacts } from "@/lib/artifacts/record";
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { isVerifiedEmailRecipient } from "@/lib/email/recipient";
 import { enqueueDelivery } from "@/lib/delivery/queue";
 import { transition } from "@/lib/reports/lifecycle";
+import { readStaticFallback } from "@/lib/reports/target-scope";
 import { teardownSandbox } from "@/lib/sandbox/provision";
 import { hasActiveRepositoryGrant, loadRepositoryGrantSnapshot } from "@/lib/targets/repository-grant";
 import { appendVerdictRevision, ensureInitialVerdict, nextVerdictRevision } from "@/lib/verdicts/lifecycle";
@@ -134,6 +137,15 @@ async function reproductionUnavailabilityEvidence(reportId: string, tx: Executor
   return { reproduction: "unavailable", reason: "no-reproduction-target" };
 }
 
+async function staticFallbackReason(reportId: string, tx: Executor): Promise<StaticFallbackReason | null> {
+  return (await readStaticFallback(reportId, tx))?.reason ?? null;
+}
+
+async function analysisOnlyReasonEvidence(reportId: string, tx: Executor): Promise<{ analysisOnlyReason?: StaticFallbackReason }> {
+  const reason = await staticFallbackReason(reportId, tx);
+  return reason ? { analysisOnlyReason: reason } : {};
+}
+
 export async function synthesizeAnalysisOnlyVerdict(
   reportId: string,
   tx: Executor,
@@ -171,7 +183,11 @@ export async function synthesizeAnalysisOnlyVerdict(
       summary: SYNTHESIZED_ANALYSIS_SUMMARY,
       // The outbound summary stays constant; the evidence (reviewer-facing, not the GitHub comment)
       // carries the server-derived reason reproduction was unavailable.
-      evidence: { source: "server-synthesized", ...(await reproductionUnavailabilityEvidence(reportId, tx)) },
+      evidence: {
+        source: "server-synthesized",
+        ...(await reproductionUnavailabilityEvidence(reportId, tx)),
+        ...(await analysisOnlyReasonEvidence(reportId, tx)),
+      },
       payload: buildAgentDraftedPayload(verdictId, draft),
     },
     tx,
@@ -246,6 +262,17 @@ async function persistAgentDraftedVerdict(
   const allowed = await assertVerdictInsertAllowed(reportId, draft.outcome, tx);
   if (!allowed.ok) return allowed;
 
+  // A static-review run never had a running target, whatever the agent concluded from the source,
+  // so a definitive outcome is refused here even when the target and its grant are otherwise fine.
+  // Only the initial run is held to this: a later re-check boots the target again on its own terms.
+  const staticReason = await staticFallbackReason(reportId, tx);
+  if (staticReason && draft.outcome !== "ANALYSIS_ONLY") {
+    return {
+      ok: false,
+      reason: `outcome ${draft.outcome} is refused: this run was a static review (${staticReason}) with no running target; only ANALYSIS_ONLY is permitted`,
+    };
+  }
+
   // The image the report was reproduced against, if it has a bound target with a digest. Cited
   // in the approved comment; absent for a target-less report, which simply gets no target line.
   const [targetRow] = await tx
@@ -283,7 +310,11 @@ async function persistAgentDraftedVerdict(
       reportId,
       outcome: draft.outcome,
       summary: draft.summary,
-      evidence: { source: "agent-drafted", findings: draft.findings },
+      evidence: {
+        source: "agent-drafted",
+        findings: draft.findings,
+        ...(staticReason ? { analysisOnlyReason: staticReason } : {}),
+      },
       payload,
     },
     tx,
@@ -565,6 +596,39 @@ export async function publishVerdict(capability: string): Promise<PublishVerdict
 }
 
 /**
+ * The advisory delivery target for an email report, or null when the reply is the right channel.
+ *
+ * "Supports advisories" means an active grant on a bound connected repository whose installation
+ * has accepted "Repository security advisories: write". Without that permission the draft could
+ * never be created, and routing there would only produce a held send, so the report gets its email
+ * reply instead (with the reply's own verified-recipient gate). The pinned demo target has no connected repository (its grant snapshot
+ * has a null connectedRepositoryId, which hasActiveRepositoryGrant treats as always active), so it
+ * is excluded here on purpose, it delivers as an email reply. The returned target names the repo,
+ * not a GHSA: an email report has no pre-existing advisory, so the arm creates one, and freezing the
+ * repo id lets the worker refuse a rebind between approval and send the same way the other channels
+ * refuse a moved destination.
+ */
+export async function emailAdvisoryDeliveryTarget(
+  reportId: string,
+  tx: Executor,
+): Promise<string | null> {
+  const grant = await loadRepositoryGrantSnapshot(reportId, tx);
+  if (!grant || !grant.connectedRepositoryId || !hasActiveRepositoryGrant(grant)) return null;
+  const [repo] = await tx
+    .select({
+      repoId: connectedRepository.repoId,
+      advisories: githubInstallation.repositoryAdvisoriesPermission,
+    })
+    .from(report)
+    .innerJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .innerJoin(githubInstallation, eq(githubInstallation.id, connectedRepository.installationId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (!repo || repo.advisories !== "write") return null;
+  return `github:${repo.repoId}:advisory:create`;
+}
+
+/**
  * The shared tail that turns a proven human approval into a queued delivery: check the outcome
  * is publishable, resolve the GitHub target, enqueue the outbound comment bound to the exact
  * approved hash, move the report to DELIVERING, and clear the session's pending markers.
@@ -604,6 +668,7 @@ export async function enqueueApprovedVerdictDelivery(
       sourceRef: report.sourceRef,
       state: report.state,
       reporterContact: report.reporterContact,
+      verifiedSender: report.verifiedSender,
     })
     .from(report)
     .where(eq(report.id, verdictRow.reportId))
@@ -616,29 +681,68 @@ export async function enqueueApprovedVerdictDelivery(
   // than followed. Refusing before the DELIVERING transition leaves a report that cannot be
   // delivered still approvable, rather than stranding it mid-delivery.
   let deliveryTarget: string;
+  let deliveryChannel: (typeof report.channel.enumValues)[number] | undefined;
   if (reportRow.channel === "github") {
     if (!/^github:\d+:issue:\d+$/.test(reportRow.sourceRef)) {
       return { ok: false, reason: "invalid GitHub delivery target" };
     }
     deliveryTarget = reportRow.sourceRef;
   } else if (reportRow.channel === "email") {
+    // An email report bound to a target whose connected repository still grants access is
+    // delivered as a draft advisory, not an email reply: for a connected repo the advisory is the
+    // place a vulnerability is tracked and fixed. This is decided before the email-recipient gates
+    // because the advisory route mails nobody; its recipient is the repository, re-verified live by
+    // the advisory arm. An email report with no such binding, or whose installation has not
+    // accepted the advisories write permission, falls through to the reply.
+    const advisoryTarget = await emailAdvisoryDeliveryTarget(verdictRow.reportId, tx);
+    if (advisoryTarget) {
+      deliveryTarget = advisoryTarget;
+      deliveryChannel = "advisory";
+    } else {
+      const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
+      // The verified-recipient half of the delivery contract: no address that passed inbound
+      // SPF/DKIM means there is nobody we can prove we are replying to, so no outbox row exists.
+      if (!contact) {
+        return { ok: false, reason: "report has no verified reporter contact to deliver to" };
+      }
+      if (!/^email:.+/.test(reportRow.sourceRef)) {
+        return { ok: false, reason: "invalid email delivery target" };
+      }
+      // Intake accepts mail from an allowlisted sender, or from an outside sender whose mail passed
+      // SPF and DKIM (recorded as verified_sender). Re-reading it here refuses early, before the
+      // report moves to DELIVERING, if the address no longer qualifies. The worker checks again at
+      // send time; this one is about not stranding the report, that one is about not mailing the
+      // wrong person.
+      if (!(await isVerifiedEmailRecipient(reportRow))) {
+        return { ok: false, reason: `${contact} is no longer an authorised address` };
+      }
+      deliveryTarget = contact;
+    }
+  } else if (reportRow.channel === "upload") {
+    // Upload rides the email transport, so its delivery target is the same OTP-verified contact and
+    // the same recipient re-check. The one difference from email is the source_ref shape: an upload
+    // has no inbound message to thread onto, so it is upload:<id>, not email:<message-id>.
     const contact = reportRow.reporterContact?.trim().toLowerCase() ?? "";
-    // The verified-recipient half of the delivery contract: no address that passed inbound
-    // SPF/DKIM means there is nobody we can prove we are replying to, so no outbox row exists.
     if (!contact) {
       return { ok: false, reason: "report has no verified reporter contact to deliver to" };
     }
-    if (!/^email:.+/.test(reportRow.sourceRef)) {
-      return { ok: false, reason: "invalid email delivery target" };
+    if (!/^upload:.+/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid upload delivery target" };
     }
-    // Intake only accepts mail from an allowlisted sender, so this address was authorised when
-    // the report was created. Re-reading it here refuses early, before the report moves to
-    // DELIVERING, if it has been removed since. The worker checks again at send time; this one
-    // is about not stranding the report, that one is about not mailing the wrong person.
-    if (!(await isReviewerEmail(contact))) {
+    if (!(await isVerifiedEmailRecipient(reportRow))) {
       return { ok: false, reason: `${contact} is no longer an authorised address` };
     }
     deliveryTarget = contact;
+  } else if (reportRow.channel === "advisory") {
+    // The verdict is written back by editing the repository's security advisory, so the delivery
+    // target is the report's own source_ref (the repo id plus the GHSA id), exactly as the GitHub
+    // channel targets its issue. The recipient is the connected repository, re-verified live at
+    // send time by the advisory arm's activeRepository check; a grant revoked before then is
+    // refused and held there rather than delivered.
+    if (!/^github:\d+:advisory:.+/.test(reportRow.sourceRef)) {
+      return { ok: false, reason: "invalid advisory delivery target" };
+    }
+    deliveryTarget = reportRow.sourceRef;
   } else {
     return { ok: false, reason: `unsupported delivery channel: ${reportRow.channel}` };
   }
@@ -656,6 +760,7 @@ export async function enqueueApprovedVerdictDelivery(
       verdictId: verdictRow.id,
       idempotencyKey: `verdict:${verdictRow.id}`,
       target: deliveryTarget,
+      channel: deliveryChannel,
       // The hash this write commits to is the one the caller just verified, not a second,
       // unverified read of the same column: a `verdict` row is immutable, so the two should
       // always agree, but the outbox must never bind to a value nobody checked the moment

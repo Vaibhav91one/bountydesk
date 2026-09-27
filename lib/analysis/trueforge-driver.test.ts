@@ -45,6 +45,10 @@ type ProvisionAuthorization = import("@/lib/sandbox/provision").ProvisionAuthori
 
 let dbm: DbModule;
 let driver: DriverModule;
+// Loaded in before(), after the daytona mock above is registered. A static import here would pull
+// provision.ts (and its real daytona dependency) in before mock.module runs, which silently defeats
+// the mock and leaves the teardown tests unable to observe a delete.
+let provisionModule: typeof import("@/lib/sandbox/provision");
 
 const TEST_PROVISIONING = {
   readinessPath: "/",
@@ -59,6 +63,7 @@ before(async () => {
 
   dbm = await import("@/lib/db");
   driver = await import("./trueforge-driver");
+  provisionModule = await import("@/lib/sandbox/provision");
   await dbm.db.execute("select 1");
 });
 
@@ -864,6 +869,109 @@ test("run() falls back to the no-target turn message when provisioning fails, an
     .where(dbm.eq(dbm.agentSession.reportId, reportId));
   assert.equal(session.sandboxId, null);
   assert.equal(session.appPort, null);
+});
+
+test("run() turns a hard deploy failure into a static-review turn instead of ending the report", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-undeployable" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  const messages: string[] = [];
+  const client = fakeClient({
+    async createTurn(_sessionId, input) {
+      messages.push((input[0] as { content?: string }).content ?? "");
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  // A hard deploy failure: the pinned image cannot be booted at all, so no later run fixes it.
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new provisionModule.ProvisionCouldNotDeployError("sandbox booted the wrong build");
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+
+  assert.equal(messages.length, 1, "the report still gets a turn, now a static review");
+  assert.match(messages[0], /COULD_NOT_DEPLOY/);
+
+  const [reportRow] = await dbm.db
+    .select({ state: dbm.report.state })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, reportId));
+  assert.equal(reportRow.state, "TRIAGING", "the driver never moves the report; the verdict path does");
+
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type, data: dbm.sessionEvent.data })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  assert.deepEqual(
+    events.filter((e) => e.type === "reproduction.static_fallback").map((e) => (e.data as { reason: string }).reason),
+    ["COULD_NOT_DEPLOY"],
+  );
+});
+
+test("run() keeps a bound target ANALYSIS_ONLY on a transient provision failure", async () => {
+  const target = await seedTargetProfile({ name: "juice-shop-unavailable-this-run" });
+  const reportId = await seedReport("TRIAGING", target.id);
+  let createTurnCalls = 0;
+  const client = fakeClient({
+    async createTurn() {
+      createTurnCalls++;
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  // Unavailable this run (Daytona down, app slow to answer): the target may be reachable next
+  // run, so this stays the plain analysis-only turn.
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new provisionModule.ProvisionTargetUnavailableError("app did not answer its port in time");
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+
+  assert.equal(createTurnCalls, 1, "a transient failure still starts the analysis-only turn");
+
+  const [reportRow] = await dbm.db
+    .select({ state: dbm.report.state })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, reportId));
+  assert.equal(reportRow.state, "TRIAGING");
+  const events = await dbm.db
+    .select({ type: dbm.sessionEvent.type })
+    .from(dbm.sessionEvent)
+    .where(dbm.eq(dbm.sessionEvent.reportId, reportId));
+  assert.ok(
+    !events.some((e) => e.type === "reproduction.static_fallback"),
+    "a transient failure is not a static fallback: the target may answer next run",
+  );
+});
+
+test("run() never provisions, or reports a deploy failure for, a no-target report", async () => {
+  const reportId = await seedReport("TRIAGING", null);
+  let createTurnCalls = 0;
+  const client = fakeClient({
+    async createTurn() {
+      createTurnCalls++;
+      return { turnId: "trueturn-fixed", snapshot: { status: "running" } };
+    },
+  });
+  // Provisioning must never run for a report with no bound target, so a deploy error cannot even
+  // arise; the report goes to the analysis-only turn, preserving no-target -> ANALYSIS_ONLY.
+  const fakeProvision: typeof import("@/lib/sandbox/provision").provisionTarget = async () => {
+    throw new provisionModule.ProvisionCouldNotDeployError("this should never be reached without a bound target");
+  };
+
+  const d = driver.createTrueforgeAnalysisDriver(client, fakeProvision);
+  await d.ensureSession(context(reportId));
+  await d.run(context(reportId));
+
+  assert.equal(createTurnCalls, 1, "a no-target report always gets the analysis-only turn");
+
+  const [reportRow] = await dbm.db
+    .select({ state: dbm.report.state })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, reportId));
+  assert.equal(reportRow.state, "TRIAGING");
 });
 
 test("run() never calls provisioning a second time once a turn already exists", async () => {

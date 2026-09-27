@@ -11,8 +11,9 @@ import {
 } from "@/lib/build-onboarding/approve-request";
 
 import { selectOnboardingArtifact } from "./artifact-select";
+import { retryOnboardingRequest, type RetryResult } from "./retry-onboarding";
 
-export type { ApproveResult };
+export type { ApproveResult, RetryResult };
 export type { OnboardingArtifactKind, ArtifactResult } from "./artifact-select";
 type OnboardingArtifactKind = "dockerfile" | "manifest" | "buildplan" | "buildlog";
 type ArtifactResult = { ok: true; filename: string; text: string } | { ok: false; error: string };
@@ -66,6 +67,22 @@ export async function approveOnboarding(
     await currentSession(),
     formData.get("repoId"),
   );
+
+  if (result.ok) revalidatePath("/connections");
+
+  return result;
+}
+
+/**
+ * Requeue a FAILED onboarding from the start. Thin for the same reason as approveOnboarding: the
+ * reviewer check, the live-grant check and the FAILED guard all live in retryOnboardingRequest,
+ * where they are tested.
+ */
+export async function retryOnboarding(
+  _previous: RetryResult | null,
+  formData: FormData,
+): Promise<RetryResult> {
+  const result = await retryOnboardingRequest(await currentSession(), formData.get("repoId"));
 
   if (result.ok) revalidatePath("/connections");
 

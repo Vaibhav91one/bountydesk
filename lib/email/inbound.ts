@@ -79,6 +79,40 @@ function firstString(...values: unknown[]): string {
  * not worth creating. Tolerant of shape drift: providers move fields around, and a dropped email is
  * better than a crash on the webhook.
  */
+/** An RFC 5322 message id, always angle-bracketed inside In-Reply-To and References. */
+const MESSAGE_ID_TOKEN = /<[^>]+>/g;
+
+/** Read one header from a raw MIME header block, unfolding continuation lines first. */
+function readHeader(rawHeaders: string, name: string): string | null {
+  // A header value continues on any following line that begins with whitespace (RFC 5322 folding).
+  const unfolded = rawHeaders.replace(/\r?\n[ \t]+/g, " ");
+  for (const line of unfolded.split(/\r?\n/)) {
+    const colon = line.indexOf(":");
+    if (colon === -1) continue;
+    if (line.slice(0, colon).trim().toLowerCase() === name) return line.slice(colon + 1).trim();
+  }
+  return null;
+}
+
+/**
+ * The parent message ids an inbound reply threads to, from its In-Reply-To and References headers.
+ *
+ * The acknowledgement BountyDesk sends threads on the parent report's own message id (see
+ * lib/email/notice.ts), so a conformant reply carries that id here, and matching it to a report's
+ * source_ref (email:<id>) links the reply to its parent. These tokens are attacker-controllable and
+ * are only ever used to look a report up, never to authorize anything: a spoofed id can at most
+ * point at a report the sender is not otherwise allowed to touch, which is why the caller also
+ * requires the verified sender to match before it links (lib/reports/lifecycle.ts).
+ */
+export function parseThreadReferences(rawHeaders: string): string[] {
+  const tokens: string[] = [];
+  for (const name of ["in-reply-to", "references"]) {
+    const value = readHeader(rawHeaders, name);
+    if (value) for (const match of value.matchAll(MESSAGE_ID_TOKEN)) tokens.push(match[0]);
+  }
+  return [...new Set(tokens)];
+}
+
 export function parseInboundEmail(event: ResendWebhookEvent): InboundEmail | null {
   if (event.type !== "email.received") return null;
 

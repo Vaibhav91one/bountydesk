@@ -239,6 +239,83 @@
       "when": 1790184807240,
       "tag": "0033_aberrant_onslaught",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1790256351414,
+      "tag": "0034_thin_vulcan",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1790259510088,
+      "tag": "0035_outside_email_gate",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1790307613042,
+      "tag": "0036_fair_domino",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1790318871456,
+      "tag": "0037_zippy_stark_industries",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1790349450254,
+      "tag": "0038_familiar_caretaker",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790398643269,
+      "tag": "0039_advisory_intake_channel",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790404234552,
+      "tag": "0040_delivery_channel_override",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1790409744328,
+      "tag": "0041_onboarding_analysis_only_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1790412897361,
+      "tag": "0042_private_repo_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1790415639663,
+      "tag": "0043_upload_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1790421168792,
+      "tag": "0044_installation_advisories_permission",
+      "breakpoints": true
     }
   ]
 }

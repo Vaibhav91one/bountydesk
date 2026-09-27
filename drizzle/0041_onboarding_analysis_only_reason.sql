@@ -1,0 +1,1 @@
+ALTER TABLE "target_onboarding" ADD COLUMN "analysis_only_reason" text;

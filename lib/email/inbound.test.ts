@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { Webhook } from "svix";
 
-import { parseInboundEmail, verifyResendWebhook, type ResendWebhookEvent } from "./inbound";
+import {
+  parseInboundEmail,
+  parseThreadReferences,
+  verifyResendWebhook,
+  type ResendWebhookEvent,
+} from "./inbound";
 
 const SECRET = `whsec_${Buffer.from("0123456789abcdef0123456789abcdef").toString("base64")}`;
 
@@ -54,6 +59,28 @@ test("a missing subject or body falls back rather than crashing", () => {
   const email = parseInboundEmail(received({ from: "a@b.com", message_id: "m5" }));
   assert.equal(email?.subject, "(no subject)");
   assert.equal(email?.text, "");
+});
+
+test("thread references are read from In-Reply-To and References, deduped", () => {
+  const headers = [
+    "From: reporter@example.com",
+    "In-Reply-To: <parent@mail.test>",
+    "References: <parent@mail.test> <ack@bountydesk.test>",
+    "Subject: Re: We received your report",
+  ].join("\r\n");
+  assert.deepEqual(parseThreadReferences(headers), ["<parent@mail.test>", "<ack@bountydesk.test>"]);
+});
+
+test("a folded References header still yields every token", () => {
+  const headers = ["References: <a@mail.test>", "\t<b@mail.test>", " <c@mail.test>"].join("\r\n");
+  assert.deepEqual(parseThreadReferences(headers), ["<a@mail.test>", "<b@mail.test>", "<c@mail.test>"]);
+});
+
+test("a subject-only Re: with no threading headers yields no tokens", () => {
+  // The anti-pattern this guards: matching on "Re: ..." would cross-link every reporter who shares
+  // the acknowledgement subject. Without In-Reply-To or References there is nothing to link on.
+  const headers = ["From: reporter@example.com", "Subject: Re: We received your report"].join("\r\n");
+  assert.deepEqual(parseThreadReferences(headers), []);
 });
 
 test("a correctly signed webhook verifies, and tampering is rejected", () => {

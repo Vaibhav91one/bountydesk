@@ -1,7 +1,11 @@
-import type { InboundEmail } from "@/lib/email/inbound";
-import { fetchInboundBody } from "@/lib/email/resend";
+import { db, eq, report } from "@/lib/db";
+import { parseThreadReferences, type InboundEmail } from "@/lib/email/inbound";
+import type { OutsideEmailPayload } from "@/lib/email/outside-intake";
+import { fetchInboundBody, fetchRawHeaders } from "@/lib/email/resend";
 import { activeRepository } from "@/lib/github/lifecycle";
-import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
+import { ensureReport, findRepliedToReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
+import { holdForDecision, type GateAnalysisPayload } from "@/lib/triage/gate";
+import { createTrueForgeClient } from "@/lib/trueforge/client";
 
 import {
   LeaseLostError,
@@ -142,29 +146,97 @@ function parseDelivery(lease: Lease): {
   };
 }
 
-async function parseEmail(lease: Lease): Promise<Lease> {
-  const email = lease.payload as InboundEmail;
-  const sourceRef = `email:${email.messageId}`;
+type AdvisoryDelivery = {
+  action?: string;
+  repository_advisory?: { ghsa_id?: string };
+  sender?: { login?: string };
+  repository?: { id?: number; full_name?: string };
+  installation?: { id?: number };
+};
 
-  // The webhook carries no body, so pull it here rather than at intake. A fetch failure throws and
-  // the job retries, which is why this runs before ensureReport: a report is created only once its
-  // body is in hand, never as an empty shell. Prefer the plain-text part; fall back to HTML when a
-  // sender emits HTML only.
-  const fetched = email.resendEmailId ? await fetchInboundBody(email.resendEmailId) : null;
-  const body = fetched?.text || fetched?.html || email.text;
+/**
+ * Reads a draft advisory's title and body. Injected so a test can drive parseAdvisory without a
+ * live GitHub App: the default mints an installation token and reads the advisory through the API.
+ */
+export type AdvisoryReader = (opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}) => Promise<{ summary: string; description: string }>;
 
-  // No connected repository and no target profile: an email report has nothing bound to reproduce
-  // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
-  // kept as the reply-to for a future outbound delivery.
+async function defaultReadAdvisory(opts: {
+  installationId: number;
+  repoId: number;
+  fullName: string;
+  ghsaId: string;
+  signal?: AbortSignal;
+}): Promise<{ summary: string; description: string }> {
+  const [{ mintInstallationToken }, { getAdvisory }] = await Promise.all([
+    import("@/lib/github/app-auth"),
+    import("@/lib/github/advisory"),
+  ]);
+  const { token } = await mintInstallationToken(opts.installationId, opts.repoId, {
+    signal: opts.signal,
+  });
+  const { summary, description } = await getAdvisory({
+    token,
+    fullName: opts.fullName,
+    ghsaId: opts.ghsaId,
+    signal: opts.signal,
+  });
+  return { summary, description };
+}
+
+/**
+ * Turn a repository_advisory delivery into a report, held at the NEEDS_DECISION gate.
+ *
+ * A private vulnerability report can be filed by any GitHub user, so the reporter is untrusted the
+ * same way a public issue opener is. An issue needs an allowlisted reviewer's /reproduce before a
+ * run starts; an advisory has no comment to carry that command, so it waits at NEEDS_DECISION like
+ * an outside email report, and only a reviewer's "Run analysis" spends the sandbox budget. Nothing
+ * is cloned, built or provisioned until then.
+ *
+ * Access is re-checked here, not just at intake: a suspension or a repository removal can land
+ * between the 202 and this run, and the target profile is read from the server, never the payload,
+ * exactly as the issue path does. A report whose repository has since lost its grant can only reach
+ * ANALYSIS_ONLY downstream (see the repository-grant gate), which is the "no bound target, no
+ * REPRODUCED" invariant, so nothing here has to special-case it.
+ */
+async function parseAdvisory(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
+  const payload = lease.payload as AdvisoryDelivery;
+  const ghsaId = payload.repository_advisory?.ghsa_id;
+  const installationId = payload.installation?.id;
+  if (!ghsaId) throw new UnprocessableDelivery("advisory delivery carries no ghsa_id");
+  if (!installationId) throw new UnprocessableDelivery("advisory delivery carries no installation id");
+
+  const repository = await activeRepository(installationId, payload.repository?.id);
+  if (!repository) {
+    throw new UnprocessableDelivery(
+      `repository ${payload.repository?.full_name ?? "?"} is no longer connected`,
+    );
+  }
+
+  const { summary, description } = await readAdvisory({
+    installationId,
+    repoId: repository.repoId,
+    fullName: repository.fullName,
+    ghsaId,
+    signal: undefined,
+  });
+
+  const sourceRef = `github:${repository.repoId}:advisory:${ghsaId}`;
+
   const reportId = await ensureReport({
     channel: lease.channel,
     sourceRef,
-    title: email.subject,
-    body,
-    reporterHandle: email.fromName,
-    reporterContact: email.fromEmail,
-    connectedRepositoryId: null,
-    targetProfileId: null,
+    title: summary || `${repository.fullName} advisory ${ghsaId}`,
+    body: description,
+    reporterHandle: payload.sender?.login ?? null,
+    state: "NEEDS_DECISION",
+    connectedRepositoryId: repository.connectedRepositoryId,
+    targetProfileId: repository.targetProfileId,
   });
 
   await recordEvent(
@@ -177,8 +249,102 @@ async function parseEmail(lease: Lease): Promise<Lease> {
   return advance(lease, "PARSED", { reportId });
 }
 
-async function parse(lease: Lease): Promise<Lease> {
+type EmailJobPayload = InboundEmail | OutsideEmailPayload | GateAnalysisPayload;
+
+function isOutside(payload: unknown): payload is OutsideEmailPayload {
+  return (payload as { intake?: unknown } | null)?.intake === "outside";
+}
+
+/**
+ * A reviewer released a gated outside report (lib/triage/gate.ts releaseForAnalysis). The report
+ * already exists, so there is nothing to parse: confirm the gate really did release it and hand
+ * it to the same analysis-only run an allowlisted sender's email gets.
+ */
+async function parseGateRelease(lease: Lease, reportId: string): Promise<Lease> {
+  const [row] = await db
+    .select({ channel: report.channel, state: report.state })
+    .from(report)
+    .where(eq(report.id, reportId))
+    .limit(1);
+  // Every channel that waits at the gate can be released this way: an outside email report, an
+  // advisory report, and an upload (directly, or after its reviewer-approved target build). The
+  // release job itself is enqueued on the email channel as a routing signal, so this checks the
+  // report it names, not the job's channel.
+  if (!row || (row.channel !== "email" && row.channel !== "advisory" && row.channel !== "upload")) {
+    throw new UnprocessableDelivery(`gate release names no gated report ${reportId}`);
+  }
+  if (row.state !== "TRIAGING") {
+    throw new UnprocessableDelivery(`report ${reportId} is ${row.state}; the gate did not release it`);
+  }
+  return advance(lease, "PARSED", { reportId });
+}
+
+async function parseEmail(lease: Lease): Promise<Lease> {
+  const payload = lease.payload as EmailJobPayload;
+  if ("intake" in payload && payload.intake === "gate-analysis") {
+    return parseGateRelease(lease, payload.reportId);
+  }
+  const email = payload as InboundEmail | OutsideEmailPayload;
+  const outside = isOutside(email);
+  const sourceRef = `email:${email.messageId}`;
+
+  // The webhook carries no body, so pull it here rather than at intake. A fetch failure throws and
+  // the job retries, which is why this runs before ensureReport: a report is created only once its
+  // body is in hand, never as an empty shell. Prefer the plain-text part; fall back to HTML when a
+  // sender emits HTML only.
+  const fetched = email.resendEmailId ? await fetchInboundBody(email.resendEmailId) : null;
+  const body = fetched?.text || fetched?.html || email.text;
+
+  // Link a reply to the report it threads to. The parent's message id is in this reply's
+  // In-Reply-To/References, which live only in the raw MIME, so read the header block from the
+  // signed URL the body fetch just handed back. Best-effort: a failure here must not stop a report
+  // from being created, so a fetch or parse error leaves the reply standalone. Only outside senders
+  // carry a verified sender, and findRepliedToReport links only on a verified-sender match, so an
+  // allowlisted reply (null sender) never links, which is fine: acks go only to outside reporters.
+  let repliesToReportId: string | null = null;
+  if (fetched?.rawUrl) {
+    try {
+      const tokens = parseThreadReferences(await fetchRawHeaders(fetched.rawUrl));
+      repliesToReportId = await findRepliedToReport(
+        tokens,
+        outside ? email.verifiedSender : null,
+      );
+    } catch (error) {
+      console.warn(`email parse: could not link reply ${sourceRef} to a parent: ${String(error)}`);
+    }
+  }
+
+  // No connected repository and no target profile: an email report has nothing bound to reproduce
+  // against, so the pipeline drafts an analysis-only verdict from the text. The verified sender is
+  // kept as the reply-to for a future outbound delivery. An outside sender's report starts at
+  // the NEEDS_DECISION gate instead, with the address intake verified by SPF and DKIM.
+  const reportId = await ensureReport({
+    channel: lease.channel,
+    sourceRef,
+    title: email.subject,
+    body,
+    reporterHandle: email.fromName,
+    reporterContact: email.fromEmail,
+    repliesToReportId,
+    ...(outside ? { state: "NEEDS_DECISION" as const, verifiedSender: email.verifiedSender } : {}),
+    connectedRepositoryId: null,
+    targetProfileId: null,
+  });
+
+  // Under the report lock: once an outside report exists, a reviewer can act on it at the gate.
+  await recordEventLocked(
+    reportId,
+    "intake.accepted",
+    { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
+    `${lease.id}:intake.accepted`,
+  );
+
+  return advance(lease, "PARSED", { reportId });
+}
+
+async function parse(lease: Lease, readAdvisory: AdvisoryReader): Promise<Lease> {
   if (lease.channel === "email") return parseEmail(lease);
+  if (lease.channel === "advisory") return parseAdvisory(lease, readAdvisory);
 
   const { payload, issueNumber, title, body, reporterHandle } = parseDelivery(lease);
 
@@ -218,6 +384,10 @@ async function parse(lease: Lease): Promise<Lease> {
   return advance(lease, "PARSED", { reportId });
 }
 
+function defaultHold({ reportId, signal }: AnalysisContext): Promise<void> {
+  return holdForDecision(reportId, signal, { client: createTrueForgeClient() });
+}
+
 /**
  * Drive one job as far as its lease allows. Returns the job id, or null when the queue had
  * nothing claimable.
@@ -229,9 +399,19 @@ export async function runOnce(
   owner: string,
   {
     analysis,
+    hold = defaultHold,
+    readAdvisory = defaultReadAdvisory,
     leaseSeconds = 60,
     signal,
-  }: { analysis: AnalysisDriver; leaseSeconds?: number; signal?: AbortSignal },
+  }: {
+    analysis: AnalysisDriver;
+    /** The gate step for an outside email report; injectable so tests need no TrueForge. */
+    hold?: (context: AnalysisContext) => Promise<void>;
+    /** Reads an advisory's title and body; injectable so tests need no live GitHub App. */
+    readAdvisory?: AdvisoryReader;
+    leaseSeconds?: number;
+    signal?: AbortSignal;
+  },
 ): Promise<string | null> {
   if (signal?.aborted) return null;
   const claimed = await claim(owner, leaseSeconds);
@@ -249,8 +429,27 @@ export async function runOnce(
   let lease = claimed;
 
   try {
-    if (lease.state === "RECEIVED") lease = await parse(lease);
+    if (lease.state === "RECEIVED") lease = await parse(lease, readAdvisory);
     signal?.throwIfAborted();
+    // An outside sender's report stops here. The analysis driver never sees it: no session, no
+    // sandbox, no clone. The job finishes once the acknowledgement and triage are recorded, and
+    // only a reviewer's "Run analysis" queues the job that takes the branch below.
+    if (lease.state === "PARSED" && lease.channel === "email" && isOutside(lease.payload)) {
+      if (!lease.reportId) {
+        throw new UnprocessableDelivery("job reached PARSED with no report attached");
+      }
+      await runWithHeartbeat(hold, lease.reportId, lease, leaseSeconds, signal);
+      await complete(lease);
+      return lease.id;
+    }
+    // An advisory report also waits at the gate, but there is no reporter mailbox to acknowledge and
+    // no email text to triage, so the job just finishes and the report sits at NEEDS_DECISION until a
+    // reviewer releases it. The gate-release job that a reviewer's "Run analysis" enqueues is the one
+    // that takes the branch below and starts the run.
+    if (lease.state === "PARSED" && lease.channel === "advisory") {
+      await complete(lease);
+      return lease.id;
+    }
     if (lease.state === "PARSED") {
       if (!lease.reportId) {
         throw new UnprocessableDelivery("job reached PARSED with no report attached");

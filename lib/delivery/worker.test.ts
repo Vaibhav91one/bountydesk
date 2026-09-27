@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+import { GitHubApiError } from "@/lib/github/app-auth";
+
 /**
  * Real Postgres is required for the lease and active-repository checks. The GitHub boundary
  * stays fake so these tests can force network failures and crash windows deterministically.
@@ -223,6 +225,20 @@ function makeFakeDeps(
       calls.postComment++;
       if (opts.postComment) return opts.postComment(calls.postComment);
       return { id: 1 };
+    },
+    // The GitHub comment arm must never touch an advisory; a throw turns each required dep into an
+    // assertion rather than dead scaffolding.
+    getAdvisory: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
+    },
+    updateAdvisoryDescription: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
+    },
+    createDraftAdvisory: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
+    },
+    findAdvisoryByMarker: async () => {
+      throw new Error("github comment delivery must not touch an advisory");
     },
   };
   return { deps, calls };
@@ -784,4 +800,255 @@ test("no delivery_attempt row ever stores the installation token or app JWT", as
       );
     }
   }
+});
+
+test("a token-mint 403 terminal-refuses, holds the row for a human, and posts nothing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  // activeRepository still passes (the fixture is fully connected); the revocation only surfaces
+  // when GitHub refuses the token mint, which is the dropped-webhook window this guards.
+  deps.mintToken = async () => {
+    calls.mintToken++;
+    throw new GitHubApiError(
+      403,
+      "GitHub installation token request failed with 403: forbidden",
+    );
+  };
+
+  const id = await worker.deliverOnce("w-mint-403", { deps });
+  assert.equal(id, fixture.deliveryId);
+
+  assert.equal(calls.mintToken, 1);
+  assert.equal(calls.listComments, 0);
+  assert.equal(calls.postComment, 0, "an authoritative refusal must never post");
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /no longer connected/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "DELIVERING");
+
+  const [held] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+  assert.equal(held.rhr, true, "a lost grant is held for a human to reconnect");
+});
+
+test("a token-mint 404 is treated the same as a 403", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    throw new GitHubApiError(404, "GitHub installation token request failed with 404: not found");
+  };
+
+  await worker.deliverOnce("w-mint-404", { deps });
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /no longer connected/);
+});
+
+test("a rate-limited token-mint 403 stays retryable rather than refusing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    throw new GitHubApiError(
+      403,
+      "GitHub installation token request failed with 403: You have exceeded a secondary rate limit",
+      true,
+    );
+  };
+
+  await worker.deliverOnce("w-mint-403-rl", { deps });
+
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "PENDING", "a rate limit is transient, not a lost grant");
+
+  const [held] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, fixture.deliveryId));
+  assert.equal(held.rhr, false);
+});
+
+test("a token-mint 5xx stays retryable rather than refusing", async () => {
+  await drainOthers();
+  const fixture = await seedFixture();
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  deps.mintToken = async () => {
+    calls.mintToken++;
+    throw new GitHubApiError(
+      503,
+      "GitHub installation token request failed with 503: service unavailable",
+    );
+  };
+
+  const id = await worker.deliverOnce("w-mint-503", { deps });
+  assert.equal(id, fixture.deliveryId);
+
+  assert.equal(calls.postComment, 0);
+
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(
+    delivery.state,
+    "PENDING",
+    "a 5xx minting the token is transient and must stay retryable",
+  );
+  assert.match(delivery.lastError ?? "", /503/);
+
+  const rep = await reportRow(fixture.reportId);
+  assert.equal(rep.state, "DELIVERING");
+});
+
+/** Hold a row the way refuseDelivery(..., hold) leaves it, without going through a send. */
+async function holdRow(deliveryId: string, attempts = 1) {
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({
+      state: "FAILED",
+      requiresHumanReview: true,
+      attempts,
+      lastError: "held for a human",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    })
+    .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
+}
+
+async function heldFlag(deliveryId: string) {
+  const [row] = await dbm.db
+    .select({ rhr: dbm.outboundDelivery.requiresHumanReview })
+    .from(dbm.outboundDelivery)
+    .where(dbm.eq(dbm.outboundDelivery.id, deliveryId));
+  return row.rhr;
+}
+
+test("a held delivery retried after the cause is fixed posts once and completes the report", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  const refusing = makeFakeDeps({ listComments: [] });
+  refusing.deps.mintToken = async () => {
+    throw new GitHubApiError(403, "GitHub installation token request failed with 403: forbidden");
+  };
+  await worker.deliverOnce("w-held", { deps: refusing.deps });
+  assert.equal(await heldFlag(fixture.deliveryId), true);
+  // Held means claim() never sees it again on its own.
+  assert.equal(await worker.deliverById(fixture.deliveryId, "w-held-noop", { deps: refusing.deps }), null);
+
+  const result = await retry.retryHeldDelivery(fixture.reportId, "alice");
+  assert.deepEqual(result, { ok: true, deliveryId: fixture.deliveryId });
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  assert.equal(await worker.deliverById(fixture.deliveryId, "w-retried", { deps }), fixture.deliveryId);
+  assert.equal(calls.postComment, 1);
+  assert.equal((await deliveryRow(fixture.deliveryId)).state, "SENT");
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERED");
+  // Both attempts are on record under distinct numbers: the retry never reuses the held one's.
+  assert.deepEqual(
+    (await attemptsFor(fixture.deliveryId)).map((a) => a.attempt).sort(),
+    [1, 2],
+  );
+});
+
+test("a retried delivery whose earlier send already landed is a replay, not a second post", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({
+    listComments: [
+      { body: fixture.payload, authorLogin: "bountydesk-triage[bot]", authorType: "Bot", githubAppId: 123456 },
+    ],
+  });
+  await worker.deliverById(fixture.deliveryId, "w-retry-replay", { deps });
+  assert.equal(calls.postComment, 0, "the delivery marker on the issue makes the retry a replay");
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERED");
+});
+
+test("a retried delivery re-runs the approved-hash gate", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture({ wrongApprovedHash: true });
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  await worker.deliverById(fixture.deliveryId, "w-retry-hash", { deps });
+  assert.equal(calls.mintToken, 0, "a hash mismatch is refused before GitHub is contacted");
+  assert.equal(calls.postComment, 0);
+  const delivery = await deliveryRow(fixture.deliveryId);
+  assert.equal(delivery.state, "FAILED");
+  assert.match(delivery.lastError ?? "", /content hash mismatch/);
+  assert.equal((await reportRow(fixture.reportId)).state, "DELIVERING");
+});
+
+test("a retried delivery re-runs the approval-decision gate", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture({ noApproval: true });
+  await holdRow(fixture.deliveryId);
+
+  assert.equal((await retry.retryHeldDelivery(fixture.reportId, "alice")).ok, true);
+
+  const { deps, calls } = makeFakeDeps({ listComments: [] });
+  await worker.deliverById(fixture.deliveryId, "w-retry-approval", { deps });
+  assert.equal(calls.mintToken, 0);
+  assert.equal(calls.postComment, 0);
+  assert.match((await deliveryRow(fixture.deliveryId)).lastError ?? "", /no matching approved decision/);
+});
+
+test("retry refuses a row that is not held, a report not DELIVERING, and a send the provider accepted", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+
+  const pending = await seedFixture();
+  const notHeld = await retry.retryHeldDelivery(pending.reportId, "alice");
+  assert.equal(notHeld.ok, false);
+
+  const early = await seedFixture({ reportState: "AWAITING_APPROVAL" });
+  await holdRow(early.deliveryId);
+  const notDelivering = await retry.retryHeldDelivery(early.reportId, "alice");
+  assert.equal(notDelivering.ok, false);
+  assert.equal(await heldFlag(early.deliveryId), true);
+
+  // A bounced email keeps its provider_message_id; the same idempotency key cannot send it again.
+  const bounced = await seedFixture();
+  await holdRow(bounced.deliveryId);
+  await dbm.db
+    .update(dbm.outboundDelivery)
+    .set({ providerMessageId: `re_${randomUUID()}` })
+    .where(dbm.eq(dbm.outboundDelivery.id, bounced.deliveryId));
+  const accepted = await retry.retryHeldDelivery(bounced.reportId, "alice");
+  assert.equal(accepted.ok, false);
+  assert.equal(await heldFlag(bounced.deliveryId), true);
+});
+
+test("retry leaves a duplicate-target hold alone while another delivery owns the verdict", async () => {
+  const retry = await import("./retry");
+  await drainOthers();
+  const fixture = await seedFixture();
+  // enqueueDelivery holds a second row for the same verdict and target under a different key.
+  const second = await queue.enqueueDelivery({
+    reportId: fixture.reportId,
+    verdictId: fixture.verdictId,
+    idempotencyKey: `verdict:${fixture.verdictId}:again`,
+    target: fixture.sourceRef,
+    approvedContentHash: fakeHash(fixture.payload),
+  });
+  assert.equal(second.disposition, "REVIEW_REQUIRED");
+
+  const result = await retry.retryHeldDelivery(fixture.reportId, "alice");
+  assert.equal(result.ok, false);
+  assert.equal(await heldFlag(second.id), true);
 });
