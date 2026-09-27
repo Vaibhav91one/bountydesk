@@ -216,12 +216,23 @@ function parsePoetryLock(text: string): Dependency[] {
   return parseTomlPackages(text, "PyPI");
 }
 
+// Both Go parsers split each line on whitespace and validate the tokens with anchored, single-class
+// regexes. A require or sum line is `<module-path> <version> [rest]`, and a module path never contains
+// whitespace, so tokenizing is unambiguous. This avoids a regex with two adjacent unbounded classes
+// around a literal dot, whose backtracking is quadratic on a crafted single line the size of the blob
+// cap and would stall the worker's event loop (the parse is synchronous, so the fetch AbortSignal does
+// not bound it).
+const GO_MODULE = /^[A-Za-z0-9.\-_/~]+$/;
+const GO_VERSION = /^v[0-9][A-Za-z0-9.\-+]*$/;
+
 function parseGoMod(text: string): Dependency[] {
   const out: Dependency[] = [];
   for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/\/\/.*$/, "").trim();
-    const m = line.match(/^(?:require\s+)?([\w.\-/]+\.[\w.\-/]+)\s+v([0-9][\w.\-+]*)/);
-    if (m) out.push({ ecosystem: "Go", name: m[1]!, version: `v${m[2]!}` });
+    const parts = raw.replace(/\/\/.*$/, "").trim().replace(/^require\s+/, "").split(/\s+/);
+    const [name, version] = parts;
+    if (name && version && name.includes(".") && GO_MODULE.test(name) && GO_VERSION.test(version)) {
+      out.push({ ecosystem: "Go", name, version });
+    }
   }
   return out;
 }
@@ -230,11 +241,15 @@ function parseGoSum(text: string): Dependency[] {
   const seen = new Set<string>();
   const out: Dependency[] = [];
   for (const raw of text.split(/\r?\n/)) {
-    // go.sum lists each module twice (the zip and its go.mod); one entry per module is enough.
-    const m = raw.match(/^([\w.\-/]+)\s+v([0-9][\w.\-+]*?)(?:\/go\.mod)?\s+h1:/);
-    if (m && !seen.has(m[1]!)) {
-      seen.add(m[1]!);
-      out.push({ ecosystem: "Go", name: m[1]!, version: `v${m[2]!}` });
+    const parts = raw.trim().split(/\s+/);
+    if (parts.length < 3) continue;
+    const name = parts[0]!;
+    // go.sum lists each module twice, the zip hash and the go.mod hash; the version field carries a
+    // /go.mod suffix on the second. One entry per module is enough.
+    const version = parts[1]!.replace(/\/go\.mod$/, "");
+    if (name.includes(".") && GO_MODULE.test(name) && GO_VERSION.test(version) && !seen.has(name)) {
+      seen.add(name);
+      out.push({ ecosystem: "Go", name, version });
     }
   }
   return out;

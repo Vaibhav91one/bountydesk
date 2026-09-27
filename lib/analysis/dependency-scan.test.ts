@@ -110,6 +110,16 @@ test("crates.io: Cargo.lock package blocks are read", () => {
   assert.ok(has(deps, "crates.io", "serde", "1.0.104"));
 });
 
+test("a pathological single-line go.mod parses fast and yields nothing (no quadratic backtracking)", () => {
+  // A blob-cap-sized line of dots with no version suffix is the ReDoS shape for a naive two-class
+  // regex. The tokenizing parser must return quickly, not stall the worker's event loop.
+  const evil = "require " + ".".repeat(200_000);
+  const started = Date.now();
+  const deps = parseDependencies([{ path: "go.mod", text: evil }]);
+  assert.deepEqual(deps, []);
+  assert.ok(Date.now() - started < 1_000, "parsing a hostile go.mod line stays well under a second");
+});
+
 test("malformed input yields nothing and never throws", () => {
   assert.deepEqual(parseDependencies([{ path: "package.json", text: "{ not json" }]), []);
   assert.deepEqual(parseDependencies([{ path: "package-lock.json", text: "]}{" }]), []);
