@@ -53,8 +53,8 @@ export default async function IntegrationsPage() {
     {
       id: "email",
       name: "Email",
-      // Intake is live; replying the verdict back is the half that is still not wired.
-      detail: "Report intake by email. Accepting reports, no delivery back yet.",
+      // Intake and delivery are both live: an approved verdict is emailed back to the verified sender.
+      detail: "Report intake by email, and the approved verdict is emailed back.",
       icon: "gmail",
       installed: true,
       action: { kind: "link", href: "/integrations/email", label: "View" },

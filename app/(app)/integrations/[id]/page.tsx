@@ -226,7 +226,7 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 <Detail label="Reviewers">
                   {reviewers.filter((entry) => entry.verified).length} verified
                 </Detail>
-                <Detail label="Delivery">Not wired yet</Detail>
+                <Detail label="Delivery">Approved verdict emailed to the verified sender</Detail>
               </>
             ) : (
               <Detail label="Status">

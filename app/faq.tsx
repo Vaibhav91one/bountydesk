@@ -38,7 +38,7 @@ const QUESTIONS: { q: string; a: string }[] = [
   },
   {
     q: "Do I need GitHub at all?",
-    a: "Not for intake. Email and file upload are independent channels that need no GitHub connection to create and triage a report. Neither is wired yet: outbound needs a verified recipient and a transport receipt before a delivery may be recorded, so a report from those channels must never reach delivered.",
+    a: "Not for intake. Email and file upload are independent channels that need no GitHub connection to create and triage a report, and both deliver the approved verdict back: an email report is replied to at the sender's verified address, and an upload's verdict goes to the contact the uploader confirmed with a one-time code. A delivery is still only recorded once there is a verified recipient and a transport receipt, which is the safety property rather than a gap.",
   },
 ];
 
