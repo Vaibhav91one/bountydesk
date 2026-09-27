@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowSquareOut, CaretRight } from "@phosphor-icons/react/ssr";
-import { Gmail, GitHubLight, OneDrive } from "developer-icons";
+import { Gmail, GitHubLight } from "developer-icons";
 import { Folder } from "@phosphor-icons/react/ssr";
 
 import { RollingIcon } from "@/components/rolling-icon";
@@ -22,7 +22,6 @@ import { ManageAccess, type AccessInstallation } from "./manage-access";
 const ICONS = {
   github: GitHubLight,
   gmail: Gmail,
-  onedrive: OneDrive,
   folder: Folder,
 } as const satisfies Record<IntegrationIcon, unknown>;
 
@@ -80,7 +79,7 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
   const outsideConfig: OutsideConfig | null = canManage ? await readOutsideConfig() : null;
 
   const Icon = ICONS[integration.icon];
-  // Only GitHub has anything installed to read. The other three have no connection model at
+  // Only GitHub has anything installed to read. The other channels have no connection model at
   // all, which is the honest reason their panels are shorter rather than emptier.
   const connections = integration.id === "github" ? await listConnections() : [];
   const live = connections.filter((connection) => !connection.suspendedAt);
@@ -124,13 +123,16 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
             <h1 className="text-title text-foreground">{integration.name}</h1>
             {!integration.built ? (
               <Badge variant="outline">Coming soon</Badge>
-            ) : isEmail ? (
-              // Email has no installation to count: intake is live as soon as the channel is built.
-              <Badge variant="success">Accepting reports</Badge>
-            ) : installed ? (
-              <Badge variant="success">Installed</Badge>
+            ) : integration.id === "github" ? (
+              installed ? (
+                <Badge variant="success">Installed</Badge>
+              ) : (
+                <Badge variant="outline">Not installed</Badge>
+              )
             ) : (
-              <Badge variant="outline">Not installed</Badge>
+              // Email and upload have no installation to count: intake is live as soon as the
+              // channel is built.
+              <Badge variant="success">Accepting reports</Badge>
             )}
           </div>
 
@@ -227,7 +229,9 @@ export default async function IntegrationPage({ params }: { params: Promise<{ id
                 <Detail label="Delivery">Not wired yet</Detail>
               </>
             ) : (
-              <Detail label="Status">Coming soon</Detail>
+              <Detail label="Status">
+                {integration.built ? "Accepting reports" : "Coming soon"}
+              </Detail>
             )}
 
             {integration.links.map((link) => (
