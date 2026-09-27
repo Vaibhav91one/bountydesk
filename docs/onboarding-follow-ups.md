@@ -177,6 +177,17 @@ The build driver now selects a bounded per-ecosystem egress allowlist from
 sandbox remains offline. New ecosystems or package hosts need an explicit profile and test update; do
 not restore a global allowlist that widens every build.
 
+On a restricted Daytona tier (1 or 2) that allowlist is refused: `createBuildSandbox` falls back to
+the org egress policy after proving the sandbox still cannot reach the open internet
+(`assertOrganizationEgressRestricted`). The org policy reaches the common package hosts (GitHub, npm,
+PyPI, Debian mirrors) but not the Alpine apk mirror, so a Dockerfile built on an Alpine base with
+`apk` steps fails to build and the report degrades cleanly to a static review (`COULD_NOT_BUILD` then
+`ANALYSIS_ONLY`). Debian-family bases (`*-slim`, `debian`, `ubuntu`, `node`, `python`) build fine,
+which is why the demo and test targets use them. This is a reachability limit of the tier, not a
+code gap: the per-sandbox allowlist is already correct and starts working on Tier 3 or 4, where a
+per-sandbox list replaces the default. Deciding to reproduce Alpine-based targets is a billing-tier
+choice, not a code change. Prefer a Debian base when authoring or uploading a Dockerfile.
+
 ## Resolved
 
 The no-egress oracle now accepts `wget` as well as `curl` (see `classifyEgressProbe` in
