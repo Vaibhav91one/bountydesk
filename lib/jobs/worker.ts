@@ -1,4 +1,6 @@
+import { isReviewerEmail } from "@/lib/auth/reviewers";
 import { db, eq, report } from "@/lib/db";
+import { attachEmailTarget } from "@/lib/email/attachment-target";
 import { parseThreadReferences, type InboundEmail } from "@/lib/email/inbound";
 import type { OutsideEmailPayload } from "@/lib/email/outside-intake";
 import { fetchInboundBody, fetchRawHeaders } from "@/lib/email/resend";
@@ -338,6 +340,19 @@ async function parseEmail(lease: Lease): Promise<Lease> {
     { deliveryId: lease.deliveryId, jobId: lease.id, sourceRef },
     `${lease.id}:intake.accepted`,
   );
+
+  // An attachment becomes the report's buildable target, but only from a verified sender: an outside
+  // sender that passed SPF and DKIM (admitOutsideEmail set verifiedSender and dropped anything that
+  // failed, so it never reaches here), or an allowlisted reviewer. The material rides the same
+  // upload_intake row and reviewer gate as the submit page, so nothing builds until a reviewer
+  // releases it. Best effort: an unreadable or invalid attachment must not stop the report existing.
+  if (fetched?.attachments.length && (outside || (await isReviewerEmail(email.fromEmail)))) {
+    try {
+      await attachEmailTarget({ reportId, fromEmail: email.fromEmail, attachments: fetched.attachments });
+    } catch (error) {
+      console.warn(`email parse: could not attach target material for ${sourceRef}: ${String(error)}`);
+    }
+  }
 
   return advance(lease, "PARSED", { reportId });
 }

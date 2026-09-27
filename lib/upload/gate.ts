@@ -86,7 +86,12 @@ export async function approveUploadTarget(
       .from(report)
       .where(eq(report.id, reportId))
       .for("update");
-    if (!row || row.channel !== "upload") return { ok: false, reason: "report not found" };
+    // An email report can carry the same material through an attachment, so it too is releasable
+    // here. The material check below is what actually refuses a report with nothing to build, so a
+    // text-only report of either channel is rejected there, not by channel.
+    if (!row || (row.channel !== "upload" && row.channel !== "email")) {
+      return { ok: false, reason: "report not found" };
+    }
     if (row.state !== "NEEDS_DECISION") {
       return { ok: false, reason: `report is ${row.state}; it is no longer waiting for a decision` };
     }

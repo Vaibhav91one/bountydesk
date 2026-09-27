@@ -133,7 +133,11 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   const [targetProfiles, gate, upload] = await Promise.all([
     file.target ? Promise.resolve([]) : listTargetProfiles(),
     file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
-    file.channel === "upload" ? readUpload(file.id) : Promise.resolve(null),
+    // Both channels can carry target material: an upload always, an email only when an attachment
+    // brought one. readUpload returns null otherwise. The email gate (TriageGate) uses it to offer a
+    // build; the standalone UploadGate is for the upload channel alone, so its reply-less dismiss
+    // never lands on an email report that deserves the out-of-scope reply.
+    file.channel === "upload" || file.channel === "email" ? readUpload(file.id) : Promise.resolve(null),
   ]);
 
   // Where the report came from, which is not always the repository on the row. A GitHub report
@@ -225,10 +229,13 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
           state={file.state}
           gate={gate}
           closingReason={closingReason}
+          upload={upload}
         />
       ) : null}
 
-      {upload ? <UploadGate reportId={file.id} state={file.state} upload={upload} /> : null}
+      {file.channel === "upload" && upload ? (
+        <UploadGate reportId={file.id} state={file.state} upload={upload} />
+      ) : null}
 
       {file.channel === "advisory" ? (
         <AdvisoryGate reportId={file.id} state={file.state} closingReason={closingReason} />

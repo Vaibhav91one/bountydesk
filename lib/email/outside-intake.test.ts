@@ -64,6 +64,7 @@ function fetched(overrides: Partial<InboundBody> = {}, headers?: string) {
       spf: "pass",
       dkim: "pass",
       sizeBytes: 5,
+      attachments: [],
       rawUrl: `https://raw.test/${resendEmailId}`,
       ...overrides,
     };
