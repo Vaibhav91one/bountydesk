@@ -744,6 +744,79 @@ async function seedHeldDelivery() {
   return { reportId, deliveryId: delivery.id };
 }
 
+const UPLOAD_DIGEST = `sha256:${"a".repeat(64)}`;
+
+function uploadForm(fields: Record<string, string | Blob>): FormData {
+  const data = new FormData();
+  const base: Record<string, string> = {
+    title: "Broken access control",
+    body: "Steps to reproduce...",
+    port: "3000",
+    readinessPath: "/",
+  };
+  for (const [key, value] of Object.entries({ ...base, ...fields })) data.set(key, value);
+  return data;
+}
+
+async function uploadReportCount() {
+  const [row] = await dbm.db
+    .select({ n: dbm.sql<number>`count(*)::int` })
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.channel, "upload"));
+  return row?.n ?? 0;
+}
+
+test("the reviewer upload action refuses a caller who is not a reviewer, and creates nothing", async () => {
+  const before = await uploadReportCount();
+  const form = uploadForm({ imageRef: "ghcr.io/vendor/app:1.2", imageDigest: UPLOAD_DIGEST });
+
+  signOut();
+  await assert.rejects(() => actions.submitReviewerUploadAction(form), /NEXT_REDIRECT/);
+  signIn(REVIEWER_ID + 1, "outsider");
+  await assert.rejects(() => actions.submitReviewerUploadAction(form), /NEXT_REDIRECT/);
+
+  assert.equal(await uploadReportCount(), before, "a refused caller never creates a report");
+});
+
+test("a reviewer's upload creates a verified report bound to their session and queues the build", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const result = await actions.submitReviewerUploadAction(
+    uploadForm({
+      // A contact in the form is ignored: the action binds the reviewer's session email instead.
+      contact: "attacker@evil.test",
+      imageRef: "ghcr.io/vendor/app:1.2",
+      imageDigest: UPLOAD_DIGEST,
+    }),
+  );
+  assert.equal(result.ok, true);
+  assert.ok(result.reportId);
+
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.report)
+    .where(dbm.eq(dbm.report.id, result.reportId!));
+  assert.equal(row.channel, "upload");
+  assert.equal(row.state, "TRIAGING");
+  assert.equal(row.reporterContact, REVIEWER_EMAIL);
+  assert.equal(row.verifiedSender, REVIEWER_EMAIL, "the contact is proven by the session, not an OTP");
+
+  const [upload] = await dbm.db
+    .select()
+    .from(dbm.uploadIntake)
+    .where(dbm.eq(dbm.uploadIntake.reportId, result.reportId!));
+  assert.equal(upload.buildState, "PENDING");
+});
+
+test("the reviewer upload action refuses invalid material with the public path's message", async () => {
+  signIn(REVIEWER_ID, "gatekeeper");
+  const before = await uploadReportCount();
+  const result = await actions.submitReviewerUploadAction(
+    uploadForm({ archive: new Blob(["just text, not a tarball"]) }),
+  );
+  assert.deepEqual(result, { ok: false, error: "the source archive must be a .tar or .tar.gz file" });
+  assert.equal(await uploadReportCount(), before, "a rejected upload creates no report");
+});
+
 test("retryHeldDeliveryAction refuses a caller who is not a reviewer, and changes nothing", async () => {
   const { reportId, deliveryId } = await seedHeldDelivery();
   signOut();

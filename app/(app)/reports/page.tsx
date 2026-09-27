@@ -1,3 +1,6 @@
+import Link from "next/link";
+
+import { Button } from "@/components/ui/button";
 import { requireReviewer } from "@/lib/auth/dal";
 import { listAllReports, phaseOf, INDEX_LIMIT } from "@/lib/reports/queue";
 
@@ -24,11 +27,16 @@ export default async function ReportsPage() {
             Everything that has arrived, whatever state it ended in.
           </p>
         </div>
-        {rows.length === INDEX_LIMIT ? (
-          <span className="text-meta text-muted-foreground">
-            Showing the {INDEX_LIMIT} most recently changed.
-          </span>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {rows.length === INDEX_LIMIT ? (
+            <span className="text-meta text-muted-foreground">
+              Showing the {INDEX_LIMIT} most recently changed.
+            </span>
+          ) : null}
+          <Button size="sm" render={<Link href="/reports/upload" />}>
+            Submit a target
+          </Button>
+        </div>
       </header>
 
       <ReportsLive

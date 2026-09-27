@@ -10,6 +10,7 @@ import { normalizeSender, overLimit, senderDomain } from "@/lib/email/outside-in
 import { sendVerificationEmail } from "@/lib/email/resend";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { ensureReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
+import { approveUploadTarget, reviewedUploadTarget, type UploadTargetInput } from "@/lib/upload/gate";
 
 /**
  * Intake for a report uploaded through the public submit page.
@@ -242,6 +243,91 @@ export async function admitUpload(
   if ("reason" in admitted) return { accepted: false, status: 429, reason: admitted.reason };
   const codeSent = await sendContactCode(admitted.reportId, deps.sendCode ?? defaultSendCode);
   return { accepted: true, reportId: admitted.reportId, codeSent: codeSent.ok };
+}
+
+export type ReviewerUploadResult = { ok: true; reportId: string } | { ok: false; reason: string };
+
+/**
+ * Admit a target an authenticated reviewer uploaded from the dashboard, and queue its build.
+ *
+ * This is the trusted twin of admitUpload. A reviewer's session already proves who they are, so
+ * this path drops the two things the public route exists to enforce against anonymous uploaders:
+ * the daily rate limits and the one-time-code contact proof. There is no NEEDS_DECISION hold
+ * either. The reviewer states the build settings up front, so the report is created and its
+ * material handed straight to the same build loop the public gate feeds.
+ *
+ * The material has already been validated by parseUploadForm, the exact validator the public route
+ * uses, so the size caps, tarball sniffing and image-registry allowlist are identical. The one
+ * thing this skips is the OTP, and only because the reviewer's address is proven by their session.
+ * verified_sender is set to that address so delivery's isVerifiedEmailRecipient accepts it, the
+ * same field the OTP path writes once the code is entered.
+ *
+ * Uploading is not approving: the report still runs the offline build and reproduction and drafts
+ * a verdict that a human must sign at publish_verdict before anything is delivered. The reviewer
+ * who uploads may be a different person from the one who approves, and either way the gate stays.
+ */
+export async function admitReviewerUpload(
+  submission: UploadSubmission,
+  reviewer: { login: string; email: string },
+  target: UploadTargetInput,
+): Promise<ReviewerUploadResult> {
+  const material = submission.material;
+  // This path exists to build an uploaded target. Without material there is nothing to build, and
+  // a reviewer who only wants an analysis-only run does not need to come through here.
+  if (!material) return { ok: false, reason: "attach target material to build" };
+
+  // Validate the build settings before writing anything, so bad settings never leave an orphan
+  // report at the gate. approveUploadTarget re-validates below with the real report id.
+  try {
+    reviewedUploadTarget(randomUUID(), target);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : "the target settings are not valid" };
+  }
+
+  const contact = submission.contact;
+  const archive = material.kind !== "image" ? material.archive : null;
+
+  const reportId = await db.transaction(async (tx): Promise<string> => {
+    const sourceRef = `upload:${randomUUID()}`;
+    const id = await ensureReport(
+      {
+        channel: "upload",
+        sourceRef,
+        title: submission.title,
+        body: submission.body,
+        reporterHandle: reviewer.login,
+        reporterContact: contact,
+        verifiedSender: contact,
+        state: "NEEDS_DECISION",
+        connectedRepositoryId: null,
+        targetProfileId: null,
+      },
+      tx,
+    );
+    await tx.insert(uploadIntake).values({
+      reportId: id,
+      senderKey: normalizeSender(contact),
+      senderDomain: senderDomain(contact),
+      clientIp: null,
+      materialKind: material.kind,
+      archive,
+      sourceArchiveDigest: archive ? `sha256:${createHash("sha256").update(archive).digest("hex")}` : null,
+      imageRef: material.kind === "image" ? material.imageRef : null,
+      imageDigest: material.kind === "image" ? material.imageDigest : null,
+      materialBytes: archive?.length ?? null,
+    });
+    await recordEvent(id, "intake.accepted", { sourceRef, material: material.kind, reviewer: reviewer.login }, { tx });
+    await recordEvent(id, "upload.contact_verified", { method: "reviewer" }, { tx });
+    return id;
+  });
+
+  // Reuse the reviewer gate: it moves NEEDS_DECISION to TRIAGING and flips the upload to build_state
+  // PENDING under the report's row lock, so the build loop picks the material up exactly as it does
+  // for a released public upload. The NEEDS_DECISION state is transient, held only across these two
+  // calls, never surfaced to a reviewer.
+  const approved = await approveUploadTarget(reportId, reviewer.login, target);
+  if (!approved.ok) return { ok: false, reason: approved.reason };
+  return { ok: true, reportId };
 }
 
 export type CodeResult = { ok: true } | { ok: false; reason: string };
