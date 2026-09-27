@@ -42,6 +42,12 @@ const nextConfig: NextConfig = {
   images: {
     remotePatterns: [{ protocol: "https", hostname: "img.clerk.com" }],
   },
+  // The reviewer target upload posts a tarball through a server action, and the default cap is
+  // 1 MB. Match the public upload route's own limit (UPLOAD_LIMITS.maxRequestBytes, 4 MB) plus a
+  // little multipart overhead. Vercel still enforces its own ~4.5 MB function-body ceiling.
+  experimental: {
+    serverActions: { bodySizeLimit: "5mb" },
+  },
 };
 
 export default nextConfig;

@@ -33,6 +33,8 @@ import { resolveReportId } from "@/app/(app)/reports/[id]/resolve-id";
 import { bindTarget } from "@/lib/targets/bind";
 import type { Ecosystem } from "@/lib/build-onboarding/build-plan";
 import { approveUploadTarget } from "@/lib/upload/gate";
+import { admitReviewerUpload, parseUploadForm } from "@/lib/upload/intake";
+import { readOutsideConfig } from "@/lib/email/outside-config";
 import { RUN_NOT_FOUND, thrownActionError } from "@/lib/review/action-errors";
 import { computeContentHash } from "@/lib/verdicts/hash";
 import { safeErrorText } from "@/lib/errors/safe-error";
@@ -572,6 +574,53 @@ export async function approveUploadTargetAction(
       ...(input.ecosystem ? { ecosystem: input.ecosystem as Ecosystem } : {}),
     }),
   );
+}
+
+/**
+ * Accept a target an authenticated reviewer uploaded from the dashboard, and queue its build.
+ *
+ * The trust boundary is this one line: requireReviewer runs first, so a signed-out or
+ * non-allowlisted caller is redirected before any bytes are read, and the contact is overwritten
+ * with the reviewer's own session email rather than taken from the form. That is what lets this
+ * path skip the public OTP the anonymous /submit route needs: the reviewer's address is already
+ * proven by their session, so no code round trip is used to prove it again.
+ *
+ * Everything downstream is unchanged. The material is validated by parseUploadForm, the same
+ * validator the public route runs, so the size caps, tarball check and image-registry allowlist
+ * hold identically. The build and reproduction still run in the offline sandboxes, and the drafted
+ * verdict still waits for a human at publish_verdict: uploading a target is not approving its
+ * verdict.
+ */
+export async function submitReviewerUploadAction(
+  formData: FormData,
+): Promise<ActionResult & { reportId?: string }> {
+  const session = await requireReviewer();
+  // The contact is the authenticated reviewer, never a value the form supplied. Overwriting it
+  // here is what binds the upload's delivery address to the signed-in identity.
+  formData.set("contact", session.email);
+
+  const config = await readOutsideConfig();
+  const parsed = await parseUploadForm(formData, config);
+  if (!parsed.ok) return { ok: false, error: parsed.reason };
+
+  const startCommand = String(formData.get("startCommand") ?? "").trim();
+  const ecosystem = String(formData.get("ecosystem") ?? "").trim();
+  const target = {
+    port: Number(formData.get("port")),
+    readinessPath: String(formData.get("readinessPath") ?? ""),
+    ...(startCommand ? { startCommand } : {}),
+    ...(ecosystem ? { ecosystem: ecosystem as Ecosystem } : {}),
+  };
+
+  try {
+    const result = await admitReviewerUpload(parsed.submission, session, target);
+    if (!result.ok) return { ok: false, error: result.reason };
+    revalidateReportViews(result.reportId);
+    return { ok: true, reportId: result.reportId };
+  } catch (error) {
+    console.error(`reviewer upload for ${session.login} failed: ${safeErrorText(error)}`);
+    return { ok: false, error: "The upload could not be accepted." };
+  }
 }
 
 /**
