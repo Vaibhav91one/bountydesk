@@ -117,13 +117,19 @@ export async function queryOsv(
 }
 
 /** Read the manifests and lockfiles through the same bounded reader the static review uses, then look
- *  the dependencies up in OSV. Never throws, for the same reason the static pass is fail-open. */
+ *  the dependencies up in OSV. Never throws, for the same reason the static pass is fail-open.
+ *
+ *  `availablePaths`, when given, is the repo's tree listing already filtered to blobs at or under the
+ *  size cap. Passing it means a file too large to be listed is never fetched, so a server that ignores
+ *  the reader's Range header cannot pull a giant lockfile into memory. Omit it only where reads are
+ *  local (tests). */
 export async function scanDependencies(
   source: SourceReader,
-  opts: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
+  opts: { fetchImpl?: typeof fetch; signal?: AbortSignal; availablePaths?: ReadonlySet<string> } = {},
 ): Promise<DependencyAdvisory[]> {
   const files: Array<{ path: string; text: string }> = [];
   for (const { path } of SCAN_FILES) {
+    if (opts.availablePaths && !opts.availablePaths.has(path)) continue;
     const text = await source.readFile(path).catch(() => null);
     if (text !== null && text.trim().length > 0) files.push({ path, text });
   }

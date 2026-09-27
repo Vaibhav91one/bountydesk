@@ -50,10 +50,6 @@ export const MAX_TREE_PATHS = 300;
 const MAX_SOURCE_FILES = 10;
 export const MAX_FILE_CHARS = 6_000;
 export const MAX_BLOB_BYTES = 200_000;
-/** Lockfiles carry exact versions but run large, so the dependency scan reads them with a bigger cap
- *  than the 6 KB excerpt reader. A lockfile past this bound truncates and parses to nothing, and the
- *  scan falls back to that ecosystem's manifest. */
-const SCAN_READ_BYTES = 1_000_000;
 const FETCH_TIMEOUT_MS = 20_000;
 
 export const SOURCE_EXTENSION =
@@ -144,11 +140,13 @@ export async function gatherStaticSource(
             const text = await reader.readFile(path).catch(() => null);
             if (text !== null && text.trim().length > 0) result.files.push({ path, text });
           }
-          // Host-side OSV lookup on the declared dependencies, reusing this same scoped token. A
-          // dedicated reader with a larger cap so lockfiles are not truncated to nothing. scanDependencies
-          // never throws, so a slow or unreachable OSV leaves advisories empty without failing the review.
-          const scanReader = boundedSourceReader(input.repoFullName, SCAN_READ_BYTES, ref, signal, token);
-          result.advisories = await scanDependencies(scanReader, { signal });
+          // Host-side OSV lookup on the declared dependencies, reusing this same scoped token. Reads are
+          // gated on the tree listing (already filtered to blobs at or under MAX_BLOB_BYTES), so an
+          // oversize lockfile is never fetched even if a server ignores the reader's Range header.
+          // scanDependencies never throws, so a slow or unreachable OSV leaves advisories empty without
+          // failing the review.
+          const scanReader = boundedSourceReader(input.repoFullName, MAX_BLOB_BYTES, ref, signal, token);
+          result.advisories = await scanDependencies(scanReader, { signal, availablePaths: new Set(blobs) });
         } catch (error) {
           throw new Error(redactToken(error instanceof Error ? error.message : String(error), token));
         }

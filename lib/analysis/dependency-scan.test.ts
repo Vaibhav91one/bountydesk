@@ -177,6 +177,20 @@ test("scanDependencies reads the corpus and reports OSV matches, empty when noth
   assert.deepEqual(empty, []);
 });
 
+test("availablePaths gates the scan so an unlisted (oversize) file is never read", async () => {
+  const read: string[] = [];
+  const reader: SourceReader = {
+    async readFile(path: string) {
+      read.push(path);
+      return path === "package.json" ? `{ "dependencies": { "lodash": "4.17.15" } }` : "should not be read";
+    },
+  };
+  const fetchImpl = (async () => Response.json({ results: [] })) as typeof fetch;
+  // package-lock.json is left out of the tree listing (too large to list), so it must not be fetched.
+  await scanDependencies(reader, { fetchImpl, availablePaths: new Set(["package.json"]) });
+  assert.deepEqual(read, ["package.json"], "only the listed path is read");
+});
+
 test("the advisory section is null when empty and Observation-tier framed when not", () => {
   assert.equal(dependencyAdvisorySection([]), null);
   const section = dependencyAdvisorySection([{ ecosystem: "npm", name: "lodash", version: "4.17.15", ids: ["GHSA-x"] }]);
