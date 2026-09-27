@@ -13,6 +13,13 @@ const RESEND_TIMEOUT_MS = 20_000;
 /** Resend's verdict on one sender check. Anything but "pass" is treated as a failure. */
 export type AuthResult = "pass" | "fail" | "gray" | "processing_failed" | "unknown";
 
+/** One decoded attachment. Only attachments whose bytes the receiving API returned are listed. */
+export type InboundAttachment = {
+  filename: string;
+  contentType: string;
+  content: Buffer;
+};
+
 export type InboundBody = {
   text: string;
   html: string;
@@ -24,9 +31,29 @@ export type InboundBody = {
   dkim: AuthResult;
   /** Text plus HTML plus the attachments' declared sizes, for the outside-sender size cap. */
   sizeBytes: number;
+  /**
+   * Attachments with their decoded bytes, for the email-to-target path (lib/email/attachment-target.ts).
+   * Empty when the message carried none or the API returned only their metadata. The size cap above is
+   * still computed from every attachment's declared size, so a metadata-only attachment still counts.
+   */
+  attachments: InboundAttachment[];
   /** Short-lived signed URL of the raw MIME message, for reading its header block. */
   rawUrl: string | null;
 };
+
+/** Read one attachment's bytes from the receiving payload, or null when it carried none. */
+function parseAttachment(value: unknown): InboundAttachment | null {
+  const rec = value as Record<string, unknown> | null;
+  if (!rec) return null;
+  // Resend spells the base64 body `content`; accept `content_base64` too rather than depend on one name.
+  const encoded =
+    typeof rec.content === "string" ? rec.content : typeof rec.content_base64 === "string" ? rec.content_base64 : null;
+  if (!encoded) return null;
+  const filename = typeof rec.filename === "string" ? rec.filename : typeof rec.name === "string" ? rec.name : "";
+  const contentType =
+    typeof rec.content_type === "string" ? rec.content_type : typeof rec.contentType === "string" ? rec.contentType : "";
+  return { filename, contentType, content: Buffer.from(encoded, "base64") };
+}
 
 const AUTH_RESULTS: readonly AuthResult[] = ["pass", "fail", "gray", "processing_failed", "unknown"];
 
@@ -91,12 +118,16 @@ export async function fetchInboundBody(resendEmailId: string): Promise<InboundBo
         return sum + (typeof size === "number" && size > 0 ? size : 0);
       }, 0)
     : 0;
+  const attachments = Array.isArray(payload.attachments)
+    ? payload.attachments.map(parseAttachment).filter((a): a is InboundAttachment => a !== null)
+    : [];
   return {
     text,
     html,
     spf: authResult(payload.authentication?.spf),
     dkim: authResult(payload.authentication?.dkim),
     sizeBytes: Buffer.byteLength(text) + Buffer.byteLength(html) + attachmentBytes,
+    attachments,
     rawUrl: typeof payload.raw?.download_url === "string" ? payload.raw.download_url : null,
   };
 }

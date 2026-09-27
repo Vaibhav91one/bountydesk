@@ -60,10 +60,19 @@ function file(form: FormData, key: string): File | null {
   return value instanceof File && value.size > 0 ? value : null;
 }
 
-function isTarball(bytes: Buffer): boolean {
+export function isTarball(bytes: Buffer): boolean {
   const gzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
   const ustar = bytes.length >= 262 && bytes.subarray(257, 262).toString("latin1") === "ustar";
   return gzip || ustar;
+}
+
+/**
+ * A file that a Dockerfile could be: valid UTF-8 with a FROM instruction. A NUL or a replacement
+ * character means binary or not UTF-8, which no Dockerfile is. Shared with the email attachment path
+ * so both surfaces validate the same bytes the same way.
+ */
+export function isValidDockerfileText(content: string): boolean {
+  return !content.includes("\0") && !content.includes("�") && /^\s*FROM\s+\S/im.test(content);
 }
 
 /**
@@ -131,9 +140,7 @@ export async function parseUploadForm(form: FormData, config: OutsideConfig): Pr
       return { ok: false, reason: `the Dockerfile is over ${UPLOAD_LIMITS.maxDockerfileBytes} bytes` };
     }
     const bytes = Buffer.from(await dockerfile.arrayBuffer());
-    const content = bytes.toString("utf8");
-    // A NUL or a replacement character means binary or not UTF-8, which no Dockerfile is.
-    if (content.includes("\0") || content.includes("�") || !/^\s*FROM\s+\S/im.test(content)) {
+    if (!isValidDockerfileText(bytes.toString("utf8"))) {
       return { ok: false, reason: "the Dockerfile must be a text file with a FROM instruction" };
     }
     material = { kind: "dockerfile", archive: singleFileTar("Dockerfile", bytes) };
@@ -159,12 +166,18 @@ async function recentCounts(
   clientIp: string | null,
   tx: Executor,
 ): Promise<{ sender: number; domain: number; address: number }> {
+  // Only submit-page rows count against the submit-page caps. An emailed report's attachment also
+  // lands in upload_intake (lib/email/attachment-target.ts), but it is bounded by the outside-email
+  // daily caps and the message size cap, so counting it here would let a verified email sender lock
+  // themselves, or their whole domain, out of /submit with mail that never touched it.
   const rows = await tx.execute<{ sender: number; domain: number; address: number }>(sql`
     select count(*) filter (where ${uploadIntake.senderKey} = ${senderKey})::int as sender,
            count(*) filter (where ${uploadIntake.senderDomain} = ${domain})::int as domain,
            count(*) filter (where ${uploadIntake.clientIp} = ${clientIp})::int as address
       from ${uploadIntake}
-     where ${uploadIntake.createdAt} > now() - interval '1 day'
+      join ${report} on ${report.id} = ${uploadIntake.reportId}
+     where ${report.channel} = 'upload'
+       and ${uploadIntake.createdAt} > now() - interval '1 day'
   `);
   const row = rows[0];
   return { sender: row?.sender ?? 0, domain: row?.domain ?? 0, address: row?.address ?? 0 };

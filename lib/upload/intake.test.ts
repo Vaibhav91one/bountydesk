@@ -219,6 +219,37 @@ test("an uncompressed ustar .tar is accepted as archive material, not just a gzi
   assert.equal(parsed.submission.material?.kind, "archive");
 });
 
+test("an emailed report's attachment row does not spend the submit-page daily caps", async () => {
+  // An email attachment lands in upload_intake too, but on the email channel, and it is bounded by
+  // the outside-email caps, not these. If it counted here, a verified email sender could lock their
+  // whole domain out of /submit with mail that never touched it.
+  const tight = { ...CONFIG, perSenderPerDay: 1, perDomainPerDay: 1, exemptDomains: [] };
+  const [emailReport] = await dbm.db
+    .insert(dbm.report)
+    .values({ channel: "email", sourceRef: `email:<capshare-${Math.random()}>`, title: "t", body: "b", reporterContact: "mailer@capshare.test" })
+    .returning({ id: dbm.report.id });
+  await dbm.db.insert(dbm.uploadIntake).values({
+    reportId: emailReport.id,
+    senderKey: "mailer@capshare.test",
+    senderDomain: "capshare.test",
+    materialKind: "dockerfile",
+    archive: Buffer.from("FROM alpine\n"),
+    sourceArchiveDigest: `sha256:${"b".repeat(64)}`,
+    materialBytes: 11,
+  });
+
+  const admitWith = async (contact: string, ip: string) => {
+    const parsed = await intake.parseUploadForm(form({ ...BASE, contact }), tight);
+    assert.ok(parsed.ok);
+    return intake.admitUpload(parsed.submission, ip, { sendCode, config: tight });
+  };
+
+  // The submit-page upload still gets in: the email row is not counted against the domain cap of 1.
+  assert.equal((await admitWith("u1@capshare.test", "198.51.100.77")).accepted, true);
+  // The cap still bites on the submit page's own rows: a second upload on the same domain is refused.
+  assert.equal((await admitWith("u2@capshare.test", "198.51.100.78")).accepted, false);
+});
+
 test("the client address comes from the edge, not from a value the requester chose", () => {
   const h = (init: Record<string, string>) => new Headers(init);
   assert.equal(intake.clientAddress(h({ "x-real-ip": "203.0.113.5", "x-forwarded-for": "1.2.3.4" })), "203.0.113.5");

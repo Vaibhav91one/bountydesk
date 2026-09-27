@@ -108,6 +108,34 @@ test("fetchInboundBody reads SPF, DKIM and the message size, and a missing verdi
   }
 });
 
+test("fetchInboundBody decodes attachment bytes and skips metadata-only attachments", async () => {
+  process.env.RESEND_API_KEY = "re_test_key";
+  const dockerfile = Buffer.from("FROM alpine\n").toString("base64");
+  stubFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          text: "steps",
+          attachments: [
+            { filename: "Dockerfile", content_type: "text/plain", content: dockerfile, size: 11 },
+            { filename: "big.bin", size: 2000 },
+          ],
+        }),
+        { status: 200 },
+      ),
+  );
+  try {
+    const body = await fetchInboundBody("abc-123");
+    // Only the attachment whose bytes came back is listed; the size cap still counts both sizes.
+    assert.equal(body.attachments.length, 1);
+    assert.equal(body.attachments[0].filename, "Dockerfile");
+    assert.equal(body.attachments[0].content.toString("utf8"), "FROM alpine\n");
+    assert.equal(body.sizeBytes, Buffer.byteLength("steps") + 11 + 2000);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("fetchRawHeaders returns the header block, sends no API key, and stops before the body", async () => {
   process.env.RESEND_API_KEY = "re_test_key";
   let seenAuth: string | null = "unset";

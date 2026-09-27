@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { markDuplicateAction, rejectAtGateAction, runAnalysisAction } from "@/app/review/actions";
+import { approveUploadTargetAction, markDuplicateAction, rejectAtGateAction, runAnalysisAction } from "@/app/review/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,11 +16,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { ECOSYSTEMS } from "@/lib/build-onboarding/build-plan";
 import { refreshReportViews } from "@/lib/reports/live-keys";
 import type { GateTriage, GateView } from "@/lib/triage/gate";
+import type { UploadView } from "@/lib/upload/gate";
 
 type Decision =
   | { kind: "analysis" }
+  | { kind: "build" }
   | { kind: "reject" }
   | { kind: "spam" }
   | { kind: "duplicate"; of: string; title: string | null };
@@ -29,8 +32,14 @@ const COPY: Record<Decision["kind"], { title: string; description: string; confi
   analysis: {
     title: "Run analysis on this report?",
     description:
-      "Agent Bounty drafts an analysis-only verdict from the report text, the same run an allowlisted sender gets. Nothing is cloned or started, and the verdict waits for your approval before anything reaches the reporter.",
+      "Agent Bounty drafts an analysis-only verdict from the report text, the same run an allowlisted sender gets. Nothing is cloned or started, and any attached target material is left unbuilt. The verdict waits for your approval before anything reaches the reporter.",
     confirm: "Run analysis",
+  },
+  build: {
+    title: "Build the attached target and run?",
+    description:
+      "The material attached to this email is built in the build sandbox, pinned as a target with the settings below, and bound to this report. The target's scope is loopback only. If the build fails, the report still gets an analysis-only run.",
+    confirm: "Build and run",
   },
   reject: {
     title: "Reject this report?",
@@ -52,6 +61,13 @@ const COPY: Record<Decision["kind"], { title: string; description: string; confi
 };
 
 const REPORT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A short description of the attached material for the gate's one-line note. */
+function materialSummary(upload: UploadView): string {
+  if (upload.materialKind === "dockerfile") return "a Dockerfile";
+  if (upload.materialKind === "archive") return "a source tarball";
+  return "a prebuilt image";
+}
 
 /**
  * Pull a report id out of a pasted id, a case-file URL, or the short id printed on a case file
@@ -111,12 +127,16 @@ export function TriageGate({
   state,
   gate,
   closingReason,
+  upload,
 }: {
   reportId: string;
   state: string;
   gate: GateView;
   /** Why a denied report was closed (rejected or spam), read from its closing event. Null otherwise. */
   closingReason: string | null;
+  /** The target material an attachment brought, if any. An email report builds it here rather than
+      through the standalone UploadGate, so its deny stays on the reply-sending reject path. */
+  upload?: UploadView | null;
 }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -124,6 +144,11 @@ export function TriageGate({
   const [decision, setDecision] = useState<Decision | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualId, setManualId] = useState("");
+  const [port, setPort] = useState("3000");
+  const [readinessPath, setReadinessPath] = useState("/");
+  const [startCommand, setStartCommand] = useState("");
+  const [ecosystem, setEcosystem] = useState("none");
+  const canBuild = Boolean(upload?.materialKind) && !upload?.buildState;
 
   function confirm() {
     if (!decision) return;
@@ -132,6 +157,13 @@ export function TriageGate({
       const result =
         decision.kind === "analysis"
           ? await runAnalysisAction(reportId)
+          : decision.kind === "build"
+            ? await approveUploadTargetAction(reportId, {
+                port: Number(port),
+                readinessPath,
+                startCommand: startCommand.trim() || undefined,
+                ecosystem,
+              })
           : decision.kind === "duplicate"
             ? await markDuplicateAction(reportId, decision.of)
             : await rejectAtGateAction(reportId, decision.kind === "spam");
@@ -167,6 +199,34 @@ export function TriageGate({
             Original: {decision.title ?? decision.of}
           </p>
         ) : null}
+        {decision?.kind === "build" ? (
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 text-meta">
+            <label htmlFor="triage-port">Port</label>
+            <Input id="triage-port" inputMode="numeric" value={port} onChange={(e) => setPort(e.target.value)} />
+            <label htmlFor="triage-ready">Readiness path</label>
+            <Input id="triage-ready" value={readinessPath} onChange={(e) => setReadinessPath(e.target.value)} />
+            <label htmlFor="triage-start">Start command</label>
+            <Input
+              id="triage-start"
+              placeholder="How the app starts, e.g. python app.py"
+              value={startCommand}
+              onChange={(e) => setStartCommand(e.target.value)}
+            />
+            <label htmlFor="triage-ecosystem">Build ecosystem</label>
+            <select
+              id="triage-ecosystem"
+              value={ecosystem}
+              onChange={(e) => setEcosystem(e.target.value)}
+              className="h-9 rounded-md bg-input/50 px-3 text-sm"
+            >
+              {ECOSYSTEMS.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         {error ? (
           <p role="alert" className="text-body text-destructive [overflow-wrap:anywhere]">
             {error}
@@ -177,7 +237,7 @@ export function TriageGate({
             Cancel
           </Button>
           <Button
-            variant={decision?.kind === "analysis" ? "default" : "destructive"}
+            variant={decision?.kind === "analysis" || decision?.kind === "build" ? "default" : "destructive"}
             onClick={confirm}
             loading={pending}
             disabled={pending}
@@ -272,6 +332,13 @@ export function TriageGate({
         <p className="text-body text-muted-foreground">Triage has not finished yet.</p>
       )}
 
+      {upload?.materialKind ? (
+        <p className="text-meta text-muted-foreground [overflow-wrap:anywhere]">
+          This email attached target material ({materialSummary(upload)}). Build it to reproduce against
+          it, or run analysis on the text alone.
+        </p>
+      ) : null}
+
       <div className="flex flex-col gap-2">
         <h3 className="text-meta text-muted-foreground">Possible duplicates</h3>
         {triage && triage.duplicateCandidates.length > 0 ? (
@@ -333,7 +400,17 @@ export function TriageGate({
       {/* The row lock already stops a real double action; disabling here is so a confirmed decision
           does not leave the old buttons live and unmarked while the new state is still loading. */}
       <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-4">
-        <Button size="sm" disabled={pending} onClick={() => setDecision({ kind: "analysis" })}>
+        {canBuild ? (
+          <Button size="sm" disabled={pending} onClick={() => setDecision({ kind: "build" })}>
+            Build target and run
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant={canBuild ? "outline" : "default"}
+          disabled={pending}
+          onClick={() => setDecision({ kind: "analysis" })}
+        >
           Run analysis
         </Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={() => setDecision({ kind: "reject" })}>
