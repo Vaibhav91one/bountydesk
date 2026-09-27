@@ -436,6 +436,32 @@ test("a labelled listing follows every page", async () => {
   });
 });
 
+test("an empty filter lists every sandbox, sending no labels param", async () => {
+  // labels={} would be read by the API as "a sandbox with no labels", hiding every labelled one.
+  // An empty filter must mean "no filter", so the param is omitted entirely.
+  const seen: string[] = [];
+  const stub = (async (input: unknown) => {
+    seen.push(String(input));
+    return json({ items: [{ id: "a" }], nextCursor: null });
+  }) as typeof fetch;
+
+  await withFetch(stub, async () => {
+    await listSandboxes({});
+  });
+  assert.equal(seen.length, 1);
+  assert.doesNotMatch(seen[0], /labels=/, "an empty filter must not send a labels param");
+
+  const labelled: string[] = [];
+  const stub2 = (async (input: unknown) => {
+    labelled.push(String(input));
+    return json({ items: [], nextCursor: null });
+  }) as typeof fetch;
+  await withFetch(stub2, async () => {
+    await listSandboxes({ "bountydesk.purpose": "reproduction" });
+  });
+  assert.match(labelled[0], /labels=/, "a non-empty filter still sends a labels param");
+});
+
 test("executing a command addresses the toolbox proxy by sandbox id", async () => {
   let seen = "";
   const stub = (async (input: unknown) => {
