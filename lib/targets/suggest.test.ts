@@ -180,7 +180,22 @@ test("a body with no links costs no query and suggests nothing", async () => {
     unconnected: [],
     progress: [],
     connectLinks: [],
+    referencedElsewhere: [],
   });
+});
+
+test("a GitLab or Bitbucket link is carried as a display-only reference, never a target", async () => {
+  // No GitHub mention at all, so the report has nothing bindable, yet the reference is still shown.
+  const result = await suggest.suggestTargets(
+    "Reproduced on https://gitlab.com/acme/api and bitbucket.org/acme/web",
+    { fetchImpl: plain },
+  );
+  assert.deepEqual(result.matched, []);
+  assert.deepEqual(result.unconnected, []);
+  assert.deepEqual(
+    result.referencedElsewhere.map((r) => `${r.label} ${r.name}`),
+    ["GitLab acme/api", "Bitbucket acme/web"],
+  );
 });
 
 let forkSeq = 0;
