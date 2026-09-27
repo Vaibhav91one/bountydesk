@@ -49,6 +49,9 @@ test("only a green CI run from a push to main reaches production", () => {
     assert.equal(count, 2, `${guard} must guard both jobs`);
   }
   assert.match(workflow, /^ {4}needs: migrate$/m);
+  // A custom if: removes the implicit needs-success gate, so the worker must re-check it or it
+  // could push against a database whose migration failed.
+  assert.match(workflow, /needs\.migrate\.result == 'success'/, "worker must not run when migrate failed");
   // A manual dispatch is still limited to main, and both jobs carry that guard.
   assert.equal(
     (workflow.match(/github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/g) ?? []).length,

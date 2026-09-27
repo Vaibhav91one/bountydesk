@@ -59,12 +59,15 @@ jobs:
 
   worker:
     needs: migrate
+    # A custom if: drops the implicit needs-success gate, so re-assert it: a worker must never be
+    # pushed against a database whose migration failed part way. The source gate matches migrate's.
     if: >-
-      (github.event_name == 'workflow_run'
-        && github.event.workflow_run.conclusion == 'success'
-        && github.event.workflow_run.event == 'push'
-        && github.event.workflow_run.head_branch == 'main')
-      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+      needs.migrate.result == 'success'
+      && ((github.event_name == 'workflow_run'
+            && github.event.workflow_run.conclusion == 'success'
+            && github.event.workflow_run.event == 'push'
+            && github.event.workflow_run.head_branch == 'main')
+        || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
