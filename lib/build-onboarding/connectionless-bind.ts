@@ -1,5 +1,7 @@
 import {
   configureConnectionlessTarget,
+  rotateConnectionlessTarget,
+  TargetProfileExistsError,
   type ConfiguredTarget,
 } from "@/lib/targets/configure";
 import type { TargetDefinition } from "@/lib/targets/registry";
@@ -16,9 +18,8 @@ import { onboardingSnapshotImageRef, type BuildResult } from "./build-driver";
  * The image the build authored is authoritative about where the image lives, so the definition's
  * imageName is overridden with the build's before the write, matching the GitHub path (verifyAndWrite).
  *
- * ponytail: this creates the profile (or reuses an identical one). Rotating a connectionless profile
- * to a new build in place, the way rotateTarget does for a GitHub target, is a later follow-up when a
- * non-GitHub target is re-onboarded with changed settings; today that path throws TargetProfileExistsError.
+ * A re-onboard with changed pins falls back to rotateConnectionlessTarget, the same create-or-rotate
+ * order the GitHub path uses, so the profile row id (and every report bound to it) is kept.
  */
 export async function bindConnectionlessTargetFromBuild(
   definition: TargetDefinition,
@@ -32,7 +33,7 @@ export async function bindConnectionlessTargetFromBuild(
     ? { ...definition, imageName: build.imageName, config: { ...definition.config, services: build.services } }
     : { ...definition, imageName: build.imageName };
 
-  return configureConnectionlessTarget({
+  const args = {
     targetDefinition: pinnedDefinition,
     imageDigest: build.imageDigest,
     snapshotId: build.snapshotId,
@@ -42,5 +43,11 @@ export async function bindConnectionlessTargetFromBuild(
     ...(build.resolvedCommitSha ? { resolvedCommitSha: build.resolvedCommitSha } : {}),
     ...(build.sourceArchiveDigest ? { sourceArchiveDigest: build.sourceArchiveDigest } : {}),
     ...(build.dockerfileText ? { dockerfileText: build.dockerfileText } : {}),
-  });
+  };
+  try {
+    return await configureConnectionlessTarget(args);
+  } catch (error) {
+    if (!(error instanceof TargetProfileExistsError)) throw error;
+    return await rotateConnectionlessTarget(args);
+  }
 }
