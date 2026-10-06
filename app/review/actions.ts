@@ -12,6 +12,8 @@ import {
   db,
   eq,
   report,
+  targetOnboarding,
+  targetProfile,
   verdict,
   verdictSupersession,
 } from "@/lib/db";
@@ -676,9 +678,17 @@ export async function runCodeReviewAction(reportId: string): Promise<ActionResul
   await requireReviewer();
   if (!isReportId(reportId)) return { ok: false, error: "The report id is not valid." };
   const [row] = await db
-    .select({ title: report.title, body: report.body, repoFullName: connectedRepository.fullName })
+    .select({
+      title: report.title,
+      body: report.body,
+      repoFullName: connectedRepository.fullName,
+      targetCommitSha: targetProfile.resolvedCommitSha,
+      onboardingCommitSha: targetOnboarding.resolvedCommitSha,
+    })
     .from(report)
+    .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
     .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
     .where(eq(report.id, reportId))
     .limit(1);
   if (!row) return { ok: false, error: "Report not found." };
@@ -687,6 +697,8 @@ export async function runCodeReviewAction(reportId: string): Promise<ActionResul
     reportId,
     repoFullName: row.repoFullName,
     reportText: `${row.title}\n${row.body}`,
+    // Read the pinned commit, as the static review does, so findings match the code the report named.
+    ref: row.targetCommitSha ?? row.onboardingCommitSha,
   });
   revalidateReportViews(reportId);
   return status === "DONE" ? { ok: true } : { ok: false, error: "The code review could not run." };
