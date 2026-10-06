@@ -6,6 +6,8 @@ import { withRepoReadToken } from "@/lib/github/repo-access";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 import type { ReviewResult, ReviewVerdict } from "@/lib/mcp/review";
 
+import { boundedSourceReader, REVIEW_FILES, type RepoReadDeps } from "./source-access";
+
 /**
  * The sandboxability review: the first, read-only piece of the agentic code-review module.
  *
@@ -28,57 +30,6 @@ const TURN_DEADLINE_MS = 4 * 60_000;
 const POLL_INTERVAL_MS = 3_000;
 /** Per-file cap so a large lockfile or README cannot blow the turn's context. */
 const MAX_FILE_CHARS = 4_000;
-
-/** The files whose presence and contents most reveal how a repo boots: what it is (README), whether it
- *  declares multiple services (compose), its ecosystem and scripts (the language manifests), how it is
- *  launched (Dockerfile, Procfile), and whether it needs credentials to start (.env.example, app.json). */
-export const REVIEW_FILES = [
-  "README.md",
-  "readme.md",
-  "docker-compose.yml",
-  "docker-compose.yaml",
-  "compose.yml",
-  "compose.yaml",
-  "Dockerfile",
-  "Procfile",
-  "app.json",
-  ".env.example",
-  "package.json",
-  "requirements.txt",
-  "pyproject.toml",
-  "composer.json",
-  "Gemfile",
-  "go.mod",
-  "pom.xml",
-];
-
-/** The injectable token plumbing for a private repository's reads. Production passes nothing and gets
- *  the real lookup, mint and revoke from lib/github/repo-access. */
-export type RepoReadDeps = Parameters<typeof withRepoReadToken>[2];
-
-/** Read a file capped at maxBytes with a Range request, so a large README or lockfile does not download
- *  in full for a cheap pre-check. raw.githubusercontent.com honours Range and answers 206 with only the
- *  first bytes; a host that ignores it returns 200, which the slice still bounds. A private repository
- *  needs `token`, a contents:read token from withRepoReadToken whose lifetime the caller owns. */
-export function boundedSourceReader(
-  repoFullName: string,
-  maxBytes: number,
-  ref = "HEAD",
-  signal?: AbortSignal,
-  token?: string | null,
-): SourceReader {
-  return {
-    async readFile(path: string) {
-      const res = await fetch(`https://raw.githubusercontent.com/${repoFullName}/${ref}/${path}`, {
-        headers: { Range: `bytes=0-${maxBytes - 1}`, ...(token ? { authorization: `Bearer ${token}` } : {}) },
-        signal,
-      });
-      if (res.status === 404) return null;
-      if (!res.ok && res.status !== 206) return null;
-      return (await res.text()).slice(0, maxBytes);
-    },
-  };
-}
 
 async function readRepoFiles(source: SourceReader): Promise<Array<{ path: string; text: string }>> {
   const found: Array<{ path: string; text: string }> = [];
