@@ -238,3 +238,69 @@ test("a prebuilt image whose registry is not allowed never reaches a build", asy
     /images from quay\.io are not accepted/,
   );
 });
+
+async function approvedUpload(): Promise<string> {
+  // claim() is global FIFO, so an earlier test's retry-pending row would be claimed ahead of this one.
+  while (await build.buildUploadOnce({ driver: fakeDriver("fail") })) {
+    // keep going until nothing is waiting
+  }
+  const reportId = await heldUpload({ imageRef: "ghcr.io/vendor/app:1", imageDigest: IMAGE_DIGEST });
+  assert.deepEqual(await gate.approveUploadTarget(reportId, "reviewer", TARGET), { ok: true });
+  return reportId;
+}
+
+async function expireLease(reportId: string) {
+  await dbm.db
+    .update(dbm.uploadIntake)
+    .set({ buildLeaseExpiresAt: dbm.sql`now() - interval '1 minute'` })
+    .where(dbm.eq(dbm.uploadIntake.reportId, reportId));
+}
+
+test("holdsCurrentLease is true for the live claimant and false once the lease expired and was re-claimed", async () => {
+  const reportId = await approvedUpload();
+  const original = await build.claim();
+  assert.ok(original && original.reportId === reportId);
+  assert.equal(await build.holdsCurrentLease(original), true);
+
+  await expireLease(reportId);
+  const reclaimed = await build.claim();
+  assert.ok(reclaimed && reclaimed.id === original.id);
+  assert.equal(reclaimed.buildAttempts, original.buildAttempts + 1);
+
+  assert.equal(await build.holdsCurrentLease(original), false);
+  assert.equal(await build.holdsCurrentLease(reclaimed), true);
+});
+
+test("a stale worker's build cannot repoint a profile the re-claiming worker already wrote", async () => {
+  const reportId = await approvedUpload();
+  const { bindConnectionlessTargetFromBuild } = await import("@/lib/build-onboarding/connectionless-bind");
+  const { reviewedTarget } = (await uploadRow(reportId)) as unknown as { reviewedTarget: { definition: import("@/lib/targets/registry").TargetDefinition } };
+  const staleDigest = `sha256:${"d".repeat(64)}`;
+  const newerDigest = `sha256:${"f".repeat(64)}`;
+
+  // The stale worker's build is still running when its lease expires; a second worker reclaims the
+  // row and finishes first, writing the profile with its own digest. Then the stale build returns.
+  const staleDriver: BuildDriver = {
+    async build(input): Promise<BuildResult> {
+      await expireLease(reportId);
+      const second = await build.claim();
+      assert.ok(second);
+      const base = await fakeDriver().build(input);
+      await bindConnectionlessTargetFromBuild(
+        reviewedTarget.definition,
+        { ...base, imageDigest: newerDigest },
+        { mayRotate: () => build.holdsCurrentLease(second) },
+      );
+      return { ...base, imageDigest: staleDigest };
+    },
+  };
+  assert.ok(await build.buildUploadOnce({ driver: staleDriver }));
+
+  const [profile] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.name, gate.uploadTargetName(reportId)));
+  assert.equal(profile.imageDigest, newerDigest);
+  // The stale attempt failed safe: it did not bind the report to its own build.
+  assert.equal((await reportRow(reportId)).targetProfileId, null);
+});

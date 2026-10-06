@@ -45,7 +45,8 @@ type ClaimedUpload = {
   buildAttempts: number;
 };
 
-async function claim(): Promise<ClaimedUpload | null> {
+/** Exported so the lease tests can drive the real claim and fence. */
+export async function claim(): Promise<ClaimedUpload | null> {
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({ id: uploadIntake.id })
@@ -124,7 +125,7 @@ async function finish(
 }
 
 /** True while this worker's claim is still the row's current one (not expired and re-claimed). */
-async function holdsCurrentLease(upload: ClaimedUpload): Promise<boolean> {
+export async function holdsCurrentLease(upload: ClaimedUpload): Promise<boolean> {
   const [row] = await db
     .select({ id: uploadIntake.id })
     .from(uploadIntake)
