@@ -241,3 +241,27 @@ test("rotating a connectionless target that does not exist throws", async () => 
     /does not exist yet; nothing to rotate/,
   );
 });
+
+test("a mesh build stores a manifest that matches the written config and carries the build's image name", async () => {
+  const services = [
+    { service: "app", role: "app" as const, imageName: "ghcr.io/ns/mesh-app", imageDigest: `sha256:${"4".repeat(64)}`, snapshotId: "snap-app", snapshotImageRef: "ghcr.io/ns/mesh-app:bountydesk-onboarding", port: 3000 },
+    { service: "db", role: "dependency" as const, imageName: "docker.io/library/postgres", imageDigest: `sha256:${"5".repeat(64)}`, snapshotId: "snap-db", snapshotImageRef: "docker.io/library/postgres:bountydesk-onboarding", port: 5432 },
+  ] satisfies NonNullable<BuildResult["services"]>;
+  const build: BuildResult = {
+    imageName: "ghcr.io/ns/mesh-app",
+    imageDigest: `sha256:${"4".repeat(64)}`,
+    snapshotId: "snap-app",
+    dockerfileText: "FROM node:20\n",
+    buildLog: "built mesh",
+    buildMarker: "mesh-marker",
+    buildRecipeDigest: `sha256:${"6".repeat(64)}`,
+    sourceArchiveDigest: `sha256:${"7".repeat(64)}`,
+    services,
+  };
+  const configured = await bind.bindConnectionlessTargetFromBuild(definition("mesh-target"), build);
+  const row = await storedProfile(configured.targetProfileId);
+  const manifest = row.manifest as TargetDefinition;
+  assert.equal(manifest.imageName, "ghcr.io/ns/mesh-app");
+  assert.deepEqual(manifest.config.services, services);
+  assert.deepEqual((row.config as { services?: unknown }).services, manifest.config.services);
+});

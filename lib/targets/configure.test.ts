@@ -394,3 +394,69 @@ test("repository ID selects one active repository even when names are reused", a
     ],
   );
 });
+
+test("an onboarded write stores its origin and manifest, and a different manifest alone is not drift", async () => {
+  await connectedRepo(700_020, "acme/catalog-app");
+  const manifest = {
+    name: "catalog-app",
+    repoFullName: "acme/catalog-app",
+    envPrefix: "CATALOG",
+    imageName: "ghcr.io/acme/catalog-app",
+    config: { baseUrl: "http://localhost:3000", readinessPath: "/" },
+    scopeRules: [{ allow: "localhost" }],
+    provisioning: { readinessPath: "/" },
+  };
+  const input = {
+    repoId: 700_020,
+    targetName: "catalog-app",
+    targetDefinition: manifest,
+    imageDigest: `sha256:${"5".repeat(64)}`,
+    snapshotId: "snapshot-catalog",
+    buildMarker: "catalog-build-1",
+    buildRecipeDigest: `sha256:${"6".repeat(64)}`,
+    resolvedCommitSha: "b".repeat(40),
+    origin: "onboarded" as const,
+    manifest,
+  };
+  const configured = await targets.configureTarget(input);
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, configured.targetProfileId));
+  assert.equal(row.origin, "onboarded");
+  assert.deepEqual(row.manifest, manifest);
+
+  const again = await targets.configureTarget({ ...input, manifest: { ...manifest, envPrefix: "OTHER" } });
+  assert.equal(again.targetProfileId, configured.targetProfileId);
+});
+
+test("a connectionless write defaults its origin to connectionless, and the demo profile is demo", async () => {
+  const targetDefinition = {
+    name: "upload-thing",
+    repoFullName: "upload/none",
+    envPrefix: "UPLOAD",
+    imageName: "ghcr.io/ns/upload-thing",
+    config: { baseUrl: "http://localhost:3000", readinessPath: "/" },
+    scopeRules: [{ allow: "localhost" }],
+    provisioning: { readinessPath: "/" },
+  };
+  const configured = await targets.configureConnectionlessTarget({
+    targetDefinition,
+    imageDigest: `sha256:${"7".repeat(64)}`,
+    snapshotId: "snapshot-upload",
+    buildMarker: "upload-build-1",
+    buildRecipeDigest: `sha256:${"8".repeat(64)}`,
+    sourceArchiveDigest: `sha256:${"9".repeat(64)}`,
+  });
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, configured.targetProfileId));
+  assert.equal(row.origin, "connectionless");
+
+  const [demo] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.name, "juice-shop-v17.3.0"));
+  assert.equal(demo.origin, "demo");
+});

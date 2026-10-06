@@ -337,6 +337,13 @@
       "when": 1791297983761,
       "tag": "0047_famous_shinko_yamashiro",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1791303975105,
+      "tag": "0048_peaceful_vision",
+      "breakpoints": true
     }
   ]
 }
