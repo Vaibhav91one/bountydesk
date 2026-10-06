@@ -23,6 +23,7 @@ let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
 let staticReview: typeof import("./static-review");
 let sandboxability: typeof import("./sandboxability");
+let codeReview: typeof import("./code-review");
 
 const GRANTED = { id: 920001, account: { login: "acme", id: 6001, type: "Organization" } };
 const UNGRANTED = { id: 920002, account: { login: "other", id: 6002, type: "Organization" } };
@@ -40,6 +41,7 @@ before(async () => {
   dbm = await import("@/lib/db");
   staticReview = await import("./static-review");
   sandboxability = await import("./sandboxability");
+  codeReview = await import("./code-review");
   const { applyLifecycle } = await import("@/lib/github/lifecycle");
   await applyLifecycle(dbm.db, "installation", {
     action: "created",
@@ -305,4 +307,67 @@ test("the OSV dependency scan runs for a public repo but never a private one", a
   assert.deepEqual(priv.advisories, []);
   // The private source was still read, so the skip is a privacy decision, not a failed read.
   assert.ok(priv.files.some((f) => f.path === "package.json"), "the private manifest was read for the static review");
+});
+
+async function reportRow(n: number): Promise<string> {
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({ channel: "upload", sourceRef: `upload:code-review-${n}`, title: "t", body: "b" })
+    .returning({ id: dbm.report.id });
+  return row.id;
+}
+
+function capturingClient(sink: { message: string; sessions: number; callsAtSession: number }): TrueForgeClient {
+  return {
+    async createSession() {
+      sink.sessions++;
+      sink.callsAtSession = calls.length;
+      return { sessionId: "s" };
+    },
+    async createTurn(_s: string, events: Array<{ content: string }>) {
+      sink.message = events[0].content;
+      return { turnId: "t" };
+    },
+    async getTurn() { return { status: "done_no_action" }; },
+    async deleteSession() {},
+  } as unknown as TrueForgeClient;
+}
+
+test("the code review reads a private repository through a scoped, revoked token and keeps it out of the prompt", async () => {
+  const sink = { message: "", sessions: 0, callsAtSession: -1 };
+  const status = await codeReview.runCodeReview(capturingClient(sink), {
+    reportId: await reportRow(1),
+    repoFullName: READABLE.full_name,
+    reportText: "SQL injection in routes/login.ts",
+  });
+  assert.equal(status, "DONE");
+  assert.ok(sink.message.includes(SOURCE), "the review sees the private source");
+  assert.ok(!sink.message.includes(TOKEN), "the token is never put in the prompt");
+  assertScopedAndRevoked(READABLE.id);
+  assert.equal(sink.callsAtSession, calls.length, "the token is revoked before the agent turn starts");
+});
+
+test("the code review refuses a private repository without Contents: read, with zero fetches and no turn", async () => {
+  const sink = { message: "", sessions: 0, callsAtSession: -1 };
+  const status = await codeReview.runCodeReview(capturingClient(sink), {
+    reportId: await reportRow(2),
+    repoFullName: REFUSED.full_name,
+    reportText: "x",
+  });
+  assert.equal(status, "FAILED");
+  assert.equal(sink.sessions, 0, "no turn runs on a refused repository");
+  assert.deepEqual(calls, [], "no mint and no read");
+});
+
+test("the code review reads a public repository anonymously and mints nothing", async () => {
+  const sink = { message: "", sessions: 0, callsAtSession: -1 };
+  const status = await codeReview.runCodeReview(capturingClient(sink), {
+    reportId: await reportRow(3),
+    repoFullName: OPEN.full_name,
+    reportText: "routes/login.ts",
+  });
+  assert.equal(status, "DONE");
+  assert.ok(sink.message.includes(SOURCE));
+  assert.equal(mints().length, 0);
+  assert.ok(reads().every((c) => c.auth === null), "no Authorization header on a public read");
 });

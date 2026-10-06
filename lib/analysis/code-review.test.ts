@@ -129,3 +129,38 @@ test("a clean turn with no findings is DONE", async () => {
   const status = await cr.runCodeReview(clientWithTurnStatus("done_no_action"), { reportId, repoFullName: "a/b", reportText: "x" }, { source });
   assert.equal(status, "DONE");
 });
+
+test("enqueue returns at once, keeps one live run per report, and the worker claims it", async () => {
+  const reportId = await reportRow();
+  const first = await cr.enqueueCodeReview(reportId);
+  assert.equal(await cr.enqueueCodeReview(reportId), first, "a second request reuses the live run");
+  const [run] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, first));
+  assert.equal(run.status, "PENDING");
+
+  // The report has no connected repository, so the claimed run fails and closes its token.
+  assert.equal(await cr.runCodeReviewOnce(fakeClient(false)), first);
+  const [done] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, first));
+  assert.equal(done.status, "FAILED");
+  assert.equal(done.capabilityToken, `closed:${first}`);
+  assert.equal(await cr.runCodeReviewOnce(fakeClient(false)), null, "nothing left to claim");
+});
+
+test("the sweeper times out a stale run and closes its token, and leaves a fresh one", async () => {
+  const staleReport = await reportRow();
+  const freshReport = await reportRow();
+  const [stale] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId: staleReport, capabilityToken: "stale-token", status: "RUNNING", createdAt: new Date(Date.now() - 30 * 60_000) })
+    .returning({ id: dbm.codeReviewRun.id });
+  const [fresh] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId: freshReport, capabilityToken: "fresh-token", status: "RUNNING" })
+    .returning({ id: dbm.codeReviewRun.id });
+  assert.equal(await cr.sweepStaleCodeReviews(), 1);
+  const rows = await dbm.db.select().from(dbm.codeReviewRun);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  assert.equal(byId.get(stale.id)!.status, "TIMED_OUT");
+  assert.equal(byId.get(stale.id)!.capabilityToken, `closed:${stale.id}`);
+  assert.equal(byId.get(fresh.id)!.status, "RUNNING");
+  assert.equal((await review.reportCodeReviewFindings("stale-token", [finding])).ok, false);
+});

@@ -1,6 +1,18 @@
 import { randomUUID } from "node:crypto";
 
-import { codeReviewRun, db, eq } from "@/lib/db";
+import {
+  and,
+  codeReviewRun,
+  connectedRepository,
+  db,
+  eq,
+  inArray,
+  lte,
+  report,
+  sql,
+  targetOnboarding,
+  targetProfile,
+} from "@/lib/db";
 import type { SourceReader } from "@/lib/build-onboarding/classify";
 import { withRepoReadToken } from "@/lib/github/repo-access";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
@@ -92,22 +104,145 @@ async function readSource(
   );
 }
 
-/** Run the review. Never throws; the status is the run row's final state, FAILED when anything broke. */
+/** A run still PENDING or RUNNING this long after it was queued is treated as orphaned. */
+const STALE_RUN_MS = 15 * 60_000;
+
+/**
+ * Resolve what a review reads: the report's connected repository, the report text, and the pinned
+ * commit (the target profile's, else the onboarding's) so findings match the code the report named.
+ * Null when the report does not exist or has no connected repository.
+ */
+export async function loadCodeReviewInput(reportId: string): Promise<RunCodeReviewInput | null> {
+  const [row] = await db
+    .select({
+      title: report.title,
+      body: report.body,
+      repoFullName: connectedRepository.fullName,
+      targetCommitSha: targetProfile.resolvedCommitSha,
+      onboardingCommitSha: targetOnboarding.resolvedCommitSha,
+    })
+    .from(report)
+    .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (!row?.repoFullName) return null;
+  return {
+    reportId,
+    repoFullName: row.repoFullName,
+    reportText: `${row.title}\n${row.body}`,
+    ref: row.targetCommitSha ?? row.onboardingCommitSha,
+  };
+}
+
+/**
+ * Queue a review for the worker to run and return at once. At most one run per report is live: a
+ * second request while one is PENDING or RUNNING returns the existing run id.
+ */
+export async function enqueueCodeReview(reportId: string): Promise<string> {
+  const [live] = await db
+    .select({ id: codeReviewRun.id })
+    .from(codeReviewRun)
+    .where(and(eq(codeReviewRun.reportId, reportId), inArray(codeReviewRun.status, ["PENDING", "RUNNING"])))
+    .limit(1);
+  if (live) return live.id;
+  const [row] = await db
+    .insert(codeReviewRun)
+    .values({ reportId, capabilityToken: randomUUID(), status: "PENDING" })
+    .returning({ id: codeReviewRun.id });
+  return row.id;
+}
+
+/**
+ * Worker entry: take one PENDING run (FOR UPDATE SKIP LOCKED, like the other queues), run it to
+ * completion and return its id, or null when nothing is queued. The run's own finally closes the
+ * token and records the final status.
+ */
+export async function runCodeReviewOnce(
+  client: TrueForgeClient,
+  opts: { signal?: AbortSignal } = {},
+): Promise<string | null> {
+  const rows = await db.execute<{ id: string; report_id: string; capability_token: string }>(sql`
+    update ${codeReviewRun}
+       set status = 'RUNNING'
+     where ${codeReviewRun.id} = (
+       select ${codeReviewRun.id}
+         from ${codeReviewRun}
+        where ${codeReviewRun.status} = 'PENDING'
+        order by ${codeReviewRun.createdAt}
+        limit 1
+        for update skip locked
+     )
+    returning ${codeReviewRun.id} as id, ${codeReviewRun.reportId} as report_id,
+              ${codeReviewRun.capabilityToken} as capability_token
+  `);
+  const claimed = rows[0];
+  if (!claimed) return null;
+
+  const input = await loadCodeReviewInput(claimed.report_id).catch(() => null);
+  if (!input) {
+    await closeRun(claimed.id, "FAILED");
+    return claimed.id;
+  }
+  await executeRun(client, claimed.id, claimed.capability_token, input, opts);
+  return claimed.id;
+}
+
+/** Close a run: record the final status and retire the token so a late tool call is refused. */
+async function closeRun(runId: string, status: CodeReviewStatus): Promise<void> {
+  await db
+    .update(codeReviewRun)
+    .set({ status, capabilityToken: `closed:${runId}` })
+    .where(eq(codeReviewRun.id, runId))
+    .catch(() => undefined);
+}
+
+/** Self-heal runs orphaned by a crashed worker: close their tokens and mark them TIMED_OUT. */
+export async function sweepStaleCodeReviews(): Promise<number> {
+  const stale = await db
+    .update(codeReviewRun)
+    .set({ status: "TIMED_OUT", capabilityToken: sql`'closed:' || ${codeReviewRun.id}` })
+    .where(
+      and(
+        inArray(codeReviewRun.status, ["PENDING", "RUNNING"]),
+        lte(codeReviewRun.createdAt, new Date(Date.now() - STALE_RUN_MS)),
+      ),
+    )
+    .returning({ id: codeReviewRun.id });
+  return stale.length;
+}
+
+/** Queue-less entry used by tests and callers that already hold a client: insert a RUNNING run and
+ *  execute it inline. Never throws; the status is the run's final state. */
 export async function runCodeReview(
   client: TrueForgeClient,
   input: RunCodeReviewInput,
   opts: { signal?: AbortSignal; source?: SourceReader; readDeps?: RepoReadDeps; deadlineMs?: number } = {},
 ): Promise<CodeReviewStatus> {
   const capability = randomUUID();
-  let runId: string | null = null;
-  let status: CodeReviewStatus = "FAILED";
+  let runId: string;
   try {
     const [row] = await db
       .insert(codeReviewRun)
       .values({ reportId: input.reportId, capabilityToken: capability, status: "RUNNING" })
       .returning({ id: codeReviewRun.id });
     runId = row.id;
+  } catch {
+    return "FAILED";
+  }
+  return executeRun(client, runId, capability, input, opts);
+}
 
+async function executeRun(
+  client: TrueForgeClient,
+  runId: string,
+  capability: string,
+  input: RunCodeReviewInput,
+  opts: { signal?: AbortSignal; source?: SourceReader; readDeps?: RepoReadDeps; deadlineMs?: number },
+): Promise<CodeReviewStatus> {
+  let status: CodeReviewStatus = "FAILED";
+  try {
     const files = await readSource(input, opts);
     const { sessionId } = await client.createSession({ signal: opts.signal, agentName: CODE_REVIEW_AGENT_NAME });
     try {
@@ -130,14 +265,7 @@ export async function runCodeReview(
   } catch {
     status = "FAILED";
   } finally {
-    // The token stops resolving once the run is over, so a late tool call is refused.
-    if (runId) {
-      await db
-        .update(codeReviewRun)
-        .set({ status, capabilityToken: `closed:${runId}` })
-        .where(eq(codeReviewRun.id, runId))
-        .catch(() => undefined);
-    }
+    await closeRun(runId, status);
   }
   return status;
 }

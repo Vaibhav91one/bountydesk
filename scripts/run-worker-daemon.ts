@@ -40,6 +40,7 @@ import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue
 import { reconcileGitHubAccess } from "@/lib/github/reconcile";
 import { sweepExpiredReports } from "@/lib/reports/expiry";
 
+import { runCodeReviewOnce, sweepStaleCodeReviews } from "@/lib/analysis/code-review";
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
 import { runDaemon, type QueueSpec } from "@/lib/worker-daemon/runner";
 
@@ -307,6 +308,13 @@ async function main(): Promise<void> {
         } satisfies QueueSpec]
       : []),
     {
+      // A queued code review: one claim runs the whole turn, so it gets the jobs stall budget. The
+      // sweeper closes the token of a run a crashed worker left behind.
+      name: "code-review",
+      claimOnce: (signal: AbortSignal) => runCodeReviewOnce(trueForgeClient, { signal }),
+      sweepOnce: sweepStaleCodeReviews,
+    },
+    {
       // Re-check runs are rare and self-contained: claim one, provision, hand the turn to the
       // agent-sessions poller. Slow loop budget because provisioning a mesh can take minutes.
       name: "investigation-recheck",
@@ -360,6 +368,7 @@ async function main(): Promise<void> {
     defaultBudgetMs: STALL_BUDGET_MS,
     budgets: {
       jobs: JOBS_STALL_BUDGET_MS,
+      "code-review": JOBS_STALL_BUDGET_MS,
       "build-onboarding": BUILD_ONBOARDING_STALL_BUDGET_MS,
       "upload-build": BUILD_ONBOARDING_STALL_BUDGET_MS,
     },

@@ -8,17 +8,13 @@ import {
   and,
   approvalDecision,
   approvalSubmission,
-  connectedRepository,
   db,
   eq,
   report,
-  targetOnboarding,
-  targetProfile,
   verdict,
   verdictSupersession,
 } from "@/lib/db";
-import { runCodeReview } from "@/lib/analysis/code-review";
-import { createTrueForgeClient } from "@/lib/trueforge/client";
+import { enqueueCodeReview, loadCodeReviewInput } from "@/lib/analysis/code-review";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
@@ -670,40 +666,17 @@ export async function cancelRecheckAction(reportId: string, runId: string): Prom
 }
 
 /**
- * Run the read-only code review for a report on demand. It records findings as evidence and
- * touches no report state, reproduction or verdict. A report with no connected repository has no
- * source to read, so it is refused.
+ * Queue the read-only code review for a report. The worker daemon runs it, because the turn polls
+ * for minutes and would outlive a request. It records findings as evidence and touches no report
+ * state, reproduction or verdict. A report with no connected repository has no source to read.
  */
 export async function runCodeReviewAction(reportId: string): Promise<ActionResult> {
   await requireReviewer();
   if (!isReportId(reportId)) return { ok: false, error: "The report id is not valid." };
-  const [row] = await db
-    .select({
-      title: report.title,
-      body: report.body,
-      repoFullName: connectedRepository.fullName,
-      targetCommitSha: targetProfile.resolvedCommitSha,
-      onboardingCommitSha: targetOnboarding.resolvedCommitSha,
-    })
-    .from(report)
-    .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
-    .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
-    .leftJoin(targetOnboarding, eq(targetOnboarding.repoId, connectedRepository.repoId))
-    .where(eq(report.id, reportId))
-    .limit(1);
-  if (!row) return { ok: false, error: "Report not found." };
-  if (!row.repoFullName) return { ok: false, error: "This report has no connected repository to review." };
-  const status = await runCodeReview(createTrueForgeClient(), {
-    reportId,
-    repoFullName: row.repoFullName,
-    reportText: `${row.title}\n${row.body}`,
-    // Read the pinned commit, as the static review does, so findings match the code the report named.
-    ref: row.targetCommitSha ?? row.onboardingCommitSha,
-  });
+  if (!(await loadCodeReviewInput(reportId))) {
+    return { ok: false, error: "This report has no connected repository to review." };
+  }
+  await enqueueCodeReview(reportId);
   revalidateReportViews(reportId);
-  if (status === "DONE") return { ok: true };
-  return {
-    ok: false,
-    error: status === "TIMED_OUT" ? "The code review timed out before it finished." : "The code review could not run.",
-  };
+  return { ok: true };
 }
