@@ -1314,11 +1314,17 @@ export const codeReviewRun = pgTable(
     capabilityToken: text("capability_token").notNull(),
     agentSessionId: text("agent_session_id"),
     status: text("status").notNull().default("PENDING"),
+    /** Set when the worker claims the run (PENDING to RUNNING); the sweeper times a RUNNING run from here. */
+    startedAt: timestamp("started_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("code_review_run_capability_token_key").on(t.capabilityToken),
     index("code_review_run_report_idx").on(t.reportId),
+    // At most one live run per report, so a double-click cannot queue two reviews.
+    uniqueIndex("code_review_run_live_report_key")
+      .on(t.reportId)
+      .where(sql`${t.status} in ('PENDING', 'RUNNING')`),
   ],
 );
 

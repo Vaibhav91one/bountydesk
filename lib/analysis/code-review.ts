@@ -8,6 +8,7 @@ import {
   eq,
   inArray,
   lte,
+  or,
   report,
   sql,
   targetOnboarding,
@@ -104,8 +105,10 @@ async function readSource(
   );
 }
 
-/** A run still PENDING or RUNNING this long after it was queued is treated as orphaned. */
-const STALE_RUN_MS = 15 * 60_000;
+/** A run never claimed this long after it was queued is treated as orphaned. */
+const STALE_PENDING_MS = 15 * 60_000;
+/** A claimed run is timed out this long after it started, well above TURN_DEADLINE_MS. */
+const STALE_RUNNING_MS = 15 * 60_000;
 
 /**
  * Resolve what a review reads: the report's connected repository, the report text, and the pinned
@@ -141,17 +144,24 @@ export async function loadCodeReviewInput(reportId: string): Promise<RunCodeRevi
  * second request while one is PENDING or RUNNING returns the existing run id.
  */
 export async function enqueueCodeReview(reportId: string): Promise<string> {
+  // One atomic insert against the partial unique index: a concurrent second call inserts nothing and
+  // falls through to the live run the first one created.
+  const [row] = await db
+    .insert(codeReviewRun)
+    .values({ reportId, capabilityToken: randomUUID(), status: "PENDING" })
+    .onConflictDoNothing({
+      target: codeReviewRun.reportId,
+      where: sql`${codeReviewRun.status} in ('PENDING', 'RUNNING')`,
+    })
+    .returning({ id: codeReviewRun.id });
+  if (row) return row.id;
   const [live] = await db
     .select({ id: codeReviewRun.id })
     .from(codeReviewRun)
     .where(and(eq(codeReviewRun.reportId, reportId), inArray(codeReviewRun.status, ["PENDING", "RUNNING"])))
     .limit(1);
-  if (live) return live.id;
-  const [row] = await db
-    .insert(codeReviewRun)
-    .values({ reportId, capabilityToken: randomUUID(), status: "PENDING" })
-    .returning({ id: codeReviewRun.id });
-  return row.id;
+  if (!live) throw new Error(`could not queue a code review for report ${reportId}`);
+  return live.id;
 }
 
 /**
@@ -165,7 +175,7 @@ export async function runCodeReviewOnce(
 ): Promise<string | null> {
   const rows = await db.execute<{ id: string; report_id: string; capability_token: string }>(sql`
     update ${codeReviewRun}
-       set status = 'RUNNING'
+       set status = 'RUNNING', started_at = now()
      where ${codeReviewRun.id} = (
        select ${codeReviewRun.id}
          from ${codeReviewRun}
@@ -182,31 +192,51 @@ export async function runCodeReviewOnce(
 
   const input = await loadCodeReviewInput(claimed.report_id).catch(() => null);
   if (!input) {
-    await closeRun(claimed.id, "FAILED");
+    await closeRun(claimed.id, claimed.capability_token, "FAILED");
     return claimed.id;
   }
   await executeRun(client, claimed.id, claimed.capability_token, input, opts);
   return claimed.id;
 }
 
-/** Close a run: record the final status and retire the token so a late tool call is refused. */
-async function closeRun(runId: string, status: CodeReviewStatus): Promise<void> {
+/**
+ * Close a run: record the final status and retire the token so a late tool call is refused. It only
+ * writes a run this worker still owns (RUNNING with its own token), so it cannot overwrite a
+ * TIMED_OUT the sweeper already recorded.
+ */
+export async function closeRun(runId: string, capability: string, status: CodeReviewStatus): Promise<void> {
   await db
     .update(codeReviewRun)
     .set({ status, capabilityToken: `closed:${runId}` })
-    .where(eq(codeReviewRun.id, runId))
+    .where(
+      and(
+        eq(codeReviewRun.id, runId),
+        eq(codeReviewRun.status, "RUNNING"),
+        eq(codeReviewRun.capabilityToken, capability),
+      ),
+    )
     .catch(() => undefined);
 }
 
-/** Self-heal runs orphaned by a crashed worker: close their tokens and mark them TIMED_OUT. */
+/**
+ * Self-heal runs orphaned by a crashed worker: close their tokens and mark them TIMED_OUT. A PENDING
+ * run is stale by created_at (never claimed); a RUNNING run only by started_at, so one that waited in
+ * the queue is not swept mid-turn. The status in each branch is re-checked by the UPDATE itself.
+ */
 export async function sweepStaleCodeReviews(): Promise<number> {
   const stale = await db
     .update(codeReviewRun)
     .set({ status: "TIMED_OUT", capabilityToken: sql`'closed:' || ${codeReviewRun.id}` })
     .where(
-      and(
-        inArray(codeReviewRun.status, ["PENDING", "RUNNING"]),
-        lte(codeReviewRun.createdAt, new Date(Date.now() - STALE_RUN_MS)),
+      or(
+        and(
+          eq(codeReviewRun.status, "PENDING"),
+          lte(codeReviewRun.createdAt, new Date(Date.now() - STALE_PENDING_MS)),
+        ),
+        and(
+          eq(codeReviewRun.status, "RUNNING"),
+          lte(codeReviewRun.startedAt, new Date(Date.now() - STALE_RUNNING_MS)),
+        ),
       ),
     )
     .returning({ id: codeReviewRun.id });
@@ -225,7 +255,7 @@ export async function runCodeReview(
   try {
     const [row] = await db
       .insert(codeReviewRun)
-      .values({ reportId: input.reportId, capabilityToken: capability, status: "RUNNING" })
+      .values({ reportId: input.reportId, capabilityToken: capability, status: "RUNNING", startedAt: new Date() })
       .returning({ id: codeReviewRun.id });
     runId = row.id;
   } catch {
@@ -265,7 +295,7 @@ async function executeRun(
   } catch {
     status = "FAILED";
   } finally {
-    await closeRun(runId, status);
+    await closeRun(runId, capability, status);
   }
   return status;
 }

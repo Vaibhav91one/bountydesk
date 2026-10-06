@@ -330,6 +330,13 @@
       "when": 1791293928684,
       "tag": "0046_ordinary_phil_sheldon",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791297983761,
+      "tag": "0047_famous_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

@@ -150,7 +150,7 @@ test("the sweeper times out a stale run and closes its token, and leaves a fresh
   const freshReport = await reportRow();
   const [stale] = await dbm.db
     .insert(dbm.codeReviewRun)
-    .values({ reportId: staleReport, capabilityToken: "stale-token", status: "RUNNING", createdAt: new Date(Date.now() - 30 * 60_000) })
+    .values({ reportId: staleReport, capabilityToken: "stale-token", status: "RUNNING", createdAt: new Date(Date.now() - 30 * 60_000), startedAt: new Date(Date.now() - 30 * 60_000) })
     .returning({ id: dbm.codeReviewRun.id });
   const [fresh] = await dbm.db
     .insert(dbm.codeReviewRun)
@@ -163,4 +163,60 @@ test("the sweeper times out a stale run and closes its token, and leaves a fresh
   assert.equal(byId.get(stale.id)!.capabilityToken, `closed:${stale.id}`);
   assert.equal(byId.get(fresh.id)!.status, "RUNNING");
   assert.equal((await review.reportCodeReviewFindings("stale-token", [finding])).ok, false);
+});
+
+test("concurrent enqueues for one report leave exactly one live run", async () => {
+  const reportId = await reportRow();
+  const ids = await Promise.all(Array.from({ length: 6 }, () => cr.enqueueCodeReview(reportId)));
+  assert.equal(new Set(ids).size, 1);
+  const rows = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.reportId, reportId));
+  assert.equal(rows.length, 1);
+});
+
+test("a run started recently is not swept even if it was queued long ago", async () => {
+  const reportId = await reportRow();
+  const [run] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId, capabilityToken: "waited-token", status: "RUNNING", createdAt: new Date(Date.now() - 60 * 60_000), startedAt: new Date() })
+    .returning({ id: dbm.codeReviewRun.id });
+  await cr.sweepStaleCodeReviews();
+  const [row] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, run.id));
+  assert.equal(row.status, "RUNNING");
+  assert.equal(row.capabilityToken, "waited-token");
+});
+
+test("a stale PENDING run that was never claimed is swept", async () => {
+  const reportId = await reportRow();
+  const [run] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId, capabilityToken: "never-claimed", status: "PENDING", createdAt: new Date(Date.now() - 60 * 60_000) })
+    .returning({ id: dbm.codeReviewRun.id });
+  await cr.sweepStaleCodeReviews();
+  const [row] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, run.id));
+  assert.equal(row.status, "TIMED_OUT");
+});
+
+test("neither the sweeper nor the worker overwrites the other's terminal write", async () => {
+  // The sweeper wins: the turn is still running when its run is swept, then finishes DONE.
+  const reportId = await reportRow();
+  const old = new Date(Date.now() - 60 * 60_000);
+  const [run] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId, capabilityToken: "race-token", status: "RUNNING", createdAt: old, startedAt: old })
+    .returning({ id: dbm.codeReviewRun.id });
+  await cr.sweepStaleCodeReviews();
+  await cr.closeRun(run.id, "race-token", "DONE");
+  const [swept] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, run.id));
+  assert.equal(swept.status, "TIMED_OUT", "a late close does not overwrite the sweeper");
+
+  // The worker wins: a finished run is not touched by a later sweep.
+  const second = await reportRow();
+  const [done] = await dbm.db
+    .insert(dbm.codeReviewRun)
+    .values({ reportId: second, capabilityToken: "done-token", status: "RUNNING", createdAt: old, startedAt: old })
+    .returning({ id: dbm.codeReviewRun.id });
+  await cr.closeRun(done.id, "done-token", "DONE");
+  await cr.sweepStaleCodeReviews();
+  const [kept] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, done.id));
+  assert.equal(kept.status, "DONE");
 });
