@@ -124,7 +124,8 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           !(
             row.title.toLowerCase().includes(needle) ||
             row.sourceLabel.toLowerCase().includes(needle) ||
-            row.origin.toLowerCase().includes(needle)
+            row.origin.toLowerCase().includes(needle) ||
+            (row.targetName ?? "").toLowerCase().includes(needle)
           )),
       // Straight to the case file. A summary in a panel was a stop on the way to the
       // page that has everything, and the row already says what the summary said.
@@ -143,6 +144,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         </span>,
         <span key="origin" className="min-w-0 truncate text-muted-foreground">
           {row.sourceLabel} · {row.origin}
+          {row.targetName ? ` · ${row.targetName}` : ""}
         </span>,
         <span key="state" className="flex min-w-0 items-center gap-2">
           <ReportStateBadge
