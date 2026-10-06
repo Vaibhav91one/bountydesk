@@ -18,6 +18,8 @@ import type { SourceReader } from "@/lib/build-onboarding/classify";
 import { withRepoReadToken } from "@/lib/github/repo-access";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
+import { defaultSleep } from "@/lib/worker-daemon/runner";
+
 import { boundedSourceReader, listBlobPaths, REVIEW_FILES, type RepoReadDeps } from "./source-access";
 import { MAX_FILE_CHARS, selectRelevantPaths, SKIPPED_DIRS, SOURCE_EXTENSION } from "./static-review";
 
@@ -65,13 +67,6 @@ function buildTurnMessage(input: RunCodeReviewInput, capability: string, files: 
     "",
     corpus || "(no source files could be read)",
   ].join("\n");
-}
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener("abort", () => { clearTimeout(timer); resolve(); }, { once: true });
-  });
 }
 
 async function readSource(
@@ -287,7 +282,7 @@ async function executeRun(
         if (snapshot.status === "done_no_action") { status = "DONE"; break; }
         if (snapshot.status === "error" || snapshot.status === "cancelled") { status = "FAILED"; break; }
         if (Date.now() > deadline) { status = "TIMED_OUT"; break; }
-        await sleep(POLL_INTERVAL_MS, opts.signal);
+        await defaultSleep(POLL_INTERVAL_MS, opts.signal ?? new AbortController().signal);
       }
     } finally {
       await client.deleteSession(sessionId).catch(() => undefined);

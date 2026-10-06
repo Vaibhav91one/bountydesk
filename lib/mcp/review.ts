@@ -85,7 +85,8 @@ function coerceFindings(raw: unknown): RawFinding[] {
   if (!Array.isArray(raw)) return [];
   const out: RawFinding[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null || out.length >= MAX_FINDING_FIELDS) break;
+    if (out.length >= MAX_FINDING_FIELDS) break;
+    if (typeof item !== "object" || item === null) continue;
     const r = item as Record<string, unknown>;
     if (typeof r.file !== "string" || typeof r.category !== "string" || typeof r.summary !== "string") continue;
     if (typeof r.severity !== "string" || typeof r.confidence !== "string") continue;

@@ -51,7 +51,7 @@ async function withTimeout<T>(op: Promise<T>, ms: number, label: string): Promis
  * SIGTERM during a 30-second sweeper interval (or any backoff) must not make shutdown wait for
  * that timer: most deployment platforms send SIGKILL well before then.
  */
-async function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
+export async function defaultSleep(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return;
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {

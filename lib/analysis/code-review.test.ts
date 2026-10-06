@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { getEventListeners } from "node:events";
 import test, { after, before } from "node:test";
 
 import type { SourceReader } from "@/lib/build-onboarding/classify";
@@ -219,4 +220,18 @@ test("neither the sweeper nor the worker overwrites the other's terminal write",
   await cr.sweepStaleCodeReviews();
   const [kept] = await dbm.db.select().from(dbm.codeReviewRun).where(dbm.eq(dbm.codeReviewRun.id, done.id));
   assert.equal(kept.status, "DONE");
+});
+
+test("a malformed entry does not drop the valid findings after it", async () => {
+  const reportId = await reportRow();
+  await dbm.db.insert(dbm.codeReviewRun).values({ reportId, capabilityToken: "mixed-token", status: "RUNNING", startedAt: new Date() });
+  const result = await review.reportCodeReviewFindings("mixed-token", [finding, "oops", null, { ...finding, file: "b.js" }]);
+  assert.deepEqual(result, { ok: true, message: "recorded 2 code review finding(s)", inserted: 2 });
+});
+
+test("repeated sleeps on one signal do not accumulate abort listeners", async () => {
+  const { defaultSleep } = await import("@/lib/worker-daemon/runner");
+  const signal = new AbortController().signal;
+  for (let i = 0; i < 20; i++) await defaultSleep(1, signal);
+  assert.equal(getEventListeners(signal, "abort").length, 0);
 });
