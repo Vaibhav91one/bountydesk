@@ -270,6 +270,7 @@ test("a report with no target and no verdict reads as exactly that", async () =>
 
   assert.ok(card);
   assert.equal(card.targetName, null);
+  assert.equal((await queue.listAllReports()).find((r) => r.id === id)?.targetName, null);
   assert.equal(card.outcome, null);
   assert.equal(card.eventCount, 0);
   assert.equal(card.awaitingVerdictId, null);
@@ -973,4 +974,13 @@ test("a decision the harness never received shows on the board as a failed run",
     columnsAgain.flatMap((c) => c.cards).find((c) => c.id === live)?.handoffFailed,
     false,
   );
+});
+
+test("the board and index carry the bound target's name", async () => {
+  const id = await seedReport("TRIAGING");
+  const card = column(await queue.listQueue(), "triaging").cards.find((c) => c.id === id);
+  const row = (await queue.listAllReports()).find((r) => r.id === id);
+  assert.ok(card && row);
+  assert.ok(card.targetName);
+  assert.equal(row.targetName, card.targetName);
 });
