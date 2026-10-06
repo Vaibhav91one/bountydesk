@@ -1,9 +1,8 @@
 import { posix } from "node:path";
 import { gunzipSync } from "node:zlib";
 
-import { REVIEW_FILES } from "./sandboxability";
+import { MAX_BLOB_BYTES, REVIEW_FILES } from "./source-access";
 import {
-  MAX_BLOB_BYTES,
   MAX_FILE_CHARS,
   MAX_TREE_PATHS,
   selectRelevantPaths,

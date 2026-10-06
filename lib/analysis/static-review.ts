@@ -2,7 +2,13 @@ import { redactToken, withRepoReadToken } from "@/lib/github/repo-access";
 import type { AnalysisOnlyReason } from "@/lib/reproduction/types";
 
 import { type DependencyAdvisory, dependencyAdvisorySection, scanDependencies } from "./dependency-scan";
-import { boundedSourceReader, REVIEW_FILES, type RepoReadDeps } from "./sandboxability";
+import {
+  boundedSourceReader,
+  listBlobPaths,
+  MAX_BLOB_BYTES,
+  REVIEW_FILES,
+  type RepoReadDeps,
+} from "./source-access";
 
 /**
  * The tier-3 static review: what a report gets when its target cannot be built or deployed.
@@ -49,7 +55,6 @@ export type StaticSource = {
 export const MAX_TREE_PATHS = 300;
 const MAX_SOURCE_FILES = 10;
 export const MAX_FILE_CHARS = 6_000;
-export const MAX_BLOB_BYTES = 200_000;
 const FETCH_TIMEOUT_MS = 20_000;
 
 export const SOURCE_EXTENSION =
@@ -85,31 +90,6 @@ export function selectRelevantPaths(paths: string[], reportText: string, limit =
   }
   scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length || a.path.localeCompare(b.path));
   return scored.slice(0, limit).map((s) => s.path);
-}
-
-type TreeEntry = { path?: unknown; type?: unknown; size?: unknown };
-
-async function listBlobPaths(
-  repoFullName: string,
-  ref: string,
-  signal: AbortSignal,
-  token: string | null,
-): Promise<string[]> {
-  const res = await fetch(
-    `https://api.github.com/repos/${repoFullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
-    {
-      headers: { Accept: "application/vnd.github+json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
-      signal,
-    },
-  );
-  if (!res.ok) return [];
-  const body = (await res.json()) as { tree?: TreeEntry[] };
-  return (body.tree ?? [])
-    .filter(
-      (e): e is { path: string; type: "blob"; size?: number } =>
-        e.type === "blob" && typeof e.path === "string" && (typeof e.size !== "number" || e.size <= MAX_BLOB_BYTES),
-    )
-    .map((e) => e.path);
 }
 
 /**
