@@ -5,6 +5,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 
 import { mcpServerSecret } from "@/lib/env";
 import { publishVerdict, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
+import { readCodeReviewFindings, readCodeReviewFindingsInputSchema } from "@/lib/mcp/read-code-review-findings";
 import { probeBrowser, probeBrowserInputSchema } from "@/lib/mcp/probe-browser";
 import { probeTarget, probeTargetReadInputSchema, probeTargetWriteInputSchema } from "@/lib/mcp/probe-target";
 
@@ -126,6 +127,22 @@ function buildServer(): McpServer {
         isError: true,
         content: [{ type: "text", text: result.reason }],
       };
+    },
+  );
+
+  server.registerTool(
+    "read_code_review_findings",
+    {
+      description:
+        "Read the stored code-review findings for this session's report, if a reviewer ran a code review. They are leads, not proof: use one to decide what to probe, and cite it only if your own probe evidence confirms it. Read-only; give only the capability.",
+      inputSchema: readCodeReviewFindingsInputSchema.shape,
+    },
+    async ({ capability }) => {
+      const result = await readCodeReviewFindings({ capability });
+      if (result.ok) {
+        return { content: [{ type: "text", text: JSON.stringify({ findings: result.findings }) }] };
+      }
+      return { isError: true, content: [{ type: "text", text: result.reason }] };
     },
   );
 
