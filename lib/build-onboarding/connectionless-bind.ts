@@ -4,6 +4,7 @@ import {
   TargetProfileExistsError,
   type ConfiguredTarget,
 } from "@/lib/targets/configure";
+import type { Executor } from "@/lib/db";
 import type { TargetDefinition } from "@/lib/targets/registry";
 
 import { onboardingSnapshotImageRef, type BuildResult } from "./build-driver";
@@ -19,15 +20,16 @@ import { onboardingSnapshotImageRef, type BuildResult } from "./build-driver";
  * imageName is overridden with the build's before the write, matching the GitHub path (verifyAndWrite).
  *
  * A re-onboard with changed pins rotates the profile in place (keeping its row id, so bound reports
- * stay bound) only when the caller passes mayRotate and it resolves true. mayRotate is the caller's
- * proof that it still holds the current claim on this target, checked after the drift is seen. Without
- * it the drift error is rethrown: a stale worker whose lease was re-claimed must not repoint a profile
- * that a newer attempt already wrote and a live run may be using.
+ * stay bound) only when the caller passes mayRotate. mayRotate is the caller's proof that it still holds
+ * the current claim on this target, and it runs inside the rotate transaction after the profile row is
+ * locked, so the proof and the write cannot be separated by a lease change. Without it, or when it
+ * resolves false, the drift error stands: a stale worker whose lease was re-claimed must not repoint a
+ * profile that a newer attempt already wrote and a live run may be using.
  */
 export async function bindConnectionlessTargetFromBuild(
   definition: TargetDefinition,
   build: BuildResult,
-  { mayRotate }: { mayRotate?: () => Promise<boolean> } = {},
+  { mayRotate }: { mayRotate?: (tx: Executor) => Promise<boolean> } = {},
 ): Promise<ConfiguredTarget> {
   // Every source, a prebuilt image included, is pushed and snapshotted under the onboarding tag.
   const snapshotImageRef = onboardingSnapshotImageRef(build.imageName);
@@ -51,7 +53,7 @@ export async function bindConnectionlessTargetFromBuild(
   try {
     return await configureConnectionlessTarget(args);
   } catch (error) {
-    if (!(error instanceof TargetProfileExistsError) || !mayRotate || !(await mayRotate())) throw error;
-    return await rotateConnectionlessTarget(args);
+    if (!(error instanceof TargetProfileExistsError) || !mayRotate) throw error;
+    return await rotateConnectionlessTarget(args, mayRotate);
   }
 }

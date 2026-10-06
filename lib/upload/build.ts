@@ -124,9 +124,12 @@ async function finish(
   });
 }
 
-/** True while this worker's claim is still the row's current one (not expired and re-claimed). */
-export async function holdsCurrentLease(upload: ClaimedUpload): Promise<boolean> {
-  const [row] = await db
+/**
+ * True while this worker's claim is still the row's current one (not expired and re-claimed). It
+ * takes the caller's transaction and locks the row, so the answer holds until that transaction ends.
+ */
+export async function holdsCurrentLease(tx: Executor, upload: ClaimedUpload): Promise<boolean> {
+  const [row] = await tx
     .select({ id: uploadIntake.id })
     .from(uploadIntake)
     .where(
@@ -136,7 +139,8 @@ export async function holdsCurrentLease(upload: ClaimedUpload): Promise<boolean>
         eq(uploadIntake.buildAttempts, upload.buildAttempts),
       ),
     )
-    .limit(1);
+    .limit(1)
+    .for("update");
   return Boolean(row);
 }
 
@@ -184,7 +188,7 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
     profileId = (
       await bindConnectionlessTargetFromBuild(definition, result, {
         // Rotation only for the current lease holder: the same attempt-count fence finish() uses.
-        mayRotate: () => holdsCurrentLease(upload),
+        mayRotate: (tx) => holdsCurrentLease(tx, upload),
       })
     ).targetProfileId;
   }

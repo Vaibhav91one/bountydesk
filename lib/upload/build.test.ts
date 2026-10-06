@@ -249,6 +249,9 @@ async function approvedUpload(): Promise<string> {
   return reportId;
 }
 
+const inLease = (upload: NonNullable<Awaited<ReturnType<typeof build.claim>>>) =>
+  dbm.db.transaction((tx) => build.holdsCurrentLease(tx, upload));
+
 async function expireLease(reportId: string) {
   await dbm.db
     .update(dbm.uploadIntake)
@@ -260,15 +263,15 @@ test("holdsCurrentLease is true for the live claimant and false once the lease e
   const reportId = await approvedUpload();
   const original = await build.claim();
   assert.ok(original && original.reportId === reportId);
-  assert.equal(await build.holdsCurrentLease(original), true);
+  assert.equal((await inLease(original)), true);
 
   await expireLease(reportId);
   const reclaimed = await build.claim();
   assert.ok(reclaimed && reclaimed.id === original.id);
   assert.equal(reclaimed.buildAttempts, original.buildAttempts + 1);
 
-  assert.equal(await build.holdsCurrentLease(original), false);
-  assert.equal(await build.holdsCurrentLease(reclaimed), true);
+  assert.equal((await inLease(original)), false);
+  assert.equal((await inLease(reclaimed)), true);
 });
 
 test("a stale worker's build cannot repoint a profile the re-claiming worker already wrote", async () => {
@@ -289,7 +292,7 @@ test("a stale worker's build cannot repoint a profile the re-claiming worker alr
       await bindConnectionlessTargetFromBuild(
         reviewedTarget.definition,
         { ...base, imageDigest: newerDigest },
-        { mayRotate: () => build.holdsCurrentLease(second) },
+        { mayRotate: (tx) => build.holdsCurrentLease(tx, second) },
       );
       return { ...base, imageDigest: staleDigest };
     },

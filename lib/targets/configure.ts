@@ -392,6 +392,9 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
  */
 export async function rotateConnectionlessTarget(
   input: ConfigureConnectionlessTargetInput,
+  // Runs inside the write transaction, after the row lock, so the caller's currency proof and the
+  // update are atomic. A check made before the transaction could go stale before the lock is taken.
+  assertCurrent?: (tx: Executor) => Promise<boolean>,
 ): Promise<ConfiguredTarget> {
   const definition = input.targetDefinition;
   if (input.targetName && input.targetName !== definition.name) {
@@ -419,6 +422,10 @@ export async function rotateConnectionlessTarget(
 
     if (!target) {
       throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
+    }
+
+    if (assertCurrent && !(await assertCurrent(tx))) {
+      throw new TargetProfileExistsError(`${definition.name} was re-onboarded by a newer claim`);
     }
 
     const [updatedTarget] = await tx
