@@ -123,6 +123,22 @@ async function finish(
   });
 }
 
+/** True while this worker's claim is still the row's current one (not expired and re-claimed). */
+async function holdsCurrentLease(upload: ClaimedUpload): Promise<boolean> {
+  const [row] = await db
+    .select({ id: uploadIntake.id })
+    .from(uploadIntake)
+    .where(
+      and(
+        eq(uploadIntake.id, upload.id),
+        eq(uploadIntake.buildState, "BUILDING"),
+        eq(uploadIntake.buildAttempts, upload.buildAttempts),
+      ),
+    )
+    .limit(1);
+  return Boolean(row);
+}
+
 /**
  * Build and bind, or find the bind an earlier attempt already made. Returns the target name.
  *
@@ -164,7 +180,12 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
       },
       { signal },
     );
-    profileId = (await bindConnectionlessTargetFromBuild(definition, result)).targetProfileId;
+    profileId = (
+      await bindConnectionlessTargetFromBuild(definition, result, {
+        // Rotation only for the current lease holder: the same attempt-count fence finish() uses.
+        mayRotate: () => holdsCurrentLease(upload),
+      })
+    ).targetProfileId;
   }
 
   const binding = await bindTarget(upload.reportId, profileId, upload.approvedBy);

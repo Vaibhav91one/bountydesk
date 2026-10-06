@@ -189,7 +189,9 @@ test("re-onboarding a connectionless target with changed pins rotates the profil
     snapshotId: "snap-2",
     buildRecipeDigest: `sha256:${"2".repeat(64)}`,
   };
-  const rotated = await bind.bindConnectionlessTargetFromBuild(definition("reonboard"), second);
+  const rotated = await bind.bindConnectionlessTargetFromBuild(definition("reonboard"), second, {
+    mayRotate: async () => true,
+  });
 
   // The row id is kept, so reports already bound to the profile stay bound.
   assert.equal(rotated.targetProfileId, configured.targetProfileId);
@@ -197,6 +199,32 @@ test("re-onboarding a connectionless target with changed pins rotates the profil
   assert.equal(row.imageDigest, `sha256:${"c".repeat(64)}`);
   assert.equal(row.snapshotId, "snap-2");
   assert.equal(row.buildRecipeDigest, `sha256:${"2".repeat(64)}`);
+});
+
+test("a stale or unproven re-bind with a different digest fails safe and leaves the profile alone", async () => {
+  const { TargetProfileExistsError } = await import("@/lib/targets/configure");
+  const first: BuildResult = {
+    imageName: "ghcr.io/ns/stale",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    snapshotId: "snap-1",
+    dockerfileText: "FROM node:20\n",
+    buildLog: "",
+    buildMarker: `sha256:${"b".repeat(64)}`,
+    buildRecipeDigest: `sha256:${"1".repeat(64)}`,
+    sourceArchiveDigest: `sha256:${"b".repeat(64)}`,
+  };
+  const configured = await bind.bindConnectionlessTargetFromBuild(definition("stale"), first);
+  const stale: BuildResult = { ...first, imageDigest: `sha256:${"d".repeat(64)}`, snapshotId: "snap-stale" };
+
+  for (const opts of [undefined, { mayRotate: async () => false }]) {
+    await assert.rejects(
+      bind.bindConnectionlessTargetFromBuild(definition("stale"), stale, opts),
+      (error: unknown) => error instanceof TargetProfileExistsError,
+    );
+  }
+  const row = await storedProfile(configured.targetProfileId);
+  assert.equal(row.imageDigest, first.imageDigest);
+  assert.equal(row.snapshotId, "snap-1");
 });
 
 test("rotating a connectionless target that does not exist throws", async () => {

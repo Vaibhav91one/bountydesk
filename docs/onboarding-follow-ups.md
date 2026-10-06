@@ -155,8 +155,9 @@ live installation, and that is right for GitHub-sourced targets. A target with n
 binds through `configureConnectionlessTarget` instead, which writes a profile with no connected
 repository and the same digest, snapshot and build-marker proofs, and requires an identity anchor and
 a `build_recipe_digest`. Its caller is `bindConnectionlessTargetFromBuild`
-(`lib/build-onboarding/connectionless-bind.ts`), which the upload build loop uses. A re-bind with changed pins falls back to
-`rotateConnectionlessTarget`, which updates the profile in place and keeps its row id.
+(`lib/build-onboarding/connectionless-bind.ts`), which the upload build loop uses. A re-bind with changed pins rotates through
+`rotateConnectionlessTarget`, which keeps the row id, but only when the caller proves it holds the
+current claim (the upload build passes its lease check); otherwise the drift error stands.
 
 Remaining work:
 
