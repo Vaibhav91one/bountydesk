@@ -5,7 +5,12 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 
 import { mcpServerSecret } from "@/lib/env";
-import { reportSandboxability, type ReviewToolResult } from "@/lib/mcp/review";
+import {
+  reportCodeReviewFindings,
+  reportSandboxability,
+  type CodeReviewToolResult,
+  type ReviewToolResult,
+} from "@/lib/mcp/review";
 
 // The Postgres write the tool makes needs the Node runtime.
 export const runtime = "nodejs";
@@ -19,6 +24,13 @@ function isAuthorized(header: string | null): boolean {
 }
 
 function render(result: ReviewToolResult) {
+  if (result.ok) {
+    return { content: [{ type: "text" as const, text: result.message }] };
+  }
+  return { isError: true, content: [{ type: "text" as const, text: result.reason }] };
+}
+
+function renderCodeReview(result: CodeReviewToolResult) {
   if (result.ok) {
     return { content: [{ type: "text" as const, text: result.message }] };
   }
@@ -40,6 +52,28 @@ function buildServer(): McpServer {
       },
     },
     async ({ capability, verdict, reason }) => render(await reportSandboxability(capability, verdict, reason)),
+  );
+
+  server.registerTool(
+    "report_code_review_findings",
+    {
+      description:
+        "Record structured security findings from a read-only source review. Pass the exact capability token given to you and a findings array where each entry has file (required), line (optional integer), category, summary, severity, and confidence. Call this once with all findings. Do not fabricate findings: each must be grounded in the source you read.",
+      inputSchema: {
+        capability: z.string(),
+        findings: z.array(
+          z.object({
+            file: z.string(),
+            line: z.number().int().positive().optional(),
+            category: z.string(),
+            summary: z.string(),
+            severity: z.string(),
+            confidence: z.string(),
+          }),
+        ),
+      },
+    },
+    async ({ capability, findings }) => renderCodeReview(await reportCodeReviewFindings(capability, findings)),
   );
 
   return server;

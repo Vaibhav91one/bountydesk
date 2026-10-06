@@ -8,12 +8,15 @@ import {
   and,
   approvalDecision,
   approvalSubmission,
+  connectedRepository,
   db,
   eq,
   report,
   verdict,
   verdictSupersession,
 } from "@/lib/db";
+import { runCodeReview } from "@/lib/analysis/code-review";
+import { createTrueForgeClient } from "@/lib/trueforge/client";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
@@ -662,4 +665,29 @@ export async function cancelRecheckAction(reportId: string, runId: string): Prom
   } catch (error) {
     return thrownActionError(error, "cancel");
   }
+}
+
+/**
+ * Run the read-only code review for a report on demand. It records findings as evidence and
+ * touches no report state, reproduction or verdict. A report with no connected repository has no
+ * source to read, so it is refused.
+ */
+export async function runCodeReviewAction(reportId: string): Promise<ActionResult> {
+  await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "The report id is not valid." };
+  const [row] = await db
+    .select({ title: report.title, body: report.body, repoFullName: connectedRepository.fullName })
+    .from(report)
+    .leftJoin(connectedRepository, eq(connectedRepository.id, report.connectedRepositoryId))
+    .where(eq(report.id, reportId))
+    .limit(1);
+  if (!row) return { ok: false, error: "Report not found." };
+  if (!row.repoFullName) return { ok: false, error: "This report has no connected repository to review." };
+  const status = await runCodeReview(createTrueForgeClient(), {
+    reportId,
+    repoFullName: row.repoFullName,
+    reportText: `${row.title}\n${row.body}`,
+  });
+  revalidateReportViews(reportId);
+  return status === "DONE" ? { ok: true } : { ok: false, error: "The code review could not run." };
 }
