@@ -14,6 +14,7 @@ import {
   verdict,
   verdictSupersession,
 } from "@/lib/db";
+import { enqueueCodeReview, loadCodeReviewInput } from "@/lib/analysis/code-review";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
@@ -662,4 +663,20 @@ export async function cancelRecheckAction(reportId: string, runId: string): Prom
   } catch (error) {
     return thrownActionError(error, "cancel");
   }
+}
+
+/**
+ * Queue the read-only code review for a report. The worker daemon runs it, because the turn polls
+ * for minutes and would outlive a request. It records findings as evidence and touches no report
+ * state, reproduction or verdict. A report with no connected repository has no source to read.
+ */
+export async function runCodeReviewAction(reportId: string): Promise<ActionResult> {
+  await requireReviewer();
+  if (!isReportId(reportId)) return { ok: false, error: "The report id is not valid." };
+  if (!(await loadCodeReviewInput(reportId))) {
+    return { ok: false, error: "This report has no connected repository to review." };
+  }
+  await enqueueCodeReview(reportId);
+  revalidateReportViews(reportId);
+  return { ok: true };
 }

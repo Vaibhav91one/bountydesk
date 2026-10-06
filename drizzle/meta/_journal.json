@@ -316,6 +316,27 @@
       "when": 1790421168792,
       "tag": "0044_installation_advisories_permission",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1791292977813,
+      "tag": "0045_mute_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1791293928684,
+      "tag": "0046_ordinary_phil_sheldon",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791297983761,
+      "tag": "0047_famous_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }

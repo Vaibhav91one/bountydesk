@@ -1,0 +1,2 @@
+ALTER TABLE "code_review_run" ADD COLUMN "started_at" timestamp with time zone;--> statement-breakpoint
+CREATE UNIQUE INDEX "code_review_run_live_report_key" ON "code_review_run" USING btree ("report_id") WHERE "code_review_run"."status" in ('PENDING', 'RUNNING');

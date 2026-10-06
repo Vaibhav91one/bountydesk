@@ -1297,3 +1297,60 @@ export const uploadIntake = pgTable(
     ),
   ],
 );
+
+/**
+ * One on-demand code review run, tracked so its capability token can be validated by the
+ * report_code_review_findings MCP tool. The report is never mutated by a review; this row is
+ * just the opaque token indirection that lets the agent call the tool without naming the
+ * report's id, mirroring the sandboxability review's token pattern.
+ */
+export const codeReviewRun = pgTable(
+  "code_review_run",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    capabilityToken: text("capability_token").notNull(),
+    agentSessionId: text("agent_session_id"),
+    status: text("status").notNull().default("PENDING"),
+    /** Set when the worker claims the run (PENDING to RUNNING); the sweeper times a RUNNING run from here. */
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("code_review_run_capability_token_key").on(t.capabilityToken),
+    index("code_review_run_report_idx").on(t.reportId),
+    // At most one live run per report, so a double-click cannot queue two reviews.
+    uniqueIndex("code_review_run_live_report_key")
+      .on(t.reportId)
+      .where(sql`${t.status} in ('PENDING', 'RUNNING')`),
+  ],
+);
+
+/**
+ * A single structured finding from a read-only code review of a report's source.
+ *
+ * Append-only, like verdict and session_event (the trigger is in the migration): a finding is
+ * evidence of what the reviewer read, and one that can be edited after the fact is not evidence.
+ * The review that produced it is the agentic code-review module (lib/analysis/code-review.ts),
+ * which never selects or changes a report's outcome, reproduction or verdict -- this table is
+ * the durable record of the findings it wrote, not a source of truth for anything downstream.
+ */
+export const codeReviewFinding = pgTable(
+  "code_review_finding",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    file: text("file").notNull(),
+    line: integer("line"),
+    category: text("category").notNull(),
+    summary: text("summary").notNull(),
+    severity: text("severity").notNull(),
+    confidence: text("confidence").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("code_review_finding_report_idx").on(t.reportId)],
+);
