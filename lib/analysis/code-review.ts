@@ -19,7 +19,7 @@ import { MAX_FILE_CHARS, selectRelevantPaths, SKIPPED_DIRS, SOURCE_EXTENSION } f
  */
 export const CODE_REVIEW_AGENT_NAME = "bountydesk-code-review";
 
-export type CodeReviewStatus = "DONE" | "FAILED";
+export type CodeReviewStatus = "DONE" | "FAILED" | "TIMED_OUT";
 
 const TURN_DEADLINE_MS = 4 * 60_000;
 const POLL_INTERVAL_MS = 3_000;
@@ -96,7 +96,7 @@ async function readSource(
 export async function runCodeReview(
   client: TrueForgeClient,
   input: RunCodeReviewInput,
-  opts: { signal?: AbortSignal; source?: SourceReader; readDeps?: RepoReadDeps } = {},
+  opts: { signal?: AbortSignal; source?: SourceReader; readDeps?: RepoReadDeps; deadlineMs?: number } = {},
 ): Promise<CodeReviewStatus> {
   const capability = randomUUID();
   let runId: string | null = null;
@@ -116,17 +116,17 @@ export async function runCodeReview(
         [{ type: "user.message", content: buildTurnMessage(input, capability, files) }],
         { signal: opts.signal },
       );
-      const deadline = Date.now() + TURN_DEADLINE_MS;
+      const deadline = Date.now() + (opts.deadlineMs ?? TURN_DEADLINE_MS);
       for (;;) {
         const snapshot = await client.getTurn(sessionId, turnId, { signal: opts.signal });
-        if (snapshot.status === "done_no_action" || snapshot.status === "error" || snapshot.status === "cancelled") break;
-        if (Date.now() > deadline) break;
+        if (snapshot.status === "done_no_action") { status = "DONE"; break; }
+        if (snapshot.status === "error" || snapshot.status === "cancelled") { status = "FAILED"; break; }
+        if (Date.now() > deadline) { status = "TIMED_OUT"; break; }
         await sleep(POLL_INTERVAL_MS, opts.signal);
       }
     } finally {
       await client.deleteSession(sessionId).catch(() => undefined);
     }
-    status = "DONE";
   } catch {
     status = "FAILED";
   } finally {

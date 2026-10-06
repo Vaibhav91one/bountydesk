@@ -701,5 +701,9 @@ export async function runCodeReviewAction(reportId: string): Promise<ActionResul
     ref: row.targetCommitSha ?? row.onboardingCommitSha,
   });
   revalidateReportViews(reportId);
-  return status === "DONE" ? { ok: true } : { ok: false, error: "The code review could not run." };
+  if (status === "DONE") return { ok: true };
+  return {
+    ok: false,
+    error: status === "TIMED_OUT" ? "The code review timed out before it finished." : "The code review could not run.",
+  };
 }

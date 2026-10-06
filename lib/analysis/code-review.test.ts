@@ -101,3 +101,31 @@ test("a token stops resolving once the run is over", async () => {
   await cr.runCodeReview(client, { reportId, repoFullName: "a/b", reportText: "x" }, { source });
   assert.equal((await review.reportCodeReviewFindings(token, [finding])).ok, false);
 });
+
+function clientWithTurnStatus(turnStatus: string): TrueForgeClient {
+  return { ...fakeClient(false), async getTurn() { return { status: turnStatus }; } } as unknown as TrueForgeClient;
+}
+
+test("an errored or cancelled turn is FAILED, not DONE", async () => {
+  for (const turnStatus of ["error", "cancelled"]) {
+    const reportId = await reportRow();
+    const status = await cr.runCodeReview(clientWithTurnStatus(turnStatus), { reportId, repoFullName: "a/b", reportText: "x" }, { source });
+    assert.equal(status, "FAILED");
+  }
+});
+
+test("a turn that never finishes is TIMED_OUT, not DONE", async () => {
+  const reportId = await reportRow();
+  const status = await cr.runCodeReview(
+    clientWithTurnStatus("running"),
+    { reportId, repoFullName: "a/b", reportText: "x" },
+    { source, deadlineMs: -1 },
+  );
+  assert.equal(status, "TIMED_OUT");
+});
+
+test("a clean turn with no findings is DONE", async () => {
+  const reportId = await reportRow();
+  const status = await cr.runCodeReview(clientWithTurnStatus("done_no_action"), { reportId, repoFullName: "a/b", reportText: "x" }, { source });
+  assert.equal(status, "DONE");
+});
