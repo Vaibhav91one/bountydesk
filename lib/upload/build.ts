@@ -45,7 +45,8 @@ type ClaimedUpload = {
   buildAttempts: number;
 };
 
-async function claim(): Promise<ClaimedUpload | null> {
+/** Exported so the lease tests can drive the real claim and fence. */
+export async function claim(): Promise<ClaimedUpload | null> {
   return db.transaction(async (tx) => {
     const [row] = await tx
       .select({ id: uploadIntake.id })
@@ -124,6 +125,26 @@ async function finish(
 }
 
 /**
+ * True while this worker's claim is still the row's current one (not expired and re-claimed). It
+ * takes the caller's transaction and locks the row, so the answer holds until that transaction ends.
+ */
+export async function holdsCurrentLease(tx: Executor, upload: ClaimedUpload): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: uploadIntake.id })
+    .from(uploadIntake)
+    .where(
+      and(
+        eq(uploadIntake.id, upload.id),
+        eq(uploadIntake.buildState, "BUILDING"),
+        eq(uploadIntake.buildAttempts, upload.buildAttempts),
+      ),
+    )
+    .limit(1)
+    .for("update");
+  return Boolean(row);
+}
+
+/**
  * Build and bind, or find the bind an earlier attempt already made. Returns the target name.
  *
  * A crash can land after the profile was written or after the report was bound, so each step checks
@@ -164,7 +185,12 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
       },
       { signal },
     );
-    profileId = (await bindConnectionlessTargetFromBuild(definition, result)).targetProfileId;
+    profileId = (
+      await bindConnectionlessTargetFromBuild(definition, result, {
+        // Rotation only for the current lease holder: the same attempt-count fence finish() uses.
+        mayRotate: (tx) => holdsCurrentLease(tx, upload),
+      })
+    ).targetProfileId;
   }
 
   const binding = await bindTarget(upload.reportId, profileId, upload.approvedBy);

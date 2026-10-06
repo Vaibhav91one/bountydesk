@@ -168,11 +168,7 @@ test("a build with no recipe digest is refused before any profile is written", a
   assert.equal(rows.length, 0);
 });
 
-test("re-onboarding a connectionless target with changed pins throws rather than rotating in place", async () => {
-  // Rotation of a connectionless profile is unimplemented (docs/onboarding-follow-ups.md). This pins
-  // the current contract: a second bind of the same target name with a different build is a drift the
-  // shared upsert refuses, so a re-onboard cannot silently repoint the profile.
-  const { TargetProfileExistsError } = await import("@/lib/targets/configure");
+test("re-onboarding a connectionless target with changed pins rotates the profile in place", async () => {
   const first: BuildResult = {
     imageName: "ghcr.io/ns/reonboard",
     imageDigest: `sha256:${"a".repeat(64)}`,
@@ -193,14 +189,55 @@ test("re-onboarding a connectionless target with changed pins throws rather than
     snapshotId: "snap-2",
     buildRecipeDigest: `sha256:${"2".repeat(64)}`,
   };
-  await assert.rejects(
-    bind.bindConnectionlessTargetFromBuild(definition("reonboard"), second),
-    (error: unknown) =>
-      error instanceof TargetProfileExistsError && /different pinned target settings/.test(error.message),
-  );
+  const rotated = await bind.bindConnectionlessTargetFromBuild(definition("reonboard"), second, {
+    mayRotate: async () => true,
+  });
 
-  // The original pin is untouched: the failed re-onboard changed nothing.
+  // The row id is kept, so reports already bound to the profile stay bound.
+  assert.equal(rotated.targetProfileId, configured.targetProfileId);
   const row = await storedProfile(configured.targetProfileId);
-  assert.equal(row.imageDigest, `sha256:${"a".repeat(64)}`);
+  assert.equal(row.imageDigest, `sha256:${"c".repeat(64)}`);
+  assert.equal(row.snapshotId, "snap-2");
+  assert.equal(row.buildRecipeDigest, `sha256:${"2".repeat(64)}`);
+});
+
+test("a stale or unproven re-bind with a different digest fails safe and leaves the profile alone", async () => {
+  const { TargetProfileExistsError } = await import("@/lib/targets/configure");
+  const first: BuildResult = {
+    imageName: "ghcr.io/ns/stale",
+    imageDigest: `sha256:${"a".repeat(64)}`,
+    snapshotId: "snap-1",
+    dockerfileText: "FROM node:20\n",
+    buildLog: "",
+    buildMarker: `sha256:${"b".repeat(64)}`,
+    buildRecipeDigest: `sha256:${"1".repeat(64)}`,
+    sourceArchiveDigest: `sha256:${"b".repeat(64)}`,
+  };
+  const configured = await bind.bindConnectionlessTargetFromBuild(definition("stale"), first);
+  const stale: BuildResult = { ...first, imageDigest: `sha256:${"d".repeat(64)}`, snapshotId: "snap-stale" };
+
+  for (const opts of [undefined, { mayRotate: async () => false }]) {
+    await assert.rejects(
+      bind.bindConnectionlessTargetFromBuild(definition("stale"), stale, opts),
+      (error: unknown) => error instanceof TargetProfileExistsError,
+    );
+  }
+  const row = await storedProfile(configured.targetProfileId);
+  assert.equal(row.imageDigest, first.imageDigest);
   assert.equal(row.snapshotId, "snap-1");
+});
+
+test("rotating a connectionless target that does not exist throws", async () => {
+  const { rotateConnectionlessTarget } = await import("@/lib/targets/configure");
+  await assert.rejects(
+    rotateConnectionlessTarget({
+      targetDefinition: definition("never-bound"),
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      snapshotId: "snap-x",
+      buildMarker: `sha256:${"a".repeat(64)}`,
+      buildRecipeDigest: `sha256:${"1".repeat(64)}`,
+      sourceArchiveDigest: `sha256:${"a".repeat(64)}`,
+    }),
+    /does not exist yet; nothing to rotate/,
+  );
 });

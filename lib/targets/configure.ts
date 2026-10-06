@@ -384,6 +384,80 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
   });
 }
 
+/**
+ * Rotate a connectionless profile to a new build in place. The row id is kept, so every report
+ * already bound to the profile stays bound. Unlike rotateTarget there is no repository to check:
+ * the profile name is the only key, and the identity gate matches configureConnectionlessTarget
+ * (a prebuilt image anchors on its digest and has no commit SHA).
+ */
+export async function rotateConnectionlessTarget(
+  input: ConfigureConnectionlessTargetInput,
+  // Runs inside the write transaction, after the row lock, so the caller's currency proof and the
+  // update are atomic. A check made before the transaction could go stale before the lock is taken.
+  assertCurrent?: (tx: Executor) => Promise<boolean>,
+): Promise<ConfiguredTarget> {
+  const definition = input.targetDefinition;
+  if (input.targetName && input.targetName !== definition.name) {
+    throw new Error(`target name ${input.targetName} does not match manifest ${definition.name}`);
+  }
+  if (
+    !input.buildRecipeDigest ||
+    !hasIdentityAnchor({
+      resolvedCommitSha: input.resolvedCommitSha,
+      sourceArchiveDigest: input.sourceArchiveDigest,
+      imageDigest: input.imageDigest,
+    })
+  ) {
+    throw new Error("connectionless target rotation requires build identity");
+  }
+  const config = targetProfileConfig(definition, input);
+
+  return db.transaction(async (tx) => {
+    const [target] = await tx
+      .select()
+      .from(targetProfile)
+      .where(eq(targetProfile.name, definition.name))
+      .limit(1)
+      .for("update");
+
+    if (!target) {
+      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
+    }
+
+    if (assertCurrent && !(await assertCurrent(tx))) {
+      throw new TargetProfileExistsError(`${definition.name} was re-onboarded by a newer claim`);
+    }
+
+    const [updatedTarget] = await tx
+      .update(targetProfile)
+      .set({
+        imageName: definition.imageName,
+        imageDigest: input.imageDigest,
+        snapshotId: input.snapshotId,
+        config,
+        scopeRules: definition.scopeRules,
+        ...(input.dockerfileText !== undefined ? { dockerfileText: input.dockerfileText } : {}),
+        ...(input.buildRecipeDigest !== undefined ? { buildRecipeDigest: input.buildRecipeDigest } : {}),
+        ...(input.resolvedCommitSha !== undefined ? { resolvedCommitSha: input.resolvedCommitSha } : {}),
+        ...(input.sourceArchiveDigest !== undefined ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(targetProfile.id, target.id))
+      .returning();
+
+    if (!updatedTarget) {
+      throw new Error(`${definition.name} does not exist yet; nothing to rotate`);
+    }
+
+    return {
+      repositoryId: null,
+      repositoryFullName: null,
+      targetProfileId: updatedTarget.id,
+      targetProfileName: updatedTarget.name,
+    };
+  });
+}
+
 function targetDefinitionForInput(input: ConfigureTargetInput): TargetDefinition {
   if (input.targetDefinition) {
     if (input.targetName && input.targetName !== input.targetDefinition.name) {

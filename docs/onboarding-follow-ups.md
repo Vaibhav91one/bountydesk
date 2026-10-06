@@ -9,7 +9,6 @@ each section says what is built and what is still open.
 
 Still open, in one place:
 
-- Rotating a connectionless target profile (see "Binding a target without a connected repository").
 - A tarball without a Dockerfile at its root.
 - Building from a non-GitHub git URL.
 - Reclaiming each mesh service's pushed image, and deleting images on registries other than GHCR.
@@ -156,14 +155,12 @@ live installation, and that is right for GitHub-sourced targets. A target with n
 binds through `configureConnectionlessTarget` instead, which writes a profile with no connected
 repository and the same digest, snapshot and build-marker proofs, and requires an identity anchor and
 a `build_recipe_digest`. Its caller is `bindConnectionlessTargetFromBuild`
-(`lib/build-onboarding/connectionless-bind.ts`), which the upload build loop uses.
+(`lib/build-onboarding/connectionless-bind.ts`), which the upload build loop uses. A re-bind with changed pins rotates through
+`rotateConnectionlessTarget`, which keeps the row id, but only when the caller proves it holds the
+current claim (the upload build passes its lease check); otherwise the drift error stands.
 
 Remaining work:
 
-- Rotation. A re-bind with changed pins throws `TargetProfileExistsError`, and `rotateTarget` and
-  `npm run rotate:target` are GitHub-only, so a connectionless target cannot be rebuilt in place. This
-  is unimplemented on purpose for now, and `connectionless-bind.test.ts` pins the throw so a future
-  rotation lands as a deliberate change rather than by accident.
 - A tarball without a Dockerfile. The upload build plan always uses `Dockerfile` at the archive root;
   the onboarding agent that writes a Dockerfile for a GitHub repository is not wired to uploads, so
   such a build fails and the report gets the static review of its archive (`COULD_NOT_BUILD`).
