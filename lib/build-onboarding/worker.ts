@@ -393,6 +393,8 @@ async function verifyAndWrite(
     sourceArchiveDigest: lease.sourceArchiveDigest ?? undefined,
     snapshotImageRefOverride: snapshotImageRef,
     dockerfileText: lease.dockerfileText ?? undefined,
+    origin: "onboarded" as const,
+    manifest: definition,
   };
   // Onboarding a repo that already has a profile (a re-onboard, or a verified rebuild) reuses the
   // profile name, and configureTarget refuses to overwrite one whose pinned settings differ. This

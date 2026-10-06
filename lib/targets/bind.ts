@@ -159,6 +159,8 @@ export type TargetProfileOption = {
   id: string;
   name: string;
   imageDigest: string | null;
+  origin: string | null;
+  manifest: unknown;
 };
 
 /**
@@ -174,6 +176,8 @@ export async function listTargetProfiles(): Promise<TargetProfileOption[]> {
       id: targetProfile.id,
       name: targetProfile.name,
       imageDigest: targetProfile.imageDigest,
+      origin: targetProfile.origin,
+      manifest: targetProfile.manifest,
     })
     .from(targetProfile)
     .where(isNull(targetProfile.retiredAt))

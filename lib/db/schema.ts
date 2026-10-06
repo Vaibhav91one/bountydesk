@@ -295,6 +295,16 @@ export const targetProfile = pgTable(
      * was a suffix in the name, which nothing checked.
      */
     retiredAt: timestamp("retired_at", { withTimezone: true }),
+    /**
+     * How the profile came to exist: "demo" (the frozen Juice Shop profile), "onboarded" (a
+     * connected repository through the onboarding worker) or "connectionless" (an upload or other
+     * non-GitHub source). Null for rows written before the column existed. Descriptive only, never
+     * part of the pinned identity or the drift check.
+     */
+    origin: text("origin"),
+    /** The validated target definition the profile was written from, kept so an onboarded target
+     *  is a reusable catalog entry. Descriptive only, never compared in the drift check. */
+    manifest: jsonb("manifest"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

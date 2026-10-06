@@ -77,7 +77,13 @@ export type ConfigureTargetInput = TargetPin & {
    *  onboarding pipeline. Stored on the profile so a report against it can offer the file for
    *  download; not part of the pinned identity, so it is never compared in the drift check. */
   dockerfileText?: string;
+  /** Descriptive provenance and the validated definition, stored on the profile for the catalog.
+   *  Neither is part of the pinned identity, so neither is compared in the drift check. */
+  origin?: TargetOrigin;
+  manifest?: TargetDefinition;
 };
+
+export type TargetOrigin = "demo" | "onboarded" | "connectionless";
 
 export type ConfigureJuiceShopTargetInput = Omit<
   ConfigureTargetInput,
@@ -106,7 +112,7 @@ export type ConfiguredTarget = {
 export async function configureJuiceShopTarget(
   input: ConfigureJuiceShopTargetInput,
 ): Promise<ConfiguredTarget> {
-  return configureTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME });
+  return configureTarget({ ...input, targetName: JUICE_SHOP_PROFILE_NAME, origin: "demo" });
 }
 
 /**
@@ -211,7 +217,7 @@ export async function configureConnectionlessTarget(
   const config = targetProfileConfig(definition, input);
 
   return db.transaction(async (tx) => {
-    const target = await upsertTargetProfile(tx, definition, config, input);
+    const target = await upsertTargetProfile(tx, definition, config, { origin: "connectionless", ...input });
     return {
       repositoryId: null,
       repositoryFullName: null,
@@ -230,7 +236,7 @@ async function upsertTargetProfile(
   tx: Executor,
   definition: TargetDefinition,
   config: ReturnType<typeof targetProfileConfig>,
-  pin: TargetPin & { dockerfileText?: string },
+  pin: TargetPin & { dockerfileText?: string; origin?: TargetOrigin; manifest?: TargetDefinition },
 ): Promise<typeof targetProfile.$inferSelect> {
   const [inserted] = await tx
     .insert(targetProfile)
@@ -245,6 +251,8 @@ async function upsertTargetProfile(
       buildRecipeDigest: pin.buildRecipeDigest ?? null,
       resolvedCommitSha: pin.resolvedCommitSha ?? null,
       sourceArchiveDigest: pin.sourceArchiveDigest ?? null,
+      origin: pin.origin ?? null,
+      manifest: pin.manifest ?? null,
     })
     .onConflictDoNothing({ target: targetProfile.name })
     .returning();
@@ -366,6 +374,8 @@ export async function rotateTarget(input: ConfigureTargetInput): Promise<Configu
         ...(input.buildRecipeDigest !== undefined ? { buildRecipeDigest: input.buildRecipeDigest } : {}),
         ...(input.resolvedCommitSha !== undefined ? { resolvedCommitSha: input.resolvedCommitSha } : {}),
         ...(input.sourceArchiveDigest !== undefined ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
+        ...(input.origin ? { origin: input.origin } : {}),
+        ...(input.manifest ? { manifest: input.manifest } : {}),
         updatedAt: new Date(),
       })
       .where(eq(targetProfile.id, target.id))
@@ -440,6 +450,8 @@ export async function rotateConnectionlessTarget(
         ...(input.buildRecipeDigest !== undefined ? { buildRecipeDigest: input.buildRecipeDigest } : {}),
         ...(input.resolvedCommitSha !== undefined ? { resolvedCommitSha: input.resolvedCommitSha } : {}),
         ...(input.sourceArchiveDigest !== undefined ? { sourceArchiveDigest: input.sourceArchiveDigest } : {}),
+        ...(input.origin ? { origin: input.origin } : {}),
+        ...(input.manifest ? { manifest: input.manifest } : {}),
         updatedAt: new Date(),
       })
       .where(eq(targetProfile.id, target.id))
