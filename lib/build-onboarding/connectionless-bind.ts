@@ -47,7 +47,7 @@ export async function bindConnectionlessTargetFromBuild(
     buildRecipeDigest: build.buildRecipeDigest,
     snapshotImageRefOverride: snapshotImageRef,
     origin: "connectionless" as const,
-    manifest: definition,
+    manifest: pinnedDefinition,
     ...(build.resolvedCommitSha ? { resolvedCommitSha: build.resolvedCommitSha } : {}),
     ...(build.sourceArchiveDigest ? { sourceArchiveDigest: build.sourceArchiveDigest } : {}),
     ...(build.dockerfileText ? { dockerfileText: build.dockerfileText } : {}),
