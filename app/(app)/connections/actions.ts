@@ -11,9 +11,10 @@ import {
 } from "@/lib/build-onboarding/approve-request";
 
 import { selectOnboardingArtifact } from "./artifact-select";
+import { batchOnboardRequest, type BatchResult } from "./batch-onboarding";
 import { retryOnboardingRequest, type RetryResult } from "./retry-onboarding";
 
-export type { ApproveResult, RetryResult };
+export type { ApproveResult, RetryResult, BatchResult };
 export type { OnboardingArtifactKind, ArtifactResult } from "./artifact-select";
 type OnboardingArtifactKind = "dockerfile" | "manifest" | "buildplan" | "buildlog";
 type ArtifactResult = { ok: true; filename: string; text: string } | { ok: false; error: string };
@@ -83,6 +84,19 @@ export async function retryOnboarding(
   formData: FormData,
 ): Promise<RetryResult> {
   const result = await retryOnboardingRequest(await currentSession(), formData.get("repoId"));
+
+  if (result.ok) revalidatePath("/connections");
+
+  return result;
+}
+
+/**
+ * Queue several connected repositories for onboarding at once. Each still stops at AWAITING_APPROVAL
+ * and is approved one by one; the checks live in batchOnboardRequest, where they are tested.
+ */
+export async function batchOnboard(repoIds: number[]): Promise<BatchResult> {
+  await requireReviewer();
+  const result = await batchOnboardRequest(await currentSession(), repoIds);
 
   if (result.ok) revalidatePath("/connections");
 
