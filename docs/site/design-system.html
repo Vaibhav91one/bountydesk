@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk design system</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click a group to open or close it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, drop?: collapsible, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const sw = (...c) => '<div class="sw">' + c.map(x => '<i style="background:' + x + '"></i>').join('') + '</div>';
+const big = (c) => '<div class="big" style="background:' + c + '"></div>';
+const tx = (style, t) => '<p class="tx" style="' + style + '">' + t + '</p>';
+const tree = {c:'Design system', n:'Tokens, type, color, mascot\nDark is the default; add ?theme=light to flip', root:true, mid:true, wrap:3, k:[
+  {c:'Color tokens', n:'oklch, defined once on :root', side:-1, cls:'ref', k:[
+    {c:'Surface', n:'dark  bg 0.145, card 0.178\nlight bg 1, card 1', h:sw('oklch(0.145 0 0)', 'oklch(0.178 0 0)', 'oklch(1 0 0)')},
+    {c:'Ink and muted', n:'dark  ink 0.985, muted 0.708\nlight ink 0.145, muted 0.556', h:sw('oklch(0.985 0 0)', 'oklch(0.708 0 0)', 'oklch(0.145 0 0)', 'oklch(0.556 0 0)')},
+    {c:'Border', n:'dark  oklch(1 0 0 / 10%)\nlight oklch(0.922 0 0)', h:'<div class="big" style="border:1px solid oklch(1 0 0 / 10%)"></div>'},
+    {c:'Brand', n:'brand oklch(0.585 0.233 277.117)\nbrand-soft oklch(0.785 0.115 274.713)', h:sw('oklch(0.585 0.233 277.117)', 'oklch(0.785 0.115 274.713)')},
+    {c:'Radius', n:'0.625rem on cards and inputs\nPill radius on nav and buttons', h:'<div class="big" style="border-radius:0.625rem;background:oklch(0.178 0 0)"></div>'},
+  ]},
+  {c:'Type scale', n:'Inter for everything\nGeist Mono for code and IDs', side:-1, cls:'ref', k:[
+    {c:'Display', n:'Inter 600, tight tracking', h:tx('font:600 28px Inter,sans-serif;letter-spacing:-.02em', 'Triage')},
+    {c:'Heading', n:'Inter 600, 20px', h:tx('font:600 20px Inter,sans-serif', 'Case file')},
+    {c:'Body', n:'Inter 400, 14 to 15px', h:tx('font:400 14px Inter,sans-serif', 'Approve the drafted comment')},
+    {c:'Caption', n:'Inter 500, 12px, muted', h:tx('font:500 12px Inter,sans-serif;opacity:.7', 'Updated 2 min ago')},
+    {c:'Mono', n:'Geist Mono for IDs, hashes, notes that are IDs', h:tx('font:400 12px "Geist Mono",monospace', 'GHSA-q5pc-r86m-4jjh')},
+  ]},
+  {c:'Phase colors', n:'One per report lifecycle phase (dark values)', side:1, cls:'plan', k:[
+    {c:'triaging', n:'oklch(0.7 0.15 250)', h:big('oklch(0.7 0.15 250)')},
+    {c:'reproducing', n:'oklch(0.75 0.13 195)', h:big('oklch(0.75 0.13 195)')},
+    {c:'analysis', n:'oklch(0.72 0.18 330)', h:big('oklch(0.72 0.18 330)')},
+    {c:'approval', n:'oklch(0.8 0.15 75)', h:big('oklch(0.8 0.15 75)')},
+    {c:'delivered', n:'oklch(0.72 0.16 150)', h:big('oklch(0.72 0.16 150)')},
+    {c:'closed', n:'oklch(0.55 0 0)', h:big('oklch(0.55 0 0)')},
+  ]},
+  {c:'Agent Bounty', n:'The mascot. One pose per product state', side:1, cls:'reporter', k:[
+    {c:'Pipeline', n:'States a report moves through', drop:true, k:[
+      {c:'ingest', n:'A report arrives', h:m('ingest')},
+      {c:'scanning', n:'Triage in progress', h:m('scanning')},
+      {c:'reproducing', n:'Agent is running the target', h:m('reproducing')},
+      {c:'canary-found', n:'Canary oracle fired', h:m('canary-found')},
+      {c:'awaiting-approval', n:'Waiting on a human', h:m('awaiting-approval')},
+      {c:'delivered', n:'Verdict shipped', h:m('delivered')},
+    ]},
+    {c:'Outcomes and moods', n:'Terminal and ambient states', drop:true, k:[
+      {c:'celebrating', n:'Reproduced and delivered', h:m('celebrating')},
+      {c:'denied', n:'Report rejected', h:m('denied')},
+      {c:'out-of-scope', n:'Outside the bound target', h:m('out-of-scope')},
+      {c:'infra-hiccup', n:'Sandbox or provider failed', h:m('infra-hiccup')},
+      {c:'greeting', n:'Sign-in and empty states', h:m('greeting')},
+      {c:'idle', n:'Nothing to do', h:m('idle')},
+      {c:'chilling', n:'Quiet queue', h:m('chilling')},
+      {c:'cowboy', n:'Bounty flavour', h:m('cowboy')},
+    ]},
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

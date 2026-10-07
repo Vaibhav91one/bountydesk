@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk MVP flow</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click a group to open or close it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, drop?: collapsible, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const tree = {c:'BountyDesk', n:'Automated bug-bounty triage\nHuman approves every verdict', root:true, mid:true, wrap:3, k:[
+  {c:'Reporter · intake', n:'Four independent channels, no GitHub connection needed for email or upload', side:-1, cls:'reporter', k:[
+    {c:'github', n:'Issues on a connected repository\nintake_channel = github'},
+    {c:'advisory', n:'Private vulnerability reports\nHeld at NEEDS_DECISION; verdict edits the advisory description'},
+    {c:'email', n:'Allowlisted sender goes to TRIAGING\nOutside sender waits at NEEDS_DECISION (SPF + DKIM aligned)'},
+    {c:'upload', n:'Public /submit page\nContact proved by a one-time code'},
+  ]},
+  {c:'Reviewer · the desk', n:'Where a human decides', side:-1, cls:'reviewer', k:[
+    {c:'Board', n:'Review queue by lifecycle phase'},
+    {c:'Case file', n:'Report, evidence, reviewer chat'},
+    {c:'Sign the verdict', n:'Approve the exact drafted comment\nContent hash must match at send'},
+    {c:'Connections', n:'GitHub App install and repository grants'},
+    {c:'Integrations', n:'Email allowlist and OTP verification'},
+    {c:'Settings', n:'Targets, scope, account'},
+  ]},
+  {c:'Agent · reproduction', n:'TrueForge agent, one pinned target, isolated sandbox', side:1, cls:'agent', k:[
+    {c:'scope-guard', n:'MCP server; target comes from the server-held TargetProfile, never from agent text'},
+    {c:'Sandbox mesh', n:'Daytona: build sandbox with narrow egress,\nreproduction sandbox with none'},
+    {c:'Canary oracle', n:'Defender-authored canary, fixture and negative control\nRuns outside the sandbox'},
+    {c:'probe_target', n:'HTTP probes against the bound target\nFetch only'},
+    {c:'probe_browser', n:'Browser probe for SPA behaviour\nNeeds the snapshot env set'},
+    {c:'publish_verdict', n:'Agent drafts outcome, summary and findings\nApproval-gated'},
+  ]},
+  {c:'Lifecycle', n:'One report, left to right', side:1, cls:'status', k:[
+    {c:'Intake to delivery', flow:true, k:[
+      {c:'Intake', n:'Job RECEIVED, then PARSED', h:m('ingest')},
+      {c:'Triage', n:'Authenticated and scope-checked', h:m('scanning')},
+      {c:'Reproduce', n:'Agent runs against the pinned target', h:m('reproducing')},
+      {c:'Approve', n:'Human signs the drafted comment', h:m('awaiting-approval')},
+      {c:'Deliver', n:'Receipt marks DELIVERED', h:m('delivered')},
+      {c:'Done', n:'Verdict shipped', h:m('celebrating')},
+    ]},
+    {c:'Terminal states', n:'Five of the eleven report states end the run', drop:true, k:[
+      {c:'DELIVERED', n:'Verified recipient and transport receipt'},
+      {c:'DENIED', n:'Reviewer rejected the report', h:m('denied')},
+      {c:'OUT_OF_SCOPE', n:'Operator quarantine, or a static review that read no source', h:m('out-of-scope')},
+      {c:'CANCELLED', n:'Stopped before delivery'},
+      {c:'EXPIRED', n:'Timed out'},
+    ]},
+    {c:'Invariants', n:'What never changes', drop:true, k:[
+      {c:'No bound target, no REPRODUCED', n:'Such a run stays ANALYSIS_ONLY'},
+      {c:'Human gate never skipped', n:'publish_verdict refuses a payload whose hash differs from the approved one'},
+      {c:'Nothing auto-closed', n:'Similar reports go to a human as top-k candidates'},
+      {c:'Sandbox status is not evidence', n:'READY means the target answered its health check, nothing more'},
+      {c:'Secrets stay server-side', n:'The browser talks only to Next.js'},
+    ]},
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>
