@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="views" content="desktop mobile">
+<title>BountyDesk build and deploy</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · use Focus on a branch to read it alone · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Build and deploy', n:'How a change reaches production\nVercel for the app, Zerops for the worker\nFrom .github/workflows, zerops.yml and docs/deployment.md', root:true, mid:true, wrap:5, row:175, h:m('cowboy'), k:[
+  {c:'Merge path', n:'Every change ships through a pull request\nmain is protected, admins included', side:1, cls:'plan', h:m('awaiting-approval'), flow:true, k:[
+    {c:'Branch and PR', n:'Branch names: feat, fix, chore, docs\nOne PR per coherent change\nNo direct push to main'},
+    {c:'CI build check', n:'ci.yml runs on PRs and on push to main\nThe build job is the required check'},
+    {c:'Review', n:'Conversations must be resolved\nClaude review is advisory, not a gate\nA human owns the merge'},
+    {c:'Squash merge', n:'gh pr merge --squash --delete-branch\nAfter build and the Vercel preview are green'},
+    {c:'Deploy runs', n:'The app builds on Vercel\ndeploy.yml migrates, then pushes the worker'},
+  ]},
+  {c:'CI (ci.yml)', n:'One job named build, ubuntu-24.04, 15 min cap', side:-1, cls:'reviewer', h:m('scanning'), flow:true, k:[
+    {c:'Services', n:'Real Postgres 17 service\nThe queue relies on FOR UPDATE SKIP LOCKED\nand unique constraints'},
+    {c:'Install and lint', n:'Node 22.23.2, npm ci\nnpm run lint'},
+    {c:'Migrate and drift', n:'npm run db:migrate on the CI database\nnpm run db:drift fails on an unrecorded\nschema change'},
+    {c:'Policy tests', n:'Claude review policy and head check\nDeploy policy: SHA pins, checksum,\nmain-only guard, no-cancel concurrency'},
+    {c:'Test and build', n:'npm run test, then npm run build\nClerk keys come from secrets'},
+  ]},
+  {c:'Vercel app', n:'Next.js, deploys on its own from main', side:1, cls:'agent', h:m('ingest'), k:[
+    {c:'Trigger', n:'Vercel Git integration\nNot part of deploy.yml\nA preview builds for each PR'},
+    {c:'What it serves', n:'Reviewer console, intake routes\nThe /api/mcp routes\nNo worker loops here\nReads tool-call detail from TrueForge (lib/reports/tool-calls.ts)'},
+    {c:'Env on Vercel', n:'DATABASE_URL, APP_BASE_URL, Clerk keys\nGITHUB_APP_* and webhook secret\nMCP_SERVER_SECRET, SCOPE_GUARD_*\nDAYTONA_*, WORKER_INTERNAL_SECRET'},
+    {c:'Redirect switch', n:'BOUNTYDESK_LANDING_REDIRECT\nDefault on Vercel: other hosts bounce\nto the app host (lib/deployment)'},
+    {c:'Order is not guaranteed', n:'A migration usually finishes first\nbut nothing orders it against Vercel\nIncompatible code needs two merges:\nmigration, then code'},
+  ]},
+  {c:'Hosts', n:'Where each surface lives', side:-1, cls:'ref', h:m('chilling'), k:[
+    {c:'bountydesk.vaibhav.quest', n:'Landing page, public\nOther paths redirect to the app host'},
+    {c:'app.bountydesk.vaibhav.quest', n:'The app: console, intake, MCP routes\nAPP_BASE_URL and SCOPE_GUARD_URL on the\nTrueForge service point here'},
+    {c:'mail.bountydesk.vaibhav.quest', n:'Verified Resend domain\nSends from reports@ and no-reply@'},
+    {c:'Private services', n:'bdworker and trueforge have no public port\nThe worker reaches http://trueforge:8791\nover the Zerops private network'},
+  ]},
+  {c:'Deploy on merge (deploy.yml)', n:'Runs after CI, never on a pull request', side:1, cls:'status', h:m('delivered'), flow:true, k:[
+    {c:'Gate', n:'workflow_run of CI, conclusion success\nevent push, branch main\nOr a manual dispatch from main'},
+    {c:'migrate job', n:'Checks out the commit CI validated\nnpm ci, then npm run db:migrate\nDIRECT_URL secret, session pooler 5432'},
+    {c:'worker job', n:'Needs migrate to succeed\nzcli v1.1.2, SHA-256 verified\nzcli push bdworker --no-git'},
+    {c:'Timing', n:'About ten minutes\nThe push waits for the Zerops build\nso a failed deploy fails the job'},
+    {c:'Concurrency', n:'One deploy at a time, never cancelled\nA burst of merges collapses into the\nnewest pending run'},
+    {c:'Secrets', n:'DIRECT_URL and ZEROPS_TOKEN\nRepository secrets, read-only token scope'},
+  ]},
+  {c:'Migrations', n:'Drizzle, 49 files, latest 0048', side:-1, cls:'plan', h:m('canary-found'), k:[
+    {c:'By hand', n:'npm run db:migrate with DIRECT_URL\nfrom a trusted machine\nNever from a Vercel function'},
+    {c:'On merge', n:'deploy.yml runs the same command\nA failed migration blocks the worker push'},
+    {c:'Which URL', n:'DIRECT_URL is the session pooler, port 5432\nDATABASE_URL is the transaction pooler, 6543\nThe direct host is IPv6 only'},
+    {c:'Table rules', n:'verdict, approval_decision, session_event\nand delivery_attempt refuse UPDATE and DELETE\nTests use a throwaway schema'},
+  ]},
+  {c:'Zerops worker (bdworker)', n:'zerops.yml, Node 22, npm ci on Zerops', side:1, cls:'agent', h:m('reproducing'), k:[
+    {c:'Build', n:'Deploys app, lib, scripts, agent, skills\ndrizzle, docs, node_modules and configs\nCache on node_modules'},
+    {c:'Run', n:'npm run worker:daemon\nNODE_ENV production\nDATABASE_POOL_MAX 12'},
+    {c:'Health', n:'httpGet :8080/healthz every 30 s\nRestart after 60 s of failures\nSee the app structure page'},
+    {c:'Build config', n:'BUILD_BASE_SNAPSHOT bountydesk-build-dind\nBUILD_EGRESS_ALLOWLIST: git, registries,\nnpm, apk, PyPI hosts only'},
+    {c:'Secrets', n:'DAYTONA_API_KEY, GHCR push token\nDATABASE_URL, GitHub App key\nMCP_SERVER_SECRET, TRUEFORGE_API_KEY'},
+  ]},
+  {c:'TrueForge service', n:'Same repo, separate Zerops service', side:-1, cls:'agent', h:m('infra-hiccup'), k:[
+    {c:'Shape', n:'Proxy on 8791, bearer TRUEFORGE_API_KEY\nRaw server on 127.0.0.1:8790\nSQLite on the tfdata volume'},
+    {c:'Push', n:'deploy.yml pushes bdworker only\nTrueForge is pushed by hand:\nzcli push trueforge'},
+    {c:'Apply config', n:'npm run skills:apply\nnpm run agent:apply\nagainst the authenticated proxy'},
+    {c:'Model key', n:'Lives in the harness, not in the repo\nor the worker env\nEach agent manifest pins a model'},
+  ]},
+  {c:'Env mirroring', n:'Vercel and the worker read the same lib/ code', side:1, cls:'status', h:m('idle'), k:[
+    {c:'The rule', n:'Code in lib/delivery, lib/email, lib/targets\nruns in both places\nA variable set on one side can be missing\non the other'},
+    {c:'Shared names', n:'DAYTONA_API_KEY on both\nPREBUILT_IMAGE_REGISTRIES on both\nREVIEWER_EMAILS for the allowlist checks'},
+    {c:'Worker only', n:'TRUEFORGE_URL and TRUEFORGE_API_KEY on both: Vercel reads tool calls\nWORKER_HEALTH_PORT, BUILD_*, GHCR_*\nREGISTRY_* (optional)'},
+    {c:'How to set', n:'Zerops secrets in the dashboard or at import\nVercel project settings\nVercel needs a redeploy to apply'},
+  ]},
+  {c:'Operations', n:'Manual workflows and scripts', side:-1, cls:'ref', h:m('scanning'), k:[
+    {c:'Demo target image', n:'build-daytona-target.yml, manual only\nBuilds the pinned juice-shop commit\nand pushes it digest-pinned to GHCR'},
+    {c:'Archived sandboxes', n:'scripts/cleanup-archived-sandboxes.ts\nDry run unless --apply\nLeaves anything labelled bountydesk'},
+    {c:'Snapshot sweep', n:'The daemon sweeps abandoned trial\nsnapshots every 6 hours'},
+    {c:'Before a PR', n:'Focused tests, lint, full test suite\nProduction build\nLive checks recorded separately'},
+  ]},
+  {c:'Doc drift to fix', n:'Where the written record lags the workflow', side:1, cls:'plan', h:m('out-of-scope'), k:[
+    {c:'Deploy trigger', n:'docs/deployment.md says deploy runs on\nevery push to main\nThe workflow waits for green CI'},
+    {c:'Migrations', n:'AGENTS.md says a merge never touches\nproduction. deploy.yml now migrates (#222)'},
+  ]},
+]};
+const mobileTree = {c:'Build and deploy (mobile)', n:'PROPOSED, NOT BUILT\nExpo Application Services for the app\nVercel and Zerops do not build it', root:true, mid:true, wrap:5, row:175, h:m('cowboy'), k:[
+  {c:'EAS Build', n:'Three profiles: development, preview, production', side:1, cls:'plan', h:m('scanning'), k:[
+    {c:'development', n:'For working on the app\nWhat it contains is decided when it is built'},
+    {c:'preview', n:'EAS preview builds for review'},
+    {c:'production', n:'The store build\nThe only profile EAS Submit uses'},
+    {c:'Native change', n:'Needs a new store build\nA JS update cannot carry it'},
+  ]},
+  {c:'EAS Submit', n:'Sends a production build to the stores', side:1, cls:'reviewer', h:m('delivered'), k:[
+    {c:'App Store', n:'iOS build through App Store Connect'},
+    {c:'Google Play', n:'Android build through Play Console'},
+    {c:'Store review', n:'Both stores review a submitted build\nbefore users get it\nTiming and rules are not recorded here'},
+  ]},
+  {c:'EAS Update', n:'JS-only over-the-air fixes', side:-1, cls:'agent', h:m('canary-found'), k:[
+    {c:'Runtime version policy', n:'An update only reaches builds with a\nmatching runtime version\nWhich policy is not decided yet'},
+    {c:'What it can fix', n:'JavaScript and assets\nNot native modules or permissions'},
+    {c:'Insights', n:'EAS Insights or Sentry for React Native\nDecided at build time'},
+  ]},
+  {c:'Ships with the web deploy', n:'Normal Vercel and Zerops pipeline\nNothing extra to run for the app', side:-1, cls:'status', h:m('ingest'), k:[
+    {c:'/api/mobile routes', n:'Part of the Next.js app on Vercel\nDeploys on its own from main'},
+    {c:'Push sender', n:'In the Zerops worker\nSends through the Expo Push Service on\nAWAITING_APPROVAL and DELIVERED'},
+    {c:'.well-known files', n:'apple-app-site-association and assetlinks.json\nServed by the Next.js app'},
+    {c:'Migrations', n:'device_push_token and notification_event\nare proposed tables\nThey use the normal db:migrate step'},
+    {c:'Env mirroring', n:'Anything new the push sender reads\nmust be set on the worker as well\nas on Vercel'},
+  ]},
+  {c:'Versioning', n:'Two clocks: store build and runtime version', side:1, cls:'ref', h:m('idle'), k:[
+    {c:'Store build', n:'App version and build number\nset for each store submission'},
+    {c:'Runtime version', n:'Ties an over-the-air update to the\nnative build it can run on'},
+    {c:'Server routes', n:'/api/mobile is versioned JSON\nInstalled builds keep calling it, so a\nroute change must stay compatible'},
+  ]},
+  {c:'Before a build', n:'Checks named in the brief', side:-1, cls:'reviewer', h:m('awaiting-approval'), k:[
+    {c:'App tests', n:'jest-expo and React Native Testing Library'},
+    {c:'Device flows', n:'Explore on a real Android device with ARTEMIS\nthen encode as Maestro flows'},
+    {c:'Server side', n:'/api/mobile and the push sender use the\nrepo node:test and disposable-schema pattern'},
+  ]},
+  {c:'Phones on the web', n:'No web build of the phone app', side:1, cls:'ref', h:m('chilling'), k:[
+    {c:'Status', n:'iOS and Android only\nOn the web, phones use the responsive desktop app\nReviewer pages behind sign-in not checked at 390 px'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop'; const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script>addEventListener('load', () => { fit(); document.fonts && document.fonts.ready.then(fit); }); // mascots and fonts change card heights after first layout</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

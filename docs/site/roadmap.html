@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk roadmap</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  main { max-width: 1240px; }
+  main > p.lead { max-width: 760px; margin: 6px 0 0; }
+  section h2 { margin: 36px 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  section > p { max-width: 760px; margin: 0 0 12px; }
+  .sum { display: flex; align-items: center; gap: 16px; margin-top: 20px; }
+  .sum > div:first-child { flex: 1; } .sum b { color: var(--ink); }
+  .bar { height: 6px; border-radius: 3px; background: var(--hover); margin-top: 10px; overflow: hidden; } .bar i { display: block; height: 100%; background: var(--brand); border-radius: 3px; width: 0; }
+  .list { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .it { display: flex; align-items: flex-start; gap: 12px; padding: 12px 16px; cursor: pointer; } .it + .it { border-top: 1px solid var(--border); }
+  .it input { width: 20px; height: 20px; accent-color: var(--brand); flex: none; margin-top: 2px; }
+  .it .t { flex: 1; min-width: 0; color: var(--ink); } .it .t small { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+  .it input:checked ~ .t { color: var(--muted); text-decoration: line-through; }
+  .it a { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; text-decoration: none; } .it a:hover { text-decoration: underline; }
+  .st { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 99px; white-space: nowrap; flex: none; }
+  .st.todo { background: var(--hover); color: var(--muted); } .st.def { color: var(--analysis); background: color-mix(in oklab, var(--analysis) 15%, transparent); }
+  .st.ops { color: var(--approval); background: color-mix(in oklab, var(--approval) 15%, transparent); }
+  :root.light .st.ops { color: oklch(0.5 0.13 75); } :root.light .st.def { color: oklch(0.45 0.18 330); }
+  .none { padding: 12px 16px; color: var(--muted); font-size: 14px; }
+  .tbl { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
+  .tbl table { min-width: 620px; } .tbl tr:last-child td { border-bottom: 0; }
+  td { vertical-align: top; font-size: 14px; color: var(--muted); } td:first-child { color: var(--ink); white-space: nowrap; }
+  @media (max-width: 560px) { main { padding: 64px 16px 72px; } .it { flex-wrap: wrap; } .it .t { flex-basis: calc(100% - 40px); } }
+</style>
+</head>
+<body>
+<main>
+<h1>Roadmap</h1>
+<p class="lead">Every open GitHub issue on the BountyDesk repo, grouped by area, then the work that is deferred or ruled out on purpose. Issue titles are copied from <code>gh issue list --state open</code> (18 open on 2026-10-08). Tick boxes are yours and stay in this browser; they do not change the issues.</p>
+<div class="card sum"><div><b id="cnt">0 of 18</b> open issues ticked off locally. The hackathon window is closed and the items it held back for time are built, so what is left is product depth (oracles, remediation, accuracy), onboarding follow-ups, and the deferred real-product scope.<div class="bar"><i id="barf"></i></div></div></div>
+
+<section>
+<h2>Reproduction and oracles</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="343"><span class="t">Class-specific reproduction oracles (IDOR, broken-auth, path-traversal, SSRF)<small>The canary oracle covers reflected and stored injection. These classes have no signature, so they fall to <code>ANALYSIS_ONLY</code> or agent judgment instead of a deterministic <code>REPRODUCED</code>.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/343" target="_blank" rel="noopener">#343</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="344"><span class="t">Fix-verification: retest a confirmed report after a fix (fixed / partially-fixed / not-fixed)<small>A verdict is terminal today. This adds a retest, seeded by the re-check gate from #159.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/344" target="_blank" rel="noopener">#344</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="346"><span class="t">Accuracy benchmark and validation suite for the reproduction oracle<small>A scorecard (true and false positive rates) on pinned lab targets with known ground truth. Needs DVWA and WebGoat built (#350).</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/346" target="_blank" rel="noopener">#346</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="355"><span class="t">Fresh live end-to-end run to call agent-authored publish_verdict live-proven<small>An operational check, not a code change: one complete live run where the agent drafts the verdict itself against the demo target.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/355" target="_blank" rel="noopener">#355</a><span class="st ops">verify</span></label>
+  <label class="it"><input type="checkbox" data-k="325"><span class="t">Black-box / live-target reproduction (no source)<small>Deferred product scope. Reproduce against a live target without cloning or building source. Needs its own identity, pinning and scope story. Tracking only.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/325" target="_blank" rel="noopener">#325</a><span class="st def">deferred</span></label>
+</div>
+</section>
+
+<section>
+<h2>Intake</h2>
+<div class="list"><div class="none">No open issue is only about intake. The four channels (GitHub issues, advisories, email, upload) are built. The open upload-channel work is input hardening, listed under security hardening (#348).</div></div>
+</section>
+
+<section>
+<h2>Onboarding and targets</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="350"><span class="t">More pinned lab targets: build DVWA and WebGoat beside Juice Shop<small>The registry declares <code>dvwa</code>, <code>webgoat</code>, <code>dsvw</code> and <code>log4shell-cve-lab</code> with a pending build marker. They need snapshots built and verified. Unblocks #346.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/350" target="_blank" rel="noopener">#350</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="351"><span class="t">Onboard an uploaded tarball with no Dockerfile at its root<small>Today such a build fails and the report gets a static review. Reuse the onboarding agent that writes a recipe for GitHub repos.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/351" target="_blank" rel="noopener">#351</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="352"><span class="t">Onboard a target from a non-GitHub git URL (GitLab, Bitbucket)<small>Report references already recognise those links (#315). The clone and build path for them does not exist yet.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/352" target="_blank" rel="noopener">#352</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="353"><span class="t">Reclaim mesh service images and support non-GHCR image deletion<small>A single-image build deletes its pushed image once the snapshot is active. Mesh services' images are not reclaimed, and only GHCR has a delete path.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/353" target="_blank" rel="noopener">#353</a><span class="st todo">open</span></label>
+</div>
+</section>
+
+<section>
+<h2>Review and verdicts</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="345"><span class="t">Remediation output: drafted patch artifact, optional fix PR behind contents:write<small>Default is a unified-diff patch attached to the verdict with no repository write. A draft PR would be an explicit opt-in that needs the Contents write permission.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/345" target="_blank" rel="noopener">#345</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="347"><span class="t">Semantic duplicate detection and a confirmed-outcome feedback loop<small>Duplicate candidates are heuristic today and always go to a human. The loop would learn only from human-confirmed outcomes. Nothing is ever auto-closed.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/347" target="_blank" rel="noopener">#347</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="349"><span class="t">Drafted CVSS/severity and a researcher appeal path<small>Severity is human-entered only. A drafted vector the reviewer accepts or edits keeps the human in control. The appeal path does not exist yet.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/349" target="_blank" rel="noopener">#349</a><span class="st todo">open</span></label>
+  <label class="it"><input type="checkbox" data-k="356"><span class="t">Exportable formal verdict report (Markdown/PDF)<small>A shareable document with the finding, reproduction evidence, severity and remediation. Packaging for audit and leadership use, not part of the reproduction loop.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/356" target="_blank" rel="noopener">#356</a><span class="st todo">open</span></label>
+</div>
+</section>
+
+<section>
+<h2>Security hardening</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="348"><span class="t">Upload input hardening: zip-bomb ratio, MIME sniffing, signed artifact downloads<small>The upload route already has a size cap, per-sender and per-domain rate limits and tarball magic-byte checks. <code>/submit</code> takes attachments from the public, so this is the most exposed gap in the list.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/348" target="_blank" rel="noopener">#348</a><span class="st todo">open</span></label>
+</div>
+</section>
+
+<section>
+<h2>Platform</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="326"><span class="t">RBAC, multi-tenancy, and encrypted secrets<small>Deferred product scope. The app is single-tenant today: one reviewer allowlist and server-held secrets. Tracking only.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/326" target="_blank" rel="noopener">#326</a><span class="st def">deferred</span></label>
+  <label class="it"><input type="checkbox" data-k="354"><span class="t">Self-hosted / per-tenant private registry at multi-tenant scale<small>Builds push to GHCR or one configured registry. Per-tenant namespaces and credentials belong to the multi-tenancy work (#326).</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/354" target="_blank" rel="noopener">#354</a><span class="st def">deferred</span></label>
+  <label class="it"><input type="checkbox" data-k="327"><span class="t">Pentest agent / workbench<small>Deferred product scope. The design is in <code>docs/pentest-workbench.md</code> and is held. Tracking only.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/327" target="_blank" rel="noopener">#327</a><span class="st def">deferred</span></label>
+</div>
+</section>
+
+<section>
+<h2>Docs and research</h2>
+<div class="list">
+  <label class="it"><input type="checkbox" data-k="213"><span class="t">Research: dockerless targets run directly from source in a sandbox<small>Research only. A note landed in #335 (<code>docs/dockerless-targets.md</code>); the issue stays open until the maintainer gives a go-ahead on design or build.</small></span><a href="https://github.com/Vaibhav91one/bountydesk/issues/213" target="_blank" rel="noopener">#213</a><span class="st todo">open</span></label>
+</div>
+</section>
+
+<section>
+<h2>Deferred on purpose</h2>
+<p>From the "Deferred (real product, not the hackathon)" list in <code>docs/decisions.md</code>. These are scope decisions, not scheduling slips, and the plan says they stay deferred.</p>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Note</th><th>Issue</th></tr>
+<tr><td>Black-box / live-target reproduction</td><td>For scope that cannot be self-hosted.</td><td>#325</td></tr>
+<tr><td>Full RBAC, multi-tenant enforcement, encrypted secret store</td><td>Also production microVM isolation rollout (<code>docs/plan.md</code>).</td><td>#326</td></tr>
+<tr><td>Dedupe feedback loop with a held-out audit sample</td><td>Only human-confirmed outcomes feed it.</td><td>#347</td></tr>
+<tr><td>CVSS/severity as human-signed-off only; researcher appeal path</td><td>A drafted score is acceptable only if the reviewer signs it off.</td><td>#349</td></tr>
+<tr><td>Attachment MIME and zip-bomb hardening; signed artifact downloads</td><td>The size cap, rate limits and magic-byte checks exist already.</td><td>#348</td></tr>
+<tr><td>Multi-target expansion</td><td>More pinned lab targets (DVWA, WebGoat, CVE labs) beside Juice Shop. The target-choice-in-UI half shipped in #339.</td><td>#350</td></tr>
+<tr><td>Agentic code review module</td><td>Kept separate from onboarding. Phase 1 (#338) and its use by the reproduction agent (#342) are merged; the sandboxability pre-check and static review stay read-only.</td><td>none open</td></tr>
+<tr><td>Agent-driven pentest workbench</td><td>Design only, in <code>docs/pentest-workbench.md</code>.</td><td>#327</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Onboarding follow-ups</h2>
+<p>The four items <code>docs/onboarding-follow-ups.md</code> lists as still open. Each now has an issue above.</p>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Where it stands</th><th>Issue</th></tr>
+<tr><td>Tarball without a Dockerfile</td><td>The upload build plan always uses a Dockerfile at the archive root. The onboarding agent that writes one for GitHub repos is not wired to uploads.</td><td>#351</td></tr>
+<tr><td>Non-GitHub git URL</td><td>The <code>git</code> source kind accepts any clone URL, but no intake or onboarding path produces one.</td><td>#352</td></tr>
+<tr><td>Mesh image reclaim, non-GHCR delete</td><td>Single-image builds reclaim after the snapshot is active (needs <code>REGISTRY_DELETE_TOKEN</code>). The mesh path pushes one image per service and does not.</td><td>#353</td></tr>
+<tr><td>Private registry at multi-tenant scale</td><td>Zot (a single binary) or Harbor (per-project RBAC) are the options named. It belongs to the multi-tenancy work.</td><td>#354</td></tr>
+</table></div>
+<p style="margin-top:12px">A limit rather than a gap: Alpine-based targets fail to build on a restricted Daytona tier because the org egress policy does not reach the apk mirror. That is a billing-tier choice, and a Debian base builds fine.</p>
+</section>
+
+<section>
+<h2>Never on the roadmap</h2>
+<p>From the backlog section of <code>docs/plan.md</code>: these are the invariants, not deferred work. No phase turns them off.</p>
+<div class="list">
+  <div class="it" style="cursor:default"><span class="t">Any verdict without human approval<small>Human approval of the exact bytes is the gate. <code>publish_verdict</code> refuses any payload whose content hash differs from the approved one.</small></span><span class="st def">non-goal</span></div>
+  <div class="it" style="cursor:default"><span class="t">Automatic closure of semantically similar reports<small>Similar reports go to a human as top-k candidates. Only exact delivery replays are automatic no-ops.</small></span><span class="st def">non-goal</span></div>
+  <div class="it" style="cursor:default"><span class="t">Automated severity<small>Severity stays human-signed-off. #349 only proposes a draft for a reviewer to accept or edit.</small></span><span class="st def">non-goal</span></div>
+  <div class="it" style="cursor:default"><span class="t">Drive intake<small>Dropped, not deferred. It is not a channel this version offers.</small></span><span class="st def">dropped</span></div>
+</div>
+</section>
+
+<p style="font-size:12.5px;margin-top:36px">Sources: <code>gh issue list --state open --limit 100</code> and the issue bodies, <code>docs/decisions.md</code> (Deferred section), <code>docs/onboarding-follow-ups.md</code>, <code>docs/plan.md</code> (Backlog), <code>AGENTS.md</code>.</p>
+</main>
+<script>{ // ticks are remembered in this browser only; the issue list above is the source of truth
+  const K = 'bountydesk-roadmap', boxes = [...document.querySelectorAll('.it input')];
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(K) || '{}'); } catch (e) {}
+  const count = () => { const n = boxes.filter(b => b.checked).length; document.getElementById('cnt').textContent = n + ' of ' + boxes.length; document.getElementById('barf').style.width = (n / boxes.length * 100) + '%'; };
+  boxes.forEach(b => { if (b.dataset.k in saved) b.checked = saved[b.dataset.k];
+    b.onchange = () => { saved[b.dataset.k] = b.checked; try { localStorage.setItem(K, JSON.stringify(saved)); } catch (e) {} count(); }; });
+  count(); }</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

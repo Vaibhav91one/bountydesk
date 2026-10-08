@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk data model</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Data model', n:'Postgres on Supabase, Drizzle schema in lib/db/schema.ts\n29 tables, 49 migrations in drizzle/', root:true, mid:true, wrap:3, row:150, h:m('ingest'), k:[
+  {c:'Job execution states', n:'Did we manage to process the delivery? Separate from the report', side:1, cls:'agent', flow:true, k:[
+    {c:'RECEIVED', n:'Inserted by intake, 202 returned\nUnique (channel, delivery_id)'},
+    {c:'PARSED', n:'Payload parsed and the report created\nOutside email and advisory jobs finish PARSED to DONE'},
+    {c:'SESSION_CREATED', n:'A TrueForge session exists for the report'},
+    {c:'RUNNING', n:'The agent turn is in flight'},
+    {c:'DONE', n:'Finished. A replay of a finished job is a no-op'},
+    {c:'DEAD_LETTER', n:'Attempts exhausted. Belongs to job execution only, never to a reviewer queue'},
+  ]},
+  {c:'Report lifecycle states', n:'Where the human-facing report has got to. Last five are terminal', side:-1, cls:'reviewer', k:[
+    {c:'TRIAGING', n:'Default on creation'},
+    {c:'NEEDS_DECISION', n:'Gate for outside email, every advisory, every upload\nOnly a reviewer moves it on'},
+    {c:'REPRODUCING', n:'The agent is investigating a bound target'},
+    {c:'ANALYSIS_ONLY', n:'No bound target, or a target that could not be built\nA human decides'},
+    {c:'AWAITING_APPROVAL', n:'A verdict is drafted, publish_verdict is paused'},
+    {c:'DELIVERING', n:'Approved. Waiting for a transport receipt'},
+    {c:'DELIVERED', n:'Terminal. Verified recipient and receipt'},
+    {c:'DENIED', n:'Terminal. A reviewer refused the verdict or the report'},
+    {c:'OUT_OF_SCOPE', n:'Terminal. Operator quarantine, or a static review that read no source'},
+    {c:'CANCELLED', n:'Terminal'},
+    {c:'EXPIRED', n:'Terminal. Swept by the report-expiry loop'},
+  ]},
+  {c:'Other enums', n:'lib/db/schema.ts', side:1, cls:'ref', k:[
+    {c:'intake_channel', n:'github, email, manual, upload, advisory\nUnique (channel, source_ref) on report'},
+    {c:'verdict_outcome', n:'REPRODUCED, NOT_REPRODUCED\nINCONCLUSIVE, ANALYSIS_ONLY'},
+    {c:'approval_outcome', n:'APPROVED, DENIED'},
+    {c:'delivery_state', n:'PENDING, SENT, FAILED'},
+    {c:'investigation_run', n:'Reason: INITIAL, REVIEWER_GUIDANCE, REPORTER_REPLY\nStatus: PENDING, RUNNING, AWAITING_APPROVAL, SUPERSEDED, DONE, ERROR, CANCELLED'},
+    {c:'scope_guard_audit_verdict', n:'allowed, denied, mutated'},
+  ]},
+  {c:'Intake and jobs', n:'Reports and the queue in front of them', side:-1, cls:'reporter', k:[
+    {c:'report', n:'channel, source_ref, title, body, state\nconnected_repository_id, target_profile_id, hidden_at'},
+    {c:'report contact columns', n:'reporter_contact, verified_sender\ncontact_code_hash, expiry and attempts (upload OTP)'},
+    {c:'inbound_job', n:'channel, delivery_id, state, payload, report_id\nlease_owner, lease_expires_at, fence, attempts, next_attempt_at'},
+    {c:'lifecycle_delivery', n:'GitHub lifecycle webhook deliveries already applied\nUnique delivery_id, so a replay cannot restore access'},
+    {c:'upload_intake', n:'One per report. material_kind: archive, dockerfile, image\nbuild_state: PENDING, BUILDING, BUILT, FAILED'},
+    {c:'Outside limits and reviewers', n:'outside_intake_config: per-sender and per-domain daily limits, max_bytes\nreviewer: DB members beside the env owners, authorised once verified_at is set'},
+  ]},
+  {c:'Targets and access', n:'What a report may be reproduced against', side:1, cls:'plan', k:[
+    {c:'github_installation', n:'installation_id, account_login, account_type\ncontents_permission, repository_advisories_permission'},
+    {c:'connected_repository', n:'installation_id, repo_id, full_name, target_profile_id\nactive, archived_at, is_private\nparent_full_name, source_full_name'},
+    {c:'target_profile', n:'name (unique), image_name, image_digest, snapshot_id\nconfig, scope_rules, origin, manifest, retired_at'},
+    {c:'target_onboarding', n:'repo_id, source_ref, state, build_plan, image_digest\nsnapshot_id, build_marker, dockerfile_text'},
+    {c:'github_repository_lookup', n:'Cached repository name lookups\nstate: pending, found, missing, error, with expires_at'},
+    {c:'scope_guard_grant', n:'token, target, action, event (issued or consumed)\nOne issue and one consume per token'},
+  ]},
+  {c:'Evidence tables', n:'Append-only: UPDATE and DELETE raise an exception', side:-1, cls:'status', k:[
+    {c:'verdict', n:'report_id, outcome, summary, evidence\npayload (exact comment), content_hash, revision'},
+    {c:'approval_decision', n:'verdict_id (unique), reviewer, decision, payload_hash\nthread_id and tool_call_id, both or neither'},
+    {c:'session_event', n:'report_id, seq, type, event_key, data\nUnique (report_id, seq) and (report_id, event_key)'},
+    {c:'delivery_attempt', n:'delivery_id, attempt, response_status, response_body\nerror, started_at'},
+    {c:'Four named in AGENTS.md', n:'verdict, approval_decision, session_event, delivery_attempt\nTriggers from 0001_lockdown.sql'},
+    {c:'Added by later migrations', n:'lifecycle_delivery, artifact, scope_guard_audit, scope_guard_grant\nreviewer_chat_message, verdict_supersession, code_review_finding'},
+  ]},
+  {c:'Verdict revisions and delivery', n:'Revise by inserting, send from the immutable row', side:1, cls:'plan', k:[
+    {c:'Revisions', n:'Unique (report_id, revision)\nA verdict is revised by inserting the next revision'},
+    {c:'verdict_supersession', n:'old_verdict_id, superseded_by_run_id, reason, actor\nAppend-only; composite keys prove verdict and run belong to the report'},
+    {c:'outbound_delivery', n:'report_id, verdict_id, state, channel, target\nidempotency_key, approved_content_hash, provider_message_id, delivered_at'},
+    {c:'No body column', n:'The delivery worker reads verdict.payload\nand checks it against approved_content_hash at send time'},
+    {c:'Outbox indexes', n:'Unique idempotency_key, unique provider_message_id\nUnique (verdict_id, target) when no human review is required'},
+    {c:'owner_advisory, approval_submission', n:'Advisory delivery state and the queued approval hand-off'},
+  ]},
+  {c:'Agent runs and chat', n:'Durable attempts, never edited in place', side:-1, cls:'agent', k:[
+    {c:'investigation_run', n:'One row per attempt: reason, status, lease columns\nA reviewer-guided re-check is a new row'},
+    {c:'agent_session, agent_session_claim', n:'The TrueForge session per report and its poll lease'},
+    {c:'reviewer_chat_thread and message', n:'Status OPEN, RUNNING, DONE, ERROR, CANCELLED\nSender REVIEWER, AGENT, SYSTEM; messages are append-only'},
+    {c:'code_review_run and finding', n:'At most one live run per report (partial unique index)\nFinding: file, line, category, severity, confidence'},
+    {c:'artifact', n:'Verdict payloads and transcripts, bytes in Supabase Storage\nAppend-only, so an unstored row stays unstored'},
+    {c:'scope_guard_audit', n:'seq, prev_hash, hash, actor, action, verdict, reason\nA hash chain, append-only'},
+  ]},
+]};
+const mobileTree = {c:'Data model · mobile (proposed)', n:'PROPOSED, NOT BUILT. Two new tables and an on-device cache\nThe app reads existing tables only through the API', root:true, mid:true, wrap:3, row:150, h:m('ingest'), k:[
+  {c:'What mobile reads', n:'Existing tables, only through /api/mobile', side:1, cls:'reviewer', k:[
+    {c:'Through the API only', n:'queue, case, chat, connections\nNo database credential on the device'},
+    {c:'Approve payload', n:'{ verdictId, contentHash } of the exact text shown\nThe server compares the hash'},
+  ]},
+  {c:'device_push_token', n:'Proposed new table', side:-1, cls:'agent', k:[
+    {c:'Columns', n:'user, token, platform, created_at, revoked_at'},
+    {c:'Registered', n:'The app posts its Expo push token to /api/mobile/push-token'},
+    {c:'Revoked', n:'On sign-out and on Expo DeviceNotRegistered receipts'},
+  ]},
+  {c:'notification_event', n:'Proposed new table, append-only', side:1, cls:'plan', k:[
+    {c:'Columns', n:'report id, kind, sent_at, ticket id\nIds only'},
+    {c:'Written by', n:'The Zerops worker, when it sends a push\nat AWAITING_APPROVAL and when a receipt sets DELIVERED'},
+  ]},
+  {c:'Persisted query cache', n:'On the device, TanStack Query', side:-1, cls:'status', k:[
+    {c:'Readable offline', n:'The queue and case files'},
+    {c:'A copy, not a source', n:'The server row is the truth; the cache is replaced on the next fetch'},
+  ]},
+  {c:'Never cached as a write', n:'No offline queue', side:1, cls:'status', k:[
+    {c:'Network-only writes', n:'Approve, deny, chat and add reviewer'},
+    {c:'Why', n:'A stale approval must never fire later'},
+  ]},
+  {c:'Push payload', n:'What leaves the database toward a phone', side:-1, cls:'reporter', k:[
+    {c:'Ids and a short title', n:'Never verdict text or report body'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

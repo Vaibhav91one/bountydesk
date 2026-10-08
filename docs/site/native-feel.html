@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk native feel</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · use Focus on a branch to read it alone · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const code = (...lines) => lines.map(l => '<p class="tx"><code>' + l + '</code></p>').join('');
+// Sources: screens/c.css, c.js, platform.js and the HTML in screens/mN.html (Variant C).
+// The mockups run in a browser, so a haptic or a keyboard type is described as the call the React Native app would make.
+const tree = {c:'Native feel', n:'Proposed mobile app, not built\nHow the 28 Variant C screens behave on iOS and Android Material\nOpen any screen with ?platform=ios or android\nThe app has no web build', root:true, mid:true, wrap:4, row:185, h:m('cowboy'), k:[
+  {c:'Haptics', n:'Proposed. The mockups only tag a haptic in the embed\nThese are the calls the app would make', side:1, cls:'plan', h:m('delivered'), k:[
+    {c:'Approve (M11, M13)', n:'Approving a verdict is the one weighty action\niOS notificationAsync(Success)\nAndroid Confirm', h:code('Approve  success')},
+    {c:'Deny confirmed (M11, M13)', n:'The check button on the deny sheet\niOS notificationAsync(Warning)\nAndroid Reject', h:code('Deny  warning')},
+    {c:'Code complete (M18, M21)', n:'Sixth digit entered, the code is accepted\nA success tap when the code is full'},
+    {c:'Selection (M19, M20)', n:'Notification switches in settings\nThe target material radios on the submit sheet\niOS selectionAsync(), Android Segment tick'},
+    {c:'Filter chips (M6)', n:'selectionAsync() when the active chip changes\nNo haptic for typing in search'},
+    {c:'Long press (M4, M5, M6)', n:'A light impact when the card lifts at 450 ms'},
+    {c:'Off switch', n:'Skip haptics when the system setting is off\nor in low-power mode\nGate every call on the platform'},
+  ]},
+  {c:'Keyboard and input', n:'What the mockups declare on each field', side:-1, cls:'reporter', h:m('greeting'), k:[
+    {c:'One-time codes (M18, M21)', n:'Six boxes, numeric keyboard, one digit each\nA digit moves focus on, a paste fills all six\nautocomplete one-time-code on box 1\nApp: textContentType oneTimeCode, sms-otp', h:code('inputmode=numeric')},
+    {c:'Auto submit (M18, M21)', n:'The sixth digit accepts the code\nM18 shows Verified and pops back to M17\nM21 shows Report received in place'},
+    {c:'Email fields (M17, M20)', n:'M17 validates the address before adding a reviewer\nM17 toast: Enter a valid email\nApp: keyboardType email-address, no autocapitalize'},
+    {c:'Search (M6)', n:'Filters as you type, with the phase chips\nEnter dismisses the keyboard\nNo results: say so, suggest a fix, Clear search'},
+    {c:'Chat (M10)', n:'Enter sends, unless an IME is composing\nList scrolls to the newest bubble\nSuggestion chips sit under the last reply\nTyping dots while the agent works'},
+    {c:'Long text (M13, M20, M28)', n:'Multiline note, details and report fields\nImage digest field turns spellcheck off'},
+    {c:'Keyboard avoidance', n:'Not in the mockups\nApp: keyboard-controller sticky view keeps the\nfloating bar and composer above the keys'},
+  ]},
+  {c:'Sheets, menus and long press', n:'Three overlays. Everything behind a sheet scales to about 0.94', side:1, cls:'agent', h:m('denied'), k:[
+    {c:'Sheet chrome', n:'Grabber, X on the left, check on the right\nDeny (M11, M13) and target material (M20)\nThe check confirms, the X cancels', h:code('X cancels  check confirms')},
+    {c:'Drag to dismiss', n:'Grab the top 84 px: handle and title\nRelease past 35 percent of the height,\nor faster than 600 px/s, to dismiss\nOtherwise it springs back', h:code('vel > 600 or 35%')},
+    {c:'Spring', n:'Damping ratio 0.8, about 300 ms\nAn interrupted spring keeps its velocity\nThe scrim fades with it, Escape closes'},
+    {c:'Long press (M4, M5, M6)', n:'450 ms on a report card or row\nEverything else blurs, the card lifts\nOpen case file, Copy report id, Share, Assign to me\nApp: Link with preview and context menu'},
+    {c:'More menu', n:'Bell and more in a glass pill on tab screens\nMore opens Settings, Connections, Integrations\nSort menus on the Home section headers'},
+    {c:'iOS look', n:'Translucent sheet, blur 30 px, 36 radius\nMaps to formSheet with grabber and detents'},
+    {c:'Android look', n:'Material 3 modal bottom sheet\n28 radius, 32 by 4 drag handle\nMenus are 12 radius tonal surfaces'},
+    {c:'Not in the mockups', n:'No pull to refresh or swipe actions\nLong press is the only hidden gesture'},
+  ]},
+  {c:'Press feedback', n:'Every pressable answers within 120 ms', side:-1, cls:'status', h:m('chilling'), k:[
+    {c:'Scale', n:'Buttons, tiles, cards, chips, tabs and rows\nscale to 0.97 in 120 ms\nIcon buttons scale to 0.92 and dim', h:code('scale(.97) 120ms')},
+    {c:'Hit area', n:'Icon buttons are 48, the primary button 52\nChips are 44 on iOS, 48 on Android\nThe switch is the native size and its row is the target'},
+    {c:'iOS', n:'No ripple, no hover state\nGlass pills respond with the scale only'},
+    {c:'Android', n:'Same scale, no ripple drawn in the mockups\nThe app would use the Material ripple\nActive tab is a filled indicator pill'},
+    {c:'After a tap', n:'Approve, submit and build show a toast\nthen leave the screen about 1.1 s later\n(M11, M20, M28)'},
+    {c:'Reduced motion', n:'Press scale becomes a 0.8 opacity dip\nMenus, lift and new bubbles stop animating'},
+  ]},
+  {c:'Back and transitions', n:'View transitions between the mockup pages', side:1, cls:'reviewer', h:m('scanning'), k:[
+    {c:'iOS push', n:'New screen slides in from the right\nOld screen shifts left 28 percent\n350 ms', h:code('350ms', 'cubic-bezier(.32,.72,0,1)')},
+    {c:'iOS back and modal', n:'Back mirrors the push\nSplash to sign in rises as a modal, 380 ms\nApp: swipe from the left edge follows the finger'},
+    {c:'Android', n:'Material fade through\nOld leaves in 90 ms\nNew arrives over 210 ms, from 0.96 scale', h:code('90ms out, 210ms in')},
+    {c:'Tabs', n:'Home, Queue and Reports are peers\nNo slide between them\nReview next pushes M11 like any detail screen'},
+    {c:'Back control', n:'Round back button, top left of detail screens\nGoes to the previous page, else its parent\nApprove and deny leave to the nearest Home'},
+    {c:'Chrome stays put', n:'Status bar, island and home indicator\nsit outside the moving wrapper'},
+  ]},
+  {c:'Platform looks', n:'Same tokens, two renderings (platform.js, c.css)', side:-1, cls:'ref', h:m('idle'), k:[
+    {c:'iOS', n:'Glass pills: blur 24 px, saturate 180 percent\nFloating tab pill and a round Review next\nMaps to NativeTabs and SwiftUI through @expo/ui'},
+    {c:'Android Material 3', n:'Tonal surfaces in place of blur\nTab pill becomes a floating toolbar\nReview next is a 16 dp FAB\nMaps to Jetpack Compose'},
+    {c:'Toast', n:'Pill above the nav, two seconds\nAndroid: 8 radius snackbar style'},
+    {c:'Theme (M19)', n:'Theme row cycles System, Light, Dark\nDark is the default'},
+    {c:'Phase pills', n:'Approval, Reproducing, Analysis, Triaging,\nDelivered and Closed use the desktop hues'},
+    {c:'Phones on the web', n:'Not part of this app\nPhones use the responsive desktop app\nLanding, sign-in and submit checked at 390 px;\nreviewer pages behind sign-in not checked'},
+  ]},
+  {c:'Motion and access', n:'Rules from c.css', side:1, cls:'plan', h:m('canary-found'), k:[
+    {c:'Reduced motion', n:'Screen change becomes a 150 ms crossfade\nPress scale and menu animations stop\nThe sheet falls back to a CSS transition'},
+    {c:'Reduced transparency', n:'Glass, menu and sheet use the opaque card color'},
+    {c:'Large text', n:'Type is in rem; Large text sets the root to 125 percent\nBody is 17, secondary 15, meta 13'},
+    {c:'Screen readers', n:'Review next reads Review next verdict, 3 waiting\nThe bell reads Inbox, 2 unread\nOTP boxes read Digit 1 of 6'},
+    {c:'Worst-case data', n:'Report titles clamp to two lines\nMeta rows truncate'},
+  ]},
+  {c:'Push on each platform', n:'Proposed. Two kinds: approvals needed, delivery receipts\nSee the native UI page for the plumbing', side:-1, cls:'status', h:m('awaiting-approval'), k:[
+    {c:'iOS (APNs)', n:'Banner from the top, grouped by app\nTap opens M11 for an approval\nand M7 for a receipt'},
+    {c:'Android (FCM)', n:'Heads-up card on a high-importance channel\nSeparate channels for approvals and receipts\nso the M19 toggles map to system settings'},
+    {c:'Copy rule', n:'Ids and a short title only\nSay a verdict is waiting or delivered\nNever include the verdict text\nApprove stays inside the app'},
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script>addEventListener('load', () => { fit(); document.fonts && document.fonts.ready.then(fit); }); // mascots and fonts change card heights after first layout</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

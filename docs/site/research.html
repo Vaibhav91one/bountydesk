@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk research and sources</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · use Focus to read one branch · click a linked title to open the source · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Decision answers are shortened from docs/decisions.md. The docs index is the first lines of each file in docs/ of the BountyDesk repo.
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const REPO = 'https://github.com/Vaibhav91one/bountydesk/';
+const q = (id, title, n) => ({c: id + ' ' + title, n});
+const doc = (f, n) => ({c: f, n, url: REPO + 'blob/main/docs/' + f});
+const ext = (c, n, url) => ({c, n, url});
+const tree = {c:'Research and sources', n:'Decisions Q1 to Q32, the docs index, prior art,\nand the external sources the issues cite', root:true, mid:true, wrap:4, row:230, h:m('greeting'), k:[
+  {c:'Design decisions', n:'docs/decisions.md, grouped by theme', side:-1, cls:'reporter', h:m('awaiting-approval'), wrap:4, k:[
+    {c:'Product and target', n:'What the product is and what it reproduces', cls:'reporter', k:[
+      q('Q1','Product shape','Repro-centric MVP with an analysis fallback. Reproduction is the differentiator; the fallback is graceful degradation'),
+      q('Q2','Target domain','Self-hostable with a Dockerfile first. Then any Git repo with a generated Dockerfile. Then static scan. A failed build is could-not-build, never not-reproduced'),
+      q('Q6','Demo happy path','One pinned vulnerable target, SQLi confirmed by a per-run canary. Plus a second scenario inside the same target'),
+      q('Q18','Pinned demo target','Frozen: OWASP Juice Shop v17.3.0, amd64, UNION SQLi in product search. A data-exfiltration path, so the canary is visible in the response'),
+      q('Q23','Onboarding any repo','An offline-first admission ladder: flatten, image, compose-synth, compose-mesh. Static reachability pre-check. Running the customer\'s compose in the sandbox is rejected'),
+      q('Q30','Non-GitHub sources','The identity anchor is any one of a commit SHA, a source archive digest or the image digest. hasIdentityAnchor is the single check'),
+      q('Q31','Static review fallback','A target that cannot be built or deployed ends in an evidenced ANALYSIS_ONLY static review, not a bare failure'),
+    ]},
+    {c:'Verdict and oracle', n:'How a verdict is earned', cls:'agent', k:[
+      q('Q3','The verdict oracle','REPRODUCED comes from a defender-authored canary oracle, never PoC output. Unpredictable per-run canary, trusted fixture, judged outside the PoC, negative control first'),
+      q('Q7','Fallback claim strength','The fallback asserts no verdict and no score. No oracle means a genuine or fake call would be a forgeable guess'),
+      q('Q8','Fallback evidence schema','Deterministic checks only. Three tiers: Verified, Restated, Observation. Only tool output counts as evidence'),
+      q('Q9','What the model writes in fallback','what, where (counted only after a grep confirms it), and per-finding consistency signals. No global genuine or fake call'),
+      q('Q10','Fallback routing','Always routes to a human. Delivery replay is an automatic no-op; semantic similarity shows top-k candidates and a human decides'),
+      q('Q22','Agent-authored verdicts','The agent investigates and drafts its own outcome. The server refuses REPRODUCED or NOT_REPRODUCED with no bound target or a revoked grant'),
+    ]},
+    {c:'Approval and delivery', n:'The human gate and what follows it', cls:'plan', k:[
+      q('Q11','Approval mechanism','Native TrueForge gate on publish_verdict. Modify is a pre-gate form. The tool refuses any payload whose content hash differs from the approved one'),
+      q('Q12','What the gate covers','Approve, then one DB transaction, then an idempotent delivery worker, then the DeliveryAttempt record. Only approved outcomes feed dedupe'),
+      q('Q17','Session and turn lifecycle','One session per report. The approval is a new chained turn bound to threadId and toolCallId, not a resume'),
+      q('Q24','Reviewer-guided re-checks','A reviewer can supersede the pending verdict and start a fresh run. investigation_run records each attempt'),
+    ]},
+    {c:'Sandbox and scope', n:'What can run and what it can reach', cls:'status', k:[
+      q('Q4/Q5','Sandbox and framing','Demo on Daytona (shared-kernel container, benign inputs). Production on a Kata microVM or self-hosted E2B with host-side egress hardening'),
+      q('Q15','Scope enforcement','Enforced at the capability boundary. Every attempt binds to a server-matched TargetProfile. A report may exist without one and stay analysis-only'),
+      q('Q16','Install vs runtime egress','Prebuilt pinned snapshot, so the hostile sandbox needs zero network. Two sandboxes: build with narrow egress, reproduction with none'),
+      q('Q20','Dynamic target tier','A connected repo can be its own target. Every reproduction uses an exact commit and an immutable build'),
+    ]},
+    {c:'Intake and channels', n:'How reports arrive', cls:'reviewer', k:[
+      q('Q14','Intake durability','One durable jobs table. Unique (channel, delivery_id). Decide on job state, not on whether the row exists'),
+      q('Q21','Independent intake channels','Intake and reproduction are separate. A channel needs no GitHub connection; reproduction needs a server-authorised target'),
+      q('Q25','Outside email and the gate','An outside sender gets in only when SPF and DKIM pass. The report waits at NEEDS_DECISION until a reviewer moves it'),
+      q('Q26','Linking a reply','A reply creates a report with a link to the original. It still lands at NEEDS_DECISION'),
+      q('Q27','Advisory intake','Private vulnerability reports become their own channel. The verdict is delivered by editing the advisory description'),
+      q('Q28','Email routes to an advisory','When the repo supports it, an approved email verdict goes out as a draft advisory instead of an email reply'),
+      q('Q32','Upload intake','Public /submit for a reporter with no account. 4 MB cap. Own upload channel and a report-scoped one-time code'),
+    ]},
+    {c:'GitHub, hosting and access', n:'Where the platform runs and what it may touch', cls:'ref', k:[
+      q('Q13','Deployment topology','Browser talks only to Next.js. TrueForge never public. Amended: Vercel for intake and UI, a private Zerops worker, Supabase between them'),
+      q('Q19','GitHub connectivity','OAuth login is identity only. The App install is repo access, least privilege, with a platform-owned webhook secret'),
+      q('Q29','Private repositories','Reproduce behind Contents: read. Without it the report is triaged but refused reproduction with ANALYSIS_ONLY'),
+    ]},
+  ]},
+  {c:'Docs index', n:'Every file in docs/ of the BountyDesk repo', side:1, cls:'plan', h:m('idle'), wrap:4, k:[
+    {c:'Decisions and plan', n:'The record, and the phased plan', cls:'plan', k:[
+      doc('decisions.md','Working record of the review and grilling session. Q1 to Q32, the deferred list, implementation gates'),
+      doc('plan.md','Phase-by-phase MVP plan that implements the frozen scope'),
+      doc('verification-matrix.md','Scenario, state and channel coverage exercised after the private-intake work'),
+      doc('demo-runbook.md','Demo-day runbook, with likely questions and answers'),
+    ]},
+    {c:'Targets and onboarding', n:'How a repo becomes a target', cls:'status', k:[
+      doc('target-profiles.md','Target profiles and dynamic target setup. A test repo is source for a pinned target'),
+      doc('additional-targets.md','Additional reproduction targets beyond the pinned Juice Shop'),
+      {c:'multi-target-expansion-plan.md', n:'Plan for DVWA, WebGoat and CVE-lab targets (untracked in git at this snapshot)'},
+      doc('onboarding-follow-ups.md','Open items on the manifest-driven onboarding pipeline'),
+      doc('dockerless-targets.md','Research note for #213: running source directly in a sandbox'),
+      doc('upload-and-nongithub-targets.md','Upload intake and non-GitHub targets'),
+    ]},
+    {c:'Intake and delivery', n:'Channels in, verdict out', cls:'reviewer', k:[
+      doc('advisory-intake.md','Advisory intake and the advisory delivery channel'),
+      doc('smoke-test-github-walking-skeleton.md','Smoke test for the signed GitHub intake path'),
+    ]},
+    {c:'Agent tooling', n:'What the agent can use', cls:'agent', k:[
+      doc('browser-probe.md','Browser probe for DOM and SPA XSS reproduction, since plain fetch never runs page JavaScript'),
+      doc('pentest-workbench.md','Proposal for an agent-driven tool sandbox joined to the target mesh'),
+    ]},
+    {c:'Operations and review', n:'Deploy and review workflow', cls:'ref', k:[
+      doc('deployment.md','Deployment plan. Manifests added, not live-proven at the time it was written'),
+      doc('claude-review.md','The advisory Claude review workflow. Not a merge gate'),
+      doc('blog-post.md','Draft post: agent-led bug bounty triage with a human-approved verdict'),
+    ]},
+    {c:'Other material in docs/', n:'Folders and comparison pages', cls:'ref', k:[
+      {c:'agent-comparison.html', n:'Agent comparison page (untracked in git at this snapshot)'},
+      {c:'trueforge-harness-comparison.html', n:'Harness comparison page (untracked in git at this snapshot)'},
+      {c:'spikes/', n:'2026-08-27 Daytona provisioning spike'},
+      {c:'target-packaging/', n:'Target packaging README'},
+      {c:'superpowers/', n:'Plans and specs for the reviewer-chat surface and approval polish'},
+      {c:'screenshots/', n:'Product screenshots used in the docs'},
+    ]},
+  ]},
+  {c:'Prior art', n:'What was reused, and what shaped the design', side:1, cls:'agent', h:m('canary-found'), wrap:4, k:[
+    {c:'Sentinel prototype', n:'AGENTS.md: reuse, do not rebuild', cls:'agent', k:[
+      {c:'Scope-guard engine and tests', n:'The scope-guard MCP server is ported from Sentinel'},
+      {c:'CI and CONTRIBUTING', n:'Reused as the project baseline'},
+      {c:'TrueForge session and turn driver', n:'The harness driver that runs one session per report'},
+      {c:'sandbox-setup/dvwa.sh', n:'Q23 says compose-synth generalizes this script'},
+    ]},
+    {c:'Design inputs', n:'Sources that shaped a decision', cls:'ref', k:[
+      ext('Elastic: AI vulnerability triage','~70% of reports are rejected at analysis and never reproduced. Fixes an earlier capacity error in decisions.md','https://www.elastic.co/security-labs/ai-vulnerability-triage-bug-bounty-hackerone'),
+      {c:'Konvu', n:'Tier R static reachability and the self-hosted runner shape informed Q23'},
+      {c:'XBOW safety design', n:'Scope locked at launch, DNS egress proxy, Guardian model, immutable audit trail. BountyDesk already has the equivalents'},
+      {c:'Qodo review trail', n:'The hackathon-window PR trail is kept in README.md as history'},
+    ]},
+  ]},
+  {c:'External sources and repos', n:'Cited in the open issues and design notes', side:-1, cls:'status', h:m('scanning'), wrap:4, k:[
+    {c:'Pentest landscape', n:'docs/pentest-workbench.md', cls:'status', k:[
+      ext('XBOW: how it reached #1','HackerOne US leaderboard, then global','https://xbow.com/blog/top-1-how-xbow-did-it'),
+      ext('XBOW: Series B','$75M','https://xbow.com/blog/series-b'),
+      ext('XBOW: agent safety guardrails','Scope lock, egress proxy, Guardian','https://xbow.com/blog/autonomous-agent-safety-guardrails'),
+      ext('Strix','Open-source multi-agent pentester','https://github.com/usestrix/strix'),
+      ext('CAI','Proof of exploit rather than a CVSS score','https://github.com/aliasrobotics/cai'),
+      ext('NodeZero','Proof of exploit and re-test','https://horizon3.ai/nodezero/'),
+      ext('HexStrike AI','The cautionary tale: 150+ tools on one MCP server','https://github.com/0x4m4/hexstrike-ai'),
+      ext('Check Point on HexStrike','Threat actor used it on a Citrix CVE','https://blog.checkpoint.com/executive-insights/hexstrike-ai-when-llms-meet-zero-day-exploitation/'),
+    ]},
+    {c:'Benchmarks and labs', n:'#346 and #350', cls:'status', k:[
+      {c:'xbow-engineering/validation-benchmarks', n:'Public benchmark for an apples-to-apples number against XBOW (#346)'},
+      {c:'OWASP WebGoat and Benchmark', n:'Yardsticks to evaluate for comparability (#346)'},
+      {c:'DVWA, WebGoat, dsvw, log4shell lab', n:'Scaffolded in the target registry, not yet built (#350)'},
+      {c:'December 2025 ARTEMIS study', n:'Best agent 9 findings vs top human 13; cited for the chaining non-goal'},
+    ]},
+    {c:'Tools weighed', n:'#327, #343, #347', cls:'status', k:[
+      {c:'ZAP, nuclei, sqlmap, dalfox, newman', n:'OSS workbench tools. ZAP in daemon mode, Apache-2.0'},
+      {c:'Burp and Caido', n:'Rejected: per-seat licence, GUI-bound'},
+      {c:'projectdiscovery/interactsh', n:'Self-hosted out-of-band callbacks, if DNS or SMTP OOB is needed (#343)'},
+      {c:'pg_trgm, pgvector', n:'Dedupe similarity backends, pg_trgm first (#347)'},
+    ]},
+    {c:'Open research and issues', n:'GitHub issues in Vaibhav91one/bountydesk', cls:'status', k:[
+      {c:'#213 Dockerless targets', n:'Research only. Findings go to the maintainer before any design', url: REPO + 'issues/213'},
+      {c:'#327 Pentest workbench', n:'Deferred product scope, held. Tracking only. docs/pentest-workbench.md plans Phase 0 first and stopping if it does not pay off', url: REPO + 'issues/327'},
+      {c:'#325 Black-box reproduction', n:'Needs its own identity/pinning and scope story. Tracking only', url: REPO + 'issues/325'},
+      {c:'#343 to #356', n:'The 2026 audit issues, mapped on the competitor audit page'},
+    ]},
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

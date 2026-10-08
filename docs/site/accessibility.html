@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="views" content="desktop mobile">
+<title>BountyDesk accessibility</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+<style>
+  main { max-width: 1240px; }
+  main > p.lead { max-width: 760px; margin: 6px 0 0; }
+  section h2 { margin: 36px 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  section > p { max-width: 760px; margin: 0 0 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; } .card p, .card li { font-size: 14px; } .card ul { margin: 6px 0 0; padding-left: 18px; }
+  .tbl { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
+  .tbl table { min-width: 640px; } .tbl tr:last-child td { border-bottom: 0; }
+  th { font-size: 12px; letter-spacing: .04em; }
+  td { vertical-align: top; font-size: 14px; color: var(--muted); } td:first-child { color: var(--ink); }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .ok { color: var(--delivered); background: color-mix(in oklab, var(--delivered) 15%, transparent); }
+  .bad { color: oklch(0.704 0.191 22.216); background: color-mix(in oklab, oklch(0.704 0.191 22.216) 15%, transparent); }
+  .mid { color: var(--approval); background: color-mix(in oklab, var(--approval) 15%, transparent); }
+  :root.light .mid { color: oklch(0.5 0.13 75); } :root.light .bad { color: oklch(0.5 0.2 27); } :root.light .ok { color: oklch(0.45 0.14 150); }
+  .chipx { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--sans); padding: 5px 9px; border-radius: 99px; color: var(--c); background: color-mix(in oklab, var(--c) 15%, transparent); }
+  .chipx::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--approval); background: color-mix(in oklab, var(--approval) 15%, transparent); vertical-align: 2px; }
+  .shots { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+  .shots a { display: block; width: 150px; color: inherit; text-decoration: none; font-size: 12.5px; } .shots img { width: 150px; border-radius: 16px; border: 1px solid var(--border); display: block; margin-bottom: 6px; }
+  @media (max-width: 560px) { main { padding: 64px 16px 72px; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Accessibility</h1>
+<p class="lead">What the shipped web product does today, read from its components and <code>app/globals.css</code>, then what the proposed mobile app does in its prototype screens. Gaps are marked as gaps. Nothing here comes from an assistive technology test run: no screen reader pass, keyboard audit or automated checker has been recorded in the repo.</p>
+
+<section data-only="desktop">
+<h2>Web product, today</h2>
+<div class="cards">
+  <div class="card"><h3>Color is never the only signal</h3><p>Every phase dot is <code>aria-hidden</code> and sits beside a label that says the same thing in words (<code>components/phase-dot.tsx</code>). <code>PhaseBadge</code> carries the state name and is not hidden. Report ids and handles get a <code>sr-only</code> span where the visible text is an icon or abbreviation (the home page and the case file header).</p></div>
+  <div class="card"><h3>Labels and roles</h3><p>About 30 <code>aria-label</code> attributes on search boxes, icon buttons and groups ("Search the review queue", "Message to Agent Bounty", "Remove {email}", "Digit 3" on the one-time code input). Errors use <code>role="alert"</code>; progress text uses <code>role="status"</code>. The repository filter in the reports table is a combobox with a listbox of options.</p></div>
+  <div class="card"><h3>Live regions</h3><p>Three <code>aria-live="polite"</code> regions: the route loading state, the approval dialog, and the reviewer chat. The agent chat names its busy state ("Agent Bounty is thinking").</p></div>
+  <div class="card"><h3>Focus styles</h3><p>The shared button has a <code>focus-visible</code> border and ring, and the destructive variant its own tinted ring (<code>components/ui/button.tsx</code>). The prompt bar uses <code>focus-within</code> on its pill. The button is built on the Base UI primitive; dialog focus handling was not checked.</p></div>
+  <div class="card"><h3>Touch targets</h3><p>The default button is 44 pixels high (<code>h-11</code>), large is 48, and the icon button is 44 square. Some sizes fall under 44: <code>sm</code> at 40, <code>icon-sm</code> at 40 (<code>size-10</code>), and the <code>xs</code> and <code>icon-xs</code> sizes at 28 pixels. Where those are used was not audited.</p></div>
+  <div class="card"><h3>Keyboard</h3><p>Navigation is real links and buttons, so tab order follows the document. The reports filter combobox has combobox, listbox and option roles. Two shortcuts exist: Cmd or Ctrl+B toggles the sidebar (<code>components/ui/sidebar.tsx</code>) and "/" focuses search in the integrations list (<code>integration-list.tsx</code>). A full keyboard path test has not been done.</p></div>
+</div>
+</section>
+
+<section data-only="desktop">
+<h2>Reduced motion, per keyframe</h2>
+<p><code>app/globals.css</code> defines seven animations. Each one is paired with a <code>motion-reduce</code> rule or a <code>useReducedMotion</code> check where it is used. Nothing in the stylesheet itself uses <code>@media (prefers-reduced-motion)</code>; the answer lives at the call site, so a new use of one of these classes has to remember it.</p>
+<div class="tbl"><table>
+<tr><th>Animation</th><th>What it does</th><th>Reduced-motion handling</th><th></th></tr>
+<tr><td><code>mascot-marquee</code>, <code>mascot-marquee-x</code></td><td>Vertical mascot strip on the login page (<code>MascotMarquee</code>); the landing page site banner uses the sideways <code>mascot-marquee-x</code></td><td><code>motion-reduce:animate-none</code> on the strips (<code>mascot-marquee.tsx</code>, <code>site-banner.tsx</code>)</td><td><span class="pill ok">handled</span></td></tr>
+<tr><td><code>mascot-float</code></td><td>Mascot bobbing on a board card</td><td><code>motion-reduce:animate-none</code> on the wrapper, plus <code>useReducedMotion</code> pauses the animation inside the SVG itself (<code>mascot-float.tsx</code>)</td><td><span class="pill ok">handled</span></td></tr>
+<tr><td><code>step-in</code></td><td>Lifecycle rows and landing hero arrive in sequence</td><td><code>motion-reduce:animate-none</code> on the lifecycle list and the hero</td><td><span class="pill ok">handled</span></td></tr>
+<tr><td><code>shimmer-text</code></td><td>Busy label with a band across the glyphs</td><td><code>motion-reduce:animate-none</code> and falls back to muted text (<code>agent-trace.tsx</code>)</td><td><span class="pill ok">handled</span></td></tr>
+<tr><td><code>grid-pulse</code></td><td>Pixel-grid loader</td><td><code>motion-reduce:animate-none</code> per cell; the trace also checks <code>matchMedia</code></td><td><span class="pill ok">handled</span></td></tr>
+<tr><td><code>approval-halo</code></td><td>Pulsing halo on the approve button</td><td><code>motion-reduce:animate-none</code> (<code>approval-dialog.tsx</code>)</td><td><span class="pill ok">handled</span></td></tr>
+</table></div>
+<p style="margin-top:12px">Also handled outside those keyframes: only some spinners (<code>animate-spin</code>) carry <code>motion-reduce:animate-none</code>: 4 of 10 do, and <span class="pill mid">gap</span> 6 do not (the loading prop in <code>components/ui/button.tsx</code>, <code>approval-dialog.tsx</code>, <code>agent-chat.tsx</code>, <code>repository-sheet.tsx</code> and two in <code>manage-email-access.tsx</code>); <code>Reveal</code>, <code>Parallax</code>, <code>SmoothScroll</code> and the onboarding dialog check <code>useReducedMotion</code>; the top bar and rolling icon drop their transitions. <span class="pill mid">gap</span> The mascot SVGs animate inside the file, and only <code>MascotFloat</code> pauses them. A mascot drawn another way (for example <code>AnimatedMascotSvg</code> in the chat header) was not checked.</p>
+</section>
+
+<section>
+<h2>Contrast of the phase palette</h2>
+<p>Ratios are my own calculation from the oklch tokens in <code>app/globals.css</code>, converted to sRGB and scored with the WCAG 2 formula, so treat them as close, not certified. "Pill" is the phase ink on a 15 percent mix of itself over the card, which is how <code>PhaseBadge</code> is drawn. The text threshold is 4.5. The product ships dark only, so the dark columns are what users see; the light columns are the unshipped theme.</p>
+<div class="tbl"><table>
+<tr><th>Phase</th><th>Chip</th><th>Dark, on background</th><th>Dark, pill on card</th><th>Light, on white</th><th>Light, pill</th></tr>
+<tr><td>Triaging</td><td><span class="chipx" style="--c:var(--triaging)">Triaging</span></td><td>7.4</td><td>5.7</td><td>5.4</td><td>4.4 <span class="pill mid">under</span></td></tr>
+<tr><td>Reproducing</td><td><span class="chipx" style="--c:var(--reproducing)">Reproducing</span></td><td>9.4</td><td>7.0</td><td>4.3 <span class="pill mid">under</span></td><td>3.6 <span class="pill bad">under</span></td></tr>
+<tr><td>Analysis only</td><td><span class="chipx" style="--c:var(--analysis)">Analysis only</span></td><td>7.3</td><td>5.7</td><td>5.9</td><td>4.7</td></tr>
+<tr><td>Awaiting approval</td><td><span class="chipx" style="--c:var(--approval)">Awaiting approval</span></td><td>10.4</td><td>7.5</td><td>3.7 <span class="pill bad">under</span></td><td>3.1 <span class="pill bad">under</span></td></tr>
+<tr><td>Delivered</td><td><span class="chipx" style="--c:var(--delivered)">Delivered</span></td><td>8.5</td><td>6.4</td><td>5.1</td><td>4.1 <span class="pill mid">under</span></td></tr>
+<tr><td>Closed</td><td><span class="chipx" style="--c:var(--closed)">Closed</span></td><td>4.1 <span class="pill mid">under</span></td><td>3.4 <span class="pill bad">under</span></td><td>4.9</td><td>4.0 <span class="pill mid">under</span></td></tr>
+</table></div>
+<p style="margin-top:12px">Neutral text: foreground on background is 19.0 (dark) and 19.8 (light). Muted foreground is 7.6 on the dark background and 7.3 on the dark card, and 4.7 on white in light. Brand indigo as text on white is 4.6; brand-soft on the dark background is 9.9.</p>
+<p><span class="pill mid">gap</span> In the shipped dark theme the Closed phase text is 4.1 on the page and 3.4 inside its pill, under 4.5. It always carries a label, so the state is readable, but the label itself is low contrast. <span class="pill mid">gap</span> If the light theme is ever turned on, Reproducing, Awaiting approval and the pills need darker inks first.</p>
+</section>
+
+<section data-only="mobile">
+<h2>Proposed mobile app <span class="tag">Proposed, not built</span></h2>
+<p>The 28 prototype screens in <a href="screens/m1.html">screens/</a> (Variant C) are HTML, not React Native. What they do is a design intent; none of it has been tested with VoiceOver or TalkBack. The CSS is one kit, <code>screens/c.css</code>, with behavior in <code>c.js</code>. The app is iOS and Android only. On the web, phones use the responsive desktop app: its landing, sign-in and submit pages were checked at 390 px with no horizontal scroll, and the reviewer pages behind sign-in were not checked.</p>
+<div class="tbl"><table>
+<tr><th>Area</th><th>What Variant C does</th><th>Status</th></tr>
+<tr><td>Touch targets</td><td>Icon buttons are 48 (<code>.ib</code>), the primary button is 52 (<code>.btn</code>), list rows have a 3.5rem (56) minimum, menu items 54, sheet rows 4rem (64), the tab pill is 64 high and Review next is 64 by 64. Filter chips, segmented items and the section more button are 44 on iOS and 48 on Android (<code>.pf-android</code> rules). The OTP boxes are 48 by 58 and the sheet X and check buttons are 52.</td><td><span class="pill ok">met</span> on both platforms for everything tappable that was measured</td></tr>
+<tr><td></td><td>The switch is 51 by 31 (<code>.switch</code>), the same size as the native iOS control, and the Android variant keeps that size instead of the 52 by 32 Material track. It is only a valid target because the whole settings row toggles it (<code>data-switch-row</code>). The radio dot is 26 inside a 64 row. The tab labels are 0.75rem (12) and the meta text is 0.8125rem (13).</td><td><span class="pill mid">gap</span> a bare switch outside a row would be under 44 pt and 48 dp. Row-level targets carry it today</td></tr>
+<tr><td>Text size</td><td>The base is 17 px (1.0625rem), secondary 15, meta 13, section headers 20 and screen titles 28, all in rem. The prototype's Large text toggle (<code>?text=large</code>) sets the root to 125 percent (<code>html.text-large</code>), so every size scales together. Cards and tiles have fixed widths (the carousel card is 286 px, a quick link 112 px), and the frame is fixed at 390 by 844.</td><td><span class="pill mid">partial</span> scaling is checked at 125 percent only. There is no mapping to iOS Dynamic Type categories or Android font scale, no cap, and accessibility sizes above 125 percent are untested</td></tr>
+<tr><td>Reduced motion</td><td><code>c.css</code> has a <code>prefers-reduced-motion: reduce</code> block: screen transitions become a short fade and the view-transition animations are dropped. Press feedback is a 120 ms scale to 0.97.</td><td><span class="pill ok">designed</span></td></tr>
+<tr><td>Reduced transparency</td><td>The glass pills, the more menu and sheets drop their blur and use the opaque card color under <code>prefers-reduced-transparency: reduce</code>. On Android the glass is already a flat tonal surface.</td><td><span class="pill ok">designed</span></td></tr>
+<tr><td>Screen reader labels</td><td>Generated by <code>c.js</code>: the tab bar is labelled "Primary", Review next reads "Review next verdict, 3 waiting" (the badge itself is hidden from the reader), the bell reads "Inbox, 2 unread", the more button reads "More, includes Settings", and the first-run button reads "Connect a repository". Back buttons name their destination ("Back to Case file"). The code field reads "Digit 1 of 6" to "Digit 6 of 6", the typing indicator reads "Agent is typing", and the sandbox diagram has a diagram label. Decorative icons are hidden.</td><td><span class="pill mid">partial</span> labels exist in the HTML. No spoken order or toast announcement is defined, and no real screen reader was run. The prototype's Screen reader overlay lists the names it computes</td></tr>
+<tr><td>Phase color and text</td><td>The phase pill is a tinted fill at 16 percent with a full-hue label and a dot, and always names the phase (<code>.pill</code> in <code>c.css</code>). The phase tokens match the desktop ones, with darker inks in light.</td><td><span class="pill ok">met</span> same contrast caveat as the table above</td></tr>
+<tr><td>Focus</td><td><code>c.css</code> sets one 2 px brand-soft outline with a 2 px offset on <code>:focus-visible</code> for every element, plus a brand ring on fields and the code boxes.</td><td><span class="pill ok">designed</span> for an external keyboard on iPad or Android</td></tr>
+<tr><td>Long press</td><td>A 450 ms press on a report card or row (Home, Queue, Reports) lifts it and opens Open case file, Copy report id, Share and Assign to me. Open case file is the card tap. The case file (M7) repeats Share and, in its case menu, Copy report id and Assign to me, so the gesture is never the only way.</td><td><span class="pill mid">gap</span> a screen reader user needs the gesture's menu as custom actions (<code>accessibilityActions</code>) so the list does not force a trip into each case</td></tr>
+<tr><td>Haptics</td><td>The prototype tags success, warning and selection haptics in the embed only (approve, deny confirm, code complete, switches, chips).</td><td><span class="pill mid">gap</span> extra feedback only, never the sole signal</td></tr>
+</table></div>
+<h3 style="margin-top:28px">How the Expo app would meet these (proposed)</h3>
+<p>None of this is built or tested. It is the plan for turning the prototype's intent into React Native behavior, in the order the open items are listed below.</p>
+<div class="cards">
+  <div class="card"><h3>VoiceOver and TalkBack</h3><ul><li>Every <code>aria-label</code> in the screens becomes an <code>accessibilityLabel</code>; <code>aria-current</code>, <code>aria-expanded</code> and <code>aria-checked</code> become <code>accessibilityState</code>.</li><li>Review next keeps its count in the label, not in the badge: "Review next verdict, 3 waiting". The bell keeps "Inbox, 2 unread".</li><li>Rows that push a screen get the button role and a hint ("Opens the timeline"). Static rows are read as one element: title, value, subtitle.</li><li>The phase pill label is the phase name, so it reads the same as it looks. Decorative icons and mascots are hidden.</li><li>The six code boxes are grouped and announced as "Digit 1 of 6". The sandbox and onboarding diagrams get one label that states the result, with the steps as a list.</li><li>A toast should be announced without taking focus. A sheet (deny, target material) should move focus into itself and return it on close; its X and check buttons need labels.</li><li><code>@expo/ui</code> renders real SwiftUI and Compose controls, which bring their own reader semantics. The parts drawn with <code>StyleSheet</code> need the props set by hand.</li></ul></div>
+  <div class="card"><h3>Dynamic Type and font scale</h3><ul><li>Text follows the system font size by default in React Native. The plan keeps that on and sets a maximum multiplier on dense pieces (tab labels, pills, meta) so the floating bar does not break.</li><li>Row, button and sheet heights are minimums, not fixed values, so a larger font grows the row. Fixed card widths (286 and 112) become flex or minimum widths. The 390 by 844 frame does not constrain the app.</li><li>Long titles wrap to two lines (the report row already clamps at two) rather than truncate at large sizes.</li><li>Check with the system font at its largest setting and display zoom on, on both platforms, before calling it done.</li></ul></div>
+  <div class="card"><h3>Reduced motion with Reanimated</h3><ul><li>Reanimated 4 can read the system reduced-motion setting, so each animation gets a reduced variant in code.</li><li>Screen pushes become a short crossfade. The sheet and toast fade with no travel. The long press lift becomes an opacity change.</li><li>Haptics from <code>expo-haptics</code> stay available as extra feedback and never carry the only signal.</li></ul></div>
+  <div class="card"><h3>Touch targets</h3><ul><li>Minimums are 44 pt on iOS and 48 dp on Android. The Android rules in <code>c.css</code> already raise chips, segmented items and the section more button to 48.</li><li>The switch stays its native size and the row is the target. A switch placed outside a row needs <code>hitSlop</code>.</li><li>The long press menu is exposed as custom accessibility actions for screen reader and switch users.</li></ul></div>
+</div>
+<div class="shots">
+  <a href="screens/m4.html">M4 Home, the Needs you carousel and Review next</a>
+  <a href="screens/m6.html">M6 Reports, search and filter chips with a no-results state</a>
+  <a href="screens/m18.html">M18 OTP verify, six boxes with digit labels</a>
+</div>
+<p>Before building: run VoiceOver and TalkBack over the real app, set the fonts to scale with a cap, give a bare switch a larger hit area, expose the long press menu as custom actions, and decide the Closed phase ink. Those are the open items, in that order of effort.</p>
+</section>
+
+<p style="font-size:12.5px;margin-top:36px">Sources: <code>app/globals.css</code>, <code>components/phase-dot.tsx</code>, <code>components/ui/button.tsx</code>, <code>components/mascot-float.tsx</code>, <code>app/(app)/reports/[id]/agent-trace.tsx</code>, <code>approval-dialog.tsx</code>, <code>screens/c.css</code>, <code>screens/c.js</code>.</p>
+</main>
+<script src="site-nav.js"></script>
+</body>
+</html>

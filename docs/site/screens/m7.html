@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M7 Case file - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m4.html" data-kind="pop" aria-label="Back to Home"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="topbar glass"><button class="ib" type="button" data-toast="Link to BD-1042 ready to share" aria-label="Share"><i data-icon="share"></i></button><button class="ib" type="button" data-menu="#casemenu" aria-label="More" aria-haspopup="menu"><i data-icon="more"></i></button></div>
+<div class="scroll">
+<h1 class="h1">Stored XSS in search results</h1>
+<div class="hmeta"><span class="pill c-approval halo">Awaiting approval</span><span>BD-1042 · opened 12 min ago</span></div>
+<section class="sect"><div class="sh plain">Report</div><div class="card list"><div class="kv"><span class="k">Severity</span><span class="v sev">High</span></div><div class="kv"><span class="k">Channel</span><span class="v">GitHub issue</span></div><div class="kv"><span class="k">Reporter</span><span class="v">@sec-researcher</span></div></div></section>
+<section class="sect"><div class="sh plain">Bound target</div><div class="card list"><a class="item" href="#" data-go="m22.html"><span class="main"><span class="t">Vaibhav91one/juice-shop</span><span class="s">v17.3.0 · 1867b92</span></span><span class="pill c-delivered">Verified</span></a></div><p class="note">Reproduction ran against this pinned snapshot only.</p></section>
+<section class="sect"><div class="sh plain">Agent summary</div><div class="card list" style="padding:0"><p class="body">The search parameter is stored and rendered without encoding. The canary payload executed in the reproduction sandbox.</p></div></section>
+<section class="sect"><div class="sh plain">Findings</div><div class="card list"><div class="item"><span class="main"><span class="t">Unencoded query parameter</span><span class="s">search.component.ts</span></span><span class="v sev">High</span></div><div class="item"><span class="main"><span class="t">Canary executed in sandbox</span><span class="s">Reproduction run 1 of 1</span></span><span class="v">Confirmed</span></div><div class="item"><span class="main"><span class="t">No output encoding on render</span><span class="s">Angular bypassSecurityTrustHtml</span></span><span class="v sev m">Medium</span></div></div></section>
+<section class="sect"><div class="sh plain">Explore</div><div class="links">
+<a class="tile card" href="#" data-go="m8.html"><i data-icon="clock"></i><span><b>Timeline</b><span>9 events</span></span></a>
+<a class="tile card" href="#" data-go="m9.html"><i data-icon="terminal"></i><span><b>Tool calls</b><span>14 calls</span></span></a>
+<a class="tile card" href="#" data-go="m26.html"><i data-icon="cube"></i><span><b>Sandbox</b><span>Path and oracle</span></span></a>
+<a class="tile card" href="#" data-go="m10.html"><i data-icon="chat"></i><span><b>Chat</b><span>Reviewer</span></span></a></div></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+<div class="fbar glass"><a class="ib" href="#" data-go="m10.html" aria-label="Open reviewer chat"><i data-icon="chat"></i></a><a class="btn" href="#" data-go="m11.html">Open verdict</a></div>
+</div>
+<div class="menu pop" id="casemenu" role="menu" aria-label="Case actions" hidden><button type="button" role="menuitem" data-toast="Copied BD-1042">Copy report id<i data-icon="copy"></i></button><button type="button" role="menuitem" data-toast="Assigned to you">Assign to me<i data-icon="userplus"></i></button></div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

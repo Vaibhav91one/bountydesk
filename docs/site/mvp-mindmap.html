@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk mobile flow</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click a screen caption to open it · click a thumbnail to enlarge · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, drop?: collapsible, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+// Each phone node is one screen. The thumbnail loads assets/thumbs/mN.jpg (lightbox: mN.png); the engine prefixes
+// 'mindmap-thumbs/' to i, so '../assets/thumbs/mN' resolves to assets/thumbs/mN. A missing image shows the alt text, and the caption still links to screens/mN.html.
+const tree = {c:'BountyDesk mobile', n:'Proposed React Native app, 28 screens, not built\nReviewer on the go, plus the public submit path', root:true, mid:true, h:m('cowboy'), k:[
+  {c:'Onboarding and auth', n:"Launch to a signed-in reviewer", side:-1, cls:'reporter', h:m('greeting'), flow:true, k:[
+    {c:'M1 Splash', n:"Desktop: none. Trix greeting and lockup on the dark brand surface.", i:'../assets/thumbs/m1', s:'mindmap-thumbs/', url:'screens/m1.html', phone:true},
+    {c:'M2 Sign in', n:"Desktop: /login. Google and GitHub through Clerk.", i:'../assets/thumbs/m2', s:'mindmap-thumbs/', url:'screens/m2.html', phone:true},
+    {c:'M3 Not authorized', n:"Desktop: /not-authorized. Request access path.", i:'../assets/thumbs/m3', s:'mindmap-thumbs/', url:'screens/m3.html', phone:true},
+  ]},
+  {c:'Triage', n:"The daily loop", side:-1, cls:'reviewer', h:m('idle'), flow:true, k:[
+    {c:'M4 Home', n:"Desktop: /home. Needs you carousel, active list with phase pills, floating tabs and Review next.", i:'../assets/thumbs/m4', s:'mindmap-thumbs/', url:'screens/m4.html', phone:true},
+    {c:'M5 Queue board', n:"Desktop: /board. Phase sections, each report row with its phase pill.", i:'../assets/thumbs/m5', s:'mindmap-thumbs/', url:'screens/m5.html', phone:true},
+    {c:'M6 Reports list', n:"Desktop: /reports. Search, phase chips and a no-results state.", i:'../assets/thumbs/m6', s:'mindmap-thumbs/', url:'screens/m6.html', phone:true},
+    {c:'M7 Case file', n:"Desktop: /reports/[id]. Header, phase, bound target, summary.", i:'../assets/thumbs/m7', s:'mindmap-thumbs/', url:'screens/m7.html', phone:true},
+  ]},
+  {c:'Investigate', n:"Tabs inside the case file", side:-1, cls:'agent', h:m('reproducing'), flow:true, k:[
+    {c:'M8 Timeline', n:"Desktop: case file session events.", i:'../assets/thumbs/m8', s:'mindmap-thumbs/', url:'screens/m8.html', phone:true},
+    {c:'M9 Tool calls', n:"Desktop: case file probes. Scope-guard pass and deny.", i:'../assets/thumbs/m9', s:'mindmap-thumbs/', url:'screens/m9.html', phone:true},
+    {c:'M10 Reviewer chat', n:"Desktop: case file chat with the agent.", i:'../assets/thumbs/m10', s:'mindmap-thumbs/', url:'screens/m10.html', phone:true},
+    {c:'M26 Sandbox', n:"Desktop: case file sandbox diagram. Build, then offline reproduction, oracle outside, human gate.", i:'../assets/thumbs/m26', s:'mindmap-thumbs/', url:'screens/m26.html', phone:true},
+  ]},
+  {c:'Approve', n:"The heart of the product: sign the exact drafted comment", side:1, cls:'plan', h:m('awaiting-approval'), flow:true, k:[
+    {c:'M11 Sign the verdict', n:"Desktop: /review. Exact comment, content hash, approve or deny.", i:'../assets/thumbs/m11', s:'mindmap-thumbs/', url:'screens/m11.html', phone:true},
+    {c:'M12 Verdict approved', n:"Desktop: /review result. Delivery receipt.", i:'../assets/thumbs/m12', s:'mindmap-thumbs/', url:'screens/m12.html', phone:true},
+    {c:'M13 Deny verdict', n:"Desktop: /review deny. The deny reasons in a sheet over the sign screen.", i:'../assets/thumbs/m13', s:'mindmap-thumbs/', url:'screens/m13.html', phone:true},
+  ]},
+  {c:'Connect and configure', n:"Access and delivery channels", side:1, cls:'status', h:m('scanning'), flow:true, k:[
+    {c:'M14 Connections', n:"Desktop: /connections. GitHub installs.", i:'../assets/thumbs/m14', s:'mindmap-thumbs/', url:'screens/m14.html', phone:true},
+    {c:'M15 Connection detail', n:"Desktop: /connections repo. Target binding and private-repo policy.", i:'../assets/thumbs/m15', s:'mindmap-thumbs/', url:'screens/m15.html', phone:true},
+    {c:'M16 Integrations', n:"Desktop: /integrations. Email and GitHub cards.", i:'../assets/thumbs/m16', s:'mindmap-thumbs/', url:'screens/m16.html', phone:true},
+    {c:'M17 Email access', n:"Desktop: /integrations/[id]. Reviewer allowlist.", i:'../assets/thumbs/m17', s:'mindmap-thumbs/', url:'screens/m17.html', phone:true},
+    {c:'M18 OTP verify', n:"Desktop: /integrations/[id]. Six-digit reviewer verification.", i:'../assets/thumbs/m18', s:'mindmap-thumbs/', url:'screens/m18.html', phone:true},
+    {c:'M27 Onboarding', n:"Desktop: connections onboarding pipeline. Clone, build, snapshot, manifest, approve, configure.", i:'../assets/thumbs/m27', s:'mindmap-thumbs/', url:'screens/m27.html', phone:true},
+    {c:'M28 Reviewer upload', n:"Desktop: reviewer /reports/upload. Tarball, Dockerfile or prebuilt image.", i:'../assets/thumbs/m28', s:'mindmap-thumbs/', url:'screens/m28.html', phone:true},
+  ]},
+  {c:'Settings and public', n:"Account, intake and target profile", side:1, cls:'reporter', h:m('ingest'), flow:true, k:[
+    {c:'M19 Settings', n:"Desktop: /settings. Opened from the more menu: account, theme, notifications, workspace.", i:'../assets/thumbs/m19', s:'mindmap-thumbs/', url:'screens/m19.html', phone:true},
+    {c:'M20 Submit a report', n:"Desktop: /submit. Public upload form.", i:'../assets/thumbs/m20', s:'mindmap-thumbs/', url:'screens/m20.html', phone:true},
+    {c:'M21 Contact verify', n:"Desktop: /submit. Report-scoped one-time code.", i:'../assets/thumbs/m21', s:'mindmap-thumbs/', url:'screens/m21.html', phone:true},
+    {c:'M22 Target profile', n:"Desktop: target profile. Pinned image and scope rules.", i:'../assets/thumbs/m22', s:'mindmap-thumbs/', url:'screens/m22.html', phone:true},
+    {c:'M23 Inbox', n:"Mobile only. Opened from the bell: approvals needed and delivery receipts.", i:'../assets/thumbs/m23', s:'mindmap-thumbs/', url:'screens/m23.html', phone:true},
+    {c:'M24 Privacy', n:"Desktop: /privacy. Legal, native reading layout.", i:'../assets/thumbs/m24', s:'mindmap-thumbs/', url:'screens/m24.html', phone:true},
+    {c:'M25 Terms', n:"Desktop: /terms. Legal, native reading layout.", i:'../assets/thumbs/m25', s:'mindmap-thumbs/', url:'screens/m25.html', phone:true},
+  ]}
+]};
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

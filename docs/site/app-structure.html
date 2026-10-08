@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="views" content="desktop mobile">
+<title>BountyDesk app structure</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · use Focus on a branch to read it alone · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'App structure', n:'How the BountyDesk repo is put together\nNext.js App Router on Vercel, workers on Zerops\nRead from app/, lib/, scripts/ and zerops.yml', root:true, mid:true, wrap:5, row:175, h:m('cowboy'), k:[
+  {c:'Route groups', n:'app/ has one route group, (app)\nPublic pages sit at the top level', side:1, cls:'reviewer', h:m('idle'), k:[
+    {c:'Public routes', n:'/ landing, /login, /sso-callback\n/submit (public upload form)\n/privacy, /terms, /not-authorized'},
+    {c:'(app) reviewer console', n:'app/(app)/layout.tsx calls requireReviewer\nOne gate for every signed-in page\nSidebar shell with active reports'},
+    {c:'Board and home', n:'/home phase tiles\n/board queue board\nBoth poll with react-query'},
+    {c:'Reports', n:'/reports list with the bound target (#339)\n/reports/[id] case file\n/reports/upload reviewer upload (#330)'},
+    {c:'Connections', n:'/connections: GitHub installs\nOnboarding stepper and dialog\nOnboard several repositories at once (#340)'},
+    {c:'Integrations', n:'/integrations and /integrations/[id]\nEmail intake config, reviewer access\nSix-digit verification'},
+    {c:'Settings', n:'/settings sits inside (app)\nThere is no separate settings group'},
+    {c:'No admin group', n:'app/ has no admin routes\nThe reviewer is the only console role\n/review redirects to /board'},
+  ]},
+  {c:'Auth and gate', n:'Clerk proves who you are\nBountyDesk decides who may review', side:-1, cls:'reporter', h:m('greeting'), k:[
+    {c:'proxy.ts', n:'clerkMiddleware for every non-_next path\nLanding redirect composed inside it'},
+    {c:'lib/auth/dal.ts', n:'currentSession and requireReviewer\nAllowlist checked on every request'},
+    {c:'Reviewer lists', n:'REVIEWER_EMAILS for the console\nREVIEWER_GITHUB_IDS for /reproduce\nlib/auth/reviewers.ts'},
+    {c:'Landing redirect', n:'lib/deployment/landing-redirect.ts\nOther hosts bounce to the app host\nAPI paths fall back to the repo URL'},
+    {c:'Contact codes', n:'lib/auth/otp.ts and report-contact.ts\nOne-time code for a reviewer email\nor an upload contact'},
+  ]},
+  {c:'API routes', n:'Node runtime, bounded bodies, signature checks first', side:1, cls:'plan', h:m('ingest'), k:[
+    {c:'/api/intake/github', n:'Issues, repository_advisory and lifecycle events\nX-Hub-Signature-256 over raw bytes\nBody capped at 2 MiB'},
+    {c:'/api/intake/email', n:'Every Resend webhook, svix signature\nemail.received is intake\nOther events are delivery receipts'},
+    {c:'/api/intake/upload', n:'Public multipart form\nSize cap before parsing, daily limits\n/verify checks the contact code'},
+    {c:'/api/intake/jobs', n:'Payload-free intake failures\nfor the board strip, reviewer only'},
+    {c:'Reviewer data', n:'/api/queue, /api/home, /api/reports\n/api/active-reports, /api/connections\n/api/reports/[id]/status, chat, tool-calls, targets'},
+    {c:'/api/github/setup', n:'GitHub App setup URL\nReturns here after an install'},
+    {c:'Internal ticks', n:'/api/internal/*/tick: jobs, agent-sessions\napproval-submission, delivery\ngithub/reconcile, reports/expiry\nBearer WORKER_INTERNAL_SECRET, diagnostics only'},
+    {c:'Live updates', n:'Pages poll with refetchInterval\nNo event-stream route exists in app/ today\n/api/health always passes the redirect'},
+  ]},
+  {c:'MCP surfaces', n:'TrueForge calls these over HTTP\nBearer secret on every call', side:-1, cls:'agent', h:m('reproducing'), k:[
+    {c:'/api/mcp/publish-verdict', n:'publish_verdict, probe_target\nprobe_target_write, probe_browser\nread_code_review_findings\nSecret: MCP_SERVER_SECRET'},
+    {c:'/api/mcp/scope-guard', n:'13 tools: scope_check, http_probe\ntcp_probe, scope_add, scope_remove\nrequest_intrusive_approval, osv_query\naudit_read, policy_get and more\nSecret: SCOPE_GUARD_TOKEN'},
+    {c:'/api/mcp/build', n:'open_build_sandbox, run_build_command\ncommit_target_image, commit_compose_mesh\nmark_unsandboxable'},
+    {c:'/api/mcp/review', n:'report_sandboxability\nreport_code_review_findings (#338)\nRead-only reviews that draft evidence'},
+  ]},
+  {c:'Worker daemon on Zerops', n:'scripts/run-worker-daemon.ts\nnpm run worker:daemon, service bdworker', side:-1, cls:'status', h:m('chilling'), k:[
+    {c:'Loops', n:'One claim loop and one sweeper per queue\nNo Next.js in the worker\nStops claiming on SIGTERM'},
+    {c:'Report queues', n:'jobs, agent-sessions\napproval-submission, delivery\nowner-advisory'},
+    {c:'Target queues', n:'build-onboarding, upload-build\ninvestigation-recheck\ncode-review (#338)'},
+    {c:'Reviewer chat', n:'Loop runs when REVIEWER_CHAT_ENABLED\nAgent replies are generated here\nnot on Vercel'},
+    {c:'Maintenance', n:'github-reconcile every 15 min\nreport-expiry hourly\nsnapshot-sweep every 6 h'},
+    {c:'/healthz', n:'WORKER_HEALTH_PORT 8080\n503 after a silent loop: 90 s default, jobs and code review 300 s\nbuild loops 32 min; or 3 min of failed iterations'},
+    {c:'Polling', n:'Idle claim loops back off to 15 s (#320)\nagent-sessions stays at 5 s\nDATABASE_POOL_MAX 12'},
+    {c:'trueforge service', n:'Proxy on 8791 with bearer auth\nRaw server on 127.0.0.1:8790\nSQLite on the tfdata volume'},
+  ]},
+  {c:'lib/ report pipeline', n:'From intake to delivery', side:-1, cls:'reviewer', h:m('awaiting-approval'), k:[
+    {c:'lib/jobs', n:'Durable jobs table as the queue\nenqueue, claim, advance, sweep\nUnique (channel, delivery_id)'},
+    {c:'lib/triage', n:'NEEDS_DECISION gate\nEmail triage turn\nDuplicate candidates, top 3'},
+    {c:'lib/reports', n:'states.ts holds the allowed edges\nCase view, queue view, expiry\nlifecycle.ts does the transitions'},
+    {c:'lib/agent-sessions', n:'poller.ts drives TrueForge turns\nMoves a report to AWAITING_APPROVAL\nor ANALYSIS_ONLY'},
+    {c:'lib/verdicts', n:'hash.ts: SHA-256 of the exact payload\nA revision is inserted, never edited'},
+    {c:'lib/approval-submission', n:'Relays a human approval to TrueForge\nSynthesized verdicts skip the relay'},
+    {c:'lib/delivery', n:'Outbox claim and the delivery arms\nGitHub comment, advisory, email\nRetry, hold, cancel a held send'},
+    {c:'lib/email, lib/github', n:'Resend send, inbound checks, receipts\nApp auth, webhook HMAC, advisories\nrepo-access.ts scoped clone tokens'},
+  ]},
+  {c:'lib/ targets and agents', n:'What the agent may reach and how it works', side:1, cls:'agent', h:m('scanning'), k:[
+    {c:'lib/targets', n:'configure, bind, manifest, quarantine\nServer-held TargetProfile with the\napproved manifest and origin (#341)'},
+    {c:'lib/build-onboarding', n:'Clone, build, push, snapshot\nManifest approval, compose mesh\nPluggable registry'},
+    {c:'lib/sandbox', n:'Daytona provisioning and reproduction\nBrowser probe, build markers\nArchived-sandbox sweep'},
+    {c:'lib/scope-guard', n:'Scope engine, egress rules\nGrants and the audit log'},
+    {c:'lib/mcp', n:'Tool bodies behind /api/mcp\nThe reproduction agent can read code\nreview findings (#342)'},
+    {c:'lib/analysis', n:'Static review, sandboxability\nCode review (#338), OSV scan (#318)\nReachability, archive source'},
+    {c:'lib/trueforge', n:'Client, agent config, skills\nagent/*.agent.json manifests\nare applied with npm run agent:apply'},
+    {c:'lib/upload, lib/db', n:'Upload intake, build and gate\nDrizzle schema, migrations 0000 to 0048\nlib/reviewer-chat, lib/investigation-runs'},
+  ]},
+  {c:'Latest merges', n:'From git log on main', side:1, cls:'plan', h:m('celebrating'), k:[
+    {c:'#342', n:'Reproduction agent reads a report\ncode-review findings'},
+    {c:'#341, #340, #339', n:'Manifest and origin kept on the profile\nOnboard several repositories\nBound target on the reports list'},
+    {c:'#338, #337', n:'Standalone agentic code review\nRotate a connectionless profile in place'},
+    {c:'#333, #330', n:'Dockerfile or tarball attached to an\nemailed report becomes its target\nReviewer upload from the dashboard'},
+  ]},
+]};
+const mobileTree = {c:'App structure (mobile)', n:'PROPOSED, NOT BUILT\nExpo Router app for the reviewer client\niOS and Android only\nOnly the Variant C m1 to m28 mockups exist today', root:true, mid:true, wrap:5, row:175, h:m('cowboy'), k:[
+  {c:'Tabs', n:'app/(tabs)/_layout.tsx uses NativeTabs\nHome, Queue, Reports\nReview next sits beside the tabs, not in them\nFile names are a proposal', side:1, cls:'reviewer', h:m('idle'), k:[
+    {c:'index (Home)', n:'Renders m4\nNeeds you carousel, Active and Delivered\nBell and more menu in the header'},
+    {c:'queue', n:'Renders m5\nPhases as sections with phase pills'},
+    {c:'reports', n:'Renders m6\nLive search and phase filter chips\nRows open case/[id]'},
+    {c:'Review next', n:'Round action beside the tab bar, count badge\nOpens sign/[id] (m11) for the next waiting verdict\nFirst run: Connect a repository (m14)'},
+  ]},
+  {c:'Stack routes', n:'Native stack above the tabs\nEach pushes from a tab or another route', side:1, cls:'plan', h:m('scanning'), k:[
+    {c:'case/[id]', n:'Renders m7, the case file\nRows open the timeline (m8), tool calls (m9)\nand the sandbox view (m26)'},
+    {c:'sign/[id]', n:'Renders m11, sign the verdict\nDeny is a formSheet over it (m13), done is m12\nPush tap can open it directly'},
+    {c:'inbox', n:'Renders m23, opened from the bell\nNeeds you, then earlier events\nApproval needed, delivery receipt'},
+    {c:'settings', n:'Renders m19, opened from the more menu\nSwitches, theme, Terms (m25),\nPrivacy (m24), Sign out'},
+    {c:'chat/[id]', n:'Renders m10, reviewer chat\nBubbles, chips, composer'},
+    {c:'connections', n:'Renders m14, with m15 for one install\nand m22, the target profile\nOnboarding (m27) and reviewer upload (m28)\nopen from m14'},
+    {c:'integrations', n:'Renders m16\nEmail access is m17, the six digit\nverify step is m18'},
+    {c:'submit', n:'Renders m20, the public submit form\nThen m21 to verify the contact\nNo account needed'},
+  ]},
+  {c:'Root and auth', n:'app/_layout.tsx wraps the stack\nin the providers below', side:-1, cls:'reporter', h:m('greeting'), k:[
+    {c:'Auth provider', n:'Clerk Expo SDK\nGoogle and GitHub OAuth, same identities\nas the web'},
+    {c:'SecureStore', n:'expo-secure-store holds the session token\nNothing else is trusted on the device'},
+    {c:'Gate screens', n:'m1 splash, m2 sign in, m3 not authorized\nThe server allowlist decides, not the app'},
+    {c:'Deep links', n:'Universal links on the app host plus a scheme\nA push tap opens case (m7) or sign (m11)'},
+  ]},
+  {c:'Shared modules', n:'The only code every route shares', side:-1, cls:'agent', h:m('reproducing'), k:[
+    {c:'API client', n:'One client for /api/mobile/*\nSends the Clerk token as a Bearer header\nBase URL from EXPO_PUBLIC_ env'},
+    {c:'Query client', n:'TanStack Query, as on the web\nPersisted cache: queue and case files\nreadable offline'},
+    {c:'Notifications', n:'expo-notifications\nRegisters the Expo push token with\nPOST /api/mobile/push-token'},
+    {c:'Writes', n:'Approve, deny, chat and add reviewer\nneed the network\nNo offline queue for approvals'},
+    {c:'Motion', n:'Reanimated 4, gesture handler, haptics\nPorted from screens/c.css and c.js'},
+  ]},
+  {c:'Backend it calls', n:'The same Next.js app and worker\nNo new server, no second database', side:1, cls:'status', h:m('ingest'), k:[
+    {c:'/api/mobile/*', n:'Versioned JSON route handlers\nqueue, case, chat, approve, deny,\nconnections, push-token'},
+    {c:'Why not server actions', n:'The web uses server actions and cookies\nReact Native cannot call them'},
+    {c:'Allowlist', n:'The server re-checks the reviewer allowlist\non every request, as the web does'},
+    {c:'Submit path', n:'m20 and m21 use the existing upload intake\nThe only intake the app creates'},
+  ]},
+  {c:'Bundle contents', n:'What ships inside the app', side:-1, cls:'ref', h:m('chilling'), k:[
+    {c:'Allowed', n:'EXPO_PUBLIC_ values only:\nClerk publishable key, API base URL'},
+    {c:'Never in the app', n:'DATABASE_URL, Supabase service key\nTrueForge, MCP and worker secrets\nGitHub App key'},
+    {c:'Open', n:'Where the app lives in the repo\nis not decided in the brief'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop'; const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script>addEventListener('load', () => { fit(); document.fonts && document.fonts.ready.then(fit); }); // mascots and fonts change card heights after first layout</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

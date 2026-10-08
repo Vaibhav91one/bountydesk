@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M9 Tool calls - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+<style>.m9-s{white-space:normal!important;overflow-wrap:anywhere;word-break:break-all}</style>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m7.html" data-kind="pop" aria-label="Back to Case file"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Tool calls</h1>
+<div class="hmeta" style="padding-bottom:20px"><span>BD-1042 · 6 calls</span></div>
+<section class="sect"><div class="sh plain">Investigation</div><div class="card list"><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">scope_check</span><span class="s mono m9-s" style="font-size:.75rem">target=juice-shop@1867b92</span></span><span class="pill c-delivered">Pass</span></div><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">probe_target</span><span class="s mono m9-s" style="font-size:.75rem">GET /rest/products/search?q=canary</span></span><span class="pill c-delivered">Allowed</span></div><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">probe_target_write</span><span class="s mono m9-s" style="font-size:.75rem">POST /api/Feedbacks {comment:"canary"}</span></span><span class="pill c-delivered">Allowed</span></div><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">probe_target</span><span class="s mono m9-s" style="font-size:.75rem">GET https://example.com/collect</span></span><span class="pill" style="--c:var(--red)">Denied</span></div><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">probe_browser</span><span class="s mono m9-s" style="font-size:.75rem">navigate /#/search?q=canary</span></span><span class="pill c-delivered">Allowed</span></div></div><p class="note">The target comes from the server-held profile, never from text the agent wrote. A call outside it is refused.</p></section>
+<section class="sect"><div class="sh plain">Human gate</div><div class="card list"><div class="item"><span class="main"><span class="t mono" style="color:var(--fg);font-size:.9375rem">publish_verdict</span><span class="s mono m9-s" style="font-size:.75rem">payload sha256:9f2c61ab07d4…</span></span><span class="pill c-approval">Gated</span></div></div><p class="note">publish_verdict waits for a reviewer to approve the exact drafted comment.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

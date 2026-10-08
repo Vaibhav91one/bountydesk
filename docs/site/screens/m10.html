@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M10 Reviewer chat - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+<style>.m10-st{align-self:center;font-size:.8125rem;color:var(--muted);letter-spacing:0;padding:4px 0 8px}</style>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m7.html" data-kind="pop" aria-label="Back to Case file"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll" style="padding-bottom:130px">
+<h1 class="h1">Ask the agent</h1>
+<div class="hmeta" style="padding-bottom:12px"><span>BD-1042 · Stored XSS in search results</span></div>
+<div class="chat" data-chat-thread>
+<div class="m10-st">Today 9:38</div>
+<div class="bub me">Why is this rated High?</div>
+<div class="who">Agent Bounty</div>
+<div class="bub ag">The payload is stored, so it runs for every visitor who opens the search page. The oracle saw the canary execute, not just reflect.</div>
+<div class="bub me">Did it need a login?</div>
+<div class="who">Agent Bounty</div>
+<div class="bub ag">No. The write probe used the public feedback endpoint, inside the sandbox only.</div>
+<div class="sugg"><button class="fchip" type="button">Show the probes</button><button class="fchip" type="button">Re-check</button></div>
+</div>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+<div class="composer glass"><input class="field" data-chat-input placeholder="Ask about this report" aria-label="Message"><button class="send" type="button" data-chat-send aria-label="Send"><i data-icon="arrowup" style="stroke-width:2.4"></i></button></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

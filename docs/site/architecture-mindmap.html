@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk stack</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Stack', n:'What BountyDesk is built on\nSources: AGENTS.md, package.json, env.example, docs/decisions.md', root:true, mid:true, wrap:3, row:150, h:m('cowboy'), k:[
+  {c:'Web app', n:'Reviewer UI, intake routes and MCP routes', side:1, cls:'reviewer', k:[
+    {c:'Next.js App Router', n:'next 16.3.3, React 19.2.8\nA modified Next: read node_modules/next/dist/docs before writing code (AGENTS.md)'},
+    {c:'TypeScript and npm', n:'TypeScript 5, Node 22 or newer\nnpm only (engines in package.json)'},
+    {c:'UI layer', n:'Tailwind 4, shadcn, @base-ui/react\nPhosphor and lucide icons, tokens in app/globals.css'},
+    {c:'Client data', n:'TanStack Query (components/query-provider.tsx, the *-live.tsx components)\nThe browser talks only to Next.js'},
+    {c:'Sign-in: Clerk', n:'@clerk/nextjs, Google and GitHub connections\nproxy.ts runs clerkMiddleware (Next 16 renamed middleware)'},
+    {c:'Reviewer allowlist', n:'REVIEWER_EMAILS checked on every request\nAn empty list throws on read, so access fails closed\nlib/auth/reviewers.ts'},
+  ]},
+  {c:'Database', n:'Postgres on Supabase, Drizzle ORM', side:-1, cls:'status', k:[
+    {c:'Supabase Postgres', n:'App uses the transaction pooler (port 6543)\nMigrations use DIRECT_URL (port 5432)'},
+    {c:'Drizzle', n:'drizzle-orm 0.45, drizzle-kit 0.31\nSchema in lib/db/schema.ts, 49 migrations in drizzle/'},
+    {c:'Jobs table is the queue', n:'SELECT ... FOR UPDATE SKIP LOCKED\nLeases, fences, attempts (lib/jobs/queue.ts)'},
+    {c:'Closed Data API', n:'drizzle/0001_lockdown.sql: privileges revoked from anon and authenticated, RLS on, no policies'},
+    {c:'Supabase Storage', n:'Verdict payloads and investigation transcripts\nlib/storage/artifacts.ts, signed URLs for download'},
+    {c:'Why not SQLite', n:'The app fronts on Vercel, which has no persistent disk\nThe lease needs a real row lock (docs/decisions.md Q14)'},
+  ]},
+  {c:'Intake', n:'Four independent channels, none of which authorises a target', side:1, cls:'reporter', k:[
+    {c:'github', n:'Issues through the GitHub App\napp/api/intake/github, HMAC checked with the platform secret'},
+    {c:'advisory', n:'Private vulnerability reports\nverdict goes back by editing the advisory (docs/advisory-intake.md)'},
+    {c:'email', n:'Resend inbound, SPF and DKIM checked\napp/api/intake/email, outside senders wait at NEEDS_DECISION'},
+    {c:'upload', n:'Public /submit page\napp/api/intake/upload, contact proved by a one-time code'},
+    {c:'Idempotency', n:'Unique (channel, delivery_id) on inbound_job\nInsert RECEIVED, return 202, the worker drives the states'},
+  ]},
+  {c:'Agent harness', n:'TrueForge investigates and drafts the verdict', side:-1, cls:'agent', k:[
+    {c:'TrueForge', n:'Agent harness on http://localhost:8790, loopback only\n@truefoundry/trueforge-sdk 0.1.3'},
+    {c:'Private proxy', n:'scripts/run-trueforge-proxy.mjs checks a bearer token\nbefore forwarding to the loopback listener'},
+    {c:'OpenAI provider', n:'OPENAI_API_KEY is the first-class model provider\nCompatible gateways are a TrueForge custom provider\nMODEL_BASE_URL in env.example has no consumer'},
+    {c:'MCP routes on the app', n:'scope-guard, publish-verdict, build, review\napp/api/mcp/*: scope-guard uses SCOPE_GUARD_TOKEN\npublish-verdict, build and review share MCP_SERVER_SECRET'},
+    {c:'Agent tools', n:'probe_target, probe_target_write, probe_browser\nread_code_review_findings (lib/mcp/)'},
+    {c:'Agent-authored verdicts', n:'The agent drafts outcome, summary and findings\nlib/mcp/publish-verdict.ts re-checks authorisation (Q22)'},
+  ]},
+  {c:'Sandboxes', n:'Daytona provides them, BountyDesk provisions them directly', side:1, cls:'plan', k:[
+    {c:'Build sandbox', n:'Docker-in-Docker base (BUILD_BASE_SNAPSHOT)\nNarrow dependency egress only (BUILD_EGRESS_ALLOWLIST)\nRuns customer code, so it is not trusted'},
+    {c:'Reproduction sandbox', n:'Boots an immutable snapshot with networkBlockAll\nNo external egress, torn down after the run'},
+    {c:'One artifact crosses', n:'Only the built, digest-pinned image moves\nfrom the build sandbox to the reproduction one'},
+    {c:'Linked-sandbox mesh', n:'Multi-service targets: peers reach each other by sandbox id\nlib/sandbox/provision.ts (mesh section), lib/build-onboarding/mesh-build-plan.ts'},
+    {c:'Demo target', n:'Vaibhav91one/juice-shop at 1867b926, the v17.3.0 tag\nBuilt ahead of the run so a snapshot starts offline'},
+  ]},
+  {c:'Guards and oracle', n:'Where authority is decided', side:-1, cls:'plan', k:[
+    {c:'scope-guard MCP', n:'A route on this app (app/api/mcp/scope-guard)\nPorted from the Sentinel prototype, engine in lib/scope-guard/'},
+    {c:'TargetProfile', n:'Server-held row: image, digest, snapshot, scope rules\nClone, deploy and egress read the target from it, never from agent text'},
+    {c:'Hash-chained audit', n:'scope_guard_audit rows carry prev_hash and hash\nGrants are issued and consumed once (scope_guard_grant)'},
+    {c:'Canary oracle', n:'lib/sandbox/reproduce.ts, lib/reproduction/decide.ts\nKept as stronger evidence, not on the live path today (Q22)'},
+    {c:'Static fallback', n:'A target that cannot be built or deployed gets a static review\nand ends ANALYSIS_ONLY (Q31)'},
+  ]},
+  {c:'Onboarding pipeline', n:'Turns a repository or upload into a TargetProfile', side:1, cls:'agent', flow:true, k:[
+    {c:'PENDING_PLAN', n:'Classify the source, decide the build plan\nor mark it UNSUPPORTED'},
+    {c:'PENDING_BUILD', n:'Build the one image in the build sandbox\nRegister the Daytona snapshot'},
+    {c:'PENDING_MANIFEST', n:'Derive the target manifest from the plan'},
+    {c:'AWAITING_APPROVAL', n:'A reviewer approves the manifest\nNot claimable by the worker'},
+    {c:'APPROVED', n:'Verify offline, write the TargetProfile\nBind the repository'},
+    {c:'CONFIGURED', n:'Done. FAILED and UNSUPPORTED are the other resting states\nlib/build-onboarding/queue.ts'},
+  ]},
+  {c:'Worker', n:'One long-running Node process on Zerops', side:-1, cls:'ref', k:[
+    {c:'Worker daemon', n:'npm run worker:daemon (scripts/run-worker-daemon.ts)\nImports the queue processors, does not start Next.js'},
+    {c:'Loops', n:'jobs, agent-sessions, approval-submission, delivery\nowner-advisory, build-onboarding, upload-build\nreviewer-chat, code-review, investigation-recheck'},
+    {c:'Sweeps', n:'github-reconcile, report-expiry, snapshot-sweep\nExpired-lease sweepers for each queue'},
+    {c:'Health', n:'/healthz on WORKER_HEALTH_PORT reports per-loop heartbeats\n503 when a loop stalls, so Zerops restarts it'},
+  ]},
+  {c:'Outbound and integrations', n:'How an approved verdict leaves', side:1, cls:'status', k:[
+    {c:'GitHub App', n:'Metadata read, Issues and advisories read and write\nContents read only for private repositories'},
+    {c:'Resend', n:'Inbound email, outbound verdict mail, reviewer OTP\nemail.delivered is the delivery receipt'},
+    {c:'Registry', n:'GHCR by default, REGISTRY_* overrides it\nBuilt images are pushed digest-pinned'},
+    {c:'Delivery outbox', n:'outbound_delivery written with the approved verdict\nA worker drains it, no second copy of the comment text'},
+  ]},
+]};
+const mobileTree = {c:'Stack · mobile (proposed)', n:'PROPOSED, NOT BUILT. Nothing here exists in the repo\nOnly the Variant C HTML mockups in screens/ (m1 to m28) exist', root:true, mid:true, wrap:3, row:150, h:m('cowboy'), k:[
+  {c:'App', n:'Reviewer client built with Expo\niOS and Android only, no web build', side:1, cls:'reviewer', k:[
+    {c:'Expo SDK 57', n:'React Native and TypeScript'},
+    {c:'Expo Router', n:'Native stack plus NativeTabs: Home, Queue, Reports\nReview next is a separate action\nInbox is the bell, Settings is in the more menu'},
+    {c:'@expo/ui', n:'Universal components first\nSwiftUI or Jetpack Compose only where the universal layer lacks a control'},
+    {c:'Motion', n:'Reanimated 4 and react-native-gesture-handler, expo-haptics\nMapped from screens/c.css and c.js (Variant C)'},
+  ]},
+  {c:'Role', n:'A reviewer client, not a second pipeline', side:-1, cls:'plan', k:[
+    {c:'What it does', n:'Queue, case file, chat, sign or deny the verdict\nConnections and settings'},
+    {c:'Public submit path', n:'Screens m20 and m21'},
+    {c:'What it does not do', n:'Triage, reproduce, build, probe or deliver\nAll of that stays server-side'},
+  ]},
+  {c:'Sign-in and device storage', n:'Same identities as the web', side:1, cls:'status', k:[
+    {c:'Clerk Expo', n:'Google and GitHub OAuth, same identities as the web'},
+    {c:'expo-secure-store', n:'The session token lives here and nowhere else'},
+    {c:'expo-local-authentication', n:'Proposed biometric re-confirm before Approve\nA UX speed bump, not a security boundary'},
+  ]},
+  {c:'Data on the device', n:'Read offline, write online', side:-1, cls:'agent', k:[
+    {c:'TanStack Query', n:'The web app already uses it\nPersisted cache, so the queue and case files read offline'},
+    {c:'Writes need the network', n:'Approve, deny, chat and add reviewer\nNo offline queue: a stale approval must never fire later'},
+  ]},
+  {c:'Shared backend', n:'No new server, no second database', side:1, cls:'ref', k:[
+    {c:'Same Next.js and worker', n:'The Next.js app on Vercel and the Zerops worker'},
+    {c:'/api/mobile routes', n:'Proposed versioned JSON route handlers\nqueue, case, chat, approve, deny, connections, push-token\nServer actions are not callable from React Native'},
+    {c:'Bearer auth', n:'Clerk Expo session token sent as a Bearer header\nThe server re-checks the reviewer allowlist on every request, as the web does'},
+  ]},
+  {c:'Push and links', n:'Tell the reviewer, open the right screen', side:-1, cls:'reporter', k:[
+    {c:'expo-notifications', n:'The app registers its Expo push token with\nPOST /api/mobile/push-token'},
+    {c:'Notification tap', n:'Deep-links to the case (m7) or the sign screen (m11)'},
+    {c:'Universal links', n:'On app.bountydesk.vaibhav.quest plus an app scheme\nThe Next.js app would serve apple-app-site-association and assetlinks.json'},
+  ]},
+  {c:'What stays server-side', n:'The device is never trusted to decide anything', side:1, cls:'plan', k:[
+    {c:'Secrets', n:'No DATABASE_URL, Supabase service key, TrueForge, MCP or worker secrets, no GitHub App key\nOnly EXPO_PUBLIC_ values ship: Clerk publishable key, API base URL'},
+    {c:'The verdict gate', n:'Approve sends verdictId and contentHash of the exact text shown\nThe server refuses a hash mismatch, the rule publish_verdict enforces'},
+    {c:'The pipeline', n:'Triage, reproduction, build, probes and delivery run on the worker and in sandboxes'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M17 Email access - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m16.html" data-kind="pop" aria-label="Back to Integrations"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Email access</h1>
+<div class="hmeta" style="padding-bottom:24px">Reviewer allowlist</div>
+<section class="sect"><div class="sh plain">Reviewers</div><div class="card list" data-reviewer-list>
+<div class="item"><span class="av">A</span><span class="main"><span class="t">alex@example.com</span><span class="s">Owner</span></span><span class="pill c-delivered">Verified</span></div>
+<div class="item"><span class="av">S</span><span class="main"><span class="t">sam@example.com</span><span class="s">Verified 3 Oct</span></span><span class="pill c-delivered">Verified</span></div>
+<a class="item" href="#" data-go="m18.html"><span class="av">P</span><span class="main"><span class="t">priya@example.com</span><span class="s">Code sent 4 min ago</span></span><span class="pill c-approval">Pending</span></a></div>
+<p class="note">Only a verified address can act as a reviewer. Tap a pending address to enter its code.</p></section>
+<section class="sect"><div class="sh plain">Add reviewer</div><div style="padding:0 16px;display:flex;gap:8px"><input class="field" type="email" data-add-input aria-label="Reviewer email" placeholder="name@example.com" autocapitalize="none" style="flex:1;min-width:0"><button class="btn" type="button" data-add-reviewer style="flex:none">Add</button></div><p class="note">We send a six digit code to the address. It stays pending until the code is entered.</p></section>
+<section class="sect"><div class="card list"><a class="item" href="#" data-go="m18.html"><span class="main"><span class="t">Verify with a code</span><span class="s">Open the verification step</span></span><i data-icon="chev" style="width:18px;height:18px;color:var(--faint)"></i></a></div><p class="note">Only the owner can add or remove reviewers.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

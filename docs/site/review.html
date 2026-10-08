@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk mobile - all screens</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding: 18px 220px 18px 24px; background: color-mix(in oklch, var(--bg) 78%, transparent); backdrop-filter: blur(20px) saturate(160%);
+    border-bottom: 1px solid var(--border); }
+  h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 13px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 26px; padding: 26px 24px 72px; }
+  .grid figure { margin: 0; padding: 0; border: 0; background: none; box-shadow: none; }
+  a.card, :root.light a.card { display: block; text-decoration: none; color: var(--ink); }
+  .shot { aspect-ratio: 390 / 844; border-radius: 22px; overflow: hidden; background: #000; border: 1px solid var(--border);
+          box-shadow: var(--shadow-lg); transition: transform .15s ease-out; }
+  @media (hover: hover) { a.card:hover .shot { transform: translateY(-3px); } }
+  .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  figcaption { margin-top: 9px; font-size: 13px; }
+  figcaption b { font-weight: 600; } figcaption span { color: var(--muted); }
+  @media (max-width: 700px) { header { padding-right: 24px; padding-top: 64px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>BountyDesk mobile</h1>
+  <span class="sub">28 screens, one glance - proposed app, not built. Tap a screen to open it live (iOS or Android via ?platform, light/dark via ?theme).</span>
+</header>
+<div class="grid" id="grid"></div>
+<script>
+  const SCREENS = [
+    ['m1','Splash','Onboarding'], ['m2','Sign in','Onboarding'], ['m3','Not authorized','Onboarding'],
+    ['m4','Home','Triage'], ['m5','Queue board','Triage'], ['m6','Reports','Triage'], ['m7','Case file','Triage'],
+    ['m8','Investigation timeline','Investigate'], ['m9','Agent tool calls','Investigate'], ['m10','Reviewer chat','Investigate'],
+    ['m11','Sign the verdict','Approve'], ['m12','Verdict approved','Approve'], ['m13','Deny verdict','Approve'],
+    ['m14','Connections','Connect'], ['m15','Connection detail','Connect'], ['m16','Integrations','Connect'],
+    ['m17','Email access','Connect'], ['m18','OTP verify','Connect'], ['m19','Settings','Settings'],
+    ['m20','Submit a report','Public'], ['m21','Contact verify','Public'], ['m22','Target and scope','Settings'],
+    ['m23','Inbox','Settings'],
+    ['m24','Privacy','Legal'], ['m25','Terms','Legal'], ['m26','Sandbox','Investigate'], ['m27','Onboarding','Connect'], ['m28','Reviewer upload','Connect'],
+  ];
+  const grid = document.getElementById('grid');
+  for (const [id, name, group] of SCREENS) {
+    const fig = document.createElement('figure');
+    fig.innerHTML = '<a class="card" href="screens/' + id + '.html' + location.search + '" target="_blank" rel="noopener">'
+      + '<div class="shot"><img src="assets/thumbs/' + id + '.jpg" alt="' + name + '"></div>'
+      + '<figcaption><b>' + id.toUpperCase() + ' ' + name + '</b> <span>' + group + '</span></figcaption></a>';
+    grid.appendChild(fig);
+  }
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

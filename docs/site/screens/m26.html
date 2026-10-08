@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M26 Sandbox diagram - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m7.html" data-kind="pop" aria-label="Back to Case file"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Reproduction sandbox</h1>
+<div class="hmeta" style="padding-bottom:20px"><span>BD-1042 · Stored XSS in search results</span></div>
+<div class="dg" role="img" aria-label="Reproduction sandbox diagram">
+<div class="node"><span class="ni"><i data-icon="cube"></i></span><span class="main"><span class="k">Untrusted build</span><span class="t">Build sandbox</span><span class="s">Narrow dependency egress</span></span></div><div class="conn"><span>Built artifact only</span></div>
+<div class="node hot"><span class="ni"><i data-icon="lock"></i></span><span class="main"><span class="k">Offline run</span><span class="t">Reproduction sandbox</span><span class="s">No egress · immutable snapshot</span></span></div><div class="conn"><span>Probe results only</span></div>
+<div class="node"><span class="ni"><i data-icon="target"></i></span><span class="main"><span class="k">External check</span><span class="t">Canary oracle</span><span class="s">Outside the sandbox</span></span></div><div class="conn dash"><span>Reviewer approves exact text</span></div>
+<div class="node off"><span class="ni"><i data-icon="shield"></i></span><span class="main"><span class="k">Human gate</span><span class="t">Verdict</span><span class="s">Drafted, then human approved</span></span></div>
+</div>
+<section class="sect" style="margin-top:28px"><div class="sh plain">Notes</div><div class="card list"><div class="kv"><span class="k">Target</span><span class="v">juice-shop v17.3.0</span></div><div class="kv"><span class="k">Snapshot</span><span class="v mono">1867b92</span></div><div class="kv"><span class="k">Egress</span><span class="v">None</span></div><div class="kv"><span class="k">Oracle</span><span class="v">Outside the sandbox</span></div></div><p class="note">The oracle runs outside the sandbox. A sandbox status file reports readiness only and never decides the outcome.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

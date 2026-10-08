@@ -1,0 +1,77 @@
+/* ?embed for Variant C: the prototype page draws the bezel and moves the three phones together.
+   Loaded by platform.js only when ?embed is present, so standalone screens never see this file. */
+
+html.embed,html.embed body{margin:0;padding:0;min-height:0;height:100%;overflow:hidden;background:var(--bg)}
+html.embed body{display:block}
+html.embed .tag{display:none!important}
+/* the device fills the iframe edge to edge; status bar, island and the web address bar stay */
+html.embed .device{position:fixed;inset:0;width:100%;height:100%;border-radius:0;box-shadow:none}
+html.embed .screen{border-radius:0}
+
+/* text=large: c.css sizes type in rem, so one root font-size change scales it. The status bar is the phone's own chrome. */
+html.embed.text-large{font-size:125%}
+
+/* ---- tap hotspots (message { showHot } or ?hot) ---- */
+@keyframes bd-hot{0%,100%{outline-color:color-mix(in oklab,var(--brand) 95%,transparent)}50%{outline-color:color-mix(in oklab,var(--brand) 35%,transparent)}}
+html.showhot :is([data-go],[data-sheet-open],[data-menu],.tab,.fab,.ib,a.item,.btn:not([disabled]),.fchip,.switch,.sbtn,.send){
+  outline:2px solid var(--brand);outline-offset:-2px;animation:bd-hot 1.4s ease-in-out infinite}
+html.showhot .device[data-go]{outline-offset:-4px}
+@media (prefers-reduced-motion:reduce){html.showhot :is([data-go],[data-sheet-open],[data-menu],.tab,.fab,.ib,a.item,.btn,.fchip,.switch,.sbtn,.send){animation:none}}
+
+/* ---- overlay layer: target check, screen reader labels, grid ---- */
+#bd-layer{position:absolute;inset:0;z-index:90;pointer-events:none;overflow:hidden;font:600 9px/1.25 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:0}
+#bd-layer .bx{position:absolute;border:1.5px solid var(--c);border-radius:4px;background:color-mix(in srgb,var(--c) 12%,transparent)}
+#bd-layer .bx>b{position:absolute;left:-1.5px;top:-1.5px;max-width:calc(100% + 3px);padding:1px 4px;border-radius:3px 0 3px 0;background:var(--c);color:#fff;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#bd-layer .ok{--c:#16a34a}#bd-layer .bad{--c:#dc2626}#bd-layer .sr{--c:#7c3aed}#bd-layer .lm{--c:#0369a1;border-style:dashed}
+#bd-layer .g{position:absolute;inset:0;background-image:
+  linear-gradient(rgba(236,72,153,.34) 1px,transparent 1px),linear-gradient(90deg,rgba(236,72,153,.34) 1px,transparent 1px),
+  linear-gradient(rgba(236,72,153,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(236,72,153,.13) 1px,transparent 1px);
+  background-size:32px 32px,32px 32px,8px 8px,8px 8px}
+/* guides: padding is the orange band, content box is the blue fill; cards get a dashed outline */
+html.o-guides :is(.item,.kv,.sh,.body,.tile,.btn,.dock,.fbar,.h1,.hash){
+  background:linear-gradient(rgba(56,189,248,.20),rgba(56,189,248,.20)) content-box,rgba(251,146,60,.30) padding-box!important}
+html.o-guides .card{outline:1px dashed #ec4899;outline-offset:-1px}
+html.o-guides .scroll>*{outline:1px dotted rgba(236,72,153,.55);outline-offset:-1px}
+html.o-sr .sr-dim{opacity:.22}
+
+/* ---- haptic tag ---- */
+.bd-hap{position:absolute;z-index:95;top:58px;left:50%;display:flex;align-items:center;gap:6px;padding:5px 10px 5px 8px;border-radius:99px;background:rgba(20,20,22,.88);color:#fff;
+  font:600 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:0;white-space:nowrap;pointer-events:none;opacity:0;transform:translate(-50%,-6px);transition:opacity .16s,transform .16s}
+.bd-hap.on{opacity:1;transform:translate(-50%,0)}
+.bd-hap svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.pf-android .bd-hap{top:46px}
+@media (prefers-reduced-motion:reduce){.bd-hap{transform:translate(-50%,0)}}
+
+/* ---- gesture demo bits ---- */
+.bd-finger{position:absolute;z-index:92;width:36px;height:36px;margin:-18px 0 0 -18px;border-radius:50%;background:rgba(120,120,128,.4);border:2px solid rgba(255,255,255,.9);box-shadow:0 2px 8px rgba(0,0,0,.3);pointer-events:none}
+.bd-pressing{transform:scale(.97)}
+/* refresh indicators */
+.bd-ptr{position:absolute;z-index:25;left:50%;pointer-events:none}
+.bd-ptr.ios{width:24px;height:24px;margin-left:-12px;color:var(--muted)}
+.bd-ptr.ios svg{width:24px;height:24px;animation:bd-spokes .8s steps(8) infinite}
+@keyframes bd-spokes{to{transform:rotate(360deg)}}
+.bd-ptr.md{width:40px;height:40px;margin-left:-20px;border-radius:50%;background:var(--tonal);color:var(--brand-soft);display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+.pf-web .bd-ptr.md{background:var(--cbar);color:var(--fg);box-shadow:0 1px 4px rgba(0,0,0,.4);border:1px solid var(--line)}
+.bd-ptr.md svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;animation:bd-spokes .9s linear infinite}
+@media (prefers-reduced-motion:reduce){.bd-ptr svg{animation:none!important}}
+
+/* push notification: ids and short titles only */
+.bd-push{position:absolute;z-index:96;left:8px;right:8px;display:flex;gap:10px;color:var(--fg);font-family:var(--font-sans);letter-spacing:0;cursor:pointer;text-align:left}
+.bd-push img{width:38px;height:38px;border-radius:9px;flex:none;background:#111}
+.bd-push b{display:block;font-weight:600}
+.bd-push .t{min-width:0;flex:1}
+.bd-push.ios{top:54px;padding:12px 14px;border-radius:22px;background:var(--glass);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);box-shadow:0 8px 28px rgba(0,0,0,.35);align-items:flex-start}
+.bd-push.ios b{font-size:.9375rem;display:flex;justify-content:space-between}
+.bd-push.ios b i{font-style:normal;font-weight:400;color:var(--muted);font-size:.8125rem}
+.bd-push.ios span.m{display:block;font-size:.9375rem;line-height:1.3}
+.bd-push.android{top:44px;flex-direction:column;gap:6px;padding:12px 16px 14px;border-radius:24px;background:var(--tonal);box-shadow:0 6px 18px rgba(0,0,0,.45)}
+.bd-push.android .h{display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted)}
+.bd-push.android .h img{width:16px;height:16px;border-radius:4px}
+.bd-push.android b{font-size:.875rem}
+.bd-push.android span.m{font-size:.875rem;color:var(--muted)}
+.bd-push.web{top:34px;flex-direction:column;gap:6px;padding:12px 14px;border-radius:12px;background:var(--cbar);border:1px solid var(--line);box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.bd-push.web .h{display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--muted)}
+.bd-push.web .h i{width:14px;height:14px;border-radius:50%;background:conic-gradient(#ea4335 0 33%,#fbbc04 0 66%,#34a853 0);flex:none}
+.bd-push.web .row2{display:flex;gap:10px}
+.bd-push.web b{font-size:.875rem}
+.bd-push.web span.m{font-size:.8125rem;color:var(--muted)}

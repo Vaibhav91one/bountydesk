@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M27 Onboarding - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m14.html" data-kind="pop" aria-label="Back to Connections"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Onboarding</h1>
+<div class="hmeta" style="padding-bottom:24px">How a repository becomes a bound target</div>
+<div class="dg">
+<div class="node"><span class="ni"><i data-icon="github"></i></span><span class="main"><span class="k">Stage 1</span><span class="t">Connected repo</span><span class="s">Vaibhav91one/juice-shop at the pinned commit</span></span></div>
+<div class="conn"></div>
+<div class="node"><span class="ni"><i data-icon="search"></i></span><span class="main"><span class="k">Stage 2</span><span class="t">Classify and review</span><span class="s">Read-only check that the repo can be sandboxed</span></span></div>
+<div class="conn"></div>
+<div class="node hot"><span class="ni"><i data-icon="cube"></i></span><span class="main"><span class="k">Stage 3</span><span class="t">Build in sandbox</span><span class="s">Image built with narrow dependency egress</span></span></div>
+<div class="conn"></div>
+<div class="node"><span class="ni"><i data-icon="file"></i></span><span class="main"><span class="k">Stage 4</span><span class="t">Snapshot and manifest</span><span class="s">Agent proposes port, readiness path, start command</span></span></div>
+<div class="conn"></div>
+<div class="node"><span class="ni"><i data-icon="check"></i></span><span class="main"><span class="k">Stage 5</span><span class="t">Human approves</span><span class="s">The exact build, name and digest</span></span></div>
+<div class="conn"></div>
+<div class="node"><span class="ni"><i data-icon="shield"></i></span><span class="main"><span class="k">Stage 6</span><span class="t">Verify offline</span><span class="s">Snapshot starts and answers its health check</span></span></div>
+<div class="conn"></div>
+<div class="node"><span class="ni"><i data-icon="target"></i></span><span class="main"><span class="k">Stage 7</span><span class="t">Configured target</span><span class="s">TargetProfile written, bound to the repo</span></span></div>
+</div>
+<section class="sect" style="margin-top:28px"><div class="sh plain">Notes</div><div class="card list"><div class="kv"><span class="k">Repository</span><span class="v">juice-shop</span></div><div class="kv"><span class="k">Commit</span><span class="v mono">1867b92</span></div><div class="kv"><span class="k">Status</span><span class="v">Configured</span></div></div><p class="note">Reproduction later runs in a sandbox with no egress. The onboarding build is the only stage that reaches the network.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

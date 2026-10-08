@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk motion</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+<style>
+  :root { --out: cubic-bezier(.23,1,.32,1); --sheet-ease: cubic-bezier(.32,.72,0,1); --phase-approval: var(--approval); }
+  /* Desktop keyframes, copied from app/globals.css (same names, values and easing). */
+  @keyframes step-in { from { opacity:0; translate:0 6px; } to { opacity:1; translate:0 0; } }
+  @keyframes approval-halo { 0%,100% { box-shadow:0 0 0 0 var(--phase-approval); opacity:.9; } 50% { box-shadow:0 0 0 6px transparent; opacity:1; } }
+  @keyframes mascot-float { 0%,100% { translate:0 0; rotate:0deg; } 50% { translate:0 var(--float-y); rotate:var(--float-tilt); } }
+  @keyframes shimmer-text { from { background-position:200% 0; } to { background-position:-200% 0; } }
+  @keyframes grid-pulse { 0%,100% { opacity:.15; } 40% { opacity:1; } }
+  @keyframes mascot-marquee-x { from { transform:translateX(0); } to { transform:translateX(var(--marquee-travel)); } }
+  /* Proposed mobile keyframes, matching screens/c.css (Variant C). */
+  @keyframes bd-in-right { from { transform:translateX(100%); } }
+  @keyframes bd-out-left { to { transform:translateX(-28%); } }
+  @keyframes bd-fade-in { from { opacity:0; } }
+  @keyframes bd-fade-out { to { opacity:0; } }
+  @keyframes bd-rise-in { from { opacity:0; transform:scale(.96); } }
+  @keyframes bd-bubble { from { opacity:0; transform:translateY(24px); } }
+
+  /* Gallery chrome. The map is the default view; the gallery replaces it when body has .gal. */
+  #gallery { display:none; position:fixed; inset:0; overflow:auto; padding:72px 24px 96px; background:var(--bg); }
+  body.gal #gallery { display:block; }
+  body.gal #view, body.gal #hint { display:none; }
+  #gallery .wrap { max-width:1080px; margin:0 auto; }
+  #gallery h1 { font-size:28px; letter-spacing:-.02em; margin:0 0 8px; }
+  #gallery h2 { font-size:18px; margin:36px 0 4px; display:flex; align-items:center; gap:10px; }
+  #gallery p { color:var(--muted); font-size:14px; line-height:1.55; margin:0 0 12px; max-width:70ch; }
+  #gallery .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); gap:14px; }
+  .tile { background:var(--card); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-sm); overflow:hidden; display:flex; flex-direction:column; }
+  .tile .stage { height:150px; display:grid; place-items:center; position:relative; overflow:hidden; background:var(--hover); }
+  .tile .meta { padding:10px 14px 14px; display:grid; gap:6px; }
+  .tile h3 { margin:0; font-size:14px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .tile .what { color:var(--muted); font-size:12.5px; line-height:1.45; margin:0; }
+  .tile .vals { display:flex; flex-wrap:wrap; gap:4px; }
+  .tile code, .tile .uses { font-family:var(--mono); font-size:10.5px; }
+  .tile code { background:var(--hover); border-radius:4px; padding:1px 5px; }
+  .tile .uses { color:var(--muted); }
+  .tag { font:600 10.5px var(--sans); letter-spacing:.02em; padding:2px 8px; border-radius:999px; border:1px solid var(--border); color:var(--muted); white-space:nowrap; }
+  .tag.prop { color:var(--approval); border-color:color-mix(in oklch, var(--approval) 50%, transparent); }
+  .tag.ship { color:var(--delivered); border-color:color-mix(in oklch, var(--delivered) 50%, transparent); }
+  #mbar { position:fixed; left:50%; bottom:12px; transform:translateX(-50%); z-index:20; display:flex; gap:10px; align-items:center; background:var(--card); border:1px solid var(--border); border-radius:999px; padding:5px; box-shadow:var(--shadow-lg); font:600 12px var(--sans); }
+  #mbar .seg { display:flex; gap:2px; }
+  #mbar button { font:inherit; color:var(--muted); background:none; border:0; border-radius:999px; padding:6px 14px; cursor:pointer; }
+  #mbar .seg button[aria-pressed="true"] { background:var(--brand); color:#fff; }
+  #mbar .rmsw { display:flex; align-items:center; gap:8px; color:var(--ink); }
+  #mbar .rmsw .tg { width:30px; height:18px; border-radius:9px; background:var(--border); position:relative; transition:background-color 180ms var(--out); }
+  #mbar .rmsw .tg::after { content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:var(--ink); transition:transform 180ms var(--out); }
+  #mbar .rmsw[aria-checked="true"] .tg { background:var(--brand); }
+  #mbar .rmsw[aria-checked="true"] .tg::after { transform:translateX(12px); background:#fff; }
+
+  /* Demo pieces */
+  .d-row { display:flex; align-items:center; gap:8px; padding:7px 12px; border-radius:8px; background:var(--card); border:1px solid var(--border); font-size:12px; width:200px; }
+  .d-dot { width:8px; height:8px; border-radius:50%; background:var(--delivered); flex:none; }
+  .d-btn { font:600 13px var(--sans); border:0; border-radius:8px; padding:9px 16px; background:var(--approval); color:#161616; }
+  .d-btn.brand { background:var(--brand); color:#fff; }
+  .d-btn.halo { animation:approval-halo 2s var(--out) infinite; }
+  .d-mascot { width:84px; height:84px; object-fit:contain; --float-y:-6px; --float-tilt:-2deg; animation:mascot-float 4s ease-in-out infinite; }
+  .d-shimmer { font:600 14px var(--sans); color:transparent; -webkit-background-clip:text; background-clip:text; background-size:200% 100%;
+    background-image:linear-gradient(90deg, var(--muted) 35%, var(--ink) 50%, var(--muted) 65%); animation:shimmer-text 1.4s linear infinite; }
+  .d-grid { display:grid; grid-template-columns:repeat(3, 10px); gap:3px; }
+  .d-grid i { width:10px; height:10px; border-radius:2px; background:var(--ink); opacity:.15; animation:grid-pulse 650ms ease-in-out infinite; }
+  .d-marq { width:240px; overflow:hidden; mask-image:linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent); }
+  .d-marq > div { display:flex; gap:12px; width:max-content; --marquee-travel:-50%; animation:mascot-marquee-x 9s linear infinite; }
+  .d-marq img { width:56px; height:56px; object-fit:contain; flex:none; }
+  .d-fold { width:200px; border:1px solid var(--border); border-radius:8px; background:var(--card); overflow:hidden; font-size:12px; }
+  .d-fold b { display:block; padding:8px 12px; }
+  .d-fold .body { display:grid; grid-template-rows:0fr; opacity:0; transition:grid-template-rows 300ms var(--out), opacity 300ms var(--out); }
+  .d-fold.open .body { grid-template-rows:1fr; opacity:1; }
+  .d-fold .body > div { overflow:hidden; color:var(--muted); padding:0 12px; }
+  .d-fold.open .body > div { padding-bottom:10px; }
+  .d-reveal { opacity:0; transform:translateY(16px); transition:none; }
+  .d-reveal.go { opacity:1; transform:none; transition:opacity 450ms var(--out), transform 450ms var(--out); }
+  /* proposed mobile demos */
+  .phone { width:96px; height:128px; border-radius:14px; border:2px solid var(--border); background:var(--card); position:relative; overflow:hidden; font:600 10px var(--sans); }
+  .phone .scr { position:absolute; inset:0; display:grid; place-items:center; }
+  .phone .scr.a { background:color-mix(in oklch, var(--reviewer) 22%, var(--card)); }
+  .phone .scr.b { background:color-mix(in oklch, var(--delivered) 22%, var(--card)); }
+  .phone .sheet { position:absolute; left:0; right:0; bottom:0; height:62px; background:var(--card); border-top:1px solid var(--border); border-radius:12px 12px 0 0; display:grid; place-items:center; transform:translateY(110%); }
+  .phone .scrim { position:absolute; inset:0; background:#000; opacity:0; }
+  .phone .toast { position:absolute; left:10px; right:10px; bottom:10px; padding:6px; text-align:center; border-radius:8px; background:var(--ink); color:var(--bg); transform:translateY(16px) scale(.96); opacity:0; }
+  .d-press { transition:transform 120ms var(--out); }
+  .d-press.down { transform:scale(.97); }
+  .d-sw { width:46px; height:28px; border-radius:14px; background:var(--border); position:relative; transition:background-color 200ms; }
+  .d-sw::after { content:""; position:absolute; top:2px; left:2px; width:24px; height:24px; border-radius:50%; background:#fff; transition:transform 220ms var(--out); box-shadow:0 1px 3px rgb(0 0 0 / 30%); }
+  .d-sw.on { background:var(--delivered); } .d-sw.on::after { transform:translateX(18px); }
+  .d-bub { padding:8px 12px; border-radius:14px 14px 14px 4px; background:var(--card); border:1px solid var(--border); font-size:12px; transform-origin:left bottom; }
+  .d-bub.new { animation:bd-bubble 300ms var(--out) backwards; }
+  /* Reduce motion switch: stops loops and slides, like the OS setting. */
+  body.rm .tile * { animation:none !important; transition-duration:.01ms !important; }
+  @media (prefers-reduced-motion: reduce) { .tile * { animation:none !important; transition-duration:.01ms !important; } }
+</style>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit · Motion gallery for live demos</div>
+<main id="gallery" aria-label="Motion gallery"><div class="wrap">
+  <h1>Motion gallery</h1>
+  <p data-only="desktop">Each tile loops a real keyframe or transition, using the values in app/globals.css and the components named under it. The Reduce motion switch stops loops and slides, like the OS setting.</p>
+  <p data-only="mobile">Each tile loops a proposed mobile motion with the values measured from Variant C (screens/c.css and c.js). The core easing is the desktop curve, cubic-bezier(.23, 1, .32, 1), and the desktop keyframes (step-in, approval-halo, mascot-float, shimmer-text) run in the C screens with the same values. Nothing here is built into an app; the app is iOS and Android only.</p>
+  <div id="tiles"></div>
+</div></main>
+<div id="mbar" role="group" aria-label="View and motion settings"><div class="seg"><button type="button" data-v="map" aria-pressed="true">Map</button><button type="button" data-v="gal" aria-pressed="false">Motion gallery</button></div><button class="rmsw" id="rmSw" type="button" role="switch" aria-checked="false" aria-label="Reduce motion"><span class="tg" aria-hidden="true"></span><span>Reduce motion</span></button></div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Motion', n:'How BountyDesk moves, and where\nDesktop is shipped. The mobile app motion is proposed, not built', root:true, mid:true, wrap:3, row:150, h:m('celebrating'), k:[
+  {c:'Desktop keyframes', n:'app/globals.css, each exposed as a Tailwind utility', side:1, cls:'agent', k:[
+    {c:'step-in', n:'opacity 0 to 1, translate 0 6px to 0\n450ms, cubic-bezier(0.23, 1, 0.32, 1), fill both\nLifecycle steps arrive one after another'},
+    {c:'approval-halo', n:'box-shadow ring 0 to 6px in --phase-approval, opacity .9 to 1\n2s, same easing, infinite\nAttention without a spinner: the run waits on a person'},
+    {c:'mascot-float', n:'translate 0 to --float-y, rotate 0 to --float-tilt\nease-in-out, infinite, duration set per card (3.1s to 5.2s)\nRides on top of the animation inside each mascot SVG'},
+    {c:'shimmer-text', n:'background-position 200% to -200%, clipped to the glyphs\n1.4s linear infinite\nA busy label with an elapsed timer, no spinner'},
+    {c:'grid-pulse', n:'opacity .15 to 1 at 40%, back to .15\n650ms ease-in-out, delay (column + |row - 1|) x 90ms\nNine 4px cells make the pixel-grid loader'},
+    {c:'mascot-marquee, mascot-marquee-x', n:'translate to --marquee-travel, linear, infinite\nOne translation over a duplicated list; no state, no timer'},
+  ]},
+  {c:'Easing and timing', n:'One hand across the product', side:-1, cls:'plan', k:[
+    {c:'Core easing', n:'cubic-bezier(0.23, 1, 0.32, 1), a strong ease-out\nstep-in, approval-halo, Reveal, every expand and slide'},
+    {c:'Expand and collapse', n:'grid-template-rows 0fr to 1fr plus opacity, 300ms\nAnimates a real height without measuring it'},
+    {c:'Slide', n:'Approval dialog two-pane slide: translate on a 200% wide strip\n300ms, transform-gpu'},
+    {c:'Reveal on scroll', n:'motion/react: opacity 0, y 16 to rest, 450ms\nviewport once, amount .3, delay passed per item'},
+    {c:'Dialog resize', n:'Onboarding dialog width and height\n320ms, cubic-bezier(0.4, 0, 0.2, 1), then a 200ms fade'},
+    {c:'Stagger', n:'Lifecycle list rows 70ms apart (lifecycle-list.tsx)\nLanding entrance uses a named ENTRANCE delay table'},
+  ]},
+  {c:'Where desktop motion is used', n:'grep of app/ and components/', side:1, cls:'reviewer', k:[
+    {c:'Landing page', n:'app/page.tsx: step-in on the lede, buttons and backdrop\nReveal, mascot carousel, marquee along an SVG path\n(app/panels.tsx too)'},
+    {c:'Case file', n:'lifecycle-list.tsx: step-in rows, expand per step\nverdict-card.tsx and artifacts-panel.tsx: 300ms expand'},
+    {c:'Agent trace', n:'agent-trace.tsx: LoaderGrid (grid-pulse) and ShimmerLabel (shimmer-text)\nBoth stop under prefers-reduced-motion'},
+    {c:'Approval dialog', n:'approval-dialog.tsx: halo on the approve button\nand the 300ms pane slide'},
+    {c:'Queue board', n:'queue-board.tsx: MascotFloat on each card, five drift presets\n(y -3 to -7px, tilt, 3.1s to 5.2s, negative delays)'},
+    {c:'Login and banner', n:'login/page.tsx: MascotMarquee\nsite-banner.tsx: mascot-marquee-x over the strip'},
+    {c:'Lists and bars', n:'filter-table.tsx and faq.tsx: 300ms expand\ntop-bar.tsx: 300ms expand and transform'},
+    {c:'Connections', n:'onboarding-dialog.tsx: animated width and height\nwith useReducedMotion fallback'},
+    {c:'Smooth scroll', n:'smooth-scroll.tsx: Lenis, off when reduced motion is on'},
+  ]},
+  {c:'Reduced motion', n:'Every motion has an off switch', side:-1, cls:'status', k:[
+    {c:'Tailwind', n:'motion-reduce:animate-none on step-in, halo, float, shimmer, pulse\nmotion-reduce:transition-none on slides'},
+    {c:'motion/react', n:'useReducedMotion in Reveal, Parallax, MascotFloat\nSmoothScroll and the onboarding dialog'},
+    {c:'Mascot SVGs', n:'MascotFloat pauses the animations inside the artwork\nbecause no class can reach them'},
+    {c:'Lenis', n:'No scroll inertia for a reader who asked for less motion'},
+    {c:'Reduced-motion text', n:'shimmer-text falls back to text-muted-foreground'},
+  ]},
+  {c:'Libraries', n:'package.json', side:1, cls:'ref', k:[
+    {c:'motion 13', n:'motion/react: Reveal, Parallax, TextAnimate\nmarquee-along-svg-path, onboarding dialog'},
+    {c:'lenis 1.3', n:'Smooth scrolling, components/smooth-scroll.tsx'},
+    {c:'tw-animate-css', n:'devDependency, utility animations for Tailwind'},
+    {c:'CSS first', n:'Keyframes and transitions in app/globals.css and Tailwind classes\nmotion/react where a component needs in-view or measured sizes'},
+  ]},
+]};
+const mobileTree = {c:'Motion · mobile (proposed)', n:'PROPOSED, NOT BUILT. Variant C, measured from screens/c.css and c.js\niOS and Android only. The 28 screens are mockups; no app exists yet', root:true, mid:true, wrap:3, row:150, h:m('celebrating'), k:[
+  {c:'Toolkit and rules', n:'Reanimated 4, gesture handler, expo-haptics', side:1, cls:'agent', k:[
+    {c:'Core easing', n:'cubic-bezier(.23, 1, .32, 1), the desktop curve\nscreens/c.css --out'},
+    {c:'Rule set', n:'Transform and opacity only\niOS tab switches do not animate; Android uses fade through'},
+    {c:'Reanimated 4', n:'Shared values and worklets keep these on the UI thread'},
+    {c:'expo-haptics', n:'success on Approve and code complete, warning on deny confirm,\nselection on switches (data-haptic in the screens)'},
+  ]},
+  {c:'Press feedback', n:'Every pressable', side:-1, cls:'plan', k:[
+    {c:'Scale', n:'scale .97 in 120ms ease-out on every pressable'},
+    {c:'Icon buttons', n:'scale .92 and opacity .7 while held'},
+    {c:'Reduced motion', n:'no scale, opacity .8 while held'},
+  ]},
+  {c:'Screen transitions', n:'iOS and Android', side:1, cls:'reviewer', k:[
+    {c:'iOS push', n:'New screen in from 100% over 350ms, cubic-bezier(.32,.72,0,1)\nOld screen out to -28%. Back is the mirror'},
+    {c:'iOS modal', n:'Rises from the bottom over 380ms, same curve'},
+    {c:'Android fade through', n:'Old out in 90ms linear\nNew in over 210ms after 90ms, scale .96 to 1\nTabs fade the same way'},
+  ]},
+  {c:'Sheets and long press', n:'Spring, drag, lift', side:-1, cls:'plan', k:[
+    {c:'Sheet spring', n:'dampingRatio .8, period .3s\nDrag to dismiss hands its velocity to the spring'},
+    {c:'Long press', n:'Opens after a 450ms hold, cancels on movement\nCard lifts to 1.04 over 260ms, menu pops from .92 over 220ms'},
+  ]},
+  {c:'Toast, switch, bubble', n:'Small surfaces', side:1, cls:'plan', k:[
+    {c:'Toast', n:'Rises 16px from scale .96: transform 350ms ease-out, opacity 200ms\nShown for 2s'},
+    {c:'Switch', n:'Thumb transform 220ms ease-out, track colour 200ms'},
+    {c:'Chat bubble', n:'New bubble rises 24px and fades in over 300ms'},
+  ]},
+  {c:'Desktop keyframes', n:'Same values as app/globals.css', side:-1, cls:'status', k:[
+    {c:'step-in', n:'Rows on Home, Queue and Reports, 450ms with a 40ms stagger, first load only'},
+    {c:'approval-halo', n:'2s pulse on the Approve button (M11)\nand the awaiting-approval pill on the case file (M7)'},
+    {c:'mascot-float', n:'4s idle float on mascots: M3, M4 first run, M6 no results, M12, M21'},
+    {c:'shimmer-text', n:'1.4s band across running labels on Queue and Reports'},
+  ]},
+  {c:'Reduced motion', n:'Every motion has an off switch', side:1, cls:'ref', k:[
+    {c:'Screen change', n:'Becomes a 150ms opacity crossfade'},
+    {c:'Loops and entrances', n:'step-in becomes a 150ms fade, the halo softens to opacity,\nthe float slows to 8s at 2px, the shimmer stops'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script>
+// ---- Gallery: view switch and reduce-motion switch ----
+(() => {
+  const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const rm = $('#rmSw');
+  const rmOn = () => rm.getAttribute('aria-checked') === 'true' || matchMedia('(prefers-reduced-motion: reduce)').matches;
+  rm.addEventListener('click', () => { const on = rm.getAttribute('aria-checked') !== 'true'; rm.setAttribute('aria-checked', on); document.body.classList.toggle('rm', on); });
+  const setView = v => { document.body.classList.toggle('gal', v === 'gal'); $$('#mbar .seg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v)); history.replaceState(null, '', v === 'gal' ? '#gallery' : location.pathname + location.search); };
+  $$('#mbar .seg button').forEach(b => b.addEventListener('click', () => setView(b.dataset.v)));
+  if (location.hash === '#gallery') setView('gal');
+  addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('gal')) setView('map'); });
+
+  // The sheet uses the screens/c.js spring (dampingRatio .8, period .3s) as a CSS linear() easing.
+  let spring = 'cubic-bezier(.23,1,.32,1)';
+  try {
+    const Z = .8, O = 2 * Math.PI / .3, wd = O * Math.sqrt(1 - Z * Z), T = .4, N = 28, pts = [];
+    for (let i = 0; i <= N; i++) { const t = i / N * T; pts.push((1 - Math.exp(-Z * O * t) * (Math.cos(wd * t) + Z * O / wd * Math.sin(wd * t))).toFixed(4)); }
+    spring = 'linear(' + pts.join(',') + ')';
+  } catch (_) {}
+
+  const mas = n => `<img class="d-mascot" src="assets/mascot/${n}.svg" alt="">`;
+  const flip = (el, cls, on) => el && el.classList.toggle(cls, on);
+  const tl = (...steps) => (root) => { steps.forEach(([ms, fn]) => setTimeout(() => fn(root), ms)); };
+  // tiles: g group, tag shipped or proposed, build html, play(root) runs once per period.
+  const T = [
+    { g:'d', id:'step-in', name:'step-in', what:'Lifecycle rows arrive one after another, so the eye follows the pipeline.', vals:['450ms','cubic-bezier(0.23, 1, 0.32, 1)','fill both','stagger 70ms'], uses:'lifecycle-list.tsx, app/page.tsx', period:3200,
+      build:() => [0,1,2].map(i => `<div class="d-row" style="animation:step-in 450ms var(--out) both; animation-delay:${i*70}ms"><span class="d-dot"></span>Step ${i+1}</div>`).join('').replace(/^/, '<div style="display:grid;gap:6px">') + '</div>',
+      play:r => { $$('.d-row', r).forEach(e => { const s = e.getAttribute('style'); e.style.animation = 'none'; void e.offsetWidth; e.setAttribute('style', s); }); } },
+    { g:'d', id:'halo', name:'approval-halo', what:'A ring pulses on the approve button while the run waits for a person.', vals:['2s','cubic-bezier(0.23, 1, 0.32, 1)','infinite','ring 6px'], uses:'approval-dialog.tsx', period:0,
+      build:() => '<button class="d-btn halo" type="button">Approve verdict</button>' },
+    { g:'d', id:'float', name:'mascot-float', what:'Trix drifts on a board card, on top of the animation baked into the SVG.', vals:['3.1s to 5.2s','ease-in-out','y -3 to -7px','tilt -3 to 3deg'], uses:'mascot-float.tsx, queue-board.tsx', period:0,
+      build:() => mas('idle') },
+    { g:'d', id:'shimmer', name:'shimmer-text', what:'A bright band crosses the glyphs of a running label, next to an elapsed timer.', vals:['1.4s','linear','infinite','200% to -200%'], uses:'agent-trace.tsx ShimmerLabel', period:0,
+      build:() => '<span class="d-shimmer">Reproducing, 00:42</span>' },
+    { g:'d', id:'grid', name:'grid-pulse', what:'Nine cells run one fade on nine delays so a wavefront travels across the grid.', vals:['650ms','ease-in-out','delay (col + |row - 1|) x 90ms','4px cells in the app'], uses:'agent-trace.tsx LoaderGrid', period:0,
+      build:() => '<div class="d-grid">' + [0,1,2,3,4,5,6,7,8].map(i => `<i style="animation-delay:${(i%3 + Math.abs(Math.floor(i/3)-1))*90}ms"></i>`).join('') + '</div>' },
+    { g:'d', id:'marquee', name:'mascot-marquee-x', what:'One translation over a duplicated list. No state, no timer, no client bundle.', vals:['linear','infinite','--marquee-travel'], uses:'mascot-marquee.tsx, site-banner.tsx, login', period:0,
+      build:() => '<div class="d-marq"><div>' + ['greeting','scanning','reproducing','awaiting-approval','delivered','greeting','scanning','reproducing','awaiting-approval','delivered'].map(n => `<img src="assets/mascot/${n}.svg" alt="">`).join('') + '</div></div>' },
+    { g:'d', id:'expand', name:'Expand and collapse', what:'grid-template-rows 0fr to 1fr with opacity animates a real height.', vals:['300ms','cubic-bezier(0.23, 1, 0.32, 1)','0fr to 1fr'], uses:'verdict-card, lifecycle-list, filter-table, faq, top-bar', period:2600,
+      build:() => '<div class="d-fold"><b>Probe results</b><div class="body"><div>Scope-guard allowed 4 of 4 requests. The reproduction sandbox had no egress.</div></div></div>',
+      play:r => { const f = $('.d-fold', r); f.classList.toggle('open'); } },
+    { g:'d', id:'reveal', name:'Reveal', what:'Sections rise 16px and fade in once when they enter the viewport.', vals:['450ms','cubic-bezier(0.23, 1, 0.32, 1)','y 16','once, amount .3'], uses:'reveal.tsx, app/page.tsx', period:3000,
+      build:() => '<div class="d-row d-reveal"><span class="d-dot"></span>Report triaged</div>',
+      play:r => { const e = $('.d-reveal', r); e.classList.remove('go'); void e.offsetWidth; setTimeout(() => e.classList.add('go'), 60); } },
+
+    { g:'p', id:'press', name:'Press', what:'Every pressable scales to .97 in 120ms. Rows scale their label instead of the clipped row.', vals:['scale .97','120ms','ease-out'], uses:'screens/c.css', period:1800,
+      build:() => '<button class="d-btn brand d-press" type="button">Approve</button>',
+      play:r => { const b = $('.d-press', r); flip(b, 'down', true); setTimeout(() => flip(b, 'down', false), 700); } },
+    { g:'p', id:'push', name:'iOS push', what:'The new screen slides in from the right while the old one parallaxes left.', vals:['350ms','cubic-bezier(.32,.72,0,1)','old to -28%'], uses:'view transitions, iOS', period:2600,
+      build:() => '<div class="phone"><div class="scr a">Queue</div><div class="scr b" style="transform:translateX(100%)">Case file</div></div>',
+      play:r => { const a = $('.a', r), b = $('.b', r), E = 'cubic-bezier(.32,.72,0,1)';
+        [a, b].forEach(e => e.style.transition = 'none'); a.style.transform = 'none'; b.style.transform = 'translateX(100%)'; void b.offsetWidth;
+        [a, b].forEach(e => e.style.transition = 'transform 350ms ' + E); setTimeout(() => { a.style.transform = 'translateX(-28%)'; b.style.transform = 'none'; }, 60); } },
+    { g:'p', id:'fade', name:'Android fade through', what:'The old screen leaves in 90ms, then the new one fades in and scales up over 210ms.', vals:['90ms out','210ms in','scale .96 to 1'], uses:'view transitions, Android', period:2600,
+      build:() => '<div class="phone"><div class="scr a">Queue</div><div class="scr b" style="opacity:0">Case file</div></div>',
+      play:r => { const a = $('.a', r), b = $('.b', r);
+        [a, b].forEach(e => { e.style.transition = 'none'; }); a.style.opacity = 1; b.style.opacity = 0; b.style.transform = 'scale(.96)'; void b.offsetWidth;
+        a.style.transition = 'opacity 90ms linear'; setTimeout(() => { a.style.opacity = 0; }, 60);
+        b.style.transition = 'opacity 210ms var(--out) 150ms, transform 210ms var(--out) 150ms'; setTimeout(() => { b.style.opacity = 1; b.style.transform = 'none'; }, 60); } },
+    { g:'p', id:'sheet', name:'Sheet spring', what:'A damped spring (ratio .8, period .3s) moves the sheet and dims the scrim. Drag to dismiss keeps velocity.', vals:['zeta .8','period .3s','rubber band'], uses:'screens/c.js, deny sheet', period:3000,
+      build:() => '<div class="phone"><div class="scr a">Review</div><div class="scrim"></div><div class="sheet">Deny reason</div></div>',
+      play:r => { const s = $('.sheet', r), c = $('.scrim', r); let open = true;
+        const set = o => { s.style.transition = 'transform 420ms ' + spring; c.style.transition = 'opacity 420ms ' + spring; s.style.transform = o ? 'none' : 'translateY(110%)'; c.style.opacity = o ? .4 : 0; };
+        setTimeout(() => set(true), 60); setTimeout(() => set(false), 1700); } },
+    { g:'p', id:'toast', name:'Toast', what:'Rises 16px from scale .96 and fades in, then leaves the same way. It stays 2s.', vals:['transform 350ms','opacity 200ms','ease-out'], uses:'screens/c.css .toast', period:3200,
+      build:() => '<div class="phone"><div class="scr a">Queue</div><div class="toast">Verdict approved</div></div>',
+      play:r => { const t = $('.toast', r);
+        t.style.transition = 'transform 350ms var(--out), opacity 200ms'; setTimeout(() => { t.style.transform = 'none'; t.style.opacity = 1; }, 60);
+        setTimeout(() => { t.style.transform = 'translateY(16px) scale(.96)'; t.style.opacity = 0; }, 2060); } },
+    { g:'p', id:'switch', name:'Switch', what:'The thumb is transform only. The track colour crossfades.', vals:['thumb 220ms','track 200ms','transform + background'], uses:'screens/c.css .switch', period:1800,
+      build:() => '<div class="d-sw"></div>', play:r => flip($('.d-sw', r), 'on') },
+    { g:'p', id:'bubble', name:'Chat bubble', what:'A new bubble rises 24px and fades in.', vals:['300ms','ease-out','translateY 24px'], uses:'screens/c.css .bub.new', period:2800,
+      build:() => '<div class="d-bub">Retry the probe with the fixture token</div>',
+      play:r => { const b = $('.d-bub', r); b.classList.remove('new'); void b.offsetWidth; b.classList.add('new'); } },
+    { g:'p', id:'enter', name:'List entrance', what:'Rows use step-in once on first load with a 40ms stagger. Reduced motion keeps opacity only.', vals:['450ms','40ms stagger','opacity only when reduced'], uses:'screens/c.css, tab screen rows', period:3200,
+      build:() => '<div style="display:grid;gap:6px">' + [0,1,2].map(i => `<div class="d-row" style="animation:step-in 450ms var(--out) both; animation-delay:${i*40}ms"><span class="d-dot"></span>Report ${i+1}</div>`).join('') + '</div>',
+      play:r => { $$('.d-row', r).forEach(e => { const s = e.getAttribute('style'); e.style.animation = 'none'; void e.offsetWidth; e.setAttribute('style', s); }); } },
+  ];
+  const groups = { d:['Desktop, shipped', 'Values from app/globals.css and the components that use them.', 'ship', 'Shipped'], p:['Mobile app, proposed', 'Measured from Variant C, screens/c.css and c.js. The 28 mobile screens are mockups; no app exists yet.', 'prop', 'Proposed'] };
+  const host = $('#tiles');
+  Object.keys(groups).filter(g => g === (VIEW === 'mobile' ? 'p' : 'd')).forEach(g => {
+    const [h, d, cls, label] = groups[g];
+    host.insertAdjacentHTML('beforeend', `<h2>${h} <span class="tag ${cls}">${label}</span></h2><p>${d}</p><div class="grid" id="grid-${g}"></div>`);
+    T.filter(t => t.g === g).forEach(t => {
+      const el = document.createElement('article'); el.className = 'tile';
+      el.innerHTML = `<div class="stage">${t.build()}</div><div class="meta"><h3>${t.name}<span class="tag ${cls}">${label}</span></h3><p class="what">${t.what}</p><div class="vals">${t.vals.map(v => `<code>${v}</code>`).join('')}</div><div class="uses">${t.uses}</div></div>`;
+      $('#grid-' + g).appendChild(el);
+      if (t.play && t.period) { const stage = $('.stage', el); const run = () => { if (!rmOn() && document.body.classList.contains('gal')) t.play(stage); }; setTimeout(run, 400); setInterval(run, t.period); }
+    });
+  });
+})();
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

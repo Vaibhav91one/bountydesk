@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk brand assets</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  main { max-width: 1240px; padding-top: 72px; }
+  main > p.lead { max-width: 760px; margin: 6px 0 0; }
+  section { padding-top: 8px; }
+  section h2 { margin: 36px 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  section > p { max-width: 760px; margin: 0 0 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+  .tile { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .pv { aspect-ratio: 1.5; border-radius: var(--radius); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .pv img { max-width: 72%; max-height: 62%; }
+  .pv.dk { background: oklch(0.145 0 0); } .pv.lt { background: oklch(1 0 0); border-color: oklch(0.922 0 0); }
+  .pv.sq { aspect-ratio: 1; } .pv.sq img { max-width: 56%; max-height: 56%; }
+  .tile b { display: block; font-size: 15px; } .tile small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pair .pv { aspect-ratio: 1.25; }
+  .mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+  .mc { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 6px; box-shadow: var(--shadow-sm); }
+  .mc .pv { aspect-ratio: 1.3; background: oklch(0.145 0 0); border-color: var(--border); }
+  .mc .pv img { max-width: 62%; max-height: 80%; }
+  .mc code { align-self: flex-start; }
+  .mc p { margin: 0; font-size: 13px; line-height: 1.5; }
+  .sws { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+  .swc { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+  .swc i { display: block; height: 52px; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 4px; }
+  .swc b { font-size: 14px; } .swc code { align-self: flex-start; font-size: 11.5px; } .swc small { color: var(--muted); font-size: 12px; }
+  .chipx { display: inline-flex; align-items: center; gap: 6px; font: 600 11px/1 var(--sans); padding: 5px 9px; border-radius: 99px; color: var(--c); background: color-mix(in oklab, var(--c) 15%, transparent); }
+  .chipx::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .type { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); }
+  .type .r { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: baseline; padding: 12px 16px; }
+  .type .r + .r { border-top: 1px solid var(--border); }
+  .type .r > span { color: var(--muted); font: 12px var(--mono); }
+  .bd { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .bd img { width: 100%; display: block; border-radius: var(--radius); border: 1px solid var(--border); background: oklch(0.145 0 0); }
+  .rules { max-width: 820px; padding-left: 18px; } .rules li { margin: 6px 0; } .rules b { color: var(--ink); }
+  .tag { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 9px; border-radius: 99px; color: var(--approval); background: color-mix(in oklab, var(--approval) 15%, transparent); }
+  .phone { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+  .phone a { color: inherit; text-decoration: none; display: block; width: 190px; }
+  .phone img.shot { width: 190px; border-radius: 22px; border: 1px solid var(--border); display: block; }
+  .src { font-size: 12.5px; } .src code { font-size: 11.5px; }
+  @media (max-width: 560px) { main { padding: 64px 16px 72px; } .type .r { grid-template-columns: 1fr; gap: 2px; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Brand assets</h1>
+<p class="lead">The BountyDesk marks, the Agent Bounty mascot, the color and type tokens, and the images the product ships. Everything here is read from the repo: the files in <code>public/</code>, <code>lib/mascot/catalog.ts</code> and <code>app/globals.css</code>. Add <code>?theme=light</code> to this page to flip the page chrome; the previews below always show both surfaces.</p>
+
+<section>
+<h2>Logos</h2>
+<p>Five SVGs, each in <code>public/</code> and copied to <code>assets/</code>. The lockup, the mark and the small mark are drawn with near-white (#F5F5F5) letterforms, so they are made for the dark surface the product ships on. The tick is a single indigo shape (#6774F0) and reads on either surface.</p>
+<div class="tiles">
+  <figure class="tile"><div class="pair"><div class="pv dk"><img src="assets/logo-lockup.svg" alt="Lockup on dark"></div><div class="pv lt"><img src="assets/logo-lockup.svg" alt="Lockup on light"></div></div><figcaption><b>Lockup</b><small>Mark plus wordmark, <code>logo-lockup.svg</code></small><small>Used in the site header and footer, the login page, and the app sidebar when it is expanded.</small></figcaption></figure>
+  <figure class="tile"><div class="pair"><div class="pv dk"><img src="assets/logo-mark.svg" alt="Mark on dark"></div><div class="pv lt"><img src="assets/logo-mark.svg" alt="Mark on light"></div></div><figcaption><b>Mark</b><small>Same artwork as the lockup, <code>logo-mark.svg</code></small><small>Not referenced by a page in the repo today. Use it where the wordmark would repeat nearby.</small></figcaption></figure>
+  <figure class="tile"><div class="pair"><div class="pv dk"><img src="assets/logo-small.svg" alt="Small mark on dark"></div><div class="pv lt"><img src="assets/logo-small.svg" alt="Small mark on light"></div></div><figcaption><b>Small</b><small>78 by 58, drawn for small sizes, <code>logo-small.svg</code></small><small>The collapsed sidebar rail (30 by 22) and the panel header (16 by 16). It is drawn for that size, not the lockup scaled down.</small></figcaption></figure>
+  <figure class="tile"><div class="pair"><div class="pv dk"><img src="assets/logo-tick.svg" alt="Tick on dark"></div><div class="pv lt"><img src="assets/logo-tick.svg" alt="Tick on light"></div></div><figcaption><b>Tick</b><small>64 by 64, one color, <code>logo-tick.svg</code></small><small>The favicon in these docs. The only logo file that holds up on a light surface unaided.</small></figcaption></figure>
+  <figure class="tile"><div class="pair"><div class="pv dk"><img src="assets/trix.svg" alt="Trix on dark"></div><div class="pv lt"><img src="assets/trix.svg" alt="Trix on light"></div></div><figcaption><b>Trix</b><small>44 by 44, <code>trix.svg</code></small><small>The small purple mascot icon on the public <code>/submit</code> page and the legal pages, at 32 pixels.</small></figcaption></figure>
+  <figure class="tile"><div class="pair"><div class="pv sq dk"><img src="assets/app-icon.svg" alt="Web app icon"></div><div class="pv sq lt"><img src="assets/app-icon.svg" alt="Web app icon on light"></div></div><figcaption><b>Web app icon</b><small>64 by 64, tick-shaped mark on #0A0A0A, <code>app/icon.svg</code></small><small>The Next.js icon file. It carries its own dark plate, so it needs no surface to sit on.</small></figcaption></figure>
+</div>
+<h3>Usage notes</h3>
+<ul class="rules">
+  <li><b>Put the lockup, mark and small mark on dark.</b> Their letterforms are #F5F5F5, so on white they lose most of the shape. The light previews above show that on purpose. The product defines a light theme but ships dark only.</li>
+  <li><b>Use the lockup when there is room for the wordmark, the small mark when there is not.</b> The sidebar swaps between them as it collapses, and gives both the alt text "BountyDesk".</li>
+  <li><b>Decorative uses carry empty alt text.</b> The panel header mark and the Trix icon are beside text that already says what they are.</li>
+  <li><b>Do not recolor.</b> The indigo is #6774F0 in the files and the UI brand token is a different indigo (below); do not swap one for the other.</li>
+</ul>
+</section>
+
+<section>
+<h2>Agent Bounty, the mascot</h2>
+<p>Fourteen poses, one SVG each in <code>assets/mascot/</code>, named in <code>MASCOT_STATES</code> in <code>lib/mascot/catalog.ts</code>. A report's state picks its pose through <code>MASCOT_FOR_STATE</code>, so the queue board and the case file never disagree. An unknown state falls back to <code>idle</code>. Each SVG carries its own looping animation; only <code>MascotFloat</code> (the queue board) pauses it when the visitor prefers reduced motion. <code>AnimatedMascotSvg</code> elsewhere has no reduced-motion handling.</p>
+<div class="mgrid" id="mascots"></div>
+<h3>Where states are not one to one</h3>
+<ul class="rules">
+  <li>The case file lifecycle list picks a pose per row in <code>stepMascot</code> (<code>lib/reports/case-view.ts</code>): intake is <code>ingest</code>, the investigation row is <code>reproducing</code> while current, <code>infra-hiccup</code> when skipped and <code>idle</code> before it is reached, the verdict row is <code>scanning</code>, the approval row is <code>awaiting-approval</code> or <code>denied</code>, and the last row is <code>delivered</code> or, once done, <code>celebrating</code>.</li>
+  <li><code>canary-found</code>, <code>chilling</code> and <code>cowboy</code> have no report state or lifecycle row pointing at them. They appear in the login page mascot marquee, which renders every state in <code>MASCOT_STATES</code> (<code>app/login/page.tsx</code>), and in this design system, nowhere else in the product yet.</li>
+</ul>
+</section>
+
+<section>
+<h2>Color</h2>
+<p>Tokens come from <code>app/globals.css</code>, defined in oklch. The product forces the dark theme on <code>&lt;html&gt;</code>. The light values exist for every token but nothing renders them today.</p>
+<div class="sws">
+  <div class="swc"><i style="background:oklch(0.145 0 0)"></i><b>Background</b><code>oklch(0.145 0 0)</code><small>Light: oklch(1 0 0)</small></div>
+  <div class="swc"><i style="background:oklch(0.178 0 0)"></i><b>Card</b><code>oklch(0.178 0 0)</code><small>Light: oklch(1 0 0)</small></div>
+  <div class="swc"><i style="background:oklch(0.985 0 0)"></i><b>Foreground</b><code>oklch(0.985 0 0)</code><small>Light: oklch(0.145 0 0)</small></div>
+  <div class="swc"><i style="background:oklch(0.708 0 0)"></i><b>Muted foreground</b><code>oklch(0.708 0 0)</code><small>Light: oklch(0.556 0 0)</small></div>
+  <div class="swc"><i style="background:oklch(1 0 0 / 10%)"></i><b>Border</b><code>oklch(1 0 0 / 10%)</code><small>Light: oklch(0.922 0 0)</small></div>
+  <div class="swc"><i style="background:oklch(0.585 0.233 277.117)"></i><b>Brand</b><code>oklch(0.585 0.233 277.117)</code><small>Same in both themes</small></div>
+  <div class="swc"><i style="background:oklch(0.785 0.115 274.713)"></i><b>Brand soft</b><code>oklch(0.785 0.115 274.713)</code><small>Same in both themes</small></div>
+  <div class="swc"><i style="background:oklch(0.704 0.191 22.216)"></i><b>Destructive</b><code>oklch(0.704 0.191 22.216)</code><small>Light: oklch(0.577 0.245 27.325)</small></div>
+</div>
+<h3>Phase palette</h3>
+<p>One color per phase of the pipeline, spread apart in hue. Amber is the only warm one and belongs to the phase that needs a human. Closed has no hue on purpose. Every dot or chip sits beside its own label. Values are the dark ones; the light ones are darker (see <a href="accessibility.html">Accessibility</a> for contrast).</p>
+<div class="sws">
+  <div class="swc"><i style="background:var(--triaging)"></i><span class="chipx" style="--c:var(--triaging)">Triaging</span><code>oklch(0.7 0.15 250)</code><small>Light: oklch(0.52 0.17 250)</small></div>
+  <div class="swc"><i style="background:var(--reproducing)"></i><span class="chipx" style="--c:var(--reproducing)">Reproducing</span><code>oklch(0.75 0.13 195)</code><small>Light: oklch(0.55 0.13 195)</small></div>
+  <div class="swc"><i style="background:var(--analysis)"></i><span class="chipx" style="--c:var(--analysis)">Analysis only</span><code>oklch(0.72 0.18 330)</code><small>Light: oklch(0.53 0.2 330)</small></div>
+  <div class="swc"><i style="background:var(--approval)"></i><span class="chipx" style="--c:var(--approval)">Awaiting approval</span><code>oklch(0.8 0.15 75)</code><small>Light: oklch(0.62 0.15 75)</small></div>
+  <div class="swc"><i style="background:var(--delivered)"></i><span class="chipx" style="--c:var(--delivered)">Delivered</span><code>oklch(0.72 0.16 150)</code><small>Light: oklch(0.52 0.15 150)</small></div>
+  <div class="swc"><i style="background:var(--closed)"></i><span class="chipx" style="--c:var(--closed)">Closed</span><code>oklch(0.55 0 0)</code><small>Same in both themes</small></div>
+</div>
+<h3>Rules</h3>
+<ul class="rules">
+  <li><b>Brand indigo is for emphasis, not status.</b> Status is the phase palette.</li>
+  <li><b>Radius is 0.625rem</b> (<code>--radius</code>), with the larger steps derived from it as multiples (0.6, 0.8, 1.4, 1.8, 2.2 and 2.6 times).</li>
+  <li><b>Phase colors appear three ways</b> in <code>components/phase-dot.tsx</code>: a dot, ink for text and spinners, and a pill with a 15 percent fill of itself.</li>
+</ul>
+</section>
+
+<section>
+<h2>Type</h2>
+<p>Inter for everything and Geist Mono for ids, hashes and code, both loaded in <code>app/layout.tsx</code>. The scale is declared once in <code>app/globals.css</code>, each level with its own leading, weight and tracking, so a heading is one class.</p>
+<div class="type">
+  <div class="r"><span>display 64 / 1.05</span><div style="font:600 44px/1.05 var(--sans);letter-spacing:-.03em">Triage</div></div>
+  <div class="r"><span>title 26 / 1.3</span><div style="font:500 26px/1.3 var(--sans);letter-spacing:-.02em">Review queue</div></div>
+  <div class="r"><span>lead 16 / 1.75</span><div style="font:400 16px/1.75 var(--sans)">A report is authenticated, scope-checked and investigated against a pinned target.</div></div>
+  <div class="r"><span>heading 16 / 1.5, 600</span><div style="font:600 16px/1.5 var(--sans)">Sign the verdict</div></div>
+  <div class="r"><span>body 14 / 1.65</span><div style="font:400 14px/1.65 var(--sans)">Approve the exact drafted comment, or deny it.</div></div>
+  <div class="r"><span>meta 13 / 1.55</span><div style="font:400 13px/1.55 var(--sans);color:var(--muted)">Updated 2 min ago</div></div>
+  <div class="r"><span>label 11, uppercase</span><div style="font:500 11px/1.45 var(--sans);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">Needs you</div></div>
+  <div class="r"><span>mono</span><div style="font:400 13px var(--mono)">GHSA-q5pc-r86m-4jjh</div></div>
+</div>
+<p style="margin-top:10px">Pixel sizes are the rem values from the theme at a 16 pixel root. Display is shown smaller here than the 4rem the landing page uses.</p>
+</section>
+
+<section>
+<h2>Backdrops and images</h2>
+<p>Four WebP backdrops in <code>public/backdrop/</code>, all used on the landing page (<code>app/page.tsx</code>). The product has no Open Graph image file in the repo, so there is none to show.</p>
+<div class="bd">
+  <figure class="tile"><img src="assets/hero.webp" alt="Hero backdrop" loading="lazy"><figcaption><b>hero.webp</b><small>2560 by 1218. Full-bleed behind the landing hero, at 75 percent opacity, with a slow parallax.</small></figcaption></figure>
+  <figure class="tile"><img src="assets/panel.webp" alt="Panel backdrop" loading="lazy"><figcaption><b>panel.webp</b><small>1800 by 1009. Frames the sandbox diagram in the reproduction feature.</small></figcaption></figure>
+  <figure class="tile"><img src="assets/queue.webp" alt="Queue backdrop" loading="lazy"><figcaption><b>queue.webp</b><small>1800 by 922. Frames the review queue preview.</small></figcaption></figure>
+  <figure class="tile"><img src="assets/reports.webp" alt="Reports backdrop" loading="lazy"><figcaption><b>reports.webp</b><small>1800 by 863. Frames the reports index preview.</small></figcaption></figure>
+  <figure class="tile"><div class="pv sq dk" style="aspect-ratio:2"><img src="assets/email-scanning.png" alt="Email scanning mascot" style="max-height:70%"></div><figcaption><b>email/scanning.png</b><small>96 by 96 PNG of the scanning pose, served from <code>/email/scanning.png</code> for the outbound email markup (checked in <code>lib/email/markup.test.ts</code>).</small></figcaption></figure>
+</div>
+</section>
+
+<section>
+<h2>Mobile app icon and splash <span class="tag">Proposed</span></h2>
+<p>The mobile app is a proposal, not built. Its splash is screen M1 (<a href="screens/m1.html">screens/m1.html</a>): the <code>greeting</code> pose, floating, above the lockup at 230 pixels wide, on the dark brand surface (<code>oklch(0.145 0 0)</code>), with a shimmering status line at the bottom in place of a spinner. The proposed app icon reuses the web icon above: the tick-shaped mark on a #0A0A0A plate. No iOS layered icon, Android adaptive icon or native splash image has been drawn.</p>
+<div class="phone">
+  <a href="screens/m1.html"><img class="shot" src="assets/thumbs/m1.png" alt="Screen M1, the proposed splash" loading="lazy"><b style="display:block;margin-top:8px;font-size:14px">M1 Splash</b><small style="color:var(--muted)">Proposed. Greeting pose and lockup on the dark surface.</small></a>
+  <div><div class="pv sq dk" style="width:190px"><img src="assets/app-icon.svg" alt="Proposed app icon" style="max-width:70%"></div><b style="display:block;margin-top:8px;font-size:14px">App icon</b><small style="color:var(--muted)">Proposed. Web icon reused as is.</small></div>
+</div>
+</section>
+
+<p class="src" style="margin-top:36px">Sources: <code>public/*.svg</code>, <code>public/backdrop/</code>, <code>public/email/scanning.png</code>, <code>app/icon.svg</code>, <code>lib/mascot/catalog.ts</code>, <code>lib/reports/case-view.ts</code>, <code>app/globals.css</code>, <code>app/layout.tsx</code>, <code>components/app-sidebar.tsx</code>, <code>components/phase-dot.tsx</code>.</p>
+</main>
+<script>
+  // Pose, state and where it shows, from MASCOT_FOR_STATE and stepMascot.
+  const POSES = [
+    ['idle', 'Cancelled and expired reports, the fallback for any unknown state, and a lifecycle row not yet reached.'],
+    ['ingest', 'Triaging: a report has arrived. Also the intake row of the lifecycle.'],
+    ['scanning', 'Analysis only: the report was read and weighed. Also the verdict row while drafting.'],
+    ['reproducing', 'Reproducing: the agent is running the target. Also the investigation row while it is current.'],
+    ['canary-found', 'No state points here. Meant for the canary oracle firing; appears only in the login page mascot marquee.'],
+    ['awaiting-approval', 'Awaiting approval and Needs decision: nothing runs until a person answers.'],
+    ['delivered', 'Delivering: the verdict is on its way. Also the last lifecycle row before it completes.'],
+    ['celebrating', 'Delivered: the verdict shipped and the receipt came back. Also the completed last row.'],
+    ['denied', 'Denied: a reviewer rejected the report or the verdict. Also the approval row after a denial.'],
+    ['out-of-scope', 'Out of scope: an operator quarantine ruled the bound target out.'],
+    ['infra-hiccup', 'The investigation row when reproduction was skipped.'],
+    ['greeting', 'The header of the reviewer chat with Agent Bounty in the approval dialog.'],
+    ['chilling', 'No state points here. Appears only in the login page mascot marquee.'],
+    ['cowboy', 'No state points here. Appears only in the login page mascot marquee.'],
+  ];
+  document.getElementById('mascots').innerHTML = POSES.map(([k, t]) =>
+    `<div class="mc"><div class="pv"><img src="assets/mascot/${k}.svg" alt="Agent Bounty, ${k.replace('-', ' ')}" loading="lazy"></div><code>${k}</code><p>${t}</p></div>`).join('');
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

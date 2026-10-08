@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M20 Submit a report - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-go="m2.html" data-kind="pop" aria-label="Close"><i data-icon="x" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Submit a report</h1>
+<div class="hmeta" style="padding-bottom:4px"><span>Goes to the reviewer team. No account needed.</span></div>
+<div style="padding:0 16px">
+<label class="lbl" for="m20-title">Title</label><input class="field" id="m20-title" value="Stored XSS in search results" placeholder="Short summary">
+<label class="lbl" for="m20-body">Report</label><textarea class="field area" id="m20-body" style="height:132px" placeholder="What happened and how to reproduce it">The q parameter on the search page is stored and rendered without encoding. Steps to reproduce are below.</textarea>
+<label class="lbl" for="m20-email">Your email</label><input class="field" id="m20-email" type="email" value="you@company.com" placeholder="you@company.com">
+<div class="lbl">Target material</div></div>
+<div class="card list"><button class="item" type="button" data-sheet-open="m20-mat" style="width:100%"><i data-icon="upload" style="color:var(--brand-soft)"></i><span class="main"><span class="t">Add target material</span><span class="s" id="m20-sel">None selected</span></span><i data-icon="chev" style="width:18px;height:18px;color:var(--faint)"></i></button></div>
+<p class="note">We email a one-time code to confirm you sent this report. Replies only go to a verified address.</p>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+<div class="fbar glass"><a class="btn" href="#" data-go="m21.html">Submit report</a></div>
+</div>
+<div class="sheet fit" id="m20-mat" role="dialog" aria-modal="true" aria-label="Target material">
+<button class="sbtn x" type="button" data-sheet-close aria-label="Close"><i data-icon="x" style="width:24px;height:24px"></i></button>
+<button class="sbtn ok" type="button" data-sheet-confirm aria-label="Done"><i data-icon="check" style="width:26px;height:26px;stroke-width:2.4"></i></button>
+<div class="grab"></div>
+<div class="st">Target material</div><div class="ss">Optional. Reviewers build it in an isolated sandbox.</div>
+<div class="card list" role="radiogroup" aria-label="Target material">
+<label class="item"><span class="main"><span class="t">None</span><span class="s">Describe the issue in the report only</span></span><input type="radio" name="m20m" class="rd" checked data-haptic="selection"></label>
+<label class="item"><span class="main"><span class="t">Tarball</span><span class="s">Source archive of the application</span></span><input type="radio" name="m20m" class="rd" data-haptic="selection"></label>
+<label class="item"><span class="main"><span class="t">Dockerfile</span><span class="s">A single file that builds the target</span></span><input type="radio" name="m20m" class="rd" data-haptic="selection"></label>
+<label class="item"><span class="main"><span class="t">Prebuilt image</span><span class="s">An image pinned by digest</span></span><input type="radio" name="m20m" class="rd" data-haptic="selection"></label></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

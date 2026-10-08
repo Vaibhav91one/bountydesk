@@ -1,0 +1,72 @@
+/* Chrome for the mindmap pages. The look lives here; pages only carry their tree. */
+@import url("https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap");
+/* Tokens: dark is the default, matching the shipped product. A ?theme=light query adds .light on <html>. */
+:root {
+  --bg: oklch(0.145 0 0); --card: oklch(0.178 0 0); --ink: oklch(0.985 0 0); --muted: oklch(0.708 0 0);
+  --border: oklch(1 0 0 / 10%); --hover: oklch(1 0 0 / 7%);
+  --brand: oklch(0.585 0.233 277.117); --brand-soft: oklch(0.785 0.115 274.713); --radius: 0.625rem;
+  --triaging: oklch(0.7 0.15 250); --reproducing: oklch(0.75 0.13 195); --analysis: oklch(0.72 0.18 330);
+  --approval: oklch(0.8 0.15 75); --delivered: oklch(0.72 0.16 150); --closed: oklch(0.55 0 0);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 35%); --shadow-lg: 0 18px 40px rgb(0 0 0 / 50%);
+  --sans: Inter, system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+:root.light {
+  --bg: oklch(1 0 0); --card: oklch(1 0 0); --ink: oklch(0.145 0 0); --muted: oklch(0.556 0 0);
+  --border: oklch(0.922 0 0); --hover: oklch(0.97 0 0);
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 8%); --shadow-lg: 0 18px 40px rgb(0 0 0 / 14%);
+  color-scheme: light;
+}
+:root {
+  --reporter: var(--brand); --reviewer: var(--triaging); --agent: var(--reproducing);
+  --status: var(--delivered); --plan: var(--approval); --ref: var(--ink);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); font: 13px/1.4 var(--sans); color: var(--ink); }
+#view { position: absolute; inset: 0; cursor: grab; }
+#view.drag { cursor: grabbing; }
+#world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+svg { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.node { position: absolute; width: 220px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+.node img { display: block; width: 100%; height: 130px; object-fit: cover; object-position: center; background: var(--hover); cursor: zoom-in; }
+.node .cap { padding: 7px 10px; font-weight: 600; }
+.node .note { padding: 0 10px 9px; color: var(--muted); font-size: 12px; white-space: pre-line; }
+.node .note, .node .mono { font-feature-settings: "calt" 0; }
+.node.text { padding-top: 4px; }
+.node.sq img { height: 220px; object-fit: contain; }
+.node.phone img { height: 460px; object-fit: contain; }
+.node.branch img { object-fit: contain; height: 90px; padding: 10px; }
+.node.branch .cap { font-size: 15px; }
+.node .cap a { color: inherit; text-decoration: none; } .node .cap a:hover { text-decoration: underline; }
+.node.root { width: 260px; border-color: var(--brand); }
+.node.root .cap { font-size: 18px; }
+/* Branch colors: the cls is inherited down the branch by mindmap.js. */
+.reporter { border-color: var(--reporter); } .reporter.branch { background: color-mix(in oklch, var(--reporter) 14%, var(--card)); }
+.reviewer { border-color: var(--reviewer); } .reviewer.branch { background: color-mix(in oklch, var(--reviewer) 14%, var(--card)); }
+.agent { border-color: var(--agent); } .agent.branch { background: color-mix(in oklch, var(--agent) 14%, var(--card)); }
+.status { border-color: var(--status); } .status.branch { background: color-mix(in oklch, var(--status) 14%, var(--card)); }
+.plan { border-color: var(--plan); } .plan.branch { background: color-mix(in oklch, var(--plan) 14%, var(--card)); }
+.ref { border-color: var(--ref); } .ref.branch { background: var(--hover); }
+.node.drop { cursor: pointer; } .node.drop:hover { box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand) 25%, transparent); }
+.node .fold, .node .focusbtn { display: block; margin: 0 10px 9px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--ink); font: 600 12px var(--sans); cursor: pointer; }
+.node .focusbtn:hover, .node .fold:hover { border-color: var(--brand); color: var(--brand-soft); }
+/* .demo holds trusted inline html: a mascot, a swatch row. */
+.demo { padding: 0 10px 10px; }
+.demo img.mascot { height: 110px; width: 100%; object-fit: contain; background: none; cursor: default; padding: 4px; }
+.demo .sw { display: flex; gap: 4px; flex-wrap: wrap; }
+.demo .sw i { display: block; width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); }
+.demo .big { height: 44px; border-radius: 8px; border: 1px solid var(--border); }
+.demo .tx { margin: 0; white-space: nowrap; overflow: hidden; }
+.demo code, .mono { font-family: var(--mono); font-size: 11px; }
+#hint { position: fixed; left: 12px; bottom: 10px; color: var(--muted); font-size: 12px; background: var(--card); border: 1px solid var(--border); padding: 4px 9px; border-radius: 6px; }
+kbd { font-family: var(--mono); font-size: 11px; }
+dialog { max-width: 96vw; max-height: 94vh; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; background: var(--card); color: var(--ink); }
+dialog img { display: block; max-width: 94vw; }
+dialog::backdrop { background: rgb(0 0 0 / 70%); }
+dialog p { margin: 0; padding: 8px 12px; font-weight: 600; position: sticky; top: 0; background: var(--card); }
+/* mindmap.js injects its own light focus and crumb chrome; these win over it. */
+.node .focusbtn { height: auto !important; border-radius: 999px !important; border-color: var(--border) !important; background: var(--card) !important; color: var(--ink) !important; font-family: var(--sans) !important; }
+.node .focusbtn:hover { background: var(--brand) !important; border-color: var(--brand) !important; color: #fff !important; }
+#crumb { background: var(--card) !important; border-color: var(--border) !important; font-family: var(--sans) !important; }
+#crumb button { background: var(--brand) !important; color: #fff !important; }
+#crumb span { color: var(--muted) !important; } #crumb b { color: var(--ink) !important; }

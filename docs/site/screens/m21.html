@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M21 Contact verify - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m20.html" data-kind="pop" aria-label="Back to Submit a report"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Verify your contact</h1>
+<div class="hmeta" style="padding-bottom:20px"><span>We sent a six digit code to you@company.com</span></div>
+<div class="otp" data-otp data-haptic="success" data-otp-show="#m21-ok"><input class="ob" inputmode="numeric" maxlength="1"><input class="ob" inputmode="numeric" maxlength="1"><input class="ob" inputmode="numeric" maxlength="1"><input class="ob" inputmode="numeric" maxlength="1"><input class="ob" inputmode="numeric" maxlength="1"><input class="ob" inputmode="numeric" maxlength="1"></div>
+<p class="note" style="text-align:center">The code is only valid for this report and expires in 10 minutes.</p>
+<div style="padding:12px 16px 0"><button class="btn ghost" type="button" style="width:100%" data-toast="Code sent">Resend code</button></div>
+<div class="card" id="m21-ok" hidden style="margin:20px 16px 0;padding:8px 20px 24px;text-align:center"><img class="float" src="../assets/mascot/delivered.svg" alt="" width="140" height="140" style="display:block;margin:0 auto"><h2 style="font:700 1.5rem/1.2 var(--font-sans);letter-spacing:-.03em">Report received</h2><p class="body" style="padding:8px 0 0;color:var(--muted);font-size:.9375rem">BD-1045 is with the reviewer team. We will reply to you@company.com once a reviewer approves a response.</p></div>
+<p class="note">An unconfirmed contact is refused. Replies only go to a verified address.</p>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

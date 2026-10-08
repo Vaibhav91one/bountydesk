@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk dev and testing</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Dev and testing', n:'Local setup, tests, isolation, CI and the merge path\nSources: AGENTS.md, package.json, lib/db/testing.ts, .github/', root:true, mid:true, wrap:3, row:150, h:m('scanning'), k:[
+  {c:'Dev: your machine', n:'Copy env.example to .env.local', side:1, cls:'reviewer', k:[
+    {c:'Runtime', n:'Node 22 or newer, npm\nnext dev, with next 16.3.3 (modified, see AGENTS.md)'},
+    {c:'.env.local', n:'Gitignored. Only the DATABASE block is needed to run anything\nenv.example holds placeholders only'},
+    {c:'Local services', n:'TrueForge on http://localhost:8790\nAPP_BASE_URL, TRUEFORGE_URL, SCOPE_GUARD_URL per checkout'},
+    {c:'Webhook tunnel', n:'GitHub cannot POST to localhost\nSet GITHUB_WEBHOOK_BASE_URL to a tunnel origin'},
+    {c:'Run the worker locally', n:'npm run worker:daemon, or worker:jobs and worker:delivery once\nSame code as the deployed worker'},
+    {c:'Seed scripts', n:'seed:target, seed:reports, enqueue:onboarding\napprove:onboarding, rotate:target (scripts/)'},
+  ]},
+  {c:'Test runner', n:'Built-in node:test, no framework', side:-1, cls:'agent', k:[
+    {c:'npm test', n:'node --import tsx --experimental-test-module-mocks\n--test-concurrency=1 --test over lib, app and scripts'},
+    {c:'Where tests live', n:'*.test.ts next to the code in lib/ and app/\nscripts/**/*.test.mjs and .github/scripts/*.test.mjs'},
+    {c:'Concurrency 1', n:'Tests share a database, so files run one at a time'},
+    {c:'Module mocks', n:'Enabled with --experimental-test-module-mocks\nProduction defaults stay apart from test doubles'},
+    {c:'Security changes carry a test', n:'Scope guard, canary oracle, intake authentication\ndelivery idempotency and the approval gate'},
+    {c:'Lint', n:'npm run lint (eslint 9, eslint-config-next)'},
+  ]},
+  {c:'Disposable schema pattern', n:'Real Postgres, one schema per test file', side:1, cls:'status', flow:true, k:[
+    {c:'1 createSchema', n:'lib/db/testing.ts makes bd_<label>_<pid>_<time>\nand sets DATABASE_SCHEMA'},
+    {c:'2 Replay migrations', n:'Every drizzle/*.sql from the journal, with public rewritten\nto the new schema, so privileges stay inside it'},
+    {c:'3 Import dynamically', n:'@/lib/db is imported after createSchema\nA static import would write fixtures to production Supabase'},
+    {c:'4 Run', n:'Assertions about SKIP LOCKED, unique constraints, triggers\nA mock would agree with a wrong implementation'},
+    {c:'5 Drop', n:'drop schema cascade in after()\nThe triggers refuse DELETE, so rows cannot be tidied by hand'},
+    {c:'Reference test', n:'lib/jobs/queue.test.ts\nclaim() is global FIFO, so each test drains the queue first'},
+  ]},
+  {c:'Worktree isolation', n:'Any agent that edits files or touches the database', side:-1, cls:'plan', k:[
+    {c:'Own worktree', n:'git worktree add ../bd-<task> -b <branch>\nOr Agent isolation: "worktree". Remove after the PR merges'},
+    {c:'Own database', n:'A distinct DATABASE_URL per agent: throwaway local Postgres\nor a dedicated schema. Never the shared Supabase project'},
+    {c:'Own ports', n:'Unique local ports for the app, TrueForge and scope-guard\nvia APP_BASE_URL, TRUEFORGE_URL, SCOPE_GUARD_URL'},
+    {c:'One owner per module', n:'Freeze shared types and contracts first\nNo overlapping edits across worktrees'},
+    {c:'Read-only agents', n:'Search, review and analysis agents need no worktree'},
+    {c:'Verify worker output', n:'Run git status after any worker run\nWorker output is untrusted evidence, not verification'},
+  ]},
+  {c:'CI: the build check', n:'.github/workflows/ci.yml, ubuntu-24.04, Node 22.23.2', side:1, cls:'status', flow:true, k:[
+    {c:'Install', n:'npm ci, actions pinned to full commit SHAs'},
+    {c:'Lint', n:'npm run lint'},
+    {c:'Migrate', n:'npm run db:migrate against a Postgres 17 service container'},
+    {c:'Drift check', n:'db:drift: drizzle-kit generate must leave drizzle/ unchanged\nCatches a migration with no snapshot'},
+    {c:'Policy tests', n:'Claude review policy, head check and deploy policy tests\nFail CI if a guard is loosened'},
+    {c:'Test, then build', n:'npm run test, then npm run build\nBoth must be green to merge'},
+  ]},
+  {c:'Claude review workflow', n:'Advisory reviewer, not a merge gate (docs/claude-review.md)', side:-1, cls:'agent', k:[
+    {c:'When it runs', n:'Same-repo PR opened, reopened, ready, or pushed\nand on /review from the owner, a member or a collaborator'},
+    {c:'Policy from main', n:'pull_request_target and issue_comment run the default-branch file\nThe PR head is read as data from pr-head/, no PR code runs'},
+    {c:'Head check', n:'Looks for <!-- claude-review head=<sha> --> on the current head\nAdvisory, fails when the summary is missing or stale'},
+    {c:'Fallback', n:'If the subscription run fails, vyceai-review.mjs posts a\nsummary from deepseek-v4-flash. Shallower, treat with suspicion'},
+    {c:'Findings', n:'At most eight, High or Medium, each naming lines and a failure\nA human fixes it or answers in the thread'},
+    {c:'Fork PRs', n:'Skipped by design, not a CI failure'},
+  ]},
+  {c:'Branches and merging', n:'Branch protection is enforced, admins included', side:1, cls:'plan', flow:true, k:[
+    {c:'1 Branch off main', n:'feat/, fix/, chore/ or docs/ prefix\nOne scoped branch per coherent change'},
+    {c:'2 Commit and push', n:'Stage only files your change owns\nNever git add -A on this tree'},
+    {c:'3 Open a PR', n:'Template: Description, Type of change, Related issues\nHow tested, Checklist. No co-author trailer'},
+    {c:'4 Review and resolve', n:'Self-review the diff, fix or answer every finding\nResolve every conversation'},
+    {c:'5 Green build', n:'build check and the Vercel preview'},
+    {c:'6 Squash merge', n:'gh pr merge <n> --squash --delete-branch\nDirect pushes fail with GH006'},
+  ]},
+  {c:'Migrations and deploy', n:'AGENTS.md says by hand; deploy.yml now also runs it after CI', side:-1, cls:'ref', k:[
+    {c:'Generate', n:'npm run db:generate after a schema change\nCommit the SQL and the meta snapshot'},
+    {c:'CI is not production', n:'ci.yml migrates a throwaway Postgres, never Supabase production'},
+    {c:'deploy.yml', n:'After a green push CI on main: migrate with DIRECT_URL,\nthen zcli push bdworker. One deploy at a time, never cancelled'},
+    {c:'By hand', n:'npm run db:migrate with DIRECT_URL from a trusted machine\nThe documented path in AGENTS.md; the fallback if deploy.yml fails'},
+    {c:'Vercel app', n:'Deploys on its own through the Git integration'},
+    {c:'Live checks', n:'Record manual and live runs apart from deterministic CI\ndocs/verification-matrix.md'},
+  ]},
+]};
+const mobileTree = {c:'Dev and testing · mobile (proposed)', n:'PROPOSED, NOT BUILT. How the app would be tested and shipped\nSource: mobile architecture brief', root:true, mid:true, wrap:3, row:150, h:m('scanning'), k:[
+  {c:'Unit and component', n:'Run on the developer machine and in CI', side:1, cls:'reviewer', k:[
+    {c:'jest-expo', n:'The Jest preset for Expo'},
+    {c:'React Native Testing Library', n:'Component tests against the screens'},
+  ]},
+  {c:'Device E2E', n:'Explore first, then encode', side:-1, cls:'agent', flow:true, k:[
+    {c:'Explore with ARTEMIS', n:'Walk the flows on a real Android device\nand confirm screens and transitions'},
+    {c:'Encode as Maestro', n:'Each verified flow becomes a Maestro flow\nwith explicit waits'},
+  ]},
+  {c:'EAS builds', n:'What a reviewer installs', side:1, cls:'plan', k:[
+    {c:'Development', n:'A build for local work'},
+    {c:'Preview', n:'EAS preview builds for review'},
+    {c:'Production', n:'The store build, sent with EAS Submit'},
+  ]},
+  {c:'Server side', n:'/api/mobile routes and the push sender', side:-1, cls:'status', k:[
+    {c:'node:test', n:'The repo\'s existing test runner'},
+    {c:'Disposable schema', n:'The pattern in lib/jobs/queue.test.ts\nReplays the committed migrations into a throwaway schema'},
+  ]},
+  {c:'Release', n:'Channels and runtime version', side:1, cls:'ref', k:[
+    {c:'EAS Update', n:'JS-only over-the-air fixes\nChannel per build profile, to be decided at build time'},
+    {c:'Runtime version policy', n:'An update only reaches builds with a matching runtime version\nA native change needs a new store build'},
+  ]},
+  {c:'Deploy split', n:'The app ships on its own track', side:-1, cls:'ref', k:[
+    {c:'Not built by Vercel or Zerops', n:'They do not build the app'},
+    {c:'Server pieces', n:'The /api/mobile routes and the push sender ship with the normal web and worker deploys'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

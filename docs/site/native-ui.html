@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk native UI and push</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · use Focus on a branch to read it alone · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+// Every screen leaf names its mockup (screens/mN.html, Variant C) and the native piece it would use. Nothing here is built.
+const tree = {c:'Native UI and push', n:'Proposed React Native app, not built, iOS and Android only\nThe 28 screens in screens/ are HTML mockups, the spec\n@expo/ui first, SwiftUI and Compose only where needed', root:true, mid:true, wrap:5, row:175, h:m('cowboy'), k:[
+  {c:'Native UI rules', n:'How the proposed app would be built', side:1, cls:'plan', h:m('idle'), k:[
+    {c:'@expo/ui universal first', n:'Host, Column, Row, List, Button, Text\nSwitch, Picker from @expo/ui\nEvery tree sits inside a Host'},
+    {c:'Platform files', n:'.ios.tsx uses @expo/ui/swift-ui\n.android.tsx uses @expo/ui/jetpack-compose\nOnly when the universal set lacks a control'},
+    {c:'Long lists', n:'@expo/ui List is native grouped rows, not virtualized\nTimeline and tool calls (M8, M9) use FlatList or FlashList'},
+    {c:'Navigation', n:'Expo Router native stack\nRound back button comes from the stack\nParent map matches the mockups'},
+    {c:'Sheets', n:'Deny (M11, M13) and target material (M20)\nuse a formSheet: grabber, X, check\nMaterial bottom sheet on Android'},
+    {c:'Tokens', n:'Colors, radius and type scale from screens/c.css\nrem becomes scaled font sizes\nDark by default, light on request'},
+  ]},
+  {c:'Tabs and chrome', n:'Three tabs and a separate action', side:-1, cls:'reviewer', h:m('scanning'), k:[
+    {c:'NativeTabs', n:'Home M4, Queue M5, Reports M6\nPeers, no slide between them\nFloating glass pill on iOS, toolbar on Android'},
+    {c:'Review next', n:'A separate round button beside the tabs\nCount badge, opens M11 for the next verdict\nFirst run: Connect a repository (M14)\nLabel reads Review next verdict, 3 waiting'},
+    {c:'Header: bell and more', n:'Bell opens Inbox (M23), unread count in its label\nMore menu: Settings (M19), Connections (M14),\nIntegrations (M16)'},
+    {c:'Where tabs hide', n:'Detail screens (M7 and deeper) push on the stack\nabove the tab bar and show no tabs'},
+    {c:'Long-press context menu', n:'450 ms on a report on M4, M5, M6\nOpen case file, Copy report id, Share, Assign to me\nExpo Router Link with a context menu'},
+  ]},
+  {c:'Onboarding, triage, investigate', n:'M1 to M10 and M26', side:1, cls:'agent', h:m('reproducing'), k:[
+    {c:'M1 Splash, M2 Sign in', n:'Splash: expo-splash-screen on the brand surface\nSign in: GitHub and Google Buttons, OAuth through Clerk\nas on the desktop app'},
+    {c:'M3 Not authorized', n:'Column with a mascot image and a Button\nRequest access path, Sign out'},
+    {c:'M4 Home', n:'Needs you carousel of large cards (horizontal)\nActive and Delivered as lists with phase pills\nSection headers with a chevron, count and sort menu\nFirst run: mascot, empty state, arrow to Review next'},
+    {c:'M5 Queue, M6 Reports', n:'M5: sections per phase, rows with phase pills\nM6: search field and phase filter chips that filter\nthe list, with a no-results state and Clear search\nExpo Router header search bar is an option'},
+    {c:'M7 Case file', n:'Quick links row: Timeline, Tool calls, Sandbox, Chat\nBound target card opens M22\nFloating bar: chat icon and Open verdict\nMono text for the target commit'},
+    {c:'M8 Timeline, M9 Tool calls', n:'Virtualized rows with mono timestamps\nStatus pill per scope-guard pass or deny'},
+    {c:'M10 Reviewer chat', n:'FlatList of bubbles, TextInput composer\nSuggestion chips follow the last message\nTyping indicator while the agent works'},
+    {c:'M26 Sandbox', n:'No @expo/ui equivalent: custom View diagram\nBuild sandbox, offline reproduction sandbox\nOracle outside, human gate'},
+  ]},
+  {c:'Approve', n:'M11 to M13, the heart of the product', side:-1, cls:'plan', h:m('awaiting-approval'), k:[
+    {c:'M11 Sign the verdict', n:'List sections: outcome, severity, delivery\nDrafted comment and content hash as selectable text\nFloating bar: Approve and Deny'},
+    {c:'Deny sheet (M13)', n:'M13 is M11 with the deny sheet open\nRadio list of reasons, multiline note\nX cancels, check denies, nothing is sent until then'},
+    {c:'M12 Verdict approved', n:'Mascot, receipt card: channel, receipt,\ndelivered time, hash\nEmail shows email.delivered\nBack to queue Button'},
+    {c:'Haptics', n:'Approve: success\nDeny confirmed: warning'},
+  ]},
+  {c:'Connect and configure', n:'M14 to M18, M27, M28', side:1, cls:'status', h:m('ingest'), k:[
+    {c:'M14, M15 Connections', n:'List of installs and repositories\nUpload a target opens M28, onboarding opens M27\nDetail on the stack: target binding, policy'},
+    {c:'M16, M17 Integrations', n:'Email and GitHub cards\nM17: email TextInput, add button, access list'},
+    {c:'M18 OTP verify', n:'Six single-digit TextInputs, auto-advance, paste\nOne-time-code autofill on the first box\nThe sixth digit verifies and pops to M17'},
+    {c:'M27 Onboarding', n:'Diagram of step nodes: clone, build, snapshot\nmanifest, approve, configure\nCustom View, no @expo/ui equivalent'},
+    {c:'M28 Reviewer upload', n:'Segmented control for the source kind\nexpo-document-picker for a tarball or Dockerfile\nBuild started toast, pop to M14'},
+  ]},
+  {c:'Settings and public', n:'M19 to M25', side:-1, cls:'reporter', h:m('greeting'), k:[
+    {c:'M19 Settings', n:'Opened from the more menu\nSwitch rows for Approvals needed, Delivery receipts,\nReproduction failures\nTheme row cycles System, Light, Dark\nTarget and scope, Privacy, Terms, Sign out'},
+    {c:'M20, M21 Submit', n:'Public, no account, no tabs\nM20: form List, target material picker in a formSheet\nM21: six-digit code, Report received in place'},
+    {c:'M22 Target and scope', n:'Read-only List with mono values\nPinned image digest and scope rules'},
+    {c:'M23 Inbox', n:'Opened from the bell\nNeeds you item opens M11, receipt opens M12'},
+    {c:'M24, M25 Legal', n:'Scrolling text sections under a native header\nSame copy as /privacy and /terms'},
+  ]},
+  {c:'Push notifications', n:'Proposed: two kinds from M19 and M23\nNo push code or device table exists in the repo', side:1, cls:'status', h:m('delivered'), k:[
+    {c:'What is sent', n:'Approvals needed\nDelivery receipts\nM19 also has a reproduction failures toggle'},
+    {c:'Receipt rule', n:'Push a delivery only after the transport receipt\nnot when a provider accepts a send\nM23 footer states the same rule'},
+    {c:'Token', n:'expo-notifications push token per device\nNeeds a new table and a registration route\nStored server-side only'},
+    {c:'Sender', n:'A new worker loop would push on state changes\nAWAITING_APPROVAL and the DELIVERED receipt\nExpo Push Service to APNs and FCM'},
+    {c:'Payload', n:'Report id and kind only\nNo verdict text, no report body\nThe app fetches the rest after sign-in'},
+    {c:'Tap', n:'Approval opens M11 for that report\nReceipt opens M7\nExpo Router link from the notification data'},
+    {c:'Permission', n:'Ask when the user first turns on a toggle in M19\nAndroid 13 and up needs POST_NOTIFICATIONS'},
+    {c:'Needs', n:'A development build, no push in Expo Go\nAPNs key and FCM credentials through EAS'},
+  ]},
+  {c:'Limits', n:'What this map does not claim', side:-1, cls:'ref', h:m('out-of-scope'), k:[
+    {c:'Not built', n:'There is no mobile code in the repo\nOnly HTML mockups under docs/site/screens'},
+    {c:'No web build', n:'The phone app is iOS and Android only\nOn the web, phones use the responsive desktop app\nReviewer pages behind sign-in not checked at 390 px'},
+    {c:'The gate stays', n:'Push never approves anything\nApprove acts on the exact text and its hash\ninside the app'},
+    {c:'Same server', n:'The app would call the same Next.js routes\nNo new secrets in the client'},
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script>addEventListener('load', () => { fit(); document.fonts && document.fonts.ready.then(fit); }); // mascots and fonts change card heights after first layout</script>
+<script src="site-nav.js"></script>
+</body>
+</html>
