@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M28 Submit a target - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m14.html" data-kind="pop" aria-label="Back to Connections"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Submit a target</h1>
+<div class="hmeta" style="padding-bottom:24px">Upload target material and the settings to run it</div>
+<section class="sect"><div class="sh plain">Source</div><div style="padding:0 16px"><div class="seg" role="radiogroup" aria-label="Source"><button type="button" role="radio" aria-checked="true" data-seg-show="#m28-tar">Tarball</button><button type="button" role="radio" aria-checked="false" data-seg-show="#m28-df">Dockerfile</button><button type="button" role="radio" aria-checked="false" data-seg-show="#m28-img">Image</button></div></div>
+<div id="m28-tar" style="padding-top:12px"><div class="card list"><button class="item" type="button" style="width:100%" data-toast="File picker opens on a device"><span class="av"><i data-icon="upload" style="width:20px;height:20px"></i></span><span class="main"><span class="t">Choose a file</span><span class="s">.tar or .tgz, Dockerfile at its root</span></span></button></div></div>
+<div id="m28-df" style="padding-top:12px" hidden><div class="card list"><button class="item" type="button" style="width:100%" data-toast="File picker opens on a device"><span class="av"><i data-icon="upload" style="width:20px;height:20px"></i></span><span class="main"><span class="t">Choose a Dockerfile</span><span class="s">A single file, built in the sandbox</span></span></button></div></div>
+<div id="m28-img" hidden><label class="lbl" for="m28-i">Image</label><input class="field" id="m28-i" placeholder="docker.io/bkimminich/juice-shop" autocapitalize="none" autocomplete="off"><label class="lbl" for="m28-d">Digest</label><input class="field" id="m28-d" placeholder="sha256:" autocapitalize="none" autocomplete="off" style="font-family:var(--font-mono);font-size:.9375rem"><p class="note" style="padding-left:4px">Pinned by digest. Docker Hub and GHCR unless the operator allows others.</p></div>
+</section>
+<section class="sect"><div class="sh plain">Report</div><div style="padding:0 16px"><textarea class="field area" aria-label="Report">The q parameter on the search page is stored and rendered without encoding.</textarea></div></section>
+<section class="sect"><div class="sh plain">How the target runs</div><div class="card list"><div class="kv"><span class="k">Port</span><span class="v">3000</span></div><div class="kv"><span class="k">Readiness path</span><span class="v mono">/</span></div><div class="kv"><span class="k">Start command</span><span class="v mono">npm start</span></div></div><p class="note">The build runs in a sandbox. The drafted verdict still needs your approval before anything is delivered.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+<div class="fbar glass"><button class="btn" type="button" data-toast="Build started in the sandbox" data-then="m14.html" data-kind="pop">Build and bind target</button></div>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

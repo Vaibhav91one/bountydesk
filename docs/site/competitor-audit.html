@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk competitor audit</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click a #number to open the issue · use Focus to read one branch · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Facts come from the open BountyDesk issues (#343 to #356, #325, #327), the 2026 competitive-audit drafts, docs/pentest-workbench.md,
+// docs/decisions.md and docs/demo-runbook.md. A competitor claim is kept as those sources state it.
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const REPO = 'https://github.com/Vaibhav91one/bountydesk/issues/';
+// A gap node links to its issue; the caption carries the number.
+const gap = (n, t) => ({c: '#' + n + ' ' + t, url: REPO + n, cls: 'plan'});
+const tree = {c:'Competitive landscape', n:'Triage AI, pentest agents, SOC AI, scanners\nEach gap points at the BountyDesk issue that covers it', root:true, mid:true, h:m('cowboy'), k:[
+  {c:'AI triage platforms', n:'Closest peers: they triage submitted reports', side:-1, cls:'reporter', h:m('scanning'), k:[
+    {c:'HackerOne Hai', k:[
+      {c:'What they do', n:'Uses "large-scale context from past findings and triage summaries"'},
+      {c:'BountyDesk lacks', n:'A feedback loop: confirmed verdicts do not improve later triage, and the duplicate matcher is heuristic'},
+      gap(347, 'Semantic duplicates and a confirmed-outcome loop'),
+    ]},
+    {c:'Bugcrowd', k:[
+      {c:'What they do', n:'Named in the demo runbook only for dedupe: similar reports are surfaced, a human decides'},
+      {c:'BountyDesk lacks', n:'Nothing recorded. BountyDesk takes the same stance: top-k candidates, never an auto-close'},
+      {c:'Covered by', n:'Q10 and lib/triage/duplicates.ts'},
+    ]},
+    {c:'Konvu', k:[
+      {c:'What they do', n:'Actively reproduces XSS, SQLi, SSRF, path traversal, IDOR and auth bypass. Ships through a self-hosted runner or a staging URL. Built on static reachability'},
+      {c:'BountyDesk lacks', n:'Deterministic oracles for IDOR, broken auth and path traversal. Reproduction against a live target with no source'},
+      gap(343, 'Class-specific oracles (IDOR, auth, traversal, SSRF)'),
+      gap(325, 'Black-box and live-target reproduction'),
+    ]},
+  ]},
+  {c:'Autonomous pentest agents', n:'They find new bugs. BountyDesk reproduces submitted ones', side:-1, cls:'agent', h:m('reproducing'), k:[
+    {c:'XBOW', k:[
+      {c:'What they do', n:'Fully autonomous pentester. Reached #1 on HackerOne\'s US leaderboard, then globally. $75M Series B. Guardian model vets each action. Publishes xbow-engineering/validation-benchmarks. Chains 40+ steps'},
+      {c:'BountyDesk lacks', n:'A published reproduction and false-positive rate. Discovery and chaining are recorded non-goals'},
+      gap(346, 'Accuracy benchmark for the oracle'),
+      gap(350, 'More pinned lab targets (DVWA, WebGoat)'),
+    ]},
+    {c:'Strix', k:[
+      {c:'What they do', n:'Open-source multi-agent pentester in a Docker sandbox. Validates with real PoCs. Opens auto-fix pull requests. Retests and routes fixes to engineering. Cites published tests'},
+      {c:'BountyDesk lacks', n:'Any remediation output, and a way to retest after the owner ships a fix'},
+      gap(345, 'Remediation: patch artifact, optional fix PR'),
+      gap(344, 'Fix-verification retest'),
+    ]},
+    {c:'NodeZero (Horizon3)', k:[
+      {c:'What they do', n:'Proof of exploit, not just a score. Hack, fix, verify, repeat with one-click Quick Verify. Fix Action report. Runs daily. "Learns from hundreds of thousands of tests". Covers AD, cloud and K8s'},
+      {c:'BountyDesk lacks', n:'Retest after fix, fix guidance, an exportable report, learning from outcomes'},
+      gap(344, 'Fix-verification retest'),
+      gap(345, 'Remediation output'),
+      gap(356, 'Exportable formal verdict report'),
+      gap(347, 'Confirmed-outcome feedback loop'),
+    ]},
+    {c:'CAI, PentAGI, HexStrike', k:[
+      {c:'What they do', n:'CAI delivers a proof of exploit rather than a CVSS score. HexStrike exposes 150+ tools on one MCP server; Check Point reported it weaponized against a Citrix CVE'},
+      {c:'BountyDesk lacks', n:'An offensive tool workbench. The plan is a slim BountyDesk-owned image on the offline mesh, evidence only. Do not import external frameworks'},
+      gap(327, 'Pentest agent and workbench (deferred)'),
+    ]},
+  ]},
+  {c:'SOC and triage AI', n:'General security-operations AI, applied to triage', side:1, cls:'plan', h:m('awaiting-approval'), k:[
+    {c:'Splunk triage skill', k:[
+      {c:'What they do', n:'Proposes a CVSS vector with its verdict. Triage taxonomy includes fixed, partially-fixed and not-fixed. Thesis: product knowledge, not model size, makes triage AI useful'},
+      {c:'BountyDesk lacks', n:'A drafted, human-editable CVSS and a researcher appeal path. Severity is human-entered only, by decision'},
+      gap(349, 'Drafted CVSS and a researcher appeal path'),
+      gap(344, 'Fixed, partially fixed, not fixed'),
+    ]},
+    {c:'Simbian', k:[
+      {c:'What they do', n:'A "Context Lake" of prior knowledge feeds its triage'},
+      {c:'BountyDesk lacks', n:'The same accumulating context: no learning loop from human-confirmed outcomes'},
+      gap(347, 'Semantic duplicates and a feedback loop'),
+    ]},
+  ]},
+  {c:'Scanners and remediation', n:'Continuous scanning, reports and fix paths', side:1, cls:'status', h:m('ingest'), k:[
+    {c:'Astra', k:[
+      {c:'What they do', n:'Gives a remediation path. Compliance-grade pentest letter. Re-runs on every deploy'},
+      {c:'BountyDesk lacks', n:'Remediation, an exportable formal report, and retest on a new commit'},
+      gap(345, 'Remediation output'),
+      gap(356, 'Exportable formal verdict report'),
+      gap(344, 'Retest on a new commit or release'),
+    ]},
+    {c:'Burp Professional, Caido', k:[
+      {c:'What they do', n:'GUI-first commercial engines. Burp Pro is a per-seat licence ($499 per user per year in the design note); Community has no active scanner'},
+      {c:'BountyDesk lacks', n:'Nothing to close. Rejected for headless-in-mesh use: the workbench plan picks ZAP, nuclei and newman instead'},
+      gap(327, 'Pentest workbench, OSS tools only'),
+    ]},
+  ]},
+  {c:'What BountyDesk has that they do not', n:'The sources reviewed describe none of these as a competitor feature. That is an absence in the sources, not proof', side:1, cls:'reviewer', h:m('canary-found'), k:[
+    {c:'Deterministic canary oracle', n:'Q3: unpredictable per-run canary, seeded through a trusted fixture, judged outside the PoC environment, negative control first. REPRODUCED never comes from PoC output'},
+    {c:'Human-gated exact text', n:'Q11 and Q12: publish_verdict is approval-gated and refuses a payload whose content hash differs from the approved one. Nothing is auto-closed'},
+    {c:'No-egress sandbox', n:'Q16: the reproduction sandbox boots a prebuilt snapshot with no network. The build sandbox has narrow dependency egress and only the artifact crosses'},
+    {c:'Server-bound scope', n:'Q15: clone, deploy and egress take the target from the server-held TargetProfile, never from a string the agent produced'},
+    {c:'Immutable audit trail', n:'Verdict, approval, session event and delivery rows refuse UPDATE and DELETE at the database. A revision is a new row'},
+    {c:'Four independent intake channels', n:'GitHub issues, security advisories, email and upload. Intake and reproduction are separate (Q21)'},
+  ]},
+  {c:'Recorded non-goals', n:'Closed as not planned on purpose. Reopen only if scope changes', side:-1, cls:'ref', h:m('out-of-scope'), k:[
+    {c:'Vulnerability discovery', n:'XBOW, Strix, NodeZero, PentAGI and Astra find new bugs. BountyDesk reproduces submitted reports'},
+    {c:'Network, AD, cloud, K8s breadth', n:'NodeZero and peers cover them. BountyDesk reproduces one self-hostable web target per report'},
+    {c:'Autonomous attack chaining', n:'The December 2025 ARTEMIS study: best agent 9 findings, top human 13. Low return for a reproduction oracle'},
+    {c:'Continuous scanning', n:'NodeZero runs daily, Astra on every deploy. A per-deploy watch on a confirmed bug could reuse #344'},
+    {c:'GTM packaging', n:'Pricing, SIEM, SOAR and CTEM integrations, SOC 2, PCI, FedRAMP. Exportable output is #356'},
+  ]},
+  {c:'Internal gaps from the audit', n:'Not competitor features, found while auditing', side:1, cls:'ref', h:m('infra-hiccup'), k:[
+    gap(348, 'Upload hardening: zip-bomb ratio, MIME sniff, signed downloads'),
+    gap(355, 'Fresh live run to call publish_verdict live-proven'),
+    gap(351, 'Tarball with no Dockerfile'),
+    gap(352, 'Non-GitHub git URL (GitLab, Bitbucket)'),
+    gap(353, 'Reclaim mesh service images'),
+    gap(354, 'Per-tenant private registry'),
+    gap(326, 'RBAC, multi-tenancy, encrypted secrets'),
+  ]},
+]};
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

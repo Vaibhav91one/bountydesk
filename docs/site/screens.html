@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk mobile screens</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 22px; margin: 14px 0 40px; }
+  .gal a { text-decoration: none; color: inherit; display: block; }
+  .shot { aspect-ratio: 390 / 844; border-radius: var(--radius); overflow: hidden; background: #000;
+          border: 1px solid var(--border); box-shadow: var(--shadow-sm); transition: transform .15s ease-out, box-shadow .15s ease-out; }
+  .gal a:hover .shot { transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+  .shot img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  .gal strong { display: block; margin-top: 9px; font-size: 14px; }
+  .gal small { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  h2 { margin-top: 6px; }
+  h2 + p.lead { margin-top: -10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<span class="tag">Proposed mobile app (not built)</span>
+<h1 style="margin-top:14px">Proposed mobile app - 28 screens for design review (not built)</h1>
+<p>React Native (Expo) reviewer-on-the-go and public-submit experience. Each card opens its screen page, live and interactive (iOS or Android via <code>?platform</code>, light or dark via <code>?theme</code>). The same screens are laid out as a flow on the <a href="mvp-mindmap.html">mobile app flow map</a>.</p>
+<div id="groups"></div>
+</main>
+<script>
+  const GROUPS = [
+    ['Onboarding and auth', 'Launch to a signed-in reviewer', [
+      ['m1','Splash','Trix greeting and lockup on the dark brand surface.'],
+      ['m2','Sign in','Google and GitHub through Clerk.'],
+      ['m3','Not authorized','Request access path for an un-allowlisted account.'],
+    ]],
+    ['Triage', 'The daily loop', [
+      ['m4','Home','Needs you carousel, active list with phase pills, floating tabs and Review next.'],
+      ['m5','Queue board','Phase sections, each report row with its phase pill.'],
+      ['m6','Reports','Search and phase filters.'],
+      ['m7','Case file','Header, phase, bound target, summary.'],
+    ]],
+    ['Investigate', 'Inside the case file', [
+      ['m8','Timeline','Session events from received to verdict.'],
+      ['m9','Tool calls','Probes, scope-guard pass and deny.'],
+      ['m10','Reviewer chat','Guided conversation with the agent.'],
+      ['m26','Sandbox','Build, offline reproduction, oracle outside, human gate.'],
+    ]],
+    ['Approve', 'Sign the exact drafted comment', [
+      ['m11','Sign the verdict','Exact comment, content hash, approve or deny.'],
+      ['m12','Verdict approved','Delivery receipt.'],
+      ['m13','Deny verdict','The deny reasons in a sheet over the sign screen.'],
+    ]],
+    ['Connect and configure', 'Access and delivery channels', [
+      ['m14','Connections','GitHub App installs and repositories.'],
+      ['m15','Connection detail','Target binding and private-repo policy.'],
+      ['m16','Integrations','Email and GitHub cards.'],
+      ['m17','Email access','Reviewer allowlist.'],
+      ['m18','OTP verify','Six-digit reviewer verification.'],
+      ['m27','Onboarding','Clone, build, snapshot, manifest, approve, configure.'],
+      ['m28','Reviewer upload','Tarball, Dockerfile or prebuilt image.'],
+    ]],
+    ['Settings and public', 'Account, intake and target profile', [
+      ['m19','Settings','Opened from the more menu: account, theme, notifications, workspace.'],
+      ['m20','Submit a report','Public upload form, no account needed.'],
+      ['m21','Contact verify','Report-scoped one-time code.'],
+      ['m22','Target profile','Pinned image and scope rules.'],
+      ['m23','Inbox','Opened from the bell: approvals needed and delivery receipts.'],
+    ]],
+    ['Legal', 'Public policy pages', [
+      ['m24','Privacy','Native reading layout, from the desktop /privacy.'],
+      ['m25','Terms','Native reading layout, from the desktop /terms.'],
+    ]],
+  ];
+  const root = document.getElementById('groups');
+  const q = location.search;
+  for (const [title, lead, screens] of GROUPS) {
+    const h = document.createElement('h2'); h.textContent = title; root.appendChild(h);
+    const p = document.createElement('p'); p.className = 'lead'; p.textContent = lead; root.appendChild(p);
+    const gal = document.createElement('div'); gal.className = 'gal';
+    for (const [id, name, desc] of screens) {
+      const a = document.createElement('a'); a.href = 'screens/' + id + '.html' + q;
+      a.innerHTML = '<div class="shot"><img src="assets/thumbs/' + id + '.jpg" alt="' + name + '" loading="lazy"></div>'
+        + '<strong>' + id.toUpperCase() + ' ' + name + '</strong><small>' + desc + '</small>';
+      gal.appendChild(a);
+    }
+    root.appendChild(gal);
+  }
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

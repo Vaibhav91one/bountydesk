@@ -1,0 +1,490 @@
+/* BountyDesk mobile, Variant C kit. One stylesheet for every screens/mN.html page.
+   Page skeleton (c.js injects .tag, .island, .status, .hind and the tab dock / top bar when asked, so pages never write them):
+
+     <head> <link rel="stylesheet" href="c.css"> <script src="platform.js"></script> </head>
+     <body><main class="device"><div class="screen"> ...topbars, .scroll, .fade-t/.fade-b, .dock or .fbar... </div>
+       <div class="sheet" id="x">...</div> (optional)</main><script src="c.js"></script></body>
+
+   Platform comes from <html> classes set by platform.js: pf-ios (default), pf-android, pf-web; "light" for ?theme=light;
+   "embed" and "text-large" for ?embed&text=large. Type is in rem, so text=large scales the root font size.
+
+   ============ KIT CONTRACT: CLASSES (one example each) ============
+   Shell
+   .device           phone, 390x844                      <main class="device">
+   .screen           everything that moves/scales        <div class="screen">...</div>
+   .tag .status .island .hind   injected by c.js, never write them
+   .scroll           scroll area, padded for chrome      <div class="scroll">...</div>
+   .fade-t .fade-b   soft edges over the scroll area     <div class="fade-t"></div><div class="fade-b"></div>
+   .glass            blurred material                    <div class="topbar glass">
+   svg.i             22px stroke icon (use data-icon)    <i data-icon="bell"></i>
+   Chrome
+   .topbar           top-right glass pill; .l = left; .round = single round button
+                     <div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m4.html" data-kind="pop" aria-label="Back"><i data-icon="back"></i></a></div>
+   .ib               48px icon button                    <button class="ib" aria-label="Share"><i data-icon="share"></i></button>
+   .dock .tabs .tab .fab   tab bar + Review next; build with data-tabs, do not hand write
+   .fbar             floating contextual bar             <div class="fbar glass"><a class="ib" ...></a><a class="btn" ...>Open verdict</a></div>
+   .menu .pop        popover list (.pop = anchored)      <div class="menu pop" id="more" hidden><a href="#" role="menuitem" data-go="m19.html">Settings</a></div>
+   Type and structure
+   .h1 .hmeta        28px screen title + meta line       <h1 class="h1">Queue</h1><div class="hmeta">8 open reports</div>
+   .sect             section wrapper (28px gap)          <section class="sect">...</section>
+   .sh               section header; .plain = no chevron; children .ch .n .more
+                     <div class="sh">Active<i class="ch" data-icon="chev"></i><span class="n">5</span><button class="more" data-menu="#sort"><i data-icon="more"></i></button></div>
+   .note             13px footnote                       <p class="note">Verdicts are only sent after you approve.</p>
+   .body .mono       paragraph text, mono (ids, hashes)  <p class="body">Thanks for the report.</p>
+   .sev .sev.m .sev.l   severity text colour (high, medium, low)   <span class="sev">High</span>
+   Cards and rows
+   .card             surface, never nested               <div class="card">
+   .card.list        card holding .item rows             <div class="card list">...</div>
+   .item             row: .main(.t .s) .v .r(.a .b)      <a class="item" href="#"><span class="main"><span class="t">Title</span><span class="s">BD-1042</span></span><span class="r">..</span></a>
+   .item.ev          row with 14px leading pad (reports) <a class="item ev" ...>
+   .kv               key/value row (.k .v)               <div class="kv"><span class="k">Severity</span><span class="v sev">High</span></div>
+   .pill .c-triaging|c-reproducing|c-analysis|c-approval|c-delivered|c-closed   phase pill (tint 16 percent, dot)
+                     <span class="pill c-approval">Awaiting approval</span>   (any hue: style="--c:var(--analysis)")
+   .rail .nc         sideways carousel of large cards    <a class="nc card" data-lp="BD-1042" ...>(.top .t .m .foot)</a>
+   .links .tile      quick-link row                      <a class="tile card" href="#"><i data-icon="clock"></i><span><b>Timeline</b><span>9 events</span></span></a>
+   .av .av.s         avatar with initials                <span class="av">VT</span>
+   .hash             mono hash block                     <p class="hash">sha256:9f2c...</p>
+   .receipt          receipt card (use .kv rows)         <div class="card list receipt">...</div>
+   Buttons and inputs
+   .btn              primary 52px; .sec secondary; .bad destructive; .ghost ghost; [disabled]
+                     <a class="btn sec" href="#">Deny</a>
+   .field            text input / textarea (.area)       <input class="field" placeholder="Email">
+   .lbl              field label                         <label class="lbl" for="e">Email</label>
+   .search           search field                        <label class="search"><i data-icon="search"></i><input type="search" data-search placeholder="Search reports"></label>
+   .fchip            filter chip; .on = selected         <button class="fchip on" data-chip="all">All</button>
+   .fchips           horizontal chip row                 <div class="fchips">...</div>
+   .seg              segmented control                   <div class="seg" role="radiogroup"><button role="radio" aria-checked="true">Day</button>...</div>
+   .switch           switch                              <button class="switch" role="switch" aria-checked="false" aria-label="Push"></button>
+   .rd               radio dot in a label.item           <label class="item"><span class="main"><span class="t">Duplicate</span></span><input type="radio" name="r" class="rd"></label>
+   .otp .ob          six-box code field                  <div class="otp" data-otp>(6 x <input class="ob" inputmode="numeric" maxlength="1">)</div>
+   Overlays
+   .toast            injected by c.js                    data-toast="Saved"
+   .sheet            bottom sheet; .fit = height by content; children .grab .sbtn.x .sbtn.ok .st .ss
+                     <div class="sheet" id="deny" role="dialog" aria-label="Deny report">...</div>
+   .scrim            injected by c.js (tap to dismiss)
+   .lp-hit .lift .menu   long press overlay, built by c.js from data-lp
+   Empty and chat
+   .empty            mascot, h2, p, action; .inline = in flow
+                     <div class="empty"><img src="../assets/mascot/greeting.svg" alt=""><h2>No reports yet</h2><p>Line.</p></div>
+   .arrow .cap       hand drawn arrow + caption (first run) <svg class="arrow">..</svg><span class="cap">Connect a repository</span>
+   .chat .bub.me|.ag .who .typing .sugg .composer   reviewer chat
+                     <div class="chat" data-chat-thread><div class="bub ag">Hello</div></div>
+   Timeline and diagram
+   .tl .tle .dot .tm   vertical events                    <ol class="tl card"><li class="tle" style="--c:var(--delivered)"><span class="dot"></span><span class="main"><span class="t">Reported</span><span class="s">GitHub</span></span><span class="tm">09:41</span></li></ol>
+   .dg .node .conn     diagram nodes + connectors         <div class="dg"><div class="node hot"><span class="ni"><i data-icon="cube"></i></span><span class="main"><span class="k">Build</span><span class="t">Build sandbox</span></span></div><div class="conn"></div>...</div>
+
+   ============ KIT CONTRACT: DATA ATTRIBUTES (handled by c.js) ============
+   data-go="mN.html"       navigate on click; with data-kind=push|pop|tab|modal (default push)   <a href="#" data-go="m7.html">
+   data-back               marks a back button (embed sends back:true); needs data-go + data-kind="pop"
+   data-tabs="home|queue|reports" on <nav class="dock">  builds the glass tab pill + Review next; data-review="3" sets the badge
+   data-topbar="tab"       on <div class="topbar glass">  builds bell (m23) + more menu (m19, m14, m16)
+   data-icon="name"        replaced by an inline svg (bell more back chev check x plus share home queue reports search clock terminal cube chat open copy userplus github mail cog lock arrowup info file upload shield target refresh)
+   data-toast="text"       show a toast on click; data-then="mN.html" (or data-go) navigates ~1.1 s later; data-kind sets the transition
+   data-haptic="success|warning|selection"   tag shown in embed only, never on web; also fired by switches and radios
+   data-sheet-open="id"    open the sheet with that id;  data-sheet-close  close it;  data-sheet-confirm  close + run data-toast/data-then
+   <div class="sheet" data-open>   sheet is open on load (no animation)
+   data-lp="BD-1042"       450 ms long press opens the overlay (Open case file via the element's data-go, Copy report id, Share, Assign to me)
+   data-menu="#id"         button toggles the popover with that id
+   data-switch             .switch toggles (aria-checked); a .item containing a .switch toggles it too
+   data-seg-show="#id"     on a .seg button: show that panel, hide the others of the same .seg
+   data-phase="approval|reproducing|analysis|triaging|delivered|closed"  on a row; data-chip="all|<phase>" on .fchip; data-search on the input
+   data-filter-list        container of rows that chips/search filter;  data-noresult (the .empty.inline block);  data-clear-search (button)
+   data-count="report|reports"  element whose text becomes "N reports"
+   data-full / data-empty  shown only without / with ?data=empty
+   data-otp (+ data-otp-done="Verified" data-then="m17.html" data-kind="pop" | data-otp-show="#received")  six boxes, auto-advance, paste
+   data-chat-thread, data-chat-input, data-chat-send   composer appends a bubble and an agent reply
+   data-add-reviewer (button) + data-add-input + data-reviewer-list   appends a pending reviewer row
+   data-theme-cycle        row cycling System, Light, Dark; child [data-theme-val] shows the value
+   data-auto-go="mN.html"  standalone only: navigate after data-auto-ms (default 1600); ignored in embed
+   ============================================================ */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
+
+/* ---------- tokens ---------- */
+:root{
+  --font-sans:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--font-mono:"Geist Mono",ui-monospace,monospace;
+  --page:oklch(0.11 0 0);--bg:oklch(0.145 0 0);--card:oklch(0.178 0 0);--raised:oklch(0.269 0 0);
+  --fg:oklch(0.985 0 0);--muted:oklch(0.72 0 0);--faint:oklch(0.56 0 0);
+  --line:oklch(1 0 0 / 8%);--glass:oklch(0.27 0 0 / .6);--glass-edge:oklch(1 0 0 / 10%);--fill:oklch(1 0 0 / 10%);--sel:oklch(1 0 0 / 16%);
+  --sheet:oklch(0.2 0 0 / .94);--sheet-card:oklch(0.26 0 0);--hover:oklch(1 0 0 / 5%);
+  --brand:oklch(0.585 0.233 277.117);--brand-soft:oklch(0.785 0.115 274.713);--red:oklch(0.704 0.191 22.216);
+  --triaging:oklch(0.7 0.15 250);--reproducing:oklch(0.75 0.13 195);--analysis:oklch(0.72 0.18 330);
+  --approval:oklch(0.8 0.15 75);--delivered:oklch(0.72 0.16 150);--closed:oklch(0.55 0 0);
+  --tonal:oklch(0.3 0.03 277);--tonal-on:oklch(0.42 0.09 277);
+  --out:cubic-bezier(.23,1,.32,1);--top:54px;--dockb:30px;color-scheme:dark;
+}
+:root.light{
+  --page:oklch(0.94 0 0);--bg:oklch(0.965 0 0);--card:oklch(1 0 0);--raised:oklch(0.94 0 0);
+  --fg:oklch(0.145 0 0);--muted:oklch(0.5 0 0);--faint:oklch(0.62 0 0);
+  --line:oklch(0 0 0 / 8%);--glass:oklch(1 0 0 / .68);--glass-edge:oklch(0 0 0 / 8%);--fill:oklch(0 0 0 / 6%);--sel:oklch(1 0 0);
+  --sheet:oklch(0.985 0 0 / .96);--sheet-card:oklch(1 0 0);--hover:oklch(0 0 0 / 4%);
+  --brand-soft:oklch(0.457 0.24 277.023);--red:oklch(0.577 0.245 27.325);
+  --triaging:oklch(0.52 0.17 250);--reproducing:oklch(0.55 0.13 195);--analysis:oklch(0.53 0.2 330);
+  --approval:oklch(0.62 0.15 75);--delivered:oklch(0.52 0.15 150);--closed:oklch(0.55 0 0);
+  --tonal:oklch(0.92 0.03 277);--tonal-on:oklch(0.84 0.07 277);color-scheme:light;
+}
+:root.pf-android{--top:40px;--dockb:24px}
+:root.pf-web{--top:80px;--dockb:16px;--cbar:#202124;--cpill:#303134}
+:root.pf-web.light{--cbar:#fff;--cpill:#f1f3f4}
+
+*{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
+html{font-size:100%}
+html.text-large{font-size:125%}
+[hidden]{display:none!important}
+body{min-height:100vh;display:grid;place-items:center;padding:2rem 1rem;background:var(--page);color:var(--fg);
+  font:400 1.0625rem/1.35 var(--font-sans);letter-spacing:-.011em;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;letter-spacing:inherit;background:none;border:0;padding:0;cursor:pointer}
+input,textarea{font:inherit;color:inherit;letter-spacing:inherit}
+:focus-visible{outline:2px solid var(--brand-soft);outline-offset:2px}
+.tag{position:fixed;top:.75rem;left:50%;transform:translateX(-50%);font-size:.75rem;color:var(--muted);background:var(--card);padding:.25rem .625rem;border-radius:99px;z-index:99;letter-spacing:0}
+
+/* ---------- device shell ---------- */
+.device{position:relative;width:390px;height:844px;border-radius:55px;overflow:hidden;background:var(--bg);isolation:isolate;
+  box-shadow:0 0 0 10px #1a1a1c,0 0 0 11px #3a3a3c,0 30px 60px rgba(0,0,0,.45)}
+:root.light .device{box-shadow:0 0 0 10px #d1d1d6,0 0 0 11px #aeaeb2,0 30px 60px rgba(0,0,0,.18)}
+.pf-android .device{border-radius:38px;box-shadow:0 0 0 9px #1c1b1f,0 0 0 10px #3a3940,0 30px 60px rgba(0,0,0,.45)}
+:root.light.pf-android .device{box-shadow:0 0 0 9px #cac4d0,0 0 0 10px #938f99,0 30px 60px rgba(0,0,0,.18)}
+.pf-web .device{border-radius:22px;box-shadow:0 0 0 1px #3a3d45,0 24px 50px rgba(0,0,0,.45)}
+:root.light.pf-web .device{box-shadow:0 0 0 1px #c4c8d0,0 24px 50px rgba(0,0,0,.16)}
+.status{position:absolute;top:0;left:0;right:0;height:54px;padding:18px 32px 0 40px;display:flex;justify-content:space-between;font:600 16px/1 var(--font-sans);letter-spacing:-.02em;z-index:60;pointer-events:none}
+.status .r{display:flex;gap:6px;align-items:center}
+.island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:120px;height:35px;border-radius:20px;background:#0c0c0e;box-shadow:0 0 0 1.5px rgba(255,255,255,.16);z-index:61}
+:root.light .island{background:#000;box-shadow:none}
+.hind{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:136px;height:5px;border-radius:3px;background:var(--fg);opacity:.85;z-index:62;pointer-events:none}
+svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* android: punch hole, Material status bar */
+.pf-android .island{top:13px;width:14px;height:14px;border-radius:50%;background:#050506;box-shadow:0 0 0 2px rgba(255,255,255,.08)}
+.pf-android .status{height:40px;padding:12px 22px 0 26px;font-size:14px;font-weight:500;letter-spacing:.25px}
+.pf-android .status .r{gap:5px}
+.pf-android .hind{width:108px;height:4px;opacity:.45}
+/* web: browser strip (status line + address bar) over the app, no island or home indicator */
+.pf-web .island,.pf-web .hind{display:none}
+.pf-web .status{height:30px;padding:8px 18px 0 22px;font-size:12px;font-weight:500}
+.pf-web .status .r{gap:4px}.pf-web .status svg{height:10px;width:auto}
+.pf-web .device::after{content:"";position:absolute;top:0;left:0;right:0;height:80px;z-index:11;background:var(--cbar);border-bottom:1px solid var(--line);pointer-events:none}
+.pf-web .device::before{content:"app.bountydesk.vaibhav.quest";position:absolute;top:34px;left:12px;right:12px;height:38px;z-index:13;padding-left:38px;border-radius:19px;
+  background:var(--cpill) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%238a8f98'%3E%3Cpath d='M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5zm-3 8V6a3 3 0 0 1 6 0v3z'/%3E%3C/svg%3E") 14px center/14px no-repeat;
+  font:400 14px/38px var(--font-sans);color:var(--fg);overflow:hidden;white-space:nowrap;pointer-events:none}
+
+/* the part of the phone that moves: scales back behind sheets, blurs behind the long press menu */
+.screen{position:absolute;inset:0;overflow:hidden;background:var(--bg);border-radius:inherit;transform-origin:top center;view-transition-name:screen}
+.device:not(.sheeting) .screen{transition:filter .22s var(--out),transform .22s var(--out)}
+.device.sheeting .screen{transform:translateY(calc(34px*var(--p,0))) scale(calc(1 - .06*var(--p,0)));filter:brightness(calc(1 - .28*var(--p,0)));
+  border-radius:calc(40px*var(--p,0));box-shadow:0 0 0 calc(1px*var(--p,0)) var(--glass-edge)}
+.device.cssm.sheeting .screen{transition:transform .32s var(--out),filter .32s var(--out),border-radius .32s var(--out)}
+.pf-web .device.sheeting .screen{transform:none;border-radius:0;box-shadow:none}
+.device.lp .screen{filter:blur(16px) brightness(.45);transform:scale(1.03);pointer-events:none}
+
+/* ---------- scroll area, edges, glass ---------- */
+.scroll{position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;padding:calc(var(--top) + 62px) 0 150px}
+.scroll::-webkit-scrollbar{display:none}
+.pf-web .scroll{scrollbar-width:thin;scrollbar-color:var(--faint) transparent}
+.fade-t,.fade-b{position:absolute;left:0;right:0;z-index:15;pointer-events:none}
+.fade-t{top:0;height:calc(var(--top) + 70px);background:linear-gradient(var(--bg) 66%,transparent)}
+.fade-b{bottom:0;height:150px;background:linear-gradient(transparent,var(--bg) 78%)}
+.pf-web .fade-t{background:none}
+.glass{background:var(--glass);-webkit-backdrop-filter:blur(24px) saturate(180%);backdrop-filter:blur(24px) saturate(180%);border:1px solid var(--glass-edge)}
+.pf-android .glass{background:var(--tonal);-webkit-backdrop-filter:none;backdrop-filter:none;border-color:transparent}
+@media (prefers-reduced-transparency:reduce){.glass,.menu,.sheet{-webkit-backdrop-filter:none;backdrop-filter:none;background:var(--card)}}
+
+/* ---------- top bars and icon buttons ---------- */
+.topbar{position:absolute;top:calc(var(--top) + 4px);right:16px;z-index:30;display:flex;height:48px;border-radius:24px}
+.topbar.l{left:16px;right:auto}
+.topbar.round{width:48px}
+.ib{width:48px;height:48px;display:grid;place-items:center;border-radius:24px;flex:none}
+
+/* ---------- press feedback: scale .97 in 120 ms ---------- */
+:is(a[href],button,[data-go],label.item,.press):not(.device,.scroll,.screen){transition:transform 120ms ease-out,opacity 120ms,filter 120ms,background-color 120ms;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+:is(a[href],button,[data-go],label.item,.press):not(.device,.scroll,.screen,.switch,.ob):active{transform:scale(.97)}
+.ib:active{transform:scale(.92)!important;opacity:.7}
+[data-lp]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+@media (hover:hover){
+  .pf-web :is(.btn,.fab,.tab,.tile,.nc,.fchip,.ib):hover{filter:brightness(1.12)}
+  .pf-web :is(.item,.menu a):is(a,label,[data-go],[data-switch-row]):hover{background:var(--hover)}
+  .pf-web :is(a[href],button,[data-go]){cursor:pointer}
+}
+
+/* ---------- tab dock: glass pill with three tabs + Review next ---------- */
+.dock{position:absolute;left:16px;right:16px;bottom:var(--dockb);z-index:30;display:flex;gap:12px}
+.tabs{flex:1;height:64px;border-radius:32px;display:flex;padding:6px;gap:2px}
+.tab{flex:1;border-radius:26px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:.75rem;font-weight:500;letter-spacing:0;color:var(--muted);transition:background 160ms}
+.tab.on{background:var(--fill);color:var(--fg)}
+.tab svg{width:24px;height:24px}
+.fab{position:relative;flex:none;width:64px;height:64px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff;border:1px solid oklch(1 0 0 / 18%);box-shadow:0 8px 24px oklch(0.585 0.233 277 / .35)}
+.fab svg{width:28px;height:28px;stroke-width:2.2}
+.fab b{position:absolute;top:-4px;right:-4px;min-width:22px;height:22px;padding:0 6px;border-radius:11px;background:var(--fg);color:var(--bg);font:700 .8125rem/18px var(--font-sans);text-align:center;letter-spacing:0;border:2px solid var(--bg)}
+/* material 3 floating toolbar and FAB */
+.pf-android .tabs{border-radius:28px}
+.pf-android .tab{border-radius:22px}
+.pf-android .tab.on{background:var(--tonal-on)}
+.pf-android .fab{border-radius:16px;border-color:transparent;box-shadow:0 6px 14px rgba(0,0,0,.35)}
+.pf-android .fab b{border-radius:11px}
+
+/* ---------- sections ---------- */
+.sect{margin-bottom:28px}
+.sh{display:flex;align-items:center;gap:6px;padding:0 20px 12px;font:600 1.25rem/1.2 var(--font-sans);letter-spacing:-.02em}
+.sh>a{display:flex;align-items:center;gap:6px;min-height:48px;margin-block:-12px}
+.sh .ch{width:18px;height:18px;color:var(--muted);stroke-width:2.4}
+.sh .n{font:500 .9375rem/1 var(--font-sans);color:var(--muted);letter-spacing:0;margin-left:2px}
+.sh .more{margin-left:auto;width:44px;height:44px;margin-block:-14px;margin-right:-10px;display:grid;place-items:center;color:var(--faint);border-radius:22px}
+.sh.plain{font-size:1.25rem}
+.h1{padding:8px 20px 0;font:700 1.75rem/1.15 var(--font-sans);letter-spacing:-.03em}
+.hmeta{display:flex;align-items:center;gap:10px;padding:14px 20px 28px;font-size:.9375rem;color:var(--muted);letter-spacing:0;flex-wrap:wrap}
+.note{padding:10px 20px 0;font-size:.8125rem;line-height:1.4;color:var(--muted);letter-spacing:0}
+.body{padding:16px 18px;font-size:1.0625rem;line-height:1.5}
+.body code,.mono{font:400 .875rem/1.5 var(--font-mono);letter-spacing:0;color:var(--brand-soft)}
+.sev{color:var(--red);font-weight:600}.sev.m{color:var(--approval)}.sev.l{color:var(--muted)}
+
+/* ---------- cards and rows ---------- */
+.card{background:var(--card);border-radius:24px;overflow:hidden}
+:root.light .card{box-shadow:0 0 0 1px oklch(0 0 0 / 6%)}
+/* desktop cards are oklch(0.178) with a 10% hairline (app/globals.css --card, --border); same here so the card edge does not depend on a lighter fill */
+:root:not(.light) .card{box-shadow:0 0 0 1px oklch(1 0 0 / 10%)}
+.list{margin:0 16px;padding:6px 0}
+.item{display:flex;align-items:center;gap:12px;min-height:3.5rem;padding:10px 18px;position:relative;text-align:left}
+.item+.item::before,.kv+.kv::before,.item+.kv::before,.kv+.item::before{content:"";position:absolute;top:0;left:18px;right:18px;height:1px;background:var(--line)}
+.item .main{flex:1;min-width:0}
+.item .t{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden;overflow-wrap:anywhere;font-size:1.0625rem;font-weight:500;line-height:1.25}
+.item .s{display:block;font-size:.8125rem;color:var(--muted);letter-spacing:0;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.item .v{font-size:1.0625rem;color:var(--muted);white-space:nowrap}
+.item .r{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px;text-align:right}
+.item .r .a{display:block;font-size:.8125rem;font-weight:600;letter-spacing:0}
+.item .r .b{font-size:.8125rem;color:var(--muted);letter-spacing:0}
+.item.ev{padding-left:14px}
+.item.vf::before{display:none}
+.kv{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:3.25rem;padding:10px 18px;position:relative}
+.kv .k{font-size:1.0625rem;font-weight:500}.kv .v{font-size:1.0625rem;color:var(--muted);text-align:right;overflow-wrap:anywhere}
+.kv .v.mono{font-size:.875rem}
+.pill{display:inline-flex;align-items:center;gap:6px;flex:none;white-space:nowrap;font:600 .8125rem/1 var(--font-sans);letter-spacing:0;padding:6px 11px;border-radius:99px;color:var(--c);background:color-mix(in oklab,var(--c) 16%,transparent)}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.c-triaging{--c:var(--triaging)}.c-reproducing{--c:var(--reproducing)}.c-analysis{--c:var(--analysis)}.c-approval{--c:var(--approval)}.c-delivered{--c:var(--delivered)}.c-closed{--c:var(--closed)}
+.rail{display:flex;gap:12px;overflow-x:auto;scroll-snap-type:x mandatory;padding:0 16px;scroll-padding-left:16px;scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.nc{flex:none;display:flex;flex-direction:column;gap:10px;width:286px;min-height:176px;scroll-snap-align:start;padding:16px 18px}
+.nc .top>span:last-child{white-space:nowrap}
+.nc .top{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:4px 8px;font-size:.8125rem;color:var(--muted);letter-spacing:0}
+.nc .t{font-size:1.1875rem;font-weight:600;line-height:1.25;letter-spacing:-.02em;display:-webkit-box;-webkit-line-clamp:2;line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.nc .m{font-size:.8125rem;color:var(--muted);letter-spacing:0;margin-top:-4px}
+.nc .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:center;font-size:.9375rem;padding-top:12px;border-top:1px solid var(--line);letter-spacing:0}
+.nc .foot span:last-child{color:var(--muted)}
+.links{display:flex;gap:12px;overflow-x:auto;padding:0 16px;scrollbar-width:none}
+.links::-webkit-scrollbar{display:none}
+.tile{flex:none;width:112px;min-height:104px;padding:14px 16px;display:flex;flex-direction:column;justify-content:space-between;gap:10px}
+.tile svg{color:var(--brand-soft)}
+.tile b{display:block;font-size:1.0625rem;font-weight:600}
+.tile span span{display:block;font-size:.8125rem;color:var(--muted);letter-spacing:0;margin-top:2px}
+.av{flex:none;width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font:600 .875rem/1 var(--font-sans);letter-spacing:0;color:var(--brand-soft);background:color-mix(in oklab,var(--brand) 22%,transparent)}
+.av.s{width:32px;height:32px;font-size:.75rem}
+.hash{padding:16px 18px;font:400 .8125rem/1.55 var(--font-mono);letter-spacing:0;word-break:break-all;color:var(--fg)}
+.receipt .kv+.kv::before{border-top:1.5px dashed var(--line);height:0;background:none}
+
+/* ---------- buttons, inputs ---------- */
+.btn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:0 22px;border-radius:26px;font:600 1.0625rem/1 var(--font-sans);background:var(--brand);color:#fff;cursor:pointer;text-align:center}
+.btn:active{filter:brightness(.9)}
+.btn.sec{background:var(--fill);color:var(--fg)}
+.btn.bad{background:color-mix(in oklab,var(--red) 18%,transparent);color:var(--red)}
+.btn.ghost{background:none;color:var(--brand-soft)}
+.btn[disabled]{opacity:.4;pointer-events:none}
+.fbar{position:absolute;left:16px;right:16px;bottom:var(--dockb);z-index:30;display:flex;gap:6px;padding:6px;border-radius:36px}
+.fbar .btn{flex:1}
+.fbar .ib{width:52px;height:52px;border-radius:50%;background:var(--fill)}
+.pf-android .fbar{border-radius:30px}
+.lbl{display:block;padding:20px 4px 10px;font:600 .9375rem/1 var(--font-sans);color:var(--muted);letter-spacing:0}
+.field{display:block;width:100%;min-height:52px;border:0;border-radius:20px;background:var(--raised);color:var(--fg);padding:14px 16px;font:400 1.0625rem/1.4 var(--font-sans);outline:0}
+.field.area,textarea.field{height:92px;min-height:92px;resize:none}
+.field::placeholder{color:var(--faint)}
+.field:focus-visible{outline:0;box-shadow:0 0 0 2px var(--brand)}
+.search{display:flex;align-items:center;gap:10px;margin:0 16px;min-height:48px;padding:0 16px;border-radius:24px;background:var(--card);color:var(--muted)}
+:root.light .search{box-shadow:0 0 0 1px oklch(0 0 0 / 6%)}
+.search .field{background:none;padding:0;min-height:48px;border-radius:0;flex:1;min-width:0;font-size:1.0625rem}
+.search:focus-within{box-shadow:0 0 0 2px var(--brand)}
+.search .field:focus-visible{box-shadow:none}
+.fchips{display:flex;gap:8px;overflow-x:auto;padding:0 16px;scrollbar-width:none}
+.fchips::-webkit-scrollbar{display:none}
+.fchip{flex:none;min-height:44px;padding:0 18px;border-radius:22px;background:var(--card);color:var(--fg);font:500 .9375rem/1 var(--font-sans);letter-spacing:0}
+:root.light .fchip{box-shadow:0 0 0 1px oklch(0 0 0 / 8%)}
+.fchip.on{background:var(--fg);color:var(--bg);box-shadow:none}
+.pf-android .fchip,.pf-android .seg button{min-height:48px}
+.pf-android .sh .more{width:48px;height:48px;margin-block:-16px}
+.seg{display:flex;gap:2px;padding:2px;border-radius:24px;background:var(--raised)}
+.seg button{flex:1;min-height:44px;border-radius:22px;font:500 .9375rem/1 var(--font-sans);letter-spacing:0;color:var(--muted);transition:background 160ms,color 160ms}
+.seg button[aria-checked=true]{background:var(--sel);color:var(--fg);font-weight:600}
+.switch{position:relative;flex:none;width:51px;height:31px;border-radius:16px;background:oklch(0.5 0 0 / .45);transition:background 200ms}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 4px rgba(0,0,0,.3);transition:transform 220ms var(--out)}
+.switch[aria-checked=true]{background:var(--brand)}
+.switch[aria-checked=true]::after{transform:translateX(20px)}
+.rd{appearance:none;-webkit-appearance:none;flex:none;width:26px;height:26px;margin:0;border-radius:50%;border:2px solid var(--faint);display:grid;place-items:center;background:none}
+.rd::after{content:"";width:14px;height:14px;border-radius:50%;background:var(--brand);transform:scale(0);transition:transform 160ms var(--out)}
+.rd:checked{border-color:var(--brand)}.rd:checked::after{transform:scale(1)}
+.otp{display:flex;justify-content:center;gap:8px;padding:8px 16px}
+.ob{width:48px;height:58px;border-radius:16px;border:0;background:var(--raised);text-align:center;font:600 1.5rem/1 var(--font-sans);color:var(--fg);outline:0;caret-color:var(--brand);padding:0}
+.ob:focus{box-shadow:0 0 0 2px var(--brand)}
+.ob:not(:placeholder-shown){box-shadow:0 0 0 1.5px var(--faint)}
+
+/* ---------- toast ---------- */
+.toast{position:absolute;left:50%;bottom:calc(var(--dockb) + 82px);z-index:80;width:max-content;max-width:calc(100% - 48px);padding:14px 20px;border-radius:24px;text-align:center;font:500 .9375rem/1.25 var(--font-sans);letter-spacing:0;
+  opacity:0;transform:translate(-50%,16px) scale(.96);pointer-events:none;transition:opacity .2s,transform .35s var(--out)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.pf-android .toast{border-radius:8px;background:var(--tonal-on)}
+
+/* ---------- bottom sheet ---------- */
+.scrim{position:absolute;inset:0;z-index:49}
+.sheet{position:absolute;z-index:50;left:0;right:0;top:calc(var(--top) + 58px);bottom:0;border-radius:36px 36px 0 0;background:var(--sheet);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border:1px solid var(--glass-edge);border-bottom:0;padding:0 16px;
+  transform:translateY(calc(100% + 64px))}
+.sheet.fit{top:auto;max-height:calc(100% - var(--top) - 58px);padding-bottom:40px}
+.device.open .sheet{transform:none}
+.device.cssm .sheet{transition:transform .32s var(--out)}
+.sheet.js{transition:none!important}
+.pf-android .sheet{border-radius:28px 28px 0 0}
+.pf-web .sheet{border-radius:16px 16px 0 0}
+.grab{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:40px;height:5px;border-radius:3px;background:oklch(0.5 0 0 / .45)}
+.pf-android .grab{top:12px;width:32px;height:4px;border-radius:2px}
+.sbtn{position:absolute;top:-46px;z-index:55;width:52px;height:52px;border-radius:50%;display:grid;place-items:center;cursor:pointer;background:oklch(0.3 0 0 / .9);color:#fff;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+:root.light .sbtn{background:oklch(1 0 0 / .92);color:var(--fg);box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.sbtn.x{left:16px}.sbtn.ok{right:16px}
+.sheet .st{padding-top:34px;text-align:center;font:600 1.0625rem/1.2 var(--font-sans);color:var(--muted)}
+.sheet .ss{text-align:center;font-size:.8125rem;color:var(--faint);margin:4px 0 18px;letter-spacing:0}
+.sheet .item{min-height:4rem;padding:10px 18px}
+.sheet .item .s{white-space:normal}
+.sheet .list{margin:0}
+.sheet .card{background:var(--sheet-card)}
+.sheet .field{background:var(--sheet-card)}
+:root.light .sheet .card{box-shadow:none}
+.sheet .sbtn.ok{background:var(--brand);color:#fff}
+
+/* ---------- popover menu and long press overlay ---------- */
+.menu{position:absolute;z-index:46;width:268px;border-radius:22px;overflow:hidden;background:color-mix(in oklab,var(--sheet-card) 86%,transparent);-webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);border:1px solid var(--glass-edge);transform-origin:top left;animation:pop .22s var(--out)}
+.menu.pop{z-index:70;width:236px;transform-origin:top right}
+.menu a,.menu button{display:flex;width:100%;align-items:center;justify-content:space-between;min-height:54px;padding:0 18px;font-size:1.0625rem;position:relative;text-align:left;transition:background 100ms}
+.menu a+a::before,.menu button+button::before,.menu a+button::before,.menu button+a::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:var(--line)}
+.menu a:active,.menu button:active{background:var(--fill);transform:none}
+.menu svg{color:var(--muted)}
+.pf-android .menu{border-radius:12px;background:var(--tonal)}
+.pop-hit,.lp-hit{position:absolute;inset:0;z-index:40}
+.pop-hit{z-index:65}
+.lift{position:absolute;z-index:45;box-shadow:0 24px 60px rgba(0,0,0,.6);transform:scale(1.04);animation:lift .26s var(--out);overflow:hidden}
+.lift>.item{pointer-events:none}
+@keyframes pop{from{transform:scale(.92);opacity:0}}
+@keyframes lift{from{transform:scale(1)}}
+
+/* ---------- empty state ---------- */
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;padding:200px 40px 0;text-align:center}
+.empty.inline{position:static;padding:48px 40px 0}
+.empty img{width:200px;height:200px}.empty.inline img{width:150px;height:150px}
+.empty :is(h1,h2){font:700 1.5rem/1.2 var(--font-sans);letter-spacing:-.03em;margin-top:18px}
+.empty p{font-size:.9375rem;line-height:1.45;color:var(--muted);margin-top:10px;letter-spacing:0;max-width:300px}
+.empty .btn{margin-top:22px;min-width:160px}
+.arrow{position:absolute;left:0;top:0;z-index:25;pointer-events:none}
+.cap{position:absolute;z-index:25;left:0;right:0;top:566px;text-align:center;font-size:.9375rem;font-weight:500;color:var(--brand-soft);letter-spacing:0}
+
+/* ---------- chat ---------- */
+.chat{display:flex;flex-direction:column;gap:8px;padding:0 16px}
+.bub{max-width:82%;padding:11px 15px;border-radius:20px;font-size:1.0625rem;line-height:1.35;overflow-wrap:anywhere}
+.bub.me{align-self:flex-end;background:var(--brand);color:#fff;border-bottom-right-radius:6px}
+.bub.ag{align-self:flex-start;background:var(--card);border-bottom-left-radius:6px}
+.who{align-self:flex-start;font-size:.8125rem;color:var(--muted);letter-spacing:0;padding:6px 4px 0}
+.bub.typing{display:flex;gap:5px;padding:15px 16px}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--faint);animation:blink 1.1s infinite}
+.typing i:nth-child(2){animation-delay:.18s}.typing i:nth-child(3){animation-delay:.36s}
+@keyframes blink{50%{opacity:.25}}
+.sugg{display:flex;flex-wrap:wrap;gap:8px;padding:8px 0 0}
+.composer{position:absolute;left:16px;right:16px;bottom:var(--dockb);z-index:30;display:flex;align-items:center;gap:6px;padding:6px 6px 6px 18px;border-radius:32px}
+.composer .field{background:none;padding:0;min-height:48px;flex:1;min-width:0;border-radius:0}
+.composer .field:focus-visible{box-shadow:none}
+.composer .send{flex:none;width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:var(--brand);color:#fff}
+.bub.new{animation:rise .3s var(--out)}
+
+/* ---------- timeline ---------- */
+.tl{list-style:none;margin:0 16px;padding:8px 0}
+.tle{display:flex;gap:14px;align-items:flex-start;padding:12px 18px;position:relative}
+.tle::before{content:"";position:absolute;left:27px;top:0;bottom:0;width:2px;background:var(--line)}
+.tle:first-child::before{top:26px}.tle:last-child::before{bottom:calc(100% - 26px)}
+.tle .dot{position:relative;z-index:1;flex:none;width:10px;height:10px;margin-top:1px;border-radius:50%;border:5px solid var(--card);background:var(--c,var(--faint));box-sizing:content-box}
+.tle .main{flex:1;min-width:0}
+.tle .t{display:block;font-size:1.0625rem;font-weight:500;line-height:1.25}
+.tle .s{display:block;font-size:.8125rem;color:var(--muted);letter-spacing:0;margin-top:3px}
+.tle .tm{flex:none;font:400 .8125rem/1.5 var(--font-mono);letter-spacing:0;color:var(--muted)}
+
+/* ---------- diagram nodes and connectors ---------- */
+.dg{display:flex;flex-direction:column;align-items:stretch;padding:0 16px}
+.node{display:flex;gap:14px;align-items:center;padding:14px 16px;border-radius:20px;background:var(--card)}
+:root.light .node{box-shadow:0 0 0 1px oklch(0 0 0 / 6%)}
+.node.hot{box-shadow:0 0 0 1.5px var(--brand)}
+.node.off{background:none;box-shadow:inset 0 0 0 1.5px var(--line);border-style:dashed}
+.node .ni{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;color:var(--brand-soft);background:color-mix(in oklab,var(--brand) 16%,transparent)}
+.node .main{flex:1;min-width:0}
+.node .k{display:block;font:600 .6875rem/1 var(--font-sans);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+.node .t{display:block;font-size:1.0625rem;font-weight:600;line-height:1.25}
+.node .s{display:block;font-size:.8125rem;color:var(--muted);letter-spacing:0;margin-top:2px}
+.conn{align-self:center;position:relative;display:flex;align-items:center;justify-content:center;width:2px;height:40px;color:var(--faint);background:currentColor;margin:0}
+.conn::after{content:"";position:absolute;bottom:-1px;left:50%;width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateX(-50%) rotate(45deg)}
+.conn.dash{background:repeating-linear-gradient(to bottom,currentColor 0 5px,transparent 5px 9px)}
+.conn span{position:absolute;left:14px;white-space:nowrap;font-size:.75rem;color:var(--muted);letter-spacing:0}
+
+/* ---------- haptic hook target: styled by embed.css ---------- */
+
+/* ---------- screen transitions (standalone only; embed skips them) ---------- */
+@view-transition{navigation:auto}
+::view-transition-group(root){animation:none}
+::view-transition-old(root),::view-transition-new(root){animation:none}
+::view-transition-group(screen){overflow:clip;background:var(--bg);border-radius:55px}
+:root.pf-android::view-transition-group(screen){border-radius:38px}
+:root.pf-web::view-transition-group(screen){border-radius:22px}
+@keyframes bd-in-right{from{transform:translateX(100%)}}
+@keyframes bd-out-left{to{transform:translateX(-28%)}}
+@keyframes bd-in-left{from{transform:translateX(-28%)}}
+@keyframes bd-out-right{to{transform:translateX(100%)}}
+@keyframes bd-fade-in{from{opacity:0}}
+@keyframes bd-fade-out{to{opacity:0}}
+@keyframes bd-rise-in{from{opacity:0;transform:scale(.96)}}
+@keyframes bd-up{from{transform:translateY(100%)}}
+@keyframes rise{from{transform:translateY(24px);opacity:0}}
+@media (prefers-reduced-motion:no-preference){
+  :root.pf-ios:active-view-transition-type(push)::view-transition-new(screen){animation:bd-in-right 350ms cubic-bezier(.32,.72,0,1) both}
+  :root.pf-ios:active-view-transition-type(push)::view-transition-old(screen){animation:bd-out-left 350ms cubic-bezier(.32,.72,0,1) both}
+  :root.pf-ios:active-view-transition-type(back)::view-transition-new(screen){animation:bd-in-left 350ms cubic-bezier(.32,.72,0,1) both}
+  :root.pf-ios:active-view-transition-type(back)::view-transition-old(screen){animation:bd-out-right 350ms cubic-bezier(.32,.72,0,1) both;z-index:2}
+  :root.pf-ios:active-view-transition-type(modal)::view-transition-new(screen){animation:bd-up 380ms cubic-bezier(.32,.72,0,1) both;z-index:2}
+  :root.pf-android::view-transition-old(screen){animation:bd-fade-out 90ms linear both}
+  :root.pf-android::view-transition-new(screen){animation:bd-fade-in 210ms var(--out) 90ms both,bd-rise-in 210ms var(--out) 90ms both}
+  :root.pf-android:active-view-transition-type(tab)::view-transition-new(screen){animation:bd-fade-in 210ms var(--out) 90ms both}
+}
+@media (prefers-reduced-motion:reduce){
+  ::view-transition-old(screen){animation:bd-fade-out 150ms linear both}
+  ::view-transition-new(screen){animation:bd-fade-in 150ms linear both}
+  :is(a[href],button,[data-go],label.item,.press):not(.device,.scroll,.screen,.switch,.ob):active{transform:none;opacity:.8}
+  .menu,.lift,.bub.new{animation:none}
+  .switch::after,.toast,.device.cssm .sheet,.device.cssm.sheeting .screen{transition:none}
+}
+
+/* ---------- desktop motion system (app/globals.css), same values as the desktop app ----------
+   step-in 450ms with a 40ms stagger on the tab screens' rows, approval-halo on the Approve button and the
+   awaiting-approval pill, mascot-float on idle mascots, shimmer-text on running labels. Each has a gentler
+   reduced-motion form so a state change still reads. */
+@keyframes step-in{from{opacity:0;translate:0 6px}to{opacity:1;translate:0 0}}
+@keyframes step-in-soft{from{opacity:0}}
+@keyframes approval-halo{0%,100%{box-shadow:0 0 0 0 var(--approval);opacity:.9}50%{box-shadow:0 0 0 6px transparent;opacity:1}}
+@keyframes approval-halo-soft{0%,100%{opacity:.85}50%{opacity:1}}
+@keyframes mascot-float{0%,100%{translate:0 0;rotate:0deg}50%{translate:0 var(--float-y);rotate:var(--float-tilt)}}
+@keyframes shimmer-text{from{background-position:200% 0}to{background-position:-200% 0}}
+:has(nav[data-tabs]) .list>.item{animation:step-in-soft 150ms linear both}
+.halo{animation:approval-halo-soft 3s ease-in-out infinite}
+.float{--float-y:-2px;--float-tilt:0deg;animation:mascot-float 8s ease-in-out infinite}
+.shimmer{color:transparent;-webkit-background-clip:text;background-clip:text;background-repeat:no-repeat;background-size:250% 100%,100% 100%;background-image:linear-gradient(var(--muted),var(--muted))}
+@media (prefers-reduced-motion:no-preference){
+  :has(nav[data-tabs]) .list>.item{animation:step-in 450ms var(--out) both}
+  .halo{animation:approval-halo 2s var(--out) infinite}
+  .float{--float-y:-6px;--float-tilt:-2deg;animation-duration:4s}
+  .shimmer{background-image:linear-gradient(90deg,transparent 40%,var(--fg) 50%,transparent 60%),linear-gradient(var(--muted),var(--muted));animation:shimmer-text 1.4s linear infinite}
+}
+:has(nav[data-tabs]) .list>.item:nth-child(2){animation-delay:40ms}
+:has(nav[data-tabs]) .list>.item:nth-child(3){animation-delay:80ms}
+:has(nav[data-tabs]) .list>.item:nth-child(4){animation-delay:120ms}
+:has(nav[data-tabs]) .list>.item:nth-child(5){animation-delay:160ms}
+:has(nav[data-tabs]) .list>.item:nth-child(6){animation-delay:200ms}
+:has(nav[data-tabs]) .list>.item:nth-child(7){animation-delay:240ms}
+:has(nav[data-tabs]) .list>.item:nth-child(8){animation-delay:280ms}
+:has(nav[data-tabs]) .list>.item:nth-child(9){animation-delay:320ms}
+:has(nav[data-tabs]) .list>.item:nth-child(10){animation-delay:360ms}
+.halo[disabled]{animation:none}

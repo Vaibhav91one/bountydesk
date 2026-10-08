@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk mobile prototype</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  body { min-height: 100vh; display: grid; grid-template-columns: 280px 1fr; font-size: 14px; line-height: 1.35; letter-spacing: -.01em; -webkit-font-smoothing: antialiased; }
+  /* screen list */
+  aside { padding: 24px 16px 24px 24px; border-right: 1px solid var(--border); background: var(--card); height: 100vh; position: sticky; top: 0; overflow: auto; }
+  aside h1 { margin: 0 0 4px; font-size: 20px; letter-spacing: -.03em; }
+  aside > p { margin: 0 0 16px; font-size: 13px; }
+  aside h2 { margin: 18px 0 6px; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  aside button { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 8px 10px; border: 0; border-radius: var(--radius); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+  aside button b { width: 30px; flex: none; font-size: 12px; color: var(--muted); font-weight: 600; font-variant-numeric: tabular-nums; }
+  aside button:hover { background: var(--hover); }
+  aside button.on { background: var(--brand); color: #fff; } aside button.on b { color: rgba(255,255,255,.7); }
+  aside button:focus-visible, .bar button:focus-visible { outline: 2px solid var(--brand-soft); outline-offset: 2px; }
+  body.devmode > :not(.device) { display: none !important; }
+  body.devmode { margin: 0; padding: 0; background: #000; overflow: hidden; display: block; }
+  /* stage */
+  main.pane { max-width: none; margin: 0; padding: 56px 24px 16px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; height: 100vh; overflow: hidden; }
+  .stage { display: flex; align-items: center; gap: 28px; transform-origin: center; }
+  /* position rail: one dot per screen, gaps between groups; scroll moves along it */
+  .rail { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+  .rail i { width: 8px; height: 8px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 40%, transparent); cursor: pointer; transition: height .25s, background .25s; flex: none; }
+  .rail i.on { height: 22px; background: var(--brand); } .rail i:hover { background: var(--muted); } .rail i.on:hover { background: var(--brand); }
+  .rail b { height: 8px; }
+  .scrollhint { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .scrollhint svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .cols { display: flex; gap: 44px; }
+  .col { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .col figcaption { text-align: center; font-size: 13px; color: var(--muted); } .col figcaption b { display: block; font-size: 14px; color: var(--ink); }
+  /* devices: the bezel is drawn here, the screen inside has no frame of its own */
+  .device { position: relative; width: 390px; height: 844px; overflow: hidden; isolation: isolate; flex: none; background: #0f0f10; border-radius: 55px;
+            box-shadow: 0 0 0 10px #1a1a1c, 0 0 0 11px #3a3a3c, 0 30px 60px rgba(0,0,0,.45); }
+  .device.android { border-radius: 38px; box-shadow: 0 0 0 9px #1c1b1f, 0 0 0 10px #3a3940, 0 30px 60px rgba(0,0,0,.45); }
+  .device.web { border-radius: 22px; box-shadow: 0 0 0 1px #3a3d45, 0 24px 50px rgba(0,0,0,.45); }
+  .plight .device { background: #fff; box-shadow: 0 0 0 10px #d1d1d6, 0 0 0 11px #aeaeb2, 0 30px 60px rgba(0,0,0,.18); }
+  .plight .device.android { box-shadow: 0 0 0 9px #cac4d0, 0 0 0 10px #938f99, 0 30px 60px rgba(0,0,0,.18); }
+  .plight .device.web { box-shadow: 0 0 0 1px #c4c8d0, 0 24px 50px rgba(0,0,0,.16); }
+  .device iframe { position: absolute; inset: 0; width: 390px; height: 844px; border: 0; background: #0f0f10; will-change: transform; }
+  .plight .device iframe { background: #fff; }
+  .device .shade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 1; }
+  .bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
+  .bar button { height: 36px; padding: 0 16px; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--ink); font: 500 14px/1 var(--sans); display: flex; align-items: center; gap: 7px; cursor: pointer; }
+  .bar button:hover:not(:disabled) { background: var(--hover); }
+  .bar button.primary { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .bar button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+  .bar button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .bar .sep { width: 1px; height: 24px; background: var(--border); margin: 0 4px; }
+  .bar button:disabled { opacity: .35; cursor: default; }
+  .bar .lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+  /* gesture demo overlays drawn on the devices */
+  .pfinger { position: absolute; z-index: 5; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%; background: rgba(120,120,128,.4); border: 2px solid rgba(255,255,255,.9); box-shadow: 0 2px 8px rgba(0,0,0,.3); pointer-events: none; }
+  .pbubble { position: absolute; z-index: 5; left: -46px; top: 50%; width: 46px; height: 46px; margin-top: -23px; border-radius: 50%; background: rgba(32,33,36,.86); display: flex; align-items: center; justify-content: flex-end; padding-right: 10px; pointer-events: none; }
+  .pbubble svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .info { text-align: center; max-width: 560px; min-height: 40px; } .info b { display: block; font-size: 16px; letter-spacing: -.02em; } .info span { display: block; margin-top: 3px; color: var(--muted); font-size: 13px; }
+  @media (max-width: 760px) { body { grid-template-columns: 1fr; } aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--border); } .cols { flex-direction: column; } main.pane { height: auto; overflow: visible; } }
+  @media (prefers-reduced-motion: reduce) { .rail i { transition: none; } }
+</style>
+</head>
+<body>
+<aside>
+  <h1>Prototype</h1>
+  <p>Every mobile screen on iOS and Android, side by side and clickable, with each platform's motion. Tap in either phone and both follow. Haptics show as tags, and the gesture buttons play back swipe, sheet dismissal, pull to refresh, long press and a push notification. Switch on light theme, large text, a screen reader view or a touch target check. Scroll to go through the screens in journey order, or tap buttons, rows, tabs and back buttons to follow the flow.</p>
+  <div id="list"></div>
+</aside>
+<main class="pane">
+  <div class="stage" id="stage"><div class="cols">
+    <figure class="col"><div class="device ios" id="dev-ios"><div class="shade"></div></div><figcaption><b>iOS</b>SwiftUI controls via Expo UI</figcaption></figure>
+    <figure class="col"><div class="device android" id="dev-android"><div class="shade"></div></div><figcaption><b>Android</b>Material 3, Jetpack Compose via Expo UI</figcaption></figure>
+  </div><nav class="rail" id="rail" aria-label="Screens"></nav></div>
+  <div class="info" id="info" aria-live="polite"><b></b><span></span></div>
+  <div class="bar">
+    <button id="prev" aria-label="Previous screen"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>Prev</button>
+    <button id="next" class="primary" aria-label="Next screen">Next<svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    <span class="sep"></span>
+    <button id="replay"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/></svg>Replay</button>
+    <button id="hot" aria-pressed="false">Tap targets</button>
+    <button id="guides" aria-pressed="false">Spacing guides</button>
+    <span class="sep"></span>
+    <button id="light" aria-pressed="false">Light</button>
+  </div>
+  <div class="bar"><span class="lbl">Access</span>
+    <button id="ax" aria-pressed="false">Large text</button><button id="sr" aria-pressed="false">Screen reader</button><button id="targets" aria-pressed="false">Target check</button>
+  </div>
+  <div class="bar gest"><span class="lbl">Gestures</span>
+    <button data-demo="back">Back swipe</button><button data-demo="sheet">Sheet swipe-down</button><button data-demo="refresh">Pull to refresh</button><button data-demo="press">Long press</button><button data-demo="push">Push notification</button>
+  </div>
+  <div class="scrollhint"><svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="5"/><path d="M12 7v3"/></svg>Scroll, or use the arrow keys, to go through every screen</div>
+</main>
+<script>
+// Journey order (next and prev follow it). Each screen is its own page in screens/, loaded with ?embed.
+// The third field is the info line: what to tap and where it goes, taken from the data-go wiring and handlers in screens/interactions.js.
+const GROUPS = [
+  ['Onboarding and auth', [
+    ['m1', 'Splash', 'Tap anywhere on the screen to open Sign in'],
+    ['m2', 'Sign in', 'Either sign-in button opens Home · Terms and Privacy policy open the legal pages'],
+    ['m3', 'Not authorized', 'Sign out returns to Sign in · Request access does nothing here'],
+  ]],
+  ['Triage', [
+    ['m4', 'Home', 'A report row opens the case file · the two count tiles open the Queue · the tab bar switches tabs'],
+    ['m5', 'Queue', 'A report row opens the case file · the tab bar switches tabs'],
+    ['m6', 'Reports', 'Search and the phase chips filter in place · a report row opens the case file · the tab bar switches tabs'],
+    ['m7', 'Case file', 'Sign the verdict opens the approval gate · Reviewer chat opens the chat · View sandbox opens the sandbox · Back returns'],
+  ]],
+  ['Investigate', [
+    ['m8', 'Timeline', 'Read only · Back returns to the case file'],
+    ['m9', 'Tool calls', 'Read only · Back returns to the case file'],
+    ['m10', 'Reviewer chat', 'Type a question or tap a suggestion chip and the agent replies · Back returns to the case file'],
+    ['m26', 'Sandbox', 'Read only · Back returns to the case file'],
+  ]],
+  ['Approve', [
+    ['m11', 'Sign the verdict', 'Approve shows a toast and returns to Home · Deny opens the confirm sheet, Deny verdict there returns to Home · Back returns to the case file'],
+    ['m12', 'Verdict approved', 'Back to queue returns to Home'],
+    ['m13', 'Deny verdict', 'Cancel returns to Sign the verdict · Deny report returns to Home'],
+  ]],
+  ['Connect', [
+    ['m14', 'Connections', 'A repository opens its detail · View onboarding and Upload a target open those screens · Install GitHub App shows a toast · Back returns'],
+    ['m15', 'Connection detail', 'Read only · Back returns to Connections'],
+    ['m27', 'Onboarding', 'Read only · Back returns to Connections'],
+    ['m28', 'Reviewer upload', 'Pick a source, tap the drop area to choose a file · Build and bind target shows a toast and returns to Connections'],
+    ['m16', 'Integrations', 'Email opens Email access · GitHub opens Connections'],
+    ['m17', 'Email access', 'Add an address to send a code · an address or Verify with a code opens the code screen · Back returns'],
+    ['m18', 'OTP verify', 'Type six digits and the sixth verifies and opens Settings · Resend code shows a toast'],
+  ]],
+  ['Settings and public', [
+    ['m19', 'Settings', 'Switches flip · Theme cycles · Terms and Privacy policy open the legal pages · Sign out returns to Sign in · the tab bar switches tabs'],
+    ['m22', 'Target and scope', 'Read only · Back returns to Connection detail'],
+    ['m23', 'Inbox', 'An Approval needed message opens Sign the verdict · the tab bar switches tabs'],
+    ['m20', 'Submit a report', 'Submit report shows a toast and returns to Home · Cancel returns to Home'],
+    ['m21', 'Contact verify', 'Type six digits and Verify unlocks, then moves on by itself · Verify returns to Submit a report · Resend code shows a toast'],
+  ]],
+  ['Legal', [
+    ['m24', 'Privacy', 'Read only · Back returns to Settings'],
+    ['m25', 'Terms', 'Read only · Back returns to Settings'],
+  ]],
+];
+// Info lines, from the navigation map (the data-go wiring in screens/).
+const INFO_C = {
+  m1: 'Tap anywhere to open Sign in',
+  m2: 'Continue with GitHub or Google opens Home · Not on the allowlist? opens Not authorized · Terms and Privacy open the legal pages',
+  m3: 'Request access shows a toast · Sign out returns to Sign in',
+  m4: 'A Needs you card or an Active or Delivered row opens the case file · hold a card for the quick menu · the bell opens Inbox · ··· opens Settings, Connections, Integrations · Review next opens the verdict · the tab pill switches tabs',
+  m5: 'A row opens the case file · hold a row for the quick menu · the bell opens Inbox · ··· opens Settings, Connections, Integrations · Review next opens the verdict · the tab pill switches tabs',
+  m6: 'Type in search or tap a phase chip to filter the list · no match shows Clear search · a row opens the case file · hold a row for the quick menu · the tab pill switches tabs',
+  m7: 'Timeline, Tool calls, Sandbox and Chat open those screens · the bound target opens Target and scope · the chat button opens Reviewer chat · Open verdict opens the approval gate · Back returns',
+  m8: 'Read only · Back returns to the case file',
+  m9: 'Read only · Back returns to the case file',
+  m10: 'Type a question or tap a suggestion and the agent replies · Back returns to the case file',
+  m26: 'Read only · Back returns to the case file',
+  m11: 'Approve shows a toast and opens Verdict approved · Deny opens the deny sheet, its check shows a toast and returns to Home · drag the sheet down to dismiss · Back returns to the case file',
+  m12: 'Back to queue opens the Queue',
+  m13: 'The deny sheet is open · pick a reason · the check shows a toast and returns to Home · X returns to Sign the verdict',
+  m14: 'Install row shows a toast · a repository opens its detail · View onboarding and Upload a target open those screens · Back returns to Settings',
+  m15: 'The bound target opens Target and scope · Back returns to Connections',
+  m27: 'Read only · Back returns to Connections',
+  m28: 'Pick a source, then the primary button shows a toast and returns to Connections · Back returns to Connections',
+  m16: 'Email opens Email access · GitHub opens Connections · Back returns to Settings',
+  m17: 'Add reviewer appends a pending row · Verify with a code opens the code screen · Back returns to Integrations',
+  m18: 'Type six digits and the sixth verifies, shows a toast and returns to Email access · Back returns to Email access',
+  m19: 'Switches flip · Theme cycles · Connections, Integrations and Target and scope open those screens · Privacy and Terms open the legal pages · Sign out returns to Sign in · Back returns to Home',
+  m22: 'Read only · Back returns to wherever you came from',
+  m23: 'A Needs you item opens Sign the verdict · a delivery receipt opens Verdict approved · Back returns to Home',
+  m20: 'Fill the fields, pick target material in the sheet, then Submit opens Contact verify · X returns to Sign in',
+  m21: 'Type six digits and Report received appears in place · Back returns to Submit a report',
+  m24: 'Read only · Back returns to Settings',
+  m25: 'Read only · Back returns to Settings'
+};
+const ORDER = GROUPS.flatMap(g => g[1]);
+const idx = id => ORDER.findIndex(s => s[0] === String(id).toLowerCase());
+// ?device (or ?device=ios|android): one full-screen phone for testing on a real phone; taps still move between screens
+const DEVICE = (q => q.has('device') ? (q.get('device') || (/iPhone|iPad/.test(navigator.userAgent) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'ios')) : '')(new URLSearchParams(location.search));
+// The phone app is iOS and Android only: on the web, phones use the responsive desktop app.
+const PFS = DEVICE ? [DEVICE] : ['ios', 'android'];
+const DEV = Object.fromEntries(PFS.map(p => [p, document.getElementById('dev-' + p)]));
+const devices = PFS.map(p => DEV[p]);
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const opts = { hot: false, guides: false, light: false, ax: false, sr: false, targets: false };
+// One design: the Variant C screens in screens/. INFO_C and DEMOS_BY keep their variant keys so a future variant can slot back in.
+const variant = 'c';
+const FOLDER = { c: 'screens' };
+const stage = document.getElementById('stage');
+
+// Calm spring (damping 1.0, response 0.45 s) as a CSS linear() easing, the same one the screens use for refresh.
+function spring(zeta, response) {
+  const w = 2 * Math.PI / response, dt = 1 / 240; let x = 0, v = 0, calm = 0; const s = [];
+  for (let i = 0; i < 240 * 3; i++) { v += (-w * w * (x - 1) - 2 * zeta * w * v) * dt; x += v * dt; s.push(x);
+    if (Math.abs(x - 1) < .0015 && Math.abs(v) < .03) { if (++calm > 10) break; } else calm = 0; }
+  const step = Math.max(1, Math.floor(s.length / 48)), pts = [0];
+  for (let i = step; i < s.length; i += step) pts.push(+s[i].toFixed(4));
+  pts.push(1); return { easing: `linear(${pts.join(', ')})`, duration: Math.round(s.length * dt * 1000) };
+}
+const CALM = spring(1, .45);
+
+// list
+document.getElementById('list').innerHTML = GROUPS.map(([g, items]) => `<h2>${g}</h2>` + items.map(([id, t]) => `<button data-id="${id}"><b>${id.toUpperCase()}</b>${t}</button>`).join('')).join('');
+document.getElementById('list').onclick = e => { const b = e.target.closest('button'); if (b) jump(b.dataset.id); };
+
+let cur = null, busy = false, frames = [], stack = [], curKind = 'push';
+const src = (id, pf) => `${FOLDER[variant]}/${id}.html?embed&platform=${pf}${opts.guides ? '&guides' : ''}${opts.hot ? '&hot' : ''}${opts.light ? '&theme=light' : ''}${opts.ax ? '&text=large' : ''}${opts.sr ? '&sr' : ''}${opts.targets ? '&targets' : ''}`;
+
+// One screen = two iframes (iOS, Android). They load together, then move in together, each with its own platform's transition.
+// kind comes from the tap: push | pop | tab | modal.
+// iOS: push slides from the right over a -30% parallax and a shade; modal rises; tabs cross-fade in about 100 ms.
+// Android: both pages move 10% and the new one fades in; tabs use Material's fade through (the same as screens/interactions.css).
+// Web: instant, like a browser. Reduced motion: a short cross-fade everywhere.
+const M3 = 'cubic-bezier(.2,0,0,1)';
+const TRANS = {
+  ios: {
+    push:  { f: [{ transform: 'translateX(100%)' }, { transform: 'none' }], o: [{ transform: 'none' }, { transform: 'translateX(-30%)' }], shade: 1 },
+    pop:   { f: [{ transform: 'translateX(-30%)' }, { transform: 'none' }], o: [{ transform: 'none' }, { transform: 'translateX(100%)' }], shade: 1, oldOnTop: 1 },
+    modal: { f: [{ transform: 'translateY(100%)' }, { transform: 'none' }], o: null },
+    unmodal: { f: null, o: [{ transform: 'none' }, { transform: 'translateY(100%)' }], oldOnTop: 1 },
+    tab:   { f: [{ opacity: 0 }, { opacity: 1 }], o: [{ opacity: 1 }, { opacity: 0 }], ms: 100, oldOnTop: 0 },
+  },
+  android: {
+    push:  { f: [{ transform: 'translateX(10%)', opacity: 0 }, { transform: 'none', opacity: 1 }], o: [{ transform: 'none' }, { transform: 'translateX(-10%)' }], ms: 300 },
+    pop:   { f: [{ transform: 'translateX(-10%)' }, { transform: 'none' }], o: [{ transform: 'none', opacity: 1 }, { transform: 'translateX(10%)', opacity: 0 }], ms: 300, oldOnTop: 1 },
+    modal: { f: [{ transform: 'translateY(8%)', opacity: 0 }, { transform: 'none', opacity: 1 }], o: null, ms: 300 },
+    unmodal: { f: null, o: [{ transform: 'none', opacity: 1 }, { transform: 'translateY(8%)', opacity: 0 }], ms: 250, oldOnTop: 1 },
+    tab:   { f: [{ opacity: 0, transform: 'scale(.92)' }, { opacity: 1, transform: 'none' }], o: [{ opacity: 1 }, { opacity: 0 }], ms: 210, oms: 90, delay: 90 },
+  },
+};
+function show(id, dir, kind) {
+  if (!id || idx(id) < 0 || busy) return;
+  id = ORDER[idx(id)][0];
+  if (dir === undefined) dir = cur ? Math.sign(idx(id) - idx(cur)) || 1 : 0;
+  kind = kind || (dir < 0 ? 'pop' : 'push');
+  if (kind === 'pop' && curKind === 'modal') kind = 'unmodal';
+  busy = true; paintDemos();
+  const next = PFS.map((pf, i) => {
+    const f = document.createElement('iframe');
+    f.title = `${id} · ${pf}`; f.src = src(id, pf); f.style.zIndex = 2;
+    if (frames.length && dir) f.style.visibility = 'hidden';                     // stays hidden until its transition starts
+    devices[i].appendChild(f); return f;
+  });
+  Promise.all(next.map(f => new Promise(r => f.addEventListener('load', r, { once: true })))).then(() => {
+    const old = frames; frames = next; cur = id; busy = false; curKind = kind === 'unmodal' ? 'push' : kind;
+    next.forEach((f, i) => {
+      const o = old[i]; f.style.visibility = '';
+      if (!o) return;
+      if (!dir) { o.remove(); return; }
+      if (REDUCED) { f.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 150 }); o.remove(); return; }
+      const T = (TRANS[PFS[i]] || {})[kind];                                       // web and unknown kinds: instant
+      if (!T) { o.remove(); return; }
+      const t = ms => ms ? { duration: ms, easing: M3, fill: 'forwards' } : { duration: CALM.duration, easing: CALM.easing, fill: 'forwards' };
+      if (T.oldOnTop) { o.style.zIndex = 3; f.style.zIndex = 1; } else o.style.zIndex = 0;
+      if (T.f) f.animate(T.f, { ...t(T.ms), delay: T.delay || 0 });
+      if (T.o) o.animate(T.o, t(T.oms || T.ms)).onfinish = () => o.remove(); else setTimeout(() => o.remove(), (T.ms || CALM.duration) + 50);
+      if (T.shade) devices[i].querySelector('.shade').animate([{ opacity: 0 }, { opacity: .18 }, { opacity: 0 }], { duration: CALM.duration });
+    });
+    paint();
+  });
+}
+// A list, rail or key jump starts a fresh history; a tap inside a phone pushes, pops or switches tab.
+function jump(id, dir) { if (busy || idx(id) < 0) return; stack = [ORDER[idx(id)][0]]; show(id, dir); }
+function route(id, kind, isBack) {
+  if (busy || idx(id) < 0) return;
+  id = ORDER[idx(id)][0];
+  kind = kind === 'back' ? 'pop' : kind || 'push';
+  if (kind === 'pop' && isBack && stack.length > 1) id = stack[stack.length - 2];   // Back goes to where you came from, not only the fixed parent
+  if (kind === 'pop') { const i = stack.lastIndexOf(id); stack = i >= 0 ? stack.slice(0, i + 1) : [id]; }
+  else if (kind === 'tab') stack = [id];
+  else stack.push(id);
+  show(id, undefined, kind);
+}
+function paint() {
+  if (DEVICE) { if (location.hash.slice(1) !== cur) history.replaceState(null, '', '#' + cur); document.title = 'BountyDesk · ' + cur; return; }
+  document.querySelectorAll('#list button').forEach(b => b.classList.toggle('on', b.dataset.id === cur));
+  document.querySelectorAll('#rail i').forEach(d => d.classList.toggle('on', d.dataset.id === cur));
+  const on = document.querySelector('#list button.on'); if (on) on.scrollIntoView({ block: 'nearest' });
+  const s = ORDER[idx(cur)]; document.querySelector('#info b').textContent = `${s[0].toUpperCase()} · ${s[1]}`; document.querySelector('#info span').textContent = variant === 'c' ? INFO_C[s[0]] || s[2] : s[2];
+  if (location.hash.slice(1) !== cur) history.replaceState(null, '', '#' + cur);
+  document.title = `Prototype · ${s[0].toUpperCase()} ${s[1]}`;
+  paintDemos();
+}
+// ---- gestures: back is played here with each platform's own animation; the others run inside the screens
+const SIGNED_OUT = ['m1', 'm2', 'm3', 'm20', 'm21', 'm24', 'm25'];
+const pushIds = ORDER.map(s => s[0]).filter(id => !SIGNED_OUT.includes(id));
+// Sheet runs on m11 and m13 (the deny sheet). Press needs report rows, so it is the three tab lists.
+const DEMOS_BY = {
+  c: { sheet: ['m11', 'm13'], refresh: ['m4', 'm5', 'm6', 'm23'], press: ['m4', 'm5', 'm6'], push: pushIds }
+};
+const backTarget = () => stack.length > 1 ? stack[stack.length - 2] : idx(cur) > 0 ? ORDER[idx(cur) - 1][0] : null;
+const paintDemos = () => document.querySelectorAll('[data-demo]').forEach(b => b.disabled = busy || !cur || (b.dataset.demo === 'back' ? !backTarget() : !DEMOS_BY[variant][b.dataset.demo].includes(cur)));
+document.querySelector('.gest').onclick = e => {
+  const b = e.target.closest('[data-demo]'); if (!b || b.disabled) return;
+  if (b.dataset.demo === 'back') backGesture(); else frames.forEach(f => f.contentWindow.postMessage({ demo: b.dataset.demo }, '*'));
+};
+const over = (dev, cls, html = '') => { const el = document.createElement('div'); el.className = cls; el.innerHTML = html; dev.appendChild(el); return el; };
+const ARROW = '<svg viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></svg>';
+const BACK = {
+  ios(dev, now, prev) {         // edge swipe: the page follows the finger, the previous page slides in underneath from -30%
+    const T = { duration: REDUCED ? 1 : 700, easing: 'cubic-bezier(.3,.6,.3,1)', fill: 'forwards' }, f = over(dev, 'pfinger'); f.style.top = '440px';
+    f.animate([{ left: '8px', opacity: 0 }, { left: '8px', opacity: 1, offset: .12 }, { left: '330px', opacity: 1, offset: .9 }, { left: '350px', opacity: 0 }], T);
+    now.style.boxShadow = '-14px 0 30px rgba(0,0,0,.2)';
+    prev.animate([{ transform: 'translateX(-30%)' }, { transform: 'translateX(-30%)', offset: .12 }, { transform: 'translateX(0)' }], T);
+    dev.querySelector('.shade').animate([{ opacity: .2 }, { opacity: .2, offset: .12 }, { opacity: 0 }], T);
+    return now.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(0)', offset: .12 }, { transform: 'translateX(100%)' }], T).finished.then(() => f.remove());
+  },
+  android(dev, now, prev) {     // predictive back: the page shrinks toward the finger, the back arrow grows at the edge, then it leaves
+    const T = { duration: REDUCED ? 1 : 1000, easing: 'cubic-bezier(.2,0,0,1)', fill: 'forwards' }, f = over(dev, 'pfinger'), b = over(dev, 'pbubble', ARROW); f.style.top = '420px';
+    f.animate([{ left: '8px', opacity: 0 }, { left: '8px', opacity: 1, offset: .1 }, { left: '120px', opacity: 1, offset: .55 }, { left: '120px', opacity: 0, offset: .65 }, { left: '120px', opacity: 0 }], T);
+    b.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(0)', offset: .1 }, { transform: 'translateX(40px)', offset: .55 }, { transform: 'translateX(40px)', opacity: 1, offset: .62 }, { transform: 'translateX(0)', opacity: 0 }], T);
+    prev.animate([{ transform: 'scale(.94)', opacity: .7 }, { transform: 'scale(.94)', opacity: .7, offset: .62 }, { transform: 'scale(1)', opacity: 1 }], T);
+    return now.animate([{ transform: 'none', borderRadius: '0px' }, { transform: 'none', borderRadius: '0px', offset: .1 }, { transform: 'translateX(24px) scale(.9)', borderRadius: '34px', offset: .55 },
+                        { transform: 'translateX(24px) scale(.9)', borderRadius: '34px', opacity: 1, offset: .62 }, { transform: 'translateX(60%) scale(.9)', borderRadius: '34px', opacity: 0 }], T).finished.then(() => { f.remove(); b.remove(); });
+  },
+  web(dev, now, prev) {         // Chrome back gesture: the arrow at the edge, then the previous page just swaps in
+    const T = { duration: REDUCED ? 1 : 800, fill: 'forwards' }, f = over(dev, 'pfinger'), b = over(dev, 'pbubble', ARROW); f.style.top = '420px';
+    f.animate([{ left: '8px', opacity: 0 }, { left: '8px', opacity: 1, offset: .12 }, { left: '110px', opacity: 1, offset: .6 }, { left: '110px', opacity: 0, offset: .7 }, { left: '110px', opacity: 0 }], T);
+    b.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(0)', offset: .12 }, { transform: 'translateX(40px)', offset: .6 }, { transform: 'translateX(40px)', opacity: 1, offset: .72 }, { transform: 'translateX(0)', opacity: 0 }], T);
+    return now.animate([{ opacity: 1 }, { opacity: 1, offset: .7 }, { opacity: 0, offset: .8 }, { opacity: 0 }], T).finished.then(() => { f.remove(); b.remove(); });
+  },
+};
+async function backGesture() {
+  const id = backTarget();
+  if (busy || !id) return;
+  const fromStack = stack.length > 1;
+  busy = true; paintDemos();
+  const prev = PFS.map((pf, i) => { const f = document.createElement('iframe'); f.title = `${id} · ${pf}`; f.src = src(id, pf); f.style.zIndex = 0; devices[i].appendChild(f); return f; });
+  await Promise.all(prev.map(f => new Promise(r => f.addEventListener('load', r, { once: true }))));
+  await Promise.all(frames.map((f, i) => BACK[PFS[i]](devices[i], f, prev[i])));
+  frames.forEach(f => f.remove()); prev.forEach(f => { f.getAnimations().forEach(a => a.cancel()); f.style.zIndex = 2; });
+  frames = prev; cur = id; busy = false; curKind = 'pop';
+  if (fromStack) stack.pop(); else stack = [id];
+  paint();
+}
+const step = d => { const i = idx(cur) + d; if (i >= 0 && i < ORDER.length) jump(ORDER[i][0], d); };
+
+// messages from the screens: { proto, go: 'm7', kind, back } and { proto, wheel }
+addEventListener('message', e => {
+  if (!e.data || !e.data.proto || !frames.some(f => f.contentWindow === e.source)) return;
+  if (e.data.wheel) return wheel(e.data.wheel);
+  if (e.data.go) route(e.data.go, e.data.kind, e.data.back);
+});
+document.getElementById('prev').onclick = () => step(-1);
+document.getElementById('next').onclick = () => step(1);
+document.getElementById('replay').onclick = () => frames.forEach((f, i) => f.src = src(cur, PFS[i]));
+for (const k of ['hot', 'guides', 'light', 'ax', 'sr', 'targets']) document.getElementById(k).onclick = e => {
+  opts[k] = !opts[k]; e.currentTarget.setAttribute('aria-pressed', opts[k]);
+  if (k === 'light') { e.currentTarget.textContent = opts.light ? 'Dark' : 'Light'; document.body.classList.toggle('plight', opts.light); }
+  frames.forEach((f, i) => k === 'hot' ? f.contentWindow.postMessage({ showHot: opts.hot }, '*') : f.src = src(cur, PFS[i]));
+};
+addEventListener('keydown', e => {
+  if (e.target.closest('input, textarea')) return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); step(1); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); step(-1); }
+});
+// Scroll through the screens: wheel on the page, or forwarded from a screen once its own scroller is at the end.
+// One screen per gesture: trackpad momentum is ignored until the transition has settled.
+let acc = 0, accT = 0, lockUntil = 0;
+function wheel(dy) {
+  const now = performance.now(); if (now - accT > 220) acc = 0; accT = now; acc += dy;
+  if (now < lockUntil || busy || Math.abs(acc) < 60) return;
+  step(Math.sign(acc)); acc = 0; lockUntil = now + (REDUCED ? 350 : CALM.duration + 250);
+}
+addEventListener('wheel', e => { if (e.target.closest('aside, .snav')) return; e.preventDefault(); wheel(e.deltaY); }, { passive: false });
+// rail
+const rail = document.getElementById('rail');
+rail.innerHTML = GROUPS.map(([g, items]) => items.map(([id, t]) => `<i data-id="${id}" title="${id.toUpperCase()} · ${t}"></i>`).join('')).join('<b></b>');
+rail.onclick = e => { const d = e.target.closest('i'); if (d) jump(d.dataset.id); };
+// fit the three phones to the window, by height and by width
+const fit = () => {
+  stage.style.transform = ''; stage.style.margin = '';
+  const W = stage.offsetWidth, H = stage.offsetHeight, pane = document.querySelector('main');
+  const k = Math.min(1, (innerHeight - 350) / H, (pane.clientWidth - 48) / W);   // room for the info line, the three bars and the hint
+  if (k < 1) { stage.style.transform = `scale(${k})`; stage.style.margin = `${-(1 - k) * H / 2}px ${-(1 - k) * W / 2}px`; }
+};
+if (DEVICE) {                                                   // keep only the one phone, scaled to the screen
+  const d = DEV[DEVICE]; document.body.replaceChildren(d); document.body.classList.add('devmode');
+  const size = () => { const k = Math.min(innerWidth / 390, innerHeight / 844); Object.assign(d.style, { position: 'fixed', left: ((innerWidth - 390 * k) / 2) + 'px', top: '0', width: '390px', height: '844px', transform: `scale(${k})`, transformOrigin: '0 0', borderRadius: '0', boxShadow: 'none', margin: '0' }); };
+  addEventListener('resize', size); size();
+} else { addEventListener('resize', fit); fit(); }
+addEventListener('hashchange', () => { const id = location.hash.slice(1); if (idx(id) >= 0 && idx(id) !== idx(cur)) jump(id); });
+{ const h = location.hash.slice(1).toLowerCase(), first = idx(h) >= 0 ? h : 'm1'; stack = [first]; show(first, 0); }
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk security invariants</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Security invariants', n:'Rules the code must keep, whatever the agent concludes\nSource: AGENTS.md architecture invariants, docs/decisions.md', root:true, mid:true, wrap:3, row:150, h:m('out-of-scope'), k:[
+  {c:'Authority and scope', n:'The capability boundary decides what the agent can reach', side:1, cls:'plan', k:[
+    {c:'Capability boundary', n:'It limits which target and which tool authorisations the agent reaches\nIt does not limit what the agent may conclude'},
+    {c:'Scope bound server-side', n:'Clone, deploy and egress take the target from the server-held TargetProfile\nNever from a string the agent produced'},
+    {c:'Intake cannot make a target', n:'Issue text, email bodies, attachments, PoCs and model output\ncan never create an authorised profile (Q15, Q20)'},
+    {c:'Installation to repo to profile', n:'installation_id resolves server-side\nA removed repo or suspended installation stops intake and delivery at once'},
+    {c:'Private repositories', n:'Accepted and triaged, reproduction refused (POLICY_REFUSED)\nuntil Contents read is added and accepted'},
+    {c:'Manifest-driven targets', n:'Startup, readiness, pins and scope rules live in the platform profile\nor a reviewed manifest, never in repo scripts like detect.sh'},
+  ]},
+  {c:'Verdict integrity', n:'What a verdict may claim, and from what evidence', side:-1, cls:'agent', k:[
+    {c:'No bound target, no REPRODUCED', n:'No target, or a revoked grant: REPRODUCED and NOT_REPRODUCED are refused\nbefore a verdict row exists. The run stays ANALYSIS_ONLY'},
+    {c:'Verdict is the agent\'s own', n:'It investigates and drafts outcome, summary and findings\nlib/mcp/publish-verdict.ts re-checks authorisation (Q22)'},
+    {c:'Status file is readiness only', n:'READY means the target started and passed its health check\nFAILED means startup failed. Never reproduction, severity or outbound content'},
+    {c:'Untrusted output', n:'Model prose, sandbox output and external-process output are data\nNever server-authored evidence'},
+    {c:'Canary oracle retained', n:'Unpredictable canary, trusted fixture, negative control, oracle outside the PoC\nStronger evidence, not the sole gate on REPRODUCED (Q3, Q22)'},
+    {c:'Write probes auto-approved', n:'probe_target_write runs only against the offline reproduction sandbox\nThe human gate guards the outside world (publish_verdict)'},
+  ]},
+  {c:'Human gate', n:'Never skippable', side:1, cls:'reviewer', k:[
+    {c:'publish_verdict is approval-gated', n:'The same @write MCP tool caught by requireApprovalForTools\nAllow or Deny only (Q11)'},
+    {c:'Content hash binds approval', n:'The tool refuses any payload whose hash differs from the approved one\nverdict.content_hash, approval_decision.payload_hash'},
+    {c:'Exact call bound', n:'An approval names the thread_id and tool_call_id it answers\nA stale or different pending call is never reused'},
+    {c:'One decision per revision', n:'Unique approval_decision on verdict_id\nA different answer needs a new verdict revision'},
+    {c:'Nothing auto-closed', n:'Similar reports go to a human as top-k candidates\nOnly exact delivery replays are automatic no-ops'},
+    {c:'Outside intake gate', n:'Outside email, every advisory and every upload wait at NEEDS_DECISION\nOnly a reviewer moves it to TRIAGING or DENIED'},
+  ]},
+  {c:'Sandboxes', n:'Two sandboxes, one artifact between them', side:-1, cls:'plan', k:[
+    {c:'Build sandbox is untrusted', n:'It runs the customer\'s Dockerfile and dependency scripts\nNo installation token, database URL, webhook secret, model key or Daytona key'},
+    {c:'Narrow build egress', n:'BUILD_EGRESS_ALLOWLIST is server-held, never from report text\nAn empty list is refused, not treated as open'},
+    {c:'Reproduction has no egress', n:'networkBlockAll, immutable snapshot, torn down after the run\nProvisioning refuses to start without the egress deny'},
+    {c:'Egress is verified', n:'From the locked sandbox, an external host and 169.254.169.254\nmust both fail (Q16)'},
+    {c:'Pinned identity', n:'Build identity: repo id, commit SHA, source archive digest\nrecipe digest and base image digest. Changed input, new authorisation'},
+    {c:'Demo isolation caveat', n:'Demo target and PoC share one Daytona sandbox\nThat is demo-only isolation, not production-grade (Q20)'},
+  ]},
+  {c:'Secrets and network', n:'Server-side only', side:1, cls:'status', k:[
+    {c:'Secrets stay server-side', n:'The browser talks only to Next.js\nAPI routes run on the Node runtime, not edge\nNo SSE route exists; pages poll'},
+    {c:'TrueForge never public', n:'Loopback or private network only\nA non-loopback URL with a blank TRUEFORGE_API_KEY fails startup'},
+    {c:'Platform-owned webhook secret', n:'X-Hub-Signature-256 is checked against the App secret\nResend uses a signing secret per endpoint'},
+    {c:'Per-route bearer secrets', n:'MCP_SERVER_SECRET, SCOPE_GUARD_TOKEN, WORKER_INTERNAL_SECRET\nMCP_SERVER_SECRET covers three MCP routes; none is a human control'},
+    {c:'Scoped clone token', n:'Installation token narrowed to one repo and contents:read\nPassed through a credential helper, revoked after the clone'},
+    {c:'Reviewer allowlist', n:'REVIEWER_EMAILS checked on every request; an empty list throws, so it fails closed\nGitHub trigger actors are matched by numeric id, not login'},
+  ]},
+  {c:'Database', n:'Evidence tables cannot be rewritten', side:-1, cls:'status', k:[
+    {c:'Data API closed', n:'0001_lockdown.sql revokes anon and authenticated, RLS on every table\nThe app connects as postgres, which has BYPASSRLS'},
+    {c:'Four named tables', n:'verdict, approval_decision, session_event, delivery_attempt\nTriggers refuse UPDATE and DELETE (bountydesk_deny_mutation)'},
+    {c:'More append-only tables', n:'Later migrations add lifecycle_delivery, artifact, scope_guard_audit\nscope_guard_grant, reviewer_chat_message, verdict_supersession, code_review_finding'},
+    {c:'Verdict revisions', n:'Revise by inserting the next revision\nUnique (report_id, revision), restrict foreign keys'},
+    {c:'Fenced leases', n:'Each claim bumps a fence; a stalled worker presents a stale one\nand its update matches no rows'},
+    {c:'Idempotent intake', n:'Unique (channel, delivery_id), decided on state not existence\nReplays of finished work are no-ops'},
+  ]},
+  {c:'Delivery', n:'Nothing is delivered without recipient and receipt', side:1, cls:'reporter', k:[
+    {c:'No body column', n:'outbound_delivery has no body\nThe worker reads immutable verdict.payload and checks approved_content_hash at send'},
+    {c:'Verified recipient', n:'Email: an allowlisted address, or an outside sender that passed SPF and DKIM\naligned with its From domain, re-checked at send time'},
+    {c:'Upload recipient', n:'The contact proved by a report-scoped one-time code\nAn unconfirmed contact is refused'},
+    {c:'Advisory recipient', n:'The repository grant, re-checked at send\nReceipt is GitHub\'s 2xx on the edit or create'},
+    {c:'Transport receipt', n:'No DeliveryAttempt or DELIVERED without one\nAn accepted email send is SENT with null delivered_at, report waits in DELIVERING'},
+    {c:'Held deliveries', n:'Advisory writes refused for a missing permission are held\nA reviewer retries or cancels from the case file'},
+  ]},
+]};
+const mobileTree = {c:'Security invariants · mobile (proposed)', n:'PROPOSED, NOT BUILT. The server invariants restated for one more untrusted client\nSource: mobile architecture brief, AGENTS.md', root:true, mid:true, wrap:3, row:150, h:m('out-of-scope'), k:[
+  {c:'Untrusted client', n:'The app is one more client of the same server', side:1, cls:'plan', k:[
+    {c:'Invariants unchanged', n:'Every server-side invariant in AGENTS.md applies as written'},
+    {c:'Rooted or jailbroken device', n:'Gains nothing, because the server decides'},
+  ]},
+  {c:'Auth on every request', n:'Clerk proves who, the allowlist decides what', side:-1, cls:'reviewer', k:[
+    {c:'Bearer token', n:'Clerk Expo session token on every /api/mobile call'},
+    {c:'Allowlist re-check', n:'The server re-checks the reviewer allowlist on every request\nexactly as the web does'},
+  ]},
+  {c:'Approval by content hash', n:'The device decides nothing', side:1, cls:'agent', k:[
+    {c:'Hash of the shown text', n:'Approve sends verdictId and contentHash of the exact text on screen'},
+    {c:'Server refuses a mismatch', n:'The same rule publish_verdict enforces'},
+    {c:'Live server check', n:'Approval needs the network and a live check, never the cache'},
+  ]},
+  {c:'No offline approvals', n:'A stale approval must never fire later', side:-1, cls:'status', k:[
+    {c:'Writes need the network', n:'Approve, deny, chat and add reviewer'},
+    {c:'No offline queue', n:'The persisted query cache is for reading the queue and case files'},
+  ]},
+  {c:'Biometric', n:'Proposed expo-local-authentication', side:1, cls:'ref', k:[
+    {c:'UX speed bump', n:'Re-confirm before Approve, so a stray tap is harder'},
+    {c:'Not a boundary', n:'The server gate is the boundary; the biometric prompt can be bypassed on a modified client'},
+  ]},
+  {c:'Secrets and storage', n:'Nothing privileged on the device', side:-1, cls:'reporter', k:[
+    {c:'Tokens in SecureStore', n:'expo-secure-store only'},
+    {c:'No secrets in the bundle', n:'Only EXPO_PUBLIC_ values: Clerk publishable key, API base URL'},
+  ]},
+  {c:'Push payloads', n:'The lock screen is not a safe place', side:1, cls:'plan', k:[
+    {c:'Ids only', n:'A short title and ids; never verdict text or report body'},
+    {c:'Fetch on open', n:'A tap deep-links to the case (m7) or the sign screen (m11)\nand the content comes from the API under the same checks'},
+    {c:'notification_event', n:'Append-only, ids only: report id, kind, sent_at, ticket id'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

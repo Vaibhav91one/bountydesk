@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M13 Deny verdict - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<div class="topbar l glass round"><a class="ib" href="#" data-back data-go="m11.html" data-kind="pop" aria-label="Back to Sign the verdict"><i data-icon="back" style="width:24px;height:24px;stroke-width:2.2"></i></a></div>
+<div class="scroll">
+<h1 class="h1">Sign the verdict</h1>
+<div class="hmeta" style="padding-bottom:24px"><span>BD-1042 · Stored XSS in search results</span></div>
+<section class="sect"><div class="sh plain">Outcome</div><div class="card list"><div class="item"><span class="main"><span class="t">Outcome</span></span><span class="pill c-delivered">Reproduced</span></div><div class="kv"><span class="k">Severity</span><span class="v sev">High</span></div><div class="kv"><span class="k">Delivery</span><span class="v">Comment on GitHub issue</span></div></div></section>
+<section class="sect"><div class="sh plain">Drafted comment</div><div class="card list" style="padding:0"><p class="body">Thanks for the report. We reproduced this on juice-shop v17.3.0 (1867b92). The <code>q</code> parameter on the search page is stored and rendered without output encoding, and our canary payload executed in the sandbox. Severity: high. Suggested fix: encode on render and drop <code>bypassSecurityTrustHtml</code> for user input.</p></div><p class="note">This exact text is what gets sent. Editing it creates a new revision that needs a fresh approval.</p></section>
+<section class="sect"><div class="sh plain">Content hash</div><div class="card list" style="padding:0"><p class="hash">sha256:9f2c61ab07d4e8135c0be7a4f6d2189a3b5e04c7d91f8a26e0b34c5d7f1a82e6</p></div><p class="note">Approval is bound to this hash. Delivery is refused if the text differs.</p></section>
+</div>
+<div class="fade-t"></div><div class="fade-b"></div>
+<div class="fbar glass"><button class="btn sec" type="button" data-sheet-open="deny">Deny</button><button class="btn" type="button" data-haptic="success" data-toast="Approved. Sending to GitHub" data-then="m12.html">Approve</button></div>
+</div>
+<div class="sheet" id="deny" role="dialog" aria-modal="true" aria-label="Deny report" data-open>
+<button class="sbtn x" type="button" data-go="m11.html" data-kind="pop" aria-label="Cancel"><i data-icon="x" style="width:24px;height:24px"></i></button>
+<button class="sbtn ok" type="button" data-sheet-confirm data-haptic="warning" data-toast="Denied. Nothing was sent" data-then="m4.html" data-kind="tab" aria-label="Deny report"><i data-icon="check" style="width:26px;height:26px;stroke-width:2.4"></i></button>
+<div class="grab"></div>
+<div class="st">Deny report</div><div class="ss">BD-1042 · Stored XSS in search results</div>
+<div class="card list" role="radiogroup" aria-label="Reason"><label class="item"><span class="main"><span class="t">Out of scope</span><span class="s">The target is not covered by the program</span></span><input type="radio" name="r" class="rd" checked></label><label class="item"><span class="main"><span class="t">Not reproduced</span><span class="s">The agent could not trigger the behavior</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Duplicate</span><span class="s">Matches an earlier report</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Insufficient detail</span><span class="s">Steps or payload are missing</span></span><input type="radio" name="r" class="rd"></label></div>
+<label class="lbl" for="note-m13">Note to reporter (optional)</label>
+<textarea class="field area" id="note-m13" placeholder="Sent with the denial"></textarea>
+<p class="note" style="padding:12px 4px 0">Nothing is sent to the reporter until you confirm. The report moves to Denied.</p>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

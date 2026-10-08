@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="views" content="desktop mobile">
+<title>BountyDesk intake to delivery</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · arrows show the order within a branch · use Focus on a branch to read it alone · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Intake to delivery', n:'Four channels in, one approved verdict out\nFrozen enums from AGENTS.md and lib/db/schema.ts\nNothing is delivered without a human approval', root:true, mid:true, wrap:5, row:185, h:m('cowboy'), k:[
+  {c:'Intake channels', n:'intake_channel: github, advisory, email, upload\n(manual exists in the enum; the Drive channel is dropped, #331)\nIntake and reproduction are separate', side:1, cls:'reporter', h:m('ingest'), k:[
+    {c:'GitHub issue', n:'POST /api/intake/github, HMAC checked first\nOnly action opened starts a run\nNeeds a /reproduce line from a reviewer\n(REVIEWER_GITHUB_IDS)'},
+    {c:'Advisory', n:'repository_advisory reported or published\nRead back with an installation token\nHeld at NEEDS_DECISION, no /reproduce path'},
+    {c:'Email', n:'Resend webhook, svix signature\nAllowlisted sender goes to analysis\nOutside sender needs SPF and DKIM pass,\naligned with From, then NEEDS_DECISION'},
+    {c:'Upload', n:'/submit posts to /api/intake/upload\nContact proves itself with a one-time code\nHeld at NEEDS_DECISION'},
+    {c:'Connected repo needed', n:'GitHub and advisory need a live install,\nactive repository and bound target\nElse 202 and no job'},
+    {c:'Email limits', n:'5 per sender and 20 per domain a day\n512 KiB cap, others dropped with a 202\nA Resend outage answers 503 to retry'},
+    {c:'Upload limits', n:'Content type and size checked before parsing\nDaily limits run against the database\nOptional tarball, Dockerfile or image digest'},
+    {c:'Email attachment', n:'A Dockerfile or tarball on an emailed\nreport can become its target (#333)'},
+  ]},
+  {c:'Jobs table', n:'The durable queue. job_execution_state, not a report state', side:-1, cls:'plan', h:m('scanning'), flow:true, k:[
+    {c:'RECEIVED', n:'Insert, return 202 quickly\nUnique (channel, delivery_id) makes a\nreplay a no-op'},
+    {c:'PARSED', n:'Worker builds the report row\nHeld email and advisory reports\nend here: PARSED to DONE'},
+    {c:'SESSION_CREATED', n:'TrueForge session identity persisted\nKeyed by report id'},
+    {c:'RUNNING', n:'The analysis turn is in flight\nHeartbeat renews the lease'},
+    {c:'DONE or DEAD_LETTER', n:'DEAD_LETTER belongs to job execution only\nIt never appears as a report state'},
+    {c:'Leasing', n:'lease_owner, lease_expires_at,\nattempts, fence\nOrthogonal to the states'},
+    {c:'Sweeper', n:'Reclaims expired leases\nA stopped worker loses nothing'},
+    {c:'Upload route', n:'An upload report is created by its route\ndirectly, with no job'},
+  ]},
+  {c:'NEEDS_DECISION gate', n:'Where an outside report waits for a human\nNothing is cloned, built or probed here', side:1, cls:'reviewer', h:m('idle'), k:[
+    {c:'Who waits', n:'Outside email, every advisory,\nevery upload'},
+    {c:'On entry', n:'Fixed acknowledgement for email\nNo-tool triage turn: hints only\nLinked repos read by pattern'},
+    {c:'Duplicates', n:'Top 3 candidates by word-set similarity\nA human decides\nNothing is ever auto-closed'},
+    {c:'Run analysis', n:'runAnalysisAction releases it to TRIAGING\nand queues the gate-analysis job'},
+    {c:'Deny or duplicate', n:'rejectAtGate, dismissAdvisory,\nmarkDuplicate move it to DENIED\nAn advisory is not written to'},
+    {c:'Upload with material', n:'Reviewer states port, readiness path,\nstart command and ecosystem\nThe server validates them as a manifest'},
+  ]},
+  {c:'Report states', n:'report_lifecycle_state, the human-facing enum', side:-1, cls:'status', h:m('awaiting-approval'), flow:true, k:[
+    {c:'TRIAGING', n:'The first pass is running\nBoard pulse'},
+    {c:'NEEDS_DECISION', n:'Held at the gate\nOnly a reviewer moves it:\nTRIAGING or DENIED'},
+    {c:'REPRODUCING', n:'Entered by a re-check from a later state\nA reviewer guides, the agent re-runs'},
+    {c:'ANALYSIS_ONLY', n:'No bound target, a revoked grant, or a\ntarget that could not be built\nA human decides'},
+    {c:'AWAITING_APPROVAL', n:'A drafted verdict waits for sign-off'},
+    {c:'DELIVERING', n:'Approved. A failing send retries here\nThere is no delivery-failure state'},
+    {c:'DELIVERED', n:'Set by the receipt, never by intent'},
+    {c:'Terminal states', n:'DELIVERED, DENIED, OUT_OF_SCOPE,\nCANCELLED, EXPIRED\nExpiry TTL is 30 days of no change'},
+  ]},
+  {c:'Investigation', n:'The agent reaches only what the server binds', side:1, cls:'agent', h:m('reproducing'), k:[
+    {c:'Bound target', n:'Clone, deploy and egress come from the\nserver-held TargetProfile\nNever from a string the agent wrote'},
+    {c:'Two sandboxes', n:'Build sandbox with narrow dependency egress\nReproduction sandbox with none\nOnly the built artifact crosses'},
+    {c:'Tools', n:'scope_check, probe_target, probe_target_write\nprobe_browser through the MCP routes\nWrite probes are auto-approved in the offline sandbox'},
+    {c:'Evidence', n:'The agent may read code-review findings (#342)\nStatic review and OSV scan add context\nSandbox status says READY or FAILED only'},
+    {c:'No target', n:'No bound target, no REPRODUCED\nRefused server-side before it becomes\na verdict row'},
+    {c:'Draft', n:'publish_verdict drafts outcome, summary\nand findings\nREPRODUCED, NOT_REPRODUCED,\nINCONCLUSIVE or ANALYSIS_ONLY'},
+    {c:'Unbuildable target', n:'Static review, then ANALYSIS_ONLY\nOUT_OF_SCOPE only for a quarantined target\nor a review that read no source'},
+  ]},
+  {c:'Approval gate', n:'A human signs the exact text', side:-1, cls:'plan', h:m('awaiting-approval'), flow:true, k:[
+    {c:'Verdict row', n:'Immutable. A revision is inserted,\nunique (report_id, revision)\nAn edit needs a fresh approval'},
+    {c:'Content hash', n:'SHA-256 of the exact payload\nShown beside the drafted comment'},
+    {c:'Reviewer acts', n:'allowVerdict or denyVerdict in\napp/review/actions.ts\nRecomputes the hash, refuses a mismatch'},
+    {c:'approval_decision', n:'One row per verdict\nDENIED moves the report to DENIED at once\nAPPROVED reaches DELIVERING when\npublish_verdict runs'},
+    {c:'Relay', n:'approval-submission worker answers the\npending publish_verdict call in TrueForge\nANALYSIS_ONLY verdicts queue delivery directly'},
+    {c:'publish_verdict', n:'Post-approval call carries a capability only\nIt refuses a payload whose hash differs\nfrom the approved one'},
+  ]},
+  {c:'Delivery', n:'outbound_delivery is the outbox. It has no body column', side:1, cls:'status', h:m('delivered'), k:[
+    {c:'Worker', n:'Reads the immutable verdict payload\nChecks it against approved_content_hash\nat send time'},
+    {c:'GitHub issue', n:'Issue comment with a delivery marker\nComments read back to avoid a double post\nA 201 is the receipt'},
+    {c:'Advisory', n:'Edits the advisory description\nGitHub has no comments API for advisories\nA 2xx is the receipt'},
+    {c:'Email reply', n:'Resend send with threading headers\nTo an allowlisted or SPF and DKIM verified\naddress, re-checked at send'},
+    {c:'Upload', n:'Rides the email path\nRecipient is the contact that passed\nthe one-time code'},
+    {c:'Draft advisory', n:'An email report on a repo with advisories\nwrite permission opens a draft advisory\ninstead of mailing a reply'},
+    {c:'Refusals', n:'Lost grant, suspended install or an address\nthat lost authorization: held for a human\nA reviewer can retry or cancel (#304)'},
+    {c:'Private repo', n:'Triaged, then POLICY_REFUSED for reproduction\nuntil Contents read is granted'},
+  ]},
+  {c:'Receipt sets DELIVERED', n:'Provider acceptance is not delivery', side:-1, cls:'status', h:m('celebrating'), k:[
+    {c:'GitHub and advisory', n:'The 2xx from GitHub marks SENT and\nmoves the report to DELIVERED in one\ntransaction'},
+    {c:'Email', n:'email.sent earns SENT with no delivered_at\nThe report waits in DELIVERING\nemail.delivered completes it'},
+    {c:'Email failure', n:'bounced, failed or complained hold the row\nfor a human\ncomplained arrives after delivery'},
+    {c:'Idempotent', n:'Receipts are keyed by event and email id\nReplays and out-of-order events are safe'},
+    {c:'Mobile copy', n:'M12 and M23 state the same rule\nProposed app, not built'},
+  ]},
+]};
+const mobileTree = {c:'Intake to delivery (mobile)', n:'PROPOSED, NOT BUILT\nThe app is one more client of the same lifecycle\nServer states and gates are unchanged', root:true, mid:true, wrap:5, row:185, h:m('cowboy'), k:[
+  {c:'Intake', n:'The app creates intake on one path only', side:1, cls:'reporter', h:m('ingest'), k:[
+    {c:'Public submit', n:'m20 posts to the existing /api/intake/upload\nNo account needed'},
+    {c:'Contact code', n:'m21 verifies the contact with a one-time code\nAn unconfirmed contact is refused'},
+    {c:'Held at the gate', n:'An upload report waits at NEEDS_DECISION\nexactly as from the web /submit page'},
+    {c:'Other channels', n:'github, advisory and email intake\nnever touch the app'},
+  ]},
+  {c:'Server lifecycle', n:'Triage, reproduction, build, probe\nand delivery stay server-side', side:-1, cls:'plan', h:m('scanning'), k:[
+    {c:'Report states', n:'The frozen enum is unchanged\nThe app only reads it'},
+    {c:'Reading', n:'Queue (m5), reports (m6), case file (m7),\ntimeline (m8), tool calls (m9)'},
+    {c:'Chat', n:'m10 reviewer chat through /api/mobile\nThe reply is still generated in the worker'},
+  ]},
+  {c:'Push on approval', n:'Worker to Expo Push Service', side:1, cls:'status', h:m('awaiting-approval'), flow:true, k:[
+    {c:'AWAITING_APPROVAL', n:'A drafted verdict waits for sign-off\nThe worker sends the push'},
+    {c:'Payload', n:'Ids and a short title only\nNever verdict text or report body'},
+    {c:'Record', n:'notification_event row (proposed)\nreport id, kind, sent_at, ticket id'},
+    {c:'Tap', n:'Deep link to the case (m7)\nor the sign screen (m11)'},
+  ]},
+  {c:'Approve or deny', n:'The device is never trusted to decide', side:-1, cls:'reviewer', h:m('idle'), flow:true, k:[
+    {c:'Review', n:'Review next opens m11 for the next waiting verdict\nIt shows the exact drafted text and its content hash'},
+    {c:'Approve', n:'Sends verdictId and contentHash\nof the text shown\nBiometric re-confirm is a proposed speed bump'},
+    {c:'Server check', n:'The server recomputes the hash and\nrefuses a mismatch, the same rule\npublish_verdict enforces'},
+    {c:'Deny', n:'m13 is the deny sheet over m11, it takes a reason\nThe check button confirms\nThe report moves to DENIED\nNothing is sent'},
+    {c:'Needs network', n:'No offline queue for approvals\nA stale approval must never fire later'},
+  ]},
+  {c:'Delivery', n:'Unchanged: outbox, worker, receipts', side:1, cls:'agent', h:m('delivered'), k:[
+    {c:'Worker sends', n:'Checks the payload against the\napproved hash at send time'},
+    {c:'Receipt', n:'DELIVERED is set by the receipt,\nnever by the approve tap'},
+    {c:'Verdict shown', n:'m12 says delivered only after the\nprovider confirmed it'},
+  ]},
+  {c:'Push on delivery', n:'Second notification', side:-1, cls:'status', h:m('celebrating'), k:[
+    {c:'DELIVERED', n:'Sent when a delivery receipt sets\nDELIVERED'},
+    {c:'Same rules', n:'Ids and a short title only\nDevice token revoked on sign-out and on\nDeviceNotRegistered receipts'},
+  ]},
+  {c:'Inbox (m23)', n:'The reviewer event list, opened from the bell', side:1, cls:'ref', h:m('chilling'), k:[
+    {c:'Needs you', n:'Approval needed rows for BD-1042 style reports'},
+    {c:'Earlier', n:'Delivery receipt and reproduction failed rows'},
+    {c:'Footer rule', n:'Delivery is confirmed by a transport receipt,\nnot by the provider accepting a send'},
+    {c:'Open', n:'The inbox data route is not named in the brief'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop'; const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script>addEventListener('load', () => { fit(); document.fonts && document.fonts.ready.then(fit); }); // mascots and fonts change card heights after first layout</script>
+<script src="site-nav.js"></script>
+</body>
+</html>

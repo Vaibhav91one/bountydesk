@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk status</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  main { max-width: 1240px; }
+  main > p.lead { max-width: 760px; margin: 6px 0 0; }
+  section h2 { margin: 36px 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  section > p { max-width: 760px; margin: 0 0 12px; }
+  .sumrow { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-top: 20px; }
+  .sumrow .card b { display: block; font-size: 24px; letter-spacing: -.02em; } .sumrow .card span { color: var(--muted); font-size: 13px; }
+  .tbl { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; overflow-x: auto; }
+  .tbl table { min-width: 640px; } .tbl tr:last-child td { border-bottom: 0; }
+  td { vertical-align: top; font-size: 14px; color: var(--muted); } td:first-child { color: var(--ink); }
+  td.n, td.d { white-space: nowrap; font-family: var(--mono); font-size: 12.5px; }
+  .pill { display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .live { color: var(--delivered); background: color-mix(in oklab, var(--delivered) 15%, transparent); }
+  .merged { color: var(--triaging); background: color-mix(in oklab, var(--triaging) 15%, transparent); }
+  .test { color: var(--approval); background: color-mix(in oklab, var(--approval) 15%, transparent); }
+  .open { color: var(--analysis); background: color-mix(in oklab, var(--analysis) 15%, transparent); }
+  :root.light .live { color: oklch(0.45 0.14 150); } :root.light .merged { color: oklch(0.45 0.16 250); } :root.light .test { color: oklch(0.5 0.13 75); } :root.light .open { color: oklch(0.45 0.18 330); }
+  .key { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 12px 0 0; font-size: 13px; color: var(--muted); }
+  @media (max-width: 560px) { main { padding: 64px 16px 72px; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Status</h1>
+<p class="lead">What is built and what has been proven live, as of 2026-10-08 (the newest commit on <code>main</code> is from 2026-10-06). Built means merged to <code>main</code>. Live-proven means a recorded run against the real system, with a report id in <code>docs/verification-matrix.md</code> or a status note in <code>docs/plan.md</code>. Since #222, a merge to <code>main</code> runs migrations and pushes the Zerops worker once CI is green (<code>deploy.yml</code>); what still needs a person is at the end of this page.</p>
+<div class="key"><span class="pill live">live-proven</span><span class="pill merged">merged</span><span class="pill test">test-covered</span><span class="pill open">not yet proven</span></div>
+
+<section>
+<h2>Newest merged work</h2>
+<p>The newest merged PRs from <code>gh pr list --state merged</code>. All eight were merged on 6 October 2026, including #338 to #342.</p>
+<div class="tbl"><table>
+<tr><th>PR</th><th>Merged</th><th>Change</th><th>State</th></tr>
+<tr><td class="n">#342</td><td class="d">2026-10-06</td><td>The reproduction agent can read a report's code-review findings (#324)</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#341</td><td class="d">2026-10-06</td><td>The approved manifest and origin are kept on each target profile (#323)</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#340</td><td class="d">2026-10-06</td><td>Onboard several connected repositories in one action (#323)</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#339</td><td class="d">2026-10-06</td><td>Show the bound target on the reports list (#323)</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#338</td><td class="d">2026-10-06</td><td>Standalone agentic code review that drafts findings as evidence (#324 phase 1)</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#337</td><td class="d">2026-10-06</td><td>Rotate a connectionless target profile in place on re-onboard</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#336</td><td class="d">2026-10-06</td><td>Analysis source readers moved into one module</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td class="n">#335</td><td class="d">2026-10-06</td><td>Research note on dockerless targets (#213)</td><td><span class="pill merged">merged</span></td></tr>
+</table></div>
+<p style="margin-top:12px">No live run of the code review module (#338, #342) is recorded in the repo.</p>
+</section>
+
+<section>
+<h2>Intake</h2>
+<p>Four independent channels. Email and upload need no GitHub connection to create and triage a report; reproduction is what needs a server-authorised target.</p>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
+<tr><td>GitHub issue with <code>/reproduce</code> lands at TRIAGING</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> prior issue reports</td></tr>
+<tr><td>Advisory intake and delivery (#280)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> reports 15986682 (GHSA-hh99) and dbd39ca8 (GHSA-qr4w)</td></tr>
+<tr><td>Email from an allowlisted sender lands at TRIAGING</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> report dbd39ca8</td></tr>
+<tr><td>Email from an outside sender lands at NEEDS_DECISION</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> report e959075a</td></tr>
+<tr><td>Upload intake, <code>/submit</code> page, reviewer-approved target builds (#285)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> reports 1012f6cd, f3f611e8, a6a20cf1, 05c7fc29</td></tr>
+<tr><td>Upload from the dashboard (#330), emailed Dockerfile or tarball attachment as target (#333)</td><td class="d">2026-09-27</td><td><span class="pill merged">merged</span> no separate live run in the matrix</td></tr>
+<tr><td>GitLab and Bitbucket links recognised in report references (#315)</td><td class="d">2026-09-27</td><td><span class="pill merged">merged</span> recognition only; onboarding from them is #352</td></tr>
+<tr><td>Drive intake removed from the UI (#331)</td><td class="d">2026-09-27</td><td>Dropped as a channel, not deferred</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Reproduction and oracles</h2>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
+<tr><td>Deterministic canary pipeline against the pinned Juice Shop target (SQLi scenario)</td><td class="d">2026-08-29</td><td><span class="pill live">live-proven</span> <code>docs/plan.md</code> Phase 4 status, live proof dated 2026-08-29</td></tr>
+<tr><td>Sandbox pipeline, build then offline reproduction, against the pinned fork <code>Vaibhav91one/juice-shop</code> at v17.3.0</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> <code>AGENTS.md</code>: run live end to end</td></tr>
+<tr><td>Agent-authored investigation and <code>publish_verdict</code></td><td class="d">merged earlier</td><td><span class="pill open">not yet proven</span> the recorded proof used the deterministic canary pipeline (#355)</td></tr>
+<tr><td>Browser probe enabled, with a Juice Shop DOM XSS recipe (#262), offline render (#259), navigate on domcontentloaded (#265), output cap raised (#268)</td><td class="d">2026-09-25</td><td><span class="pill merged">merged</span> design in <code>docs/browser-probe.md</code></td></tr>
+<tr><td>Clientless target images reproduce through a listen-socket readiness fallback (#312)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> report 05c7fc29</td></tr>
+<tr><td>Static review when a target cannot be built or deployed (#284); advisory OSV dependency scan (#318)</td><td class="d">2026-09-26 and 09-27</td><td><span class="pill live">live-proven</span> for the static fallback: build failure to ANALYSIS_ONLY, report f3f611e8 (before #310). The OSV scan (#318) is merged only</td></tr>
+<tr><td>Private repository reproduction behind Contents read, scoped clone token (#286, #288)</td><td class="d">2026-09-26</td><td><span class="pill live">live</span> 2026-09-26 run on the private dsvw-private repo: scoped-token clone, image build, snapshot, offline sandbox, REPRODUCED (UNION SQLi). The refusal path (POLICY_REFUSED) is also test-covered.</td></tr>
+<tr><td>Reproduction agent reads code-review findings (#342)</td><td class="d">2026-10-06</td><td><span class="pill merged">merged</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Onboarding and targets</h2>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
+<tr><td>Manifest-driven onboarding: build, GHCR push, snapshot, manifest proposal and approval</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> first live run on <code>crccheck/docker-hello-world</code>, per <code>docs/onboarding-follow-ups.md</code></td></tr>
+<tr><td>Pluggable registry handoff, image reclaim, start-command verify (#281)</td><td class="d">2026-09-26</td><td><span class="pill merged">merged</span> single-image reclaim only; mesh reclaim is #353</td></tr>
+<tr><td>Targets from non-GitHub sources and the identity anchor (#283, #266)</td><td class="d">2026-09-25 and 09-26</td><td><span class="pill live">live-proven</span> source tarball (a6a20cf1) and single Dockerfile (05c7fc29, target 4d0deb5f), both REPRODUCED</td></tr>
+<tr><td>Prebuilt image pinned by digest</td><td class="d">2026-09-26</td><td><span class="pill test">test-covered</span> live submit blocked, needs a public reproduce-capable image</td></tr>
+<tr><td>Upload build fixes: <code>/work</code> staging (#310), re-onboard an UNSUPPORTED repository (#295), snapshot sweep scheduled and failed upload builds statically reviewed (#292)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> #310 and #312 were found by the live matrix</td></tr>
+<tr><td>Alpine-based builds recorded as unsupported on a restricted Daytona tier (#317)</td><td class="d">2026-09-27</td><td>A tier limit, not a code gap</td></tr>
+<tr><td>Several repositories onboarded in one action (#340), manifest and origin on the profile (#341), bound target on the reports list (#339), in-place rotation (#337)</td><td class="d">2026-10-06</td><td><span class="pill merged">merged</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Review, approval and delivery</h2>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
+<tr><td>Human approval of the exact bytes, idempotent delivery, persistent deployment runner</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> <code>docs/plan.md</code> Phase 5: complete</td></tr>
+<tr><td>Advisory delivery by editing the advisory description, with marker and idempotent replay</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> REPRODUCED on 15986682 and dbd39ca8</td></tr>
+<tr><td>Email reply delivered on Resend's <code>email.delivered</code> receipt (#267)</td><td class="d">2026-09-25</td><td><span class="pill live">live-proven</span> report 1012f6cd</td></tr>
+<tr><td>Email report routed to an advisory when the repository supports it (#282, #293)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> dbd39ca8</td></tr>
+<tr><td>Advisory onto a private repository</td><td class="d">2026-09-26</td><td>Held for review, a correct fail-safe: the repo has no advisory feature. Report cd754ef7 was cancelled with the reviewer cancel action (#304)</td></tr>
+<tr><td>Reviewer gate: run analysis, reject, build target, cancel a wedged report</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> 1012f6cd, 15986682, a6a20cf1, 05c7fc29, cd754ef7</td></tr>
+<tr><td>NOT_REPRODUCED and ANALYSIS_ONLY write-backs per channel</td><td class="d"></td><td><span class="pill test">test-covered</span> the advisory and email arms treat every publishable outcome the same way</td></tr>
+<tr><td>Grant revoked mid-delivery, SPF or DKIM failure, lease loss, sweeper reclaim</td><td class="d"></td><td><span class="pill test">test-covered</span> need contrived infrastructure to trigger live</td></tr>
+<tr><td>Approval copy for an advisory-routed email verdict (#297), held-advisory refusal causes (#306)</td><td class="d">2026-09-26</td><td><span class="pill merged">merged</span></td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Platform, CI and docs</h2>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
+<tr><td>Idle worker polling backed off to cut database disk IO (#320)</td><td class="d">2026-09-27</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td>Serialised <code>session_event</code> sequence allocation for every writer (#316)</td><td class="d">2026-09-27</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td>GitHub reconcile and report expiry run from the worker daemon (#258)</td><td class="d">2026-09-25</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td>Claude review workflow: fallback is a direct DeepSeek call that posts (#261), summary steering (#257)</td><td class="d">2026-09-25</td><td><span class="pill merged">merged</span> advisory reviewer, not a merge gate</td></tr>
+<tr><td>Real terms and privacy content (#279)</td><td class="d">2026-09-26</td><td><span class="pill merged">merged</span></td></tr>
+<tr><td>Design record reconciled with private intake and any-source targets (#289), verification matrix (#314), email delivery copy corrected (#334)</td><td class="d">2026-09-26 and 09-27</td><td><span class="pill merged">merged</span></td></tr>
+</table></div>
+<p style="margin-top:12px">The 50 newest merged PRs reach back only to 2026-09-25. Earlier work (the hackathon phases 0 to 6) is described from <code>docs/plan.md</code> without PR dates.</p>
+</section>
+
+<section>
+<h2>Not yet live-proven</h2>
+<p>From the "Still open or deferred" list in <code>AGENTS.md</code>, plus gaps the verification matrix names.</p>
+<div class="tbl"><table>
+<tr><th>Item</th><th>Why</th><th>Issue</th></tr>
+<tr><td>Agent-authored <code>publish_verdict</code></td><td>Merged, but wants one fresh live run where the agent investigates and drafts the verdict itself. The recorded proof used the deterministic canary pipeline.</td><td>#355</td></tr>
+<tr><td>Onboarding follow-ups</td><td>Rotating a connectionless profile (code merged in #337), a tarball without a Dockerfile, reclaiming mesh images, and scheduling the trial-snapshot sweep. <code>docs/onboarding-follow-ups.md</code> says the sweep now runs from the worker daemon every six hours.</td><td>#351, #353</td></tr>
+<tr><td>Prebuilt image by digest, live</td><td>Test-covered only. A live submit needs a public image that can reproduce.</td><td>none</td></tr>
+<tr><td>Advisory delivery onto a private repository</td><td>Held for review, as designed: a free private repository has no security advisory feature. Needs GitHub Advanced Security on that repository.</td><td>none</td></tr>
+<tr><td>Code review module (#338, #342)</td><td>Merged 2026-10-06 with no recorded live run.</td><td>none</td></tr>
+<tr><td>Deferred by scope</td><td>Multi-target expansion, the agentic code review module as a product, black-box reproduction, RBAC and multi-tenancy, and the pentest agent. See the <a href="roadmap.html">roadmap</a>.</td><td>#325, #326, #327, #350</td></tr>
+</table></div>
+</section>
+
+<section>
+<h2>Records that disagree</h2>
+<p><code>docs/plan.md</code> Phase 4 still says "the dynamic tier is not started", while <code>AGENTS.md</code> and the verification matrix record the build and reproduction pipeline as built and run live. This page follows <code>AGENTS.md</code> and the matrix. <code>docs/decisions.md</code> "Implementation gates" (2026-08-27) is also older than the work above and reads as earlier status.</p>
+</section>
+
+<section>
+<h2>Operator steps a merge does not fully cover</h2>
+<ul>
+  <li>Migrations run in <code>deploy.yml</code> after a green CI run. If that job fails, run <code>npm run db:migrate</code> with <code>DIRECT_URL</code> by hand from a trusted machine.</li>
+  <li><code>deploy.yml</code> pushes only the <code>bdworker</code> service. The TrueForge service on Zerops is pushed by hand, and a failed worker push in the deploy run also needs a manual <code>zcli push</code>.</li>
+  <li>GitHub App permissions and events, private vulnerability reporting per repository, and the optional registry variables are switched on by a person, as listed in <code>AGENTS.md</code>.</li>
+</ul>
+</section>
+
+<p style="font-size:12.5px;margin-top:36px">Sources: <code>AGENTS.md</code> (Backlog, Operator prerequisites), <code>docs/plan.md</code> (phase status notes), <code>docs/decisions.md</code> (Implementation gates), <code>docs/verification-matrix.md</code>, <code>docs/onboarding-follow-ups.md</code>, <code>gh pr list --state merged --limit 50</code>.</p>
+</main>
+<script src="site-nav.js"></script>
+</body>
+</html>

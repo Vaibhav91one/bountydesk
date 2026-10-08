@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>M1 Splash - BountyDesk mobile</title>
+<link rel="icon" href="../assets/logo-tick.svg">
+<link rel="stylesheet" href="c.css">
+<script src="platform.js"></script>
+<style>/* the lockup letterforms are near-white, so flip them on the light theme; the hue turn keeps the indigo tick indigo */
+.light .m1-lockup{filter:invert(1) hue-rotate(180deg)}
+.m1-wrap{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding-bottom:40px}
+.m1-wrap img:first-child{width:220px;height:220px;animation:m1f 3.2s ease-in-out infinite}
+.m1-wrap p{font-size:.9375rem;color:var(--muted);letter-spacing:0}
+@keyframes m1f{50%{transform:translateY(-8px)}}
+@media (prefers-reduced-motion:reduce){.m1-wrap img:first-child{animation:none}}</style>
+</head>
+<body>
+<main class="device">
+<div class="screen">
+<a class="m1-wrap" href="#" data-go="m2.html" data-kind="modal" data-auto-go="m2.html" aria-label="Continue to sign in"><img src="../assets/mascot/greeting.svg" alt=""><img class="m1-lockup" src="../assets/logo-lockup.svg" alt="BountyDesk" width="230"><p>Triage you can trust, one approval at a time.</p></a>
+</div>
+</main>
+<script src="c.js"></script>
+</body>
+</html>

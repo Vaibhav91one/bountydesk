@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BountyDesk services</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<meta name="views" content="desktop mobile">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click Focus on a branch to isolate it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, cls?: branch color}
+// Env notes list variable names from env.example only, never values.
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const desktopTree = {c:'Services', n:'What runs where, and which env names each one owns\nSources: env.example, zerops.yml, ops/zerops/, docs/deployment.md, .github/workflows/', root:true, mid:true, wrap:3, row:150, h:m('infra-hiccup'), k:[
+  {c:'Vercel app', n:'The public, stateless tier. Deploys from Git on its own', side:1, cls:'reviewer', k:[
+    {c:'What it serves', n:'Reviewer UI, intake routes (github, email, upload)\nThe MCP routes TrueForge calls, internal tick routes'},
+    {c:'proxy.ts', n:'Clerk middleware on every request outside /_next/\nOptional landing-only redirect (BOUNTYDESK_LANDING_REDIRECT)'},
+    {c:'Env: database', n:'DATABASE_URL (transaction pooler)\nNEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY'},
+    {c:'Env: identity', n:'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY\nREVIEWER_EMAILS, REVIEWER_GITHUB_IDS, APP_BASE_URL'},
+    {c:'Env: agent and sandbox', n:'MCP_SERVER_SECRET, SCOPE_GUARD_URL, SCOPE_GUARD_TOKEN\nDAYTONA_API_KEY (probe_target previews), WORKER_INTERNAL_SECRET'},
+    {c:'Reads tool calls from TrueForge', n:'The case file fetches live tool-call detail from the harness\nlib/reports/tool-calls.ts; app/api/reports/[id]/tool-calls\ndocs/deployment.md still says Vercel never calls it'},
+  ]},
+  {c:'Zerops worker (bdworker)', n:'Persistent tier, private, one container', side:-1, cls:'agent', k:[
+    {c:'What it runs', n:'npm run worker:daemon, claim loops and sweepers\nzerops.yml setup bdworker, nodejs@22'},
+    {c:'Health', n:'/healthz on port 8080 (WORKER_HEALTH_PORT)\nDATABASE_POOL_MAX 12 so every loop gets a connection'},
+    {c:'Env: set in zerops.yml', n:'TRUEFORGE_URL, REVIEWER_CHAT_ENABLED\nBUILD_BASE_SNAPSHOT, BUILD_EGRESS_ALLOWLIST, GHCR_NAMESPACE'},
+    {c:'Env: secrets on the service', n:'DATABASE_URL, DAYTONA_API_KEY, GHCR_PUSH_TOKEN\nTRUEFORGE_API_KEY (docs/deployment.md)'},
+    {c:'Env: mirrors Vercel', n:'Delivery code reads RESEND_API_KEY, REVIEWER_EMAILS and the\nGitHub App values too, because it runs outside Vercel'},
+    {c:'Deploy on merge', n:'deploy.yml: migrate, then zcli push bdworker\nOnly after a green CI run on main'},
+  ]},
+  {c:'TrueForge and tfdata', n:'The agent harness, private', side:1, cls:'agent', k:[
+    {c:'trueforge service', n:'nodejs@22, one container (ops/zerops/services-import.yaml)\nStandalone mode, SQLite on local storage'},
+    {c:'tfdata', n:'local-storage:single@1 volume for the SQLite file'},
+    {c:'Proxy in front', n:'scripts/run-trueforge-proxy.mjs verifies the bearer token\nThe unauthenticated listener stays on loopback'},
+    {c:'Env', n:'TRUEFORGE_URL (http://localhost:8790 locally)\nTRUEFORGE_API_KEY blank on loopback, required otherwise'},
+    {c:'Bootstrap', n:'scripts/bootstrap-trueforge.mjs configures it after start\nscripts/apply-agent.ts and apply-skills.ts register agent and skills'},
+  ]},
+  {c:'Supabase', n:'Postgres and Storage', side:-1, cls:'status', k:[
+    {c:'Postgres', n:'Reports, jobs, leases, approvals, verdicts, delivery intent\nPooler 6543 for runtime, DIRECT_URL on 5432 for migrations'},
+    {c:'Storage', n:'Artifact bytes: verdict payloads, investigation transcripts\nSigned URLs for reviewer downloads'},
+    {c:'Env', n:'DATABASE_URL, DIRECT_URL\nNEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (server only)'},
+    {c:'Migrations', n:'Run by hand or by deploy.yml with DIRECT_URL\nCI migrates a throwaway Postgres 17 service, not production'},
+  ]},
+  {c:'Resend', n:'Email in both directions', side:1, cls:'status', k:[
+    {c:'One webhook endpoint', n:'Points at /api/intake/email\nThe signing secret belongs to the endpoint, not an event type'},
+    {c:'Events', n:'email.received for intake\nsent, delivered, bounced, failed, complained, delivery_delayed for receipts'},
+    {c:'Receipt rule', n:'email.sent is Resend accepting the call\nOnly email.delivered sets DELIVERED'},
+    {c:'Env', n:'RESEND_API_KEY, RESEND_WEBHOOK_SECRET\nSet on Vercel and on the worker'},
+  ]},
+  {c:'GitHub App', n:'Identity of the platform on GitHub', side:-1, cls:'status', k:[
+    {c:'Permissions', n:'Metadata read, Issues read and write\nRepository security advisories read and write, Contents read optional'},
+    {c:'Events', n:'issues, repository_advisory, installation\ninstallation_repositories, repository'},
+    {c:'URLs', n:'Webhook: GITHUB_WEBHOOK_BASE_URL + /api/intake/github\nSetup: APP_BASE_URL + /api/github/setup'},
+    {c:'Env', n:'GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_CLIENT_ID\nGITHUB_APP_CLIENT_SECRET, GITHUB_APP_WEBHOOK_SECRET\nGITHUB_APP_PRIVATE_KEY_BASE64'},
+    {c:'Tokens', n:'Short-lived installation tokens, minted per delivery\nA private clone token is scoped to one repo, contents:read'},
+  ]},
+  {c:'Daytona', n:'Sandboxes and snapshots', side:1, cls:'plan', k:[
+    {c:'Build sandbox', n:'Boots BUILD_BASE_SNAPSHOT (Docker available)\nOnly BUILD_EGRESS_ALLOWLIST hosts are reachable'},
+    {c:'Reproduction sandbox', n:'Starts from an immutable snapshot, no egress\nTorn down after the run'},
+    {c:'Env', n:'DAYTONA_API_KEY, DAYTONA_TARGET_SNAPSHOT_ID\nDAYTONA_TARGET_IMAGE_DIGEST (demo target pin)'},
+    {c:'Housekeeping', n:'scripts/cleanup-archived-sandboxes.ts\nsnapshot-sweep loop in the worker'},
+  ]},
+  {c:'Image registry', n:'Where built target images are pushed', side:-1, cls:'plan', k:[
+    {c:'Default: GHCR', n:'GHCR_NAMESPACE, GHCR_PUSH_TOKEN\nThe fallback values when REGISTRY_* is unset'},
+    {c:'Override: REGISTRY_*', n:'REGISTRY_HOST, REGISTRY_USER, REGISTRY_NAMESPACE\nREGISTRY_PUSH_TOKEN, optional REGISTRY_DELETE_TOKEN'},
+    {c:'Prebuilt images', n:'PREBUILT_IMAGE_REGISTRIES, default docker.io and ghcr.io\nSet on Vercel and the worker, both check it'},
+    {c:'Reclaim', n:'With a delete token the build removes its pushed image\nonce the Daytona snapshot is active'},
+  ]},
+  {c:'Model provider', n:'What the agent and the reviewer chat call', side:1, cls:'agent', k:[
+    {c:'OpenAI', n:'OPENAI_API_KEY, first-class provider via TrueForge'},
+    {c:'Compatible gateways', n:'Configured as a custom provider inside TrueForge (docs/deployment.md)\nMODEL_BASE_URL in env.example is not read by any code'},
+    {c:'Reviewer chat', n:'Disabled unless REVIEWER_CHAT_ENABLED is true\nIt has no investigation or approval tools'},
+  ]},
+  {c:'GitHub Actions', n:'CI, deploy and the advisory review', side:-1, cls:'ref', k:[
+    {c:'ci.yml', n:'Lint, migrate, drift check, policy tests, test, build\nPostgres 17 service container'},
+    {c:'deploy.yml', n:'workflow_run after CI on main\nSecrets: DIRECT_URL, ZEROPS_TOKEN'},
+    {c:'claude-review.yml', n:'Advisory review on pull_request_target and /review\nSecrets: CLAUDE_CODE_OAUTH_TOKEN, VYCEAI_API_KEY (fallback)'},
+    {c:'build-daytona-target.yml', n:'Manual. Builds the pinned juice-shop commit\nand pushes a digest-pinned image to GHCR'},
+  ]},
+]};
+const mobileTree = {c:'Services · mobile (proposed)', n:'PROPOSED, NOT BUILT. What the iOS and Android app would depend on\nThe app adds no server of its own', root:true, mid:true, wrap:3, row:150, h:m('infra-hiccup'), k:[
+  {c:'Vercel Next.js', n:'The same app the web uses', side:1, cls:'reviewer', k:[
+    {c:'/api/mobile routes', n:'queue, case, chat, approve, deny, connections, push-token\nBearer token from Clerk, allowlist re-checked on every request'},
+    {c:'Well-known files', n:'Would serve apple-app-site-association and assetlinks.json\nfor universal links'},
+    {c:'Deploy', n:'Ships with the normal web deploy\nVercel does not build the app'},
+  ]},
+  {c:'Zerops worker', n:'The same worker, now also the push sender', side:-1, cls:'agent', k:[
+    {c:'Push sender', n:'Sends through the Expo Push Service when a report reaches AWAITING_APPROVAL\nand when a delivery receipt sets DELIVERED'},
+    {c:'Payload', n:'Ids and a short title only\nNever verdict text or report body'},
+    {c:'Deploy', n:'Ships with the normal worker deploy\nZerops does not build the app'},
+  ]},
+  {c:'Clerk', n:'Identity for the app', side:1, cls:'status', k:[
+    {c:'Clerk Expo SDK', n:'Google and GitHub OAuth, same identities as the web\nSession token stored in expo-secure-store'},
+    {c:'Which key where', n:'The publishable key is an EXPO_PUBLIC_ value in the app\nThe secret key stays on the server'},
+  ]},
+  {c:'Expo Push Service', n:'Delivers the notification to the device', side:-1, cls:'status', k:[
+    {c:'Token registration', n:'The app sends its Expo push token to POST /api/mobile/push-token'},
+    {c:'Receipts', n:'DeviceNotRegistered receipts revoke the stored token'},
+  ]},
+  {c:'EAS', n:'Build, ship and update the app', side:1, cls:'plan', k:[
+    {c:'EAS Build', n:'Development, preview and production profiles'},
+    {c:'EAS Submit', n:'Sends builds to the App Store and Google Play'},
+    {c:'EAS Update', n:'JS-only over-the-air fixes\nGated by a runtime version policy'},
+  ]},
+  {c:'Stores and monitoring', n:'Distribution and optional error reporting', side:-1, cls:'ref', k:[
+    {c:'App Store and Google Play', n:'A native change needs a new store build, not an update'},
+    {c:'Phones on the web', n:'The phone app is iOS and Android only\nOn the web, phones use the responsive desktop app\nLanding, sign-in and submit checked at 390 px;\nreviewer pages behind sign-in not checked'},
+    {c:'Sentry or EAS Insights', n:'Crash and error reporting, optional\nDecide at build time'},
+  ]},
+  {c:'Env in the app', n:'The bundle is public, so it holds almost nothing', side:1, cls:'reporter', k:[
+    {c:'EXPO_PUBLIC_ only', n:'Clerk publishable key and the API base URL'},
+    {c:'Everything else server-side', n:'DATABASE_URL, Supabase service key, TrueForge, MCP and worker secrets\nand the GitHub App key never reach the device'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';
+const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

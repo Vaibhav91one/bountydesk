@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="views" content="desktop mobile">
+<title>BountyDesk design system</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="mindmap.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<script>document.documentElement.dataset.view = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop';</script>
+</head>
+<body>
+<div id="view"><div id="world"><svg id="edges"></svg></div></div>
+<div id="hint">Drag to pan · scroll to zoom · click a group to open or close it · <kbd>0</kbd> fit</div>
+<dialog id="lb"><p id="lbcap"></p><img id="lbimg" alt=""></dialog>
+<script>
+// Node: {c: caption, n?: note, h?: trusted html, k?: children, flow?: arrows between children, drop?: collapsible, cls?: branch color}
+const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
+const sw = (...c) => '<div class="sw">' + c.map(x => '<i style="background:' + x + '"></i>').join('') + '</div>';
+const big = (c) => '<div class="big" style="background:' + c + '"></div>';
+const typeSample = (style, t) => '<p class="tx" style="' + style + '">' + t + '</p>';
+const desktopTree = {c:'Design system', n:'Tokens, type, color, mascot\nDark is the default; add ?theme=light to flip', root:true, mid:true, wrap:3, k:[
+  {c:'Color tokens', n:'oklch, defined once on :root', side:-1, cls:'ref', k:[
+    {c:'Surface', n:'dark  bg 0.145, card 0.178\nlight bg 1, card 1', h:sw('oklch(0.145 0 0)', 'oklch(0.178 0 0)', 'oklch(1 0 0)')},
+    {c:'Ink and muted', n:'dark  ink 0.985, muted 0.708\nlight ink 0.145, muted 0.556', h:sw('oklch(0.985 0 0)', 'oklch(0.708 0 0)', 'oklch(0.145 0 0)', 'oklch(0.556 0 0)')},
+    {c:'Border', n:'dark  oklch(1 0 0 / 10%)\nlight oklch(0.922 0 0)', h:'<div class="big" style="border:1px solid oklch(1 0 0 / 10%)"></div>'},
+    {c:'Brand', n:'brand oklch(0.585 0.233 277.117)\nbrand-soft oklch(0.785 0.115 274.713)', h:sw('oklch(0.585 0.233 277.117)', 'oklch(0.785 0.115 274.713)')},
+    {c:'Radius', n:'Card rounded-lg 0.625rem\nButton and Input rounded-md 0.5rem\nOnly the site header CTA is rounded-full', h:'<div class="big" style="border-radius:0.625rem;background:oklch(0.178 0 0)"></div>'},
+  ]},
+  {c:'Type scale', n:'Inter for everything\nGeist Mono for code and IDs', side:-1, cls:'ref', k:[
+    {c:'Display', n:'4rem (64px), 600, line-height 1.05\ntracking -0.03em (shown scaled down)', h:typeSample('font:600 28px/1.05 Inter,sans-serif;letter-spacing:-.03em', 'Triage')},
+    {c:'Title', n:'1.625rem (26px), 500', h:typeSample('font:500 26px Inter,sans-serif', 'Case file')},
+    {c:'Heading', n:'1rem (16px), 600', h:typeSample('font:600 16px Inter,sans-serif', 'Drafted comment')},
+    {c:'Lead', n:'1rem (16px), 400', h:typeSample('font:400 16px Inter,sans-serif', 'Stored XSS in search')},
+    {c:'Body', n:'0.875rem (14px), 400', h:typeSample('font:400 14px Inter,sans-serif', 'Approve the drafted comment')},
+    {c:'Meta', n:'0.8125rem (13px), 400', h:typeSample('font:400 13px Inter,sans-serif;opacity:.7', 'Updated 2 min ago')},
+    {c:'Label', n:'0.6875rem (11px), 500, uppercase', h:typeSample('font:500 11px Inter,sans-serif;letter-spacing:.12em;text-transform:uppercase;opacity:.7', 'Needs you')},
+    {c:'Mono', n:'Geist Mono for IDs, hashes, notes that are IDs', h:typeSample('font:400 12px "Geist Mono",monospace', 'GHSA-q5pc-r86m-4jjh')},
+  ]},
+  {c:'Phase colors', n:'One per report lifecycle phase (dark values)', side:1, cls:'plan', k:[
+    {c:'triaging', n:'oklch(0.7 0.15 250)', h:big('oklch(0.7 0.15 250)')},
+    {c:'reproducing', n:'oklch(0.75 0.13 195)', h:big('oklch(0.75 0.13 195)')},
+    {c:'analysis', n:'oklch(0.72 0.18 330)', h:big('oklch(0.72 0.18 330)')},
+    {c:'approval', n:'oklch(0.8 0.15 75)', h:big('oklch(0.8 0.15 75)')},
+    {c:'delivered', n:'oklch(0.72 0.16 150)', h:big('oklch(0.72 0.16 150)')},
+    {c:'closed', n:'oklch(0.55 0 0)', h:big('oklch(0.55 0 0)')},
+  ]},
+  {c:'Agent Bounty', n:'The mascot. One pose per product state', side:1, cls:'reporter', k:[
+    {c:'Pipeline', n:'States a report moves through', drop:true, k:[
+      {c:'ingest', n:'TRIAGING', h:m('ingest')},
+      {c:'scanning', n:'ANALYSIS_ONLY, also the verdict row', h:m('scanning')},
+      {c:'reproducing', n:'REPRODUCING', h:m('reproducing')},
+      {c:'canary-found', n:'No report state; login page marquee only', h:m('canary-found')},
+      {c:'awaiting-approval', n:'NEEDS_DECISION and AWAITING_APPROVAL', h:m('awaiting-approval')},
+      {c:'delivered', n:'DELIVERING, on its way', h:m('delivered')},
+    ]},
+    {c:'Outcomes and moods', n:'Terminal and ambient states', drop:true, k:[
+      {c:'celebrating', n:'DELIVERED', h:m('celebrating')},
+      {c:'denied', n:'DENIED', h:m('denied')},
+      {c:'out-of-scope', n:'OUT_OF_SCOPE', h:m('out-of-scope')},
+      {c:'infra-hiccup', n:'Lifecycle investigation row when reproduction was skipped', h:m('infra-hiccup')},
+      {c:'greeting', n:'Chat header of the approval dialog only', h:m('greeting')},
+      {c:'idle', n:'CANCELLED and EXPIRED', h:m('idle')},
+      {c:'chilling', n:'No report state; login page marquee only', h:m('chilling')},
+      {c:'cowboy', n:'No report state; login page marquee only', h:m('cowboy')},
+    ]},
+  ]},
+]};
+const mobileTree = {c:'Design system (mobile)', n:'PROPOSED, NOT BUILT\nVariant C, iOS and Android only\nTokens from screens/c.css', root:true, mid:true, wrap:3, k:[
+  {c:'Color tokens', n:'Brand, phase and destructive match desktop\nSurfaces are a touch lighter in dark\nDark by default, ?theme=light flips them', side:-1, cls:'ref', k:[
+    {c:'Surface', n:'dark  bg 0.145, card 0.178 with a 10% hairline, raised 0.269\nlight bg 0.965, card 1, raised 0.94\nsame card and border as desktop', h:sw('oklch(0.145 0 0)', 'oklch(0.178 0 0)', 'oklch(0.269 0 0)', 'oklch(0.965 0 0)', 'oklch(1 0 0)')},
+    {c:'Ink', n:'dark  fg 0.985, muted 0.72, faint 0.56\nlight fg 0.145, muted 0.5, faint 0.62', h:sw('oklch(0.985 0 0)', 'oklch(0.72 0 0)', 'oklch(0.56 0 0)', 'oklch(0.145 0 0)', 'oklch(0.5 0 0)')},
+    {c:'Brand and destructive', n:'brand oklch(0.585 0.233 277.117)\nbrand-soft 0.785 0.115 274.713 (dark), 0.457 0.24 277 (light)\nred 0.704 0.191 22.216 (dark), 0.577 0.245 27.325 (light)', h:sw('oklch(0.585 0.233 277.117)', 'oklch(0.785 0.115 274.713)', 'oklch(0.704 0.191 22.216)', 'oklch(0.577 0.245 27.325)')},
+    {c:'Phase hues, dark', n:'triaging, reproducing, analysis,\napproval, delivered, closed', h:sw('oklch(0.7 0.15 250)', 'oklch(0.75 0.13 195)', 'oklch(0.72 0.18 330)', 'oklch(0.8 0.15 75)', 'oklch(0.72 0.16 150)', 'oklch(0.55 0 0)')},
+    {c:'Phase hues, light', n:'Darker inks so the pill label reads:\ntriaging 0.52, reproducing 0.55, analysis 0.53,\napproval 0.62, delivered 0.52, closed 0.55', h:sw('oklch(0.52 0.17 250)', 'oklch(0.55 0.13 195)', 'oklch(0.53 0.2 330)', 'oklch(0.62 0.15 75)', 'oklch(0.52 0.15 150)', 'oklch(0.55 0 0)')},
+    {c:'Android tonal', n:'Material 3 tonal surface under the glass pills\ndark  tonal 0.3 0.03 277, active 0.42 0.09 277\nlight tonal 0.92 0.03 277, active 0.84 0.07 277', h:sw('oklch(0.3 0.03 277)', 'oklch(0.42 0.09 277)', 'oklch(0.92 0.03 277)', 'oklch(0.84 0.07 277)')},
+  ]},
+  {c:'Type scale', n:'Inter, Geist Mono for ids and hashes\nAll sizes in rem, so Large text (root 125%) scales them', side:-1, cls:'ref', k:[
+    {c:'Screen title', n:'1.75rem (28), 700, tracking -0.03em\nBody is 1.0625rem (17)', h:typeSample('font:700 28px Inter,sans-serif;letter-spacing:-.03em', 'Queue')},
+    {c:'Section header', n:'1.25rem (20), 600, with a chevron\nand a count in muted 0.9375rem', h:typeSample('font:600 20px Inter,sans-serif;letter-spacing:-.02em', 'Needs you')},
+    {c:'Body and row title', n:'1.0625rem (17), 400 for body, 500 for row titles\nCard title 1.1875rem (19), 600', h:typeSample('font:500 17px Inter,sans-serif', 'Stored XSS in search results')},
+    {c:'Secondary', n:'0.9375rem (15)\nHeader meta, card footer, chip and field labels', h:typeSample('font:400 15px Inter,sans-serif;opacity:.7', 'Updated 12 min ago')},
+    {c:'Meta', n:'0.8125rem (13), muted\nRow subtitle, pill label, footnote', h:typeSample('font:400 13px Inter,sans-serif;opacity:.7', 'BD-1042')},
+    {c:'Mono', n:'Geist Mono, 0.8125 to 0.875rem\nContent hash, ids, commit', h:typeSample('font:400 13px "Geist Mono",monospace', 'sha256:9f2c61ab07d4')},
+    {c:'Tab label', n:'0.75rem (12), 500\nThe smallest text in the kit', h:typeSample('font:500 12px Inter,sans-serif;opacity:.7', 'Reports')},
+  ]},
+  {c:'Radius', n:'Large and round: cards are not squared off', side:1, cls:'plan', k:[
+    {c:'Card 24', n:'Cards, search, the more menu is 22\nFields 20, bubbles 20', h:'<div class="big" style="border-radius:24px;background:oklch(0.5 0 0)"></div>'},
+    {c:'Pill and button 26 to 36', n:'Buttons 26, chips 22, tab pill 32\nFloating bar 36, sheet top 36', h:'<div class="big" style="border-radius:36px;background:oklch(0.5 0 0)"></div>'},
+    {c:'Android 8 to 16', n:'Menu 12, toast 8, Review next FAB 16\nSheet top 28, floating bar 30', h:'<div class="big" style="border-radius:16px;background:oklch(0.5 0 0)"></div>'},
+  ]},
+  {c:'Touch targets', n:'44 pt on iOS, 48 dp on Android', side:1, cls:'status', k:[
+    {c:'Met', n:'Icon buttons 48, primary button 52\nRows 56, menu items 54, sheet rows 64\nTab pill 64, Review next 64 by 64\nSheet X and check 52, code boxes 48 by 58'},
+    {c:'Platform step', n:'Chips, segmented items and the section more\nbutton are 44 on iOS, 48 on Android'},
+    {c:'Known gap', n:'The switch is 51 by 31, native size\nThe whole settings row is the target\nA bare switch would need hitSlop'},
+  ]},
+  {c:'Phase pills', n:'The state of a report, always named', side:1, cls:'plan', k:[
+    {c:'Anatomy', n:'Tint of the phase hue at 16 percent\nFull-hue label, 6 px dot, 0.8125rem 600', h:'<span style="display:inline-flex;align-items:center;gap:6px;font:600 13px Inter,sans-serif;padding:6px 11px;border-radius:99px;color:oklch(0.8 0.15 75);background:oklch(0.8 0.15 75 / 16%)"><i style="width:6px;height:6px;border-radius:50%;background:currentColor"></i>Approval</span>'},
+    {c:'Labels', n:'Approval, Reproducing, Analysis, Triaging,\nDelivered, Closed\nAwaiting approval on the larger cards'},
+  ]},
+  {c:'Glass and surfaces', n:'Floating chrome over the scroll area', side:-1, cls:'agent', k:[
+    {c:'Glass pill', n:'Blur 24 px, saturate 180 percent, 1 px edge\nTab pill, bell and more pill, back button,\naction pill, floating bar, composer'},
+    {c:'Soft edges', n:'A fade over the top and bottom of the scroll\narea keeps rows from cutting under the pills'},
+    {c:'Reduced transparency', n:'Glass, menu and sheet drop the blur\nand use the opaque card color'},
+    {c:'Never nested', n:'A card never sits in a card\nGroups are separated by whitespace'},
+  ]},
+  {c:'iOS and Android', n:'Same layout and tokens, two renderings\n?platform=ios (default) | android', side:1, cls:'reporter', k:[
+    {c:'iOS', n:'Translucent glass pills, 55 px device radius\nDynamic island, large back button in a round glass\nGrabber on sheets, menu 22 radius\n51 by 31 switch, push slide 350 ms'},
+    {c:'Android (Material 3)', n:'.pf-android rules in c.css\nBack is an arrow in a round tonal button\nTab pill becomes a Material 3 floating toolbar: tonal\nsurface, active item a filled pill\nReview next is a 16 dp FAB, sheet 28 radius, 32 by 4 handle\nSnackbar-style toast, menu 12 radius, fade through'},
+    {c:'Status bar', n:'iOS 54 px with island\nAndroid 40 px with a punch hole'},
+  ]},
+  {c:'Mapping to code', n:'How the tokens and parts reach the app', side:-1, cls:'agent', k:[
+    {c:'@expo/ui', n:'Host, Column, Row, List and Section,\nButton, Text, Picker, Switch\nSwiftUI on iOS, Compose on Android'},
+    {c:'StyleSheet', n:'Tokens, type and radius as plain values\nfor the parts @expo/ui does not cover\nThe theme module shape is not decided'},
+    {c:'Native fallback', n:'SwiftUI or Jetpack Compose directly only\nwhere the universal layer lacks a control'},
+    {c:'Phones on the web', n:'No web build of the phone app\nOn the web, phones use the responsive desktop app\nLanding, sign-in and submit checked at 390 px\nReviewer pages behind sign-in not checked'},
+  ]},
+]};
+const VIEW = new URLSearchParams(location.search).get('view') === 'mobile' ? 'mobile' : 'desktop'; const tree = VIEW === 'mobile' ? mobileTree : desktopTree;
+</script>
+<script src="mindmap.js"></script>
+<script src="site-nav.js"></script>
+</body>
+</html>

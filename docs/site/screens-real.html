@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Real app screenshots</title>
+<link rel="icon" href="assets/logo-tick.svg">
+<link rel="stylesheet" href="doc.css">
+<script>if (new URLSearchParams(location.search).get('theme') === 'light') document.documentElement.classList.add('light');</script>
+<style>
+  main { max-width: 1320px; }
+  section { margin-top: 36px; }
+  section h2 { margin: 0 0 12px; font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 24px; }
+  .shot { display: flex; flex-direction: column; gap: 10px; }
+  .shot img { width: 100%; aspect-ratio: 1440 / 900; object-fit: cover; object-position: top; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); cursor: zoom-in; display: block; background: var(--card); }
+  .shot b { font-size: 15px; } .shot b span { color: var(--muted); font-family: var(--mono); font-size: 12.5px; margin-right: 6px; font-weight: 500; }
+  .shot small { display: block; color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+  table.cov { width: 100%; max-width: 860px; border-collapse: separate; border-spacing: 0; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; font-size: 14px; }
+  table.cov th, table.cov td { text-align: left; padding: 8px 14px; border-bottom: 1px solid var(--border); }
+  table.cov th { color: var(--muted); font-weight: 600; font-size: 12.5px; }
+  table.cov tr:last-child td { border-bottom: 0; }
+  table.cov td.c, table.cov th.c { text-align: center; }
+  table.cov code { font-family: var(--mono); font-size: 13px; }
+  .yes { color: var(--delivered); } .no { color: var(--muted); }
+  ul.todo { max-width: 860px; color: var(--muted); } ul.todo li { margin: 6px 0; }
+  dialog { padding: 0; border: 0; border-radius: var(--radius); max-height: 94vh; max-width: 94vw; overflow: auto; background: var(--card); }
+  dialog img { display: block; max-width: 92vw; max-height: 92vh; } dialog::backdrop { background: rgb(0 0 0 / 70%); }
+</style>
+</head>
+<body>
+<main>
+<h1>Real app screenshots</h1>
+<p>Screens of the live desktop app, captured from production (app.bountydesk.vaibhav.quest and the landing on bountydesk.vaibhav.quest) in Chrome at 1440 x 900 on 8 October 2026. The mobile column points at the proposed phone screen for the same job; compare with the <a href="screens.html">All screens</a> page.</p>
+
+<section><h2>Coverage</h2>
+<table class="cov">
+<tr><th>Route</th><th>Name</th><th class="c">Captured</th><th>Mobile</th></tr>
+<tr><td><code>/</code></td><td>Landing</td><td class="c yes">yes</td><td class="no">none</td></tr>
+<tr><td><code>/login</code></td><td>Sign in</td><td class="c yes">yes</td><td><a href="screens/m2.html">M2</a></td></tr>
+<tr><td><code>/not-authorized</code></td><td>Not authorized</td><td class="c yes">yes</td><td><a href="screens/m3.html">M3</a></td></tr>
+<tr><td><code>/submit</code></td><td>Submit a report</td><td class="c yes">yes</td><td><a href="screens/m20.html">M20</a>, <a href="screens/m21.html">M21</a></td></tr>
+<tr><td><code>/privacy</code></td><td>Privacy policy</td><td class="c yes">yes</td><td><a href="screens/m24.html">M24</a></td></tr>
+<tr><td><code>/terms</code></td><td>Terms of service</td><td class="c yes">yes</td><td><a href="screens/m25.html">M25</a></td></tr>
+<tr><td><code>/home</code></td><td>Home</td><td class="c no">sign-in</td><td><a href="screens/m4.html">M4</a></td></tr>
+<tr><td><code>/board</code></td><td>Review queue</td><td class="c no">sign-in</td><td><a href="screens/m5.html">M5</a></td></tr>
+<tr><td><code>/reports</code></td><td>Reports</td><td class="c no">sign-in</td><td><a href="screens/m6.html">M6</a></td></tr>
+<tr><td><code>/reports/[id]</code></td><td>Case file</td><td class="c no">sign-in</td><td><a href="screens/m7.html">M7</a> to <a href="screens/m11.html">M11</a>, <a href="screens/m26.html">M26</a></td></tr>
+<tr><td><code>/reports/upload</code></td><td>Submit a target</td><td class="c no">sign-in</td><td><a href="screens/m28.html">M28</a></td></tr>
+<tr><td><code>/review</code></td><td>Redirects to the review queue (<code>/board</code>)</td><td class="c no">redirect</td><td>none (signing is <a href="screens/m11.html">M11</a> to <a href="screens/m13.html">M13</a> on the case file)</td></tr>
+<tr><td><code>/connections</code></td><td>Connections</td><td class="c no">sign-in</td><td><a href="screens/m14.html">M14</a>, <a href="screens/m15.html">M15</a>, <a href="screens/m27.html">M27</a></td></tr>
+<tr><td><code>/integrations</code></td><td>Integrations</td><td class="c no">sign-in</td><td><a href="screens/m16.html">M16</a></td></tr>
+<tr><td><code>/integrations/[id]</code></td><td>Email access</td><td class="c no">sign-in</td><td><a href="screens/m17.html">M17</a>, <a href="screens/m18.html">M18</a></td></tr>
+<tr><td><code>/settings</code></td><td>Settings</td><td class="c no">sign-in</td><td><a href="screens/m19.html">M19</a></td></tr>
+</table>
+</section>
+
+<section><h2>Public pages · Chrome, 1440 x 900</h2>
+<div class="grid" id="grid"></div>
+</section>
+
+<section><h2>Not captured yet</h2>
+<ul class="todo">
+<li>Every reviewer route (<code>/home</code>, <code>/board</code>, <code>/reports</code>, the case file, <code>/reports/upload</code>, <code>/connections</code>, <code>/integrations</code>, <code>/settings</code>) sits behind Clerk sign-in, and the capture browser had no session. They need a signed-in reviewer to capture. <code>/review</code> is only a redirect to <code>/board</code>, so it has no screen of its own.</li>
+<li><code>/sso-callback</code> is a redirect with no screen of its own.</li>
+</ul>
+</section>
+</main>
+<dialog id="lb"><img id="lbimg" alt=""></dialog>
+<script>
+  const SHOTS = [
+    ['/', 'Landing', 'landing', 'Hero, the live verdict card, hackathon banner'],
+    ['/login', 'Sign in', 'login', 'GitHub and Google through Clerk'],
+    ['/not-authorized', 'Not authorized', 'not-authorized', 'Signed in but not on the reviewer allowlist'],
+    ['/submit', 'Submit a report', 'submit', 'Public upload form, verdict goes to a confirmed email'],
+    ['/privacy', 'Privacy policy', 'privacy', 'Privacy policy (#279)'],
+    ['/terms', 'Terms of service', 'terms', 'Terms of service (#279)'],
+  ];
+  const grid = document.getElementById('grid');
+  for (const [route, name, file, note] of SHOTS) {
+    const d = document.createElement('div'); d.className = 'shot';
+    const src = 'screenshots/desktop/' + file + '.png';
+    d.innerHTML = '<img src="' + src + '" data-full="' + src + '" alt="' + name + '" loading="lazy">'
+      + '<div><b><span>' + route + '</span>' + name + '</b><small>' + note + '</small></div>';
+    grid.appendChild(d);
+  }
+  document.querySelectorAll('.shot img').forEach(im => { im.onclick = () => { lbimg.src = im.dataset.full; lb.showModal(); }; });
+  lb.onclick = () => lb.close();
+</script>
+<script src="site-nav.js"></script>
+</body>
+</html>
