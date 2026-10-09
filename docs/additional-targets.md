@@ -8,8 +8,8 @@ the recipe an operator needs to build and register the image, which is the state
 DVWA were in before their snapshots were built.
 
 DVWA's image being built does not by itself make the target ready for a verdict: its recipe
-still carries `oracleReady: false` (see the next section), because the orchestrator gap below
-(form-encoded bodies, an authenticated session) is still open. Building and registering the
+still carries `oracleReady: false` (see the next section; dsvw-sqli is the one exception),
+because the orchestrator gap below (form-encoded bodies, an authenticated session) is still open. Building and registering the
 image was the harder, infrastructure half; closing the orchestrator gap is separate work.
 
 The registry entries live in `lib/targets/registry.ts`, the recipes in
@@ -38,17 +38,27 @@ the same structural reason once that target is built. DSVW is a single Python fi
 canonical image, and the Log4Shell lab ships its own Dockerfile, so both of those are built from
 source.
 
-## These four cannot produce a verdict, by construction
+## Three of these four cannot produce a verdict, by construction
 
 Documentation alone would not stop a future operator who builds a snapshot and seeds one of these
 profiles from getting a silently wrong verdict, so the block is structural rather than written.
-Each of the four recipes carries `oracleReady: false` (see the field's doc in
+The WebGoat, DVWA and Log4Shell recipes carry `oracleReady: false` (see the field's doc in
 `lib/reproduction/types.ts`), and `authorizeReproductionTarget` treats a not-ready recipe exactly
 as it treats a missing one: `NO_APPROVED_ORACLE`. Since authorization is the single gate every
-reproduction run passes through, a run against any of these four resolves `ANALYSIS_ONLY` today no
+reproduction run passes through, a run against any of these three resolves `ANALYSIS_ONLY` today no
 matter what the app returns. A false `REPRODUCED` is impossible until someone deliberately removes
 the flag, and removing it is the same act as closing the gap below. juice-shop's recipes carry no
 flag, so they stay ready and unchanged.
+
+`dsvw-sqli` is the exception: it is `oracleReady: true`. The flag is read only by
+`authorizeReproductionTarget`, whose only caller is `createReproducer` in
+`lib/sandbox/reproduce.ts`, and no live path imports that (only tests do). The live verdict path is
+the agent's own `probe_target` investigation, which does not run the canary oracle, so the oracle's
+gap cannot reach a verdict today. The gap itself is open: canary substitution happens only in POST
+bodies, so a GET exploit such as DSVW's would send a literal `{{canary}}`, and with a clean negative
+control `decideOutcome` would return a false `NOT_REPRODUCED`. That stays open until #343. Before
+`reproduce` is wired into any live path, set `oracleReady: false` on `dsvw-sqli`. Any `REPRODUCED`
+the agent draws is still human-approved.
 
 ## Why each recipe is not ready yet, beyond the missing image
 
@@ -179,7 +189,7 @@ done yet for the other three.
    with the real commit, so the constant in the registry does not have to be edited by hand.
 6. Close the orchestrator gap the recipe names: form-encoded bodies for DVWA and WebGoat, path or
    header canary substitution for DSVW and Log4Shell, and an out-of-band oracle for Log4Shell.
-   Then, and only then, mark the recipe ready by removing its `oracleReady: false`. Until that
+   Then, and only then, mark the recipe ready by removing its `oracleReady: false` (dsvw-sqli is already ready, see above). Until that
    flag is gone the run stays `ANALYSIS_ONLY`, which is the correct outcome for a target that
    cannot yet be proven. Flipping the flag without closing the gap is the one thing that would
    reintroduce the false-verdict risk, so it is deliberately a separate, visible edit.
