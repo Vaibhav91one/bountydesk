@@ -59,15 +59,20 @@ The build driver stages three source kinds (`lib/build-onboarding/build-driver.t
 What this does not relax: reproduction still runs in the no-egress sandbox, and the agent still
 reaches the app only through `probe_target` and `probe_target_write`.
 
-A tarball with no Dockerfile at its root (or inside its single wrapping directory) gets a thin
-recipe from `lib/upload/recipe.ts`: a generic node or python base, the reviewer's port and start
-command, and nothing taken from the archive except which manifest files exist. It builds as the
-`agent-authored` plan and is pinned on the archive digest like any other archive. When no recipe
-can be authored, nothing is built and the report ends `ANALYSIS_ONLY` on the static review.
+A tarball with no Dockerfile at its root (or inside its single wrapping directory), and any git
+URL, goes to the onboarding agent first (`lib/upload/agent-plan.ts`). The upload gets a
+`target_onboarding` row tied to it by `upload_id` with a synthetic negative `repo_id`, and the agent's
+`open_build_sandbox` stages the stored material (the archive bytes, or a clone of the validated URL at
+the pinned commit) instead of cloning GitHub. The agent's plan is used only if its base URL and
+readiness path equal what the reviewer approved. If the agent is unavailable or commits nothing usable,
+a tarball gets a thin recipe from `lib/upload/recipe.ts` (a generic node or python base, the reviewer's
+port and start command, nothing taken from the archive except which manifest files exist) and a git
+source keeps the plain Dockerfile plan. Either builds as an `agent-authored` or `dockerfile` plan
+pinned on the archive digest or the commit. When nothing can be built, the report ends `ANALYSIS_ONLY`
+on the static review.
 
-Not built: rotating a connectionless profile (a changed re-bind throws `TargetProfileExistsError`),
-recipes beyond node and python, and a non-GitHub git URL. They are listed in
-`docs/onboarding-follow-ups.md`.
+Not built or not run: a live run of the agent path against Daytona, and private non-GitHub hosts. They
+are listed in `docs/onboarding-follow-ups.md`.
 
 ## Pluggable and ephemeral registry handoff
 
@@ -144,8 +149,8 @@ fragment or port, a repository path of at least two segments, and a host that is
 name (no IP literal, no single-label host, no `.local`, `.internal` and similar). The commit must be
 a full 40-character SHA. The build boundary validates the stored values again before the driver sees
 them. The build clones anonymously, checks out the SHA and fails if `git rev-parse HEAD` differs.
-Private repositories and a git source without a root Dockerfile are not supported yet
-(`docs/onboarding-follow-ups.md`).
+Private repositories are not supported yet. A git source goes to the onboarding agent, which uses the
+root Dockerfile when there is one (`docs/onboarding-follow-ups.md`).
 
 Nothing builds until a reviewer releases the report at the gate with "Build target and run" and
 states the port, readiness path, optional start command and build ecosystem

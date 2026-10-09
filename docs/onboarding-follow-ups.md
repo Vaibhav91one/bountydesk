@@ -9,9 +9,8 @@ each section says what is built and what is still open.
 
 Still open, in one place:
 
-- Recipes for a tarball without a Dockerfile beyond node and python (see below).
-- A non-GitHub git URL without a root Dockerfile, a private one, and a live GitLab clone in Daytona (see below).
 - Deleting images on Docker Hub, and a live run of the orphan image sweep.
+- A live run of the agent-built upload path (a Dockerfile-less archive and a Dockerfile-less GitLab repo), and a private non-GitHub git host (see below).
 - A self-hosted private registry at multi-tenant scale.
 
 ## Source identity is resolved before customer code runs
@@ -176,25 +175,38 @@ current claim (the upload build passes its lease check); otherwise the drift err
 
 Remaining work:
 
-- A tarball without a Dockerfile builds from a thin recipe the server authors (`lib/upload/recipe.ts`),
-  not from the onboarding agent: that agent's tools resolve a `target_onboarding` row and clone from
-  GitHub, and an upload has neither. The recipe is a generic-base Dockerfile for node or python, from
-  the reviewer's ecosystem or the manifest files in the archive, with the reviewer's port and start
-  command. It runs as the existing `agent-authored` plan, pinned on the archive digest. Any other
-  ecosystem, or python without a start command, authors nothing: the build is skipped and the report
-  gets the static review of its archive (`COULD_NOT_BUILD`). Still open: more ecosystems, and letting
-  the onboarding agent author the recipe for archives the templates do not cover. Not yet run live
-  against Daytona.
+- An upload with no usable Dockerfile goes to the onboarding agent: a tarball with no Dockerfile at
+  its root, and any git URL (its root is only known after a clone). `lib/upload/agent-plan.ts` gives
+  the upload a `target_onboarding` row tied to it by `upload_id` (a check constraint makes a row either
+  a GitHub onboarding with a positive repo id or an upload onboarding with a synthetic negative one),
+  in a state the build-onboarding worker never claims, and runs `runOnboardingAgent` on it with the
+  reviewer's name, base URL, readiness path and start command appended to the turn. The agent's tools
+  stay scoped to that one row by its capability token. `open_build_sandbox` branches on the row: a
+  GitHub row clones the repository, an upload row stages the stored material through `stageSource`,
+  the same function the final build uses. An archive is re-hashed and unpacked; a git source is cloned
+  from its validated URL, checked out at the submitted commit and compared with `git rev-parse HEAD`,
+  with only that clone host added to the egress allow-list. The archive digest or the commit stays
+  the identity anchor.
+- Everything the agent commits is untrusted. `parseBuildPlan` re-validates it, and the plan is used
+  only if its runtime base URL and readiness path equal what the reviewer approved, so the agent
+  cannot move the target to a different port than the one that gets bound. The final build, offline
+  verify and connectionless bind are unchanged.
+- The fallbacks are ordered. If the agent is unavailable, errors, or commits nothing usable, a
+  tarball falls back to the thin recipe the server authors (`lib/upload/recipe.ts`: a generic-base
+  Dockerfile for node or python, with the reviewer's port and start command; a base URL with no
+  explicit port exposes 80), and a git source keeps the plain Dockerfile plan. If neither builds, the
+  build is skipped or fails and the report gets the static review (`COULD_NOT_BUILD`, ending
+  `ANALYSIS_ONLY`).
+- Still open: a live run of a Dockerfile-less archive and a Dockerfile-less GitLab repo through
+  Daytona and the agent has not been done; credentials for a private non-GitHub host; and the agent's
+  egress for a git source whose reviewer ecosystem is `none` is the base set plus the clone host, so
+  it cannot install packages until the reviewer picks an ecosystem.
 - A public non-GitHub git URL (GitLab, Bitbucket, self-hosted) is accepted at intake as a `git`
   material kind: an https URL plus a full 40-character commit SHA (`lib/upload/git-source.ts`). A
   branch, tag or `HEAD` is refused, so the server makes no network call to resolve a ref. The build
-  clones anonymously, checks out the SHA and compares `git rev-parse HEAD` with it, the same driver
-  path a GitHub source takes, and only that one clone host joins the build egress allow-list
-  (`cloneHostOf` in `daytona-build-driver.ts`). The result binds as a connectionless target pinned on
-  the commit. Still open: a git source with no root Dockerfile is not built, because the thin recipe
-  needs the file tree on the server and the clone happens inside the sandbox, so it ends in the static
-  review with no source to read; credentials for a private non-GitHub host; and a live GitLab clone in
-  Daytona, which has not been run.
+  clones anonymously, checks out the SHA and compares `git rev-parse HEAD` with it, and only that one
+  clone host joins the build egress allow-list (`cloneHostOf` in `daytona-build-driver.ts`). The
+  result binds as a connectionless target pinned on the commit.
 
 ## The build egress allowlist is per-ecosystem
 

@@ -1,4 +1,4 @@
-import type { BuildDriver, BuildSource } from "@/lib/build-onboarding/build-driver";
+import type { BuildDriver } from "@/lib/build-onboarding/build-driver";
 import { bindConnectionlessTargetFromBuild } from "@/lib/build-onboarding/connectionless-bind";
 import { and, db, eq, lte, or, report, sql, targetProfile, uploadIntake, type Executor } from "@/lib/db";
 import { safeErrorText } from "@/lib/errors/safe-error";
@@ -7,9 +7,12 @@ import { recordEvent } from "@/lib/reports/lifecycle";
 import { bindTarget } from "@/lib/targets/bind";
 import type { GateAnalysisPayload } from "@/lib/triage/gate";
 
+import { agentBuildPlan, type UploadAgent } from "./agent-plan";
 import { uploadBuildPlan, type ReviewedUploadTarget } from "./gate";
-import { parseGitSource } from "./git-source";
 import { archiveShape, thinRecipePlan } from "./recipe";
+import { uploadBuildSource } from "./source";
+
+export { uploadBuildSource };
 
 /**
  * The loop that turns reviewer-approved upload material into a bound target.
@@ -29,8 +32,8 @@ import { archiveShape, thinRecipePlan } from "./recipe";
 /** A build that must not run, as opposed to one that failed; it is not retried. */
 class UploadBuildSkipped extends Error {}
 
-/** Longer than the build sandbox's 30 minute ttl, so a live build never loses its lease. */
-const LEASE_MINUTES = 45;
+/** Longer than an agent turn (25 minutes) plus the build sandbox's 30 minute ttl, so a live build never loses its lease. */
+const LEASE_MINUTES = 60;
 /** A failed build is retried once, for a transient provider failure; after that it stays failed. */
 const MAX_BUILD_ATTEMPTS = 2;
 
@@ -78,22 +81,6 @@ export async function claim(): Promise<ClaimedUpload | null> {
       .returning();
     return claimed as unknown as ClaimedUpload;
   });
-}
-
-/** The material as a build source. The archive digest was computed from these bytes at intake. */
-export function uploadBuildSource(upload: Pick<ClaimedUpload, "materialKind" | "archive" | "sourceArchiveDigest" | "imageRef" | "imageDigest" | "gitUrl" | "gitCommitSha">): BuildSource {
-  if (upload.materialKind === "image") {
-    if (!upload.imageRef || !upload.imageDigest) throw new Error("image material is incomplete");
-    return { kind: "image", imageRef: upload.imageRef, imageDigest: upload.imageDigest };
-  }
-  if (upload.materialKind === "git") {
-    // Re-validated at the build boundary too: the row is only as trustworthy as the code that wrote it.
-    const git = parseGitSource(upload.gitUrl ?? "", upload.gitCommitSha ?? "");
-    if (!git.ok) throw new Error(`git material is not valid: ${git.reason}`);
-    return { kind: "git", cloneUrl: git.source.cloneUrl, resolvedCommitSha: git.source.commitSha };
-  }
-  if (!upload.archive || !upload.sourceArchiveDigest) throw new Error("archive material is incomplete");
-  return { kind: "archive", archive: Buffer.from(upload.archive), sourceArchiveDigest: upload.sourceArchiveDigest };
 }
 
 /**
@@ -160,7 +147,12 @@ export async function holdsCurrentLease(tx: Executor, upload: ClaimedUpload): Pr
  * A crash can land after the profile was written or after the report was bound, so each step checks
  * for its own result first: rebuilding would produce a new digest that the existing profile refuses.
  */
-async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?: AbortSignal): Promise<string> {
+async function buildAndBind(
+  upload: ClaimedUpload,
+  driver: BuildDriver,
+  signal?: AbortSignal,
+  agent?: UploadAgent,
+): Promise<string> {
   const { definition, ecosystem } = upload.reviewedTarget;
 
   const [bound] = await db
@@ -188,10 +180,25 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
   if (!profileId) {
     const source = uploadBuildSource(upload);
     let plan = uploadBuildPlan({ kind: upload.materialKind, imageRef: upload.imageRef }, ecosystem);
-    // A tarball with no Dockerfile gets a server-authored thin recipe. Without one nothing is built,
-    // and the report ends ANALYSIS_ONLY on the static review like any other failed build.
-    if (source.kind === "archive") {
-      const shape = archiveShape(source.archive);
+    // A tarball with no Dockerfile, or a git URL (its root is only known after a clone), goes to the
+    // onboarding agent. If the agent is unavailable or commits nothing usable, a tarball falls back to
+    // a server-authored thin recipe, and a git source keeps the plain Dockerfile plan. A build that
+    // cannot be made ends ANALYSIS_ONLY on the static review like any other failed build.
+    const shape = source.kind === "archive" ? archiveShape(source.archive) : null;
+    const agentPlan =
+      agent && source.kind !== "image" && (source.kind === "git" || !shape?.hasDockerfile)
+        ? await agentBuildPlan({
+            uploadId: upload.id,
+            reportId: upload.reportId,
+            source,
+            reviewed: upload.reviewedTarget,
+            agent,
+            signal,
+          })
+        : null;
+    if (agentPlan) {
+      plan = agentPlan;
+    } else if (source.kind === "archive" && shape) {
       if (shape.hasDockerfile) {
         // The sandbox extracts a wrapped archive under its directory, so the Dockerfile is found there.
         if (plan.strategy === "dockerfile") plan = { ...plan, buildContext: shape.contextDir };
@@ -229,9 +236,11 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
 export async function buildUploadOnce({
   driver,
   signal,
+  agent,
 }: {
   driver: BuildDriver;
   signal?: AbortSignal;
+  agent?: UploadAgent;
 }): Promise<string | null> {
   if (signal?.aborted) return null;
   const upload = await claim();
@@ -243,7 +252,7 @@ export async function buildUploadOnce({
   }
 
   try {
-    await buildAndBind(upload, driver, signal);
+    await buildAndBind(upload, driver, signal, agent);
     await finish(upload, { state: "BUILT" });
   } catch (error) {
     // A shutdown mid-build leaves the row BUILDING; its lease expires and another claim resumes it.

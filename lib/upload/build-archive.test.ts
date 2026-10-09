@@ -275,3 +275,116 @@ test("a Dockerfile inside the archive's wrapping directory builds with that dire
     analysis: { ensureSession: async () => {}, run: async () => {} },
   });
 });
+
+/** An agent stand-in that commits a Dockerfile the way commit_target_image would. */
+function committingAgent(
+  runtime: { baseUrl: string; readinessPath: string },
+  seen: Array<{ onboardingId: string; instructions?: string }>,
+) {
+  return async (input: { onboardingId: string; repoFullName: string; instructions?: string }) => {
+    seen.push(input);
+    const { parseBuildPlan } = await import("@/lib/build-onboarding/build-plan");
+    const plan = parseBuildPlan({
+      strategy: "agent-authored",
+      ecosystem: "node",
+      dockerfileText: 'FROM node:20\nWORKDIR /app\nCOPY . .\nCMD ["node","server.js"]\n',
+      buildContext: ".",
+      seed: { kind: "none" },
+      runtime: { name: "agent-app", ...runtime },
+    });
+    await dbm.db
+      .update(dbm.targetOnboarding)
+      .set({ buildPlan: plan })
+      .where(dbm.eq(dbm.targetOnboarding.id, input.onboardingId));
+  };
+}
+
+const noDockerfile = () =>
+  tarGz([
+    { name: "package.json", content: '{"name":"app"}\n' },
+    { name: "server.js", content: "1\n" },
+  ]);
+
+async function drain(name: string) {
+  await worker.runOnce(name, { analysis: { ensureSession: async () => {}, run: async () => {} } });
+}
+
+test("a Dockerfile-less tarball is built from the plan the onboarding agent committed", async () => {
+  const reportId = await heldArchiveUpload(noDockerfile());
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+
+  const seen: Array<{ onboardingId: string; instructions?: string }> = [];
+  const driver = fakeDriver();
+  const agent = committingAgent({ baseUrl: "http://localhost:8080", readinessPath: "/health" }, seen);
+  assert.ok(await build.buildUploadOnce({ driver, agent }));
+
+  const { plan } = driver.calls[0];
+  assert.ok(plan.strategy === "agent-authored" && plan.dockerfileText.startsWith("FROM node:20\n"));
+  // The agent is told the reviewer's settings, from the server.
+  assert.match(seen[0].instructions ?? "", /baseUrl http:\/\/localhost:8080/);
+
+  // The agent's handle is an upload onboarding row: tied to the upload, a negative id, never claimable.
+  const upload = await uploadRow(reportId);
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.id, seen[0].onboardingId));
+  assert.equal(row.uploadId, upload.id);
+  assert.ok(row.repoId < 0);
+  assert.equal(row.state, "UPLOAD_AGENT");
+  assert.equal(row.sourceArchiveDigest, upload.sourceArchiveDigest);
+  assert.equal(upload.buildState, "BUILT");
+  await drain("upload-agent-ok");
+});
+
+test("an agent that fails or commits nothing falls back to the thin recipe", async () => {
+  for (const agent of [
+    async () => {
+      throw new Error("trueforge unreachable");
+    },
+    async () => {},
+  ]) {
+    const reportId = await heldArchiveUpload(noDockerfile());
+    await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+    const driver = fakeDriver();
+    assert.ok(await build.buildUploadOnce({ driver, agent }));
+    const { plan } = driver.calls[0];
+    assert.ok(plan.strategy === "agent-authored" && /EXPOSE 8080/.test(plan.dockerfileText));
+    await drain("upload-agent-fallback");
+  }
+});
+
+test("an agent plan for a different port than the reviewer approved is refused", async () => {
+  const reportId = await heldArchiveUpload(noDockerfile());
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  const driver = fakeDriver();
+  const agent = committingAgent({ baseUrl: "http://localhost:9999", readinessPath: "/health" }, []);
+  await build.buildUploadOnce({ driver, agent });
+  const { plan } = driver.calls[0];
+  assert.ok(plan.strategy === "agent-authored" && /EXPOSE 8080/.test(plan.dockerfileText));
+  await drain("upload-agent-port");
+});
+
+test("an archive that has a Dockerfile never reaches the agent", async () => {
+  const reportId = await heldArchiveUpload(tarGz([{ name: "Dockerfile", content: "FROM nginx:1.27\n" }]));
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  const seen: Array<{ onboardingId: string }> = [];
+  const driver = fakeDriver();
+  const agent = committingAgent({ baseUrl: "http://localhost:8080", readinessPath: "/health" }, seen);
+  await build.buildUploadOnce({ driver, agent });
+  assert.equal(seen.length, 0);
+  assert.equal(driver.calls[0].plan.strategy, "dockerfile");
+  await drain("upload-agent-dockerfile");
+});
+
+test("target_onboarding is either a repository onboarding or an upload onboarding", async () => {
+  const reportId = await heldArchiveUpload(noDockerfile());
+  const upload = await uploadRow(reportId);
+  const base = { repoFullName: "x/y", sourceRef: "s" };
+  // An upload row with a positive repo id, and a repository row with a negative one, are both refused.
+  await assert.rejects(dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: 5, uploadId: upload.id }));
+  await assert.rejects(dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: -5 }));
+  await dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: -5, uploadId: upload.id });
+  // One onboarding row per upload.
+  await assert.rejects(dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: -6, uploadId: upload.id }));
+});

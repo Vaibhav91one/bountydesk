@@ -33,7 +33,7 @@ export class OnboardingAgentError extends Error {
   }
 }
 
-function buildOnboardingTurnMessage(repoFullName: string, capability: string): string {
+function buildOnboardingTurnMessage(repoFullName: string, capability: string, instructions?: string): string {
   return [
     `Onboard the repository ${repoFullName} as a BountyDesk reproduction target.`,
     "",
@@ -44,6 +44,7 @@ function buildOnboardingTurnMessage(repoFullName: string, capability: string): s
     "request returns real content, then call commit_target_image. If the repository cannot be built",
     "into one bootable offline image, call mark_unsandboxable with a specific reason. Do not reply",
     "with prose instead of a tool call; the outcome is the tool call you make.",
+    ...(instructions ? ["", instructions] : []),
   ].join("\n");
 }
 
@@ -61,7 +62,8 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export type RunOnboardingAgentInput = { onboardingId: string; repoFullName: string };
+/** `instructions` is server-authored text appended to the turn (an upload's reviewed settings). */
+export type RunOnboardingAgentInput = { onboardingId: string; repoFullName: string; instructions?: string };
 
 export async function runOnboardingAgent(
   client: TrueForgeClient,
@@ -79,7 +81,7 @@ export async function runOnboardingAgent(
   try {
     const { turnId } = await client.createTurn(
       sessionId,
-      [{ type: "user.message", content: buildOnboardingTurnMessage(input.repoFullName, capability) }],
+      [{ type: "user.message", content: buildOnboardingTurnMessage(input.repoFullName, capability, input.instructions) }],
       { signal: opts.signal },
     );
 

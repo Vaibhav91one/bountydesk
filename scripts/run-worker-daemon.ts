@@ -31,6 +31,7 @@ import { onboardOnce, sweepOrphanImages, sweepOrphanSnapshots } from "@/lib/buil
 import { resolveRegistry } from "@/lib/build-onboarding/registry";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
+import { runOnboardingAgent } from "@/lib/build-onboarding/onboarding-agent";
 import { buildUploadOnce } from "@/lib/upload/build";
 import {
   reviewerChatEnabled,
@@ -292,7 +293,12 @@ async function main(): Promise<void> {
       // A reviewer-approved upload's target build. Its claim re-takes an expired lease itself, so
       // there is nothing to sweep.
       name: "upload-build",
-      claimOnce: (signal) => buildUploadOnce({ driver: buildDriver, signal }),
+      claimOnce: (signal) =>
+        buildUploadOnce({
+          driver: buildDriver,
+          signal,
+          agent: (input) => runOnboardingAgent(trueForgeClient, input, { signal }),
+        }),
       sweepOnce: async () => null,
     },
     ...(reviewerChatEnabled()
