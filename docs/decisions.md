@@ -995,3 +995,60 @@ Delivery rides the email transport: the verdict goes to the contact only if it i
 `verified_sender`, re-checked at approval and at send, and `DELIVERED` needs Resend's
 `email.delivered` receipt. An unconfirmed contact is refused at both points. Nothing expires an
 unconfirmed upload report; it waits for a reviewer like any held report.
+
+### Q33: Ownership verification for live-target testing (design record, not yet built)
+
+Black-box reproduction (#325) and the pentest agent (#327) act on a live host, not a pinned
+snapshot. Everything this document has said about a bound target so far, from Q18's frozen
+Juice Shop target to Q30's connectionless profiles, answers "which source may this agent clone
+and run," never "who controls this production URL." A live target needs the second question
+answered before the first one is even relevant, and it needs answering again on every run, not
+once at onboarding. This entry is the design; implementation is tracked at issue #361 and is not
+merged.
+
+**Proof mechanism.** The server mints a high-entropy token on the `TargetProfile` the first time
+an owner claims a live host. The owner proves control with one of two methods: a DNS TXT record
+`bountydesk-verification=<token>` on the host, or a file at `/.well-known/bountydesk.txt`
+containing the token. The file method exists because a target on a shared platform host
+(`*.vercel.app` and the like) cannot edit DNS for its own name. A DNS proof on the apex covers
+subdomains only if the owner opts in when claiming it; a file proof covers only the exact host it
+was placed on. Neither method is novel: it is the same pattern Detectify, Aikido, Astra, AWS
+Security Agent, F5 Web App Scanning and Snyk/Probely all use for the same problem.
+
+**Re-verification, not a one-time gate.** The proof is checked again immediately before every
+live run starts, and expires after 30 days whether or not it was used. A domain that changed
+hands, or an owner who removed the record after an engagement ended, cannot be tested on stale
+trust from an earlier claim. This is the same shape as Q16's rule that authorization is checked
+again right before a drafted verdict is written, not only at intake.
+
+**What counts as a bound target, amended.** Everywhere else in this document, "no bound target,
+no REPRODUCED" (`AGENTS.md`) means a `TargetProfile` built from a connected repository or a
+connectionless source. For a live host, the amendment is: a `TargetProfile` with a current,
+re-verified ownership proof also counts as bound, and an expired or missing proof means the
+target is not bound, exactly as a revoked repository grant means it is not bound today. The
+authorization check this document has described throughout, re-run just before a drafted verdict
+is written, applies unchanged; only the definition of what makes the target authorized gains a
+second form.
+
+**Resolve, then pin.** The server resolves the proven host itself rather than trusting a client-
+supplied IP, refuses private, loopback, link-local and cloud-metadata addresses at resolution
+time, and pins the resolved address in the sandbox's egress allowlist for the run. Redirects that
+would leave the pinned address are blocked. This is DNS-rebinding defense, not ownership proof;
+the two are separate controls and both are required.
+
+**The write-probe auto-approve does not extend here.** `autoApproveWriteProbe`
+(`lib/agent-sessions/poller.ts`) allows `probe_target_write` unconditionally today because its
+only reachable network is the offline reproduction sandbox, torn down after the run, with nothing
+outside it for a human to protect (see the comment at its call site, and Q16). A live target
+breaks that premise: `probe_target_write` against a live host has effects outside the sandbox
+that a human review could prevent. A live-target session must route `probe_target_write` through
+the same human-gated path `publish_verdict` already uses, not the auto-approve path. This is the
+one point where live-target mode changes an existing control rather than adding a new one.
+
+**Account gating and operational controls.** Live-target mode is a hosted-only, paid-tier
+capability; a self-hosted copy of the AGPL core has no path to it without a call-home ownership
+check it cannot forge locally. Delivery also needs, before #325 or #327 write any code: a kill
+switch per run, a request-rate cap, a full request log through the egress proxy, a deny-list for
+government, military and large-platform domains, and immediate proof revocation on an abuse
+report. None of this is built. #325 and #327 do not start until this entry's mechanism and the
+write-probe change above are implemented and tested.
