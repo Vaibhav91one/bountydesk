@@ -144,6 +144,17 @@ test("the route refuses an anonymous caller and serves the diff as an attachment
   assert.match(ok.headers.get("content-disposition") ?? "", /^attachment; filename=".+\.diff"$/);
   assert.match(await ok.text(), /\+const q = db\.prepare/);
 
+  // A later revision without a patch supersedes the older one, whose patch must stop being served.
+  await dbm.db.insert(dbm.verdict).values({
+    reportId,
+    outcome: "ANALYSIS_ONLY",
+    summary: "s2",
+    payload: "p2",
+    contentHash: `hash-rev2-${reportId}`,
+    revision: 2,
+  });
+  assert.equal((await call()).status, 404);
+
   const none = await seedVerdict("ANALYSIS_ONLY", { target: true });
   const missing = await route.GET(new Request("http://x"), { params: Promise.resolve({ id: none.reportId }) });
   assert.equal(missing.status, 404);

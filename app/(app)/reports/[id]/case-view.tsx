@@ -192,7 +192,10 @@ export function CaseView({
                 Export full document
               </a>
             ) : null}
-            {status.artifacts.some((art) => art.kind === "remediation-patch") ? (
+            {status.artifacts.some(
+              (art) =>
+                art.kind === "remediation-patch" && art.verdictRevision === status.verdict?.revision,
+            ) ? (
               <a
                 href={`/api/reports/${reportId}/remediation-patch`}
                 className="text-meta text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
