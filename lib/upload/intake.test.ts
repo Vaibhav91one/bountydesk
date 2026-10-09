@@ -197,6 +197,26 @@ test("the form refuses missing fields, wrong file types, oversize files and mixe
   assert.equal((await parse({ body: "x".repeat(CONFIG.maxBytes + 1) })).ok, false);
 });
 
+test("git material is parsed into a pinned source and refused when unsafe or mixed", async () => {
+  const sha = "1234567890abcdef".repeat(2) + "12345678";
+  assert.ok((await parse({ gitUrl: "https://bitbucket.org/team/app", gitCommit: sha })).ok);
+  const parsed = await parse({ gitUrl: "https://gitlab.com/g/p/", gitCommit: sha });
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.submission.material, { kind: "git", gitUrl: "https://gitlab.com/g/p", gitCommitSha: sha });
+
+  for (const gitUrl of ["http://gitlab.com/g/p", "https://u:p@gitlab.com/g/p", "https://10.0.0.1/g/p", "https://localhost/g/p"]) {
+    assert.equal((await parse({ gitUrl, gitCommit: sha })).ok, false, gitUrl);
+  }
+  for (const gitCommit of ["", "abc1234", "main", "HEAD"]) {
+    assert.equal((await parse({ gitUrl: "https://gitlab.com/g/p", gitCommit })).ok, false, gitCommit);
+  }
+  assert.equal((await parse({ gitUrl: "https://gitlab.com/g/p" })).ok, false);
+  assert.equal(
+    (await parse({ gitUrl: "https://gitlab.com/g/p", gitCommit: sha, dockerfile: new Blob(["FROM alpine\n"]) })).ok,
+    false,
+  );
+});
+
 test("a prebuilt image from a registry outside the allowlist is refused", async () => {
   const refused = await parse({ imageRef: "evil.example.com/team/app:1", imageDigest: DIGEST });
   assert.deepEqual(refused, {

@@ -7,8 +7,10 @@ import type { Sandbox } from "@/lib/sandbox/daytona";
 
 import { onboardingSnapshotImageRef, type BuildInput, type BuildSource } from "./build-driver";
 import {
+  cloneHostOf,
   createDaytonaBuildDriver,
   dockerEnvLine,
+  egressAllowList,
   imageNameFromRef,
   injectProxyTrust,
   repoSlug,
@@ -327,4 +329,18 @@ test("a custom PREBUILT_IMAGE_REGISTRIES host is admitted by the driver and join
     if (saved === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
     else process.env.PREBUILT_IMAGE_REGISTRIES = saved;
   }
+});
+
+test("an explicit git source adds only its own clone host to the build egress allow-list", () => {
+  const source = { kind: "git" as const, cloneUrl: "https://gitlab.com/group/app.git", resolvedCommitSha: "b".repeat(40) };
+  const base = { repoFullName: "upload/x", sourceRef: "upload:x", plan: PLAN };
+  assert.deepEqual(resolveBuildSource({ ...base, source }), source);
+  assert.equal(cloneHostOf(source.cloneUrl), "gitlab.com");
+  assert.ok(egressAllowList(PLAN, cloneHostOf(source.cloneUrl)).includes("gitlab.com"));
+  assert.ok(!egressAllowList(PLAN).includes("gitlab.com"), "GitLab is not allowed by default");
+  assert.equal(cloneHostOf("http://gitlab.com/g/p"), undefined);
+  assert.throws(
+    () => resolveBuildSource({ ...base, source: { ...source, resolvedCommitSha: "main" } }),
+    /40-character commit SHA/,
+  );
 });

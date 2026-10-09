@@ -177,7 +177,12 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
       const registry = resolveRegistry();
       // A prebuilt image may live on a registry outside the base allow-list; its host comes from the
       // validated ref, never from the plan or anything a reporter sent.
-      const allowList = egressAllowList(plan, source.kind === "image" ? registryHostOf(source.imageRef) : undefined);
+      // An explicit git source (not the GitHub App clone) adds its own clone host, so a GitLab or
+      // Bitbucket build can reach exactly that one extra domain. The host was validated at intake.
+      const allowList = egressAllowList(
+        plan,
+        source.kind === "image" ? registryHostOf(source.imageRef) : source.kind === "git" ? cloneHostOf(source.cloneUrl) : undefined,
+      );
 
       const slug = repoSlug(input.repoFullName);
       const imageName = `${registry.namespace}/${slug}`;
@@ -831,13 +836,23 @@ async function inspectMeshStartCommand(
 /** Daytona caps the sandbox domain allow-list at this many hosts. */
 const MAX_EGRESS_DOMAINS = 20;
 
-function egressAllowList(plan: BuildPlan, imageRegistryHost?: string): string[] {
+/** The hostname of an https clone URL, or undefined when it is not one. */
+export function cloneHostOf(cloneUrl: string): string | undefined {
+  try {
+    const url = new URL(cloneUrl);
+    return url.protocol === "https:" ? url.hostname.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function egressAllowList(plan: BuildPlan, extraHost?: string): string[] {
   // The per-ecosystem code map is the source of truth; the old global BUILD_EGRESS_ALLOWLIST env is
   // deliberately not unioned in, both because it defeats the per-ecosystem narrowing and because the
   // union blew past Daytona's 20-domain cap. A repo that needs an extra host declares it on the plan.
   const hosts = selectEgressHosts({
     ecosystem: plan.ecosystem,
-    extraEgressHosts: [...(plan.extraEgressHosts ?? []), ...(imageRegistryHost ? [imageRegistryHost] : [])],
+    extraEgressHosts: [...(plan.extraEgressHosts ?? []), ...(extraHost ? [extraHost] : [])],
   });
   if (hosts.length > MAX_EGRESS_DOMAINS) {
     throw new Error(

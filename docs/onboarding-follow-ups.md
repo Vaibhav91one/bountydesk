@@ -10,7 +10,7 @@ each section says what is built and what is still open.
 Still open, in one place:
 
 - Recipes for a tarball without a Dockerfile beyond node and python (see below).
-- Building from a non-GitHub git URL.
+- A non-GitHub git URL without a root Dockerfile, a private one, and a live GitLab clone in Daytona (see below).
 - Sweeping mesh images orphaned by a crashed build, and deleting images on Docker Hub.
 - A self-hosted private registry at multi-tenant scale.
 
@@ -178,8 +178,16 @@ Remaining work:
   gets the static review of its archive (`COULD_NOT_BUILD`). Still open: more ecosystems, and letting
   the onboarding agent author the recipe for archives the templates do not cover. Not yet run live
   against Daytona.
-- A non-GitHub git URL. The `git` source kind accepts any clone URL, but no intake or onboarding path
-  produces one.
+- A public non-GitHub git URL (GitLab, Bitbucket, self-hosted) is accepted at intake as a `git`
+  material kind: an https URL plus a full 40-character commit SHA (`lib/upload/git-source.ts`). A
+  branch, tag or `HEAD` is refused, so the server makes no network call to resolve a ref. The build
+  clones anonymously, checks out the SHA and compares `git rev-parse HEAD` with it, the same driver
+  path a GitHub source takes, and only that one clone host joins the build egress allow-list
+  (`cloneHostOf` in `daytona-build-driver.ts`). The result binds as a connectionless target pinned on
+  the commit. Still open: a git source with no root Dockerfile is not built, because the thin recipe
+  needs the file tree on the server and the clone happens inside the sandbox, so it ends in the static
+  review with no source to read; credentials for a private non-GitHub host; and a live GitLab clone in
+  Daytona, which has not been run.
 
 ## The build egress allowlist is per-ecosystem
 

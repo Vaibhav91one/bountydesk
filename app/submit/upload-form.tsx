@@ -6,7 +6,7 @@ import { OtpInput } from "@/app/(app)/integrations/otp-input";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-type Material = "none" | "archive" | "dockerfile" | "image";
+type Material = "none" | "archive" | "dockerfile" | "image" | "git";
 
 const FIELD = "flex flex-col gap-1.5 text-meta text-foreground";
 
@@ -133,6 +133,7 @@ export function UploadForm() {
           <option value="archive">Source tarball (.tar or .tar.gz with a Dockerfile at its root)</option>
           <option value="dockerfile">A Dockerfile</option>
           <option value="image">A prebuilt image and its digest</option>
+          <option value="git">A public git URL and commit (GitLab, Bitbucket, self-hosted)</option>
         </select>
       </label>
       {material === "archive" ? (
@@ -156,6 +157,18 @@ export function UploadForm() {
           <label className={FIELD}>
             Digest
             <Input name="imageDigest" required placeholder="sha256:..." pattern="sha256:[0-9a-fA-F]{64}" />
+          </label>
+        </>
+      ) : null}
+      {material === "git" ? (
+        <>
+          <label className={FIELD}>
+            Repository URL, https only, such as https://gitlab.com/group/project
+            <Input name="gitUrl" type="url" required maxLength={300} placeholder="https://gitlab.com/group/project" />
+          </label>
+          <label className={FIELD}>
+            Full commit SHA (40 characters; a branch or tag is not accepted)
+            <Input name="gitCommit" required maxLength={40} placeholder="40 hex characters" pattern="[0-9a-fA-F]{40}" />
           </label>
         </>
       ) : null}

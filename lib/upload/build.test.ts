@@ -62,7 +62,12 @@ function fakeDriver(outcome: "ok" | "fail" = "ok"): BuildDriver & { calls: Build
       calls.push(input);
       if (outcome === "fail") throw new Error("docker build exited 1");
       const source = input.source!;
-      const anchor = source.kind === "image" ? source.imageDigest : source.kind === "archive" ? source.sourceArchiveDigest : "";
+      const anchor =
+        source.kind === "image"
+          ? source.imageDigest
+          : source.kind === "archive"
+            ? source.sourceArchiveDigest
+            : source.resolvedCommitSha;
       return {
         imageName: `ghcr.io/ns/${input.repoFullName.replace("/", "-")}`,
         imageDigest: `sha256:${"d".repeat(64)}`,
@@ -72,6 +77,7 @@ function fakeDriver(outcome: "ok" | "fail" = "ok"): BuildDriver & { calls: Build
         buildMarker: anchor,
         buildRecipeDigest: `sha256:${"e".repeat(64)}`,
         ...(source.kind === "archive" ? { sourceArchiveDigest: source.sourceArchiveDigest } : {}),
+        ...(source.kind === "git" ? { resolvedCommitSha: source.resolvedCommitSha } : {}),
       };
     },
   };
@@ -139,6 +145,29 @@ test("a released upload with approved image material builds, binds through the c
     analysis: { ensureSession: async () => {}, run: async ({ reportId: id }) => void (ran = id) },
   });
   assert.equal(ran, reportId);
+});
+
+test("a public git URL builds as a git source pinned on the submitted commit", async () => {
+  const sha = "c0ffee".repeat(6) + "abcd";
+  const reportId = await heldUpload({ gitUrl: "https://gitlab.com/group/sub/app", gitCommit: sha.toUpperCase() });
+  assert.deepEqual(await gate.approveUploadTarget(reportId, "reviewer", TARGET), { ok: true });
+
+  const driver = fakeDriver();
+  assert.ok(await build.buildUploadOnce({ driver }));
+  assert.deepEqual(driver.calls[0].source, {
+    kind: "git",
+    cloneUrl: "https://gitlab.com/group/sub/app",
+    resolvedCommitSha: sha,
+  });
+  assert.equal(driver.calls[0].plan.strategy, "dockerfile");
+  assert.equal((await uploadRow(reportId)).buildState, "BUILT");
+  assert.ok((await reportRow(reportId)).targetProfileId);
+});
+
+test("git material that fails the build-boundary check never reaches the driver", () => {
+  const row = { materialKind: "git", archive: null, sourceArchiveDigest: null, imageRef: null, imageDigest: null };
+  assert.throws(() => build.uploadBuildSource({ ...row, gitUrl: "http://gitlab.com/g/p", gitCommitSha: "a".repeat(40) }), /not valid/);
+  assert.throws(() => build.uploadBuildSource({ ...row, gitUrl: "https://gitlab.com/g/p", gitCommitSha: "main" }), /not valid/);
 });
 
 test("an uploaded Dockerfile builds from its one-file archive on the archive digest", async () => {

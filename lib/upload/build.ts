@@ -8,6 +8,7 @@ import { bindTarget } from "@/lib/targets/bind";
 import type { GateAnalysisPayload } from "@/lib/triage/gate";
 
 import { uploadBuildPlan, type ReviewedUploadTarget } from "./gate";
+import { parseGitSource } from "./git-source";
 import { archiveShape, thinRecipePlan } from "./recipe";
 
 /**
@@ -41,6 +42,8 @@ type ClaimedUpload = {
   sourceArchiveDigest: string | null;
   imageRef: string | null;
   imageDigest: string | null;
+  gitUrl: string | null;
+  gitCommitSha: string | null;
   reviewedTarget: ReviewedUploadTarget;
   approvedBy: string;
   buildAttempts: number;
@@ -78,10 +81,16 @@ export async function claim(): Promise<ClaimedUpload | null> {
 }
 
 /** The material as a build source. The archive digest was computed from these bytes at intake. */
-export function uploadBuildSource(upload: Pick<ClaimedUpload, "materialKind" | "archive" | "sourceArchiveDigest" | "imageRef" | "imageDigest">): BuildSource {
+export function uploadBuildSource(upload: Pick<ClaimedUpload, "materialKind" | "archive" | "sourceArchiveDigest" | "imageRef" | "imageDigest" | "gitUrl" | "gitCommitSha">): BuildSource {
   if (upload.materialKind === "image") {
     if (!upload.imageRef || !upload.imageDigest) throw new Error("image material is incomplete");
     return { kind: "image", imageRef: upload.imageRef, imageDigest: upload.imageDigest };
+  }
+  if (upload.materialKind === "git") {
+    // Re-validated at the build boundary too: the row is only as trustworthy as the code that wrote it.
+    const git = parseGitSource(upload.gitUrl ?? "", upload.gitCommitSha ?? "");
+    if (!git.ok) throw new Error(`git material is not valid: ${git.reason}`);
+    return { kind: "git", cloneUrl: git.source.cloneUrl, resolvedCommitSha: git.source.commitSha };
   }
   if (!upload.archive || !upload.sourceArchiveDigest) throw new Error("archive material is incomplete");
   return { kind: "archive", archive: Buffer.from(upload.archive), sourceArchiveDigest: upload.sourceArchiveDigest };
