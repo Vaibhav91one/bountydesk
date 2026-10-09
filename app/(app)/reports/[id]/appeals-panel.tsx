@@ -32,12 +32,13 @@ export function AppealsPanel({
   const router = useRouter();
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   async function act(appealId: string, action: "acknowledge" | "close") {
     setPending(appealId);
     setError(null);
     try {
-      const result = await resolveAppealAction(reportId, appealId, action);
+      const result = await resolveAppealAction(reportId, appealId, action, action === "close" ? notes[appealId] : undefined);
       if (!result.ok) setError(result.error ?? "Could not update the appeal.");
       else router.refresh();
     } finally {
@@ -61,6 +62,16 @@ export function AppealsPanel({
           <p className="whitespace-pre-wrap break-words text-body text-foreground">{item.body}</p>
           {item.resolutionNote ? (
             <p className="text-meta text-muted-foreground">Closed: {item.resolutionNote}</p>
+          ) : null}
+          {item.status !== "CLOSED" ? (
+            <textarea
+              value={notes[item.id] ?? ""}
+              onChange={(event) => setNotes({ ...notes, [item.id]: event.target.value })}
+              placeholder="What you told the reporter (saved when you close)"
+              maxLength={4000}
+              rows={2}
+              className="rounded-md bg-input/50 px-3 py-2 text-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
+            />
           ) : null}
           {item.status !== "CLOSED" ? (
             <div className="flex gap-2">
