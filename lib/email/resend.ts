@@ -186,12 +186,14 @@ const VERIFICATION_FROM = "BountyDesk <no-reply@mail.bountydesk.vaibhav.quest>";
 export async function sendVerificationEmail(
   to: string,
   code: string,
-  purpose: "reviewer" | "report-contact" = "reviewer",
+  purpose: "reviewer" | "report-contact" | "appeal" = "reviewer",
 ): Promise<void> {
   const what =
     purpose === "reviewer"
       ? "Your BountyDesk reviewer verification code"
-      : "The code that confirms this address for the report you uploaded to BountyDesk";
+      : purpose === "appeal"
+        ? "The code that confirms this address for your BountyDesk verdict appeal"
+        : "The code that confirms this address for the report you uploaded to BountyDesk";
   const response = await fetch(`${RESEND_API}/emails`, {
     method: "POST",
     headers: {

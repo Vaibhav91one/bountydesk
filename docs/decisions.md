@@ -1110,15 +1110,14 @@ webhook trigger, the re-pin path) can be built and tested against the one oracle
 (SQLi); the comparison logic deciding `FIXED` vs. `PARTIALLY_FIXED` vs. `NOT_FIXED` for a class
 with no oracle yet waits on that class having one.
 
-### Q35: Researcher appeal path (design record, not yet built)
+### Q35: Researcher appeal path (built)
 
 A reporter has no way to contest a verdict (a `NOT_REPRODUCED`, an `OUT_OF_SCOPE`) once it
 ships; the conversation just ends. #349 asks for an appeal path, paired with drafted CVSS (which
 shipped separately, PR #369; this entry covers only the appeal half). This entry is the design;
-issue #349 tracks it and is not merged. Demand for this is sourced from competitor feature
-matching in the issue's own context, not a reporter request on record; the design is worth
-writing down now because it resolves real architectural ambiguity cheaply, but the implementation
-stays backlog until an actual appeal is asked for.
+issue #349 tracks it. Demand was sourced from competitor feature matching rather than a reporter
+request, so the implementation waited. The maintainer asked for it to be built on 2026-10-09, and
+it now is; the sections below record the design and, under "As built", where it landed.
 
 **This cannot be a new report-lifecycle state.** The enum is frozen (see `AGENTS.md`'s
 architecture invariants), and the reason is stated plainly there: "there is no reporter-reply
@@ -1153,9 +1152,38 @@ risk class upload intake already carries guards for (per-contact and per-domain 
 `lib/upload/intake.ts`'s `UPLOAD_LIMITS`). Whatever is built needs the same shape of limits
 before it ships, not after.
 
-**Not scheduled.** No implementation starts on this until an actual appeal is requested, at which
-point this entry's open questions (discovery surface, appeal-state storage, rate limits) need
-answering concretely, not left as options.
+**As built.** The open questions were answered as follows.
+
+- Storage: an `appeal` table beside `verdict`, with a composite foreign key to
+  `(report_id, verdict_id)` like `verdict_supersession`. Status is `OPEN | ACKNOWLEDGED | CLOSED`
+  behind a check constraint; a partial unique index allows one non-closed appeal per verdict. The
+  report enum is unchanged.
+- Identity: a one-time code (`lib/auth/otp.ts` primitives) mailed to the report's delivery contact,
+  which must pass `isVerifiedEmailRecipient`. The code lives in its own `appeal_code` table.
+  `startContactVerification` is not reused: it rewrites `report.reporter_contact` and clears
+  `verified_sender`, so calling it from a public route would let anyone who knows a report id break
+  a delivered report's recipient proof. A request for an unknown report, a malformed id, a
+  different address or an undelivered verdict gets the same response as an eligible one and mails
+  nothing. Only reports with an email or upload contact can appeal; a GitHub issue reporter has
+  no proven address and answers on the issue.
+- Eligible verdict: the latest revision with an `outbound_delivery` whose `delivered_at` is set.
+- Abuse limits (`APPEAL_LIMITS`): 16 KB request, 4000 character body, 10 code requests per client
+  address per day (counting ineligible ones), 3 codes per report per day, 5 wrong guesses per code.
+- Surface: the public page `/appeal?report=<id>` and `POST /api/appeals`. Reviewers see the
+  appeals, and the link to give a reporter, on the case file; Acknowledge and Close need
+  `isReviewerWriter`. Open appeals are also in the reviewer-chat context as delimited, untrusted
+  text. Nothing in the app answers the reporter. An appeal exists only on a
+  DELIVERED report, which is terminal with no edge back, so `requestRecheck` (which accepts only
+  `AWAITING_APPROVAL` and `ANALYSIS_ONLY`) cannot run on it. The reviewer replies outside the app
+  and records the outcome in the close note. Revising a delivered verdict from an appeal needs a
+  lifecycle decision (a new edge out of `DELIVERED`, or a revision path that does not move the
+  report) and is left as a follow-up; no second delivery channel is added meanwhile.
+- Link in delivered text: not added. The delivered body is `buildAgentDraftedPayload`, rendered on
+  the worker and the app and compared byte for byte on every replay of a parked draft, and its
+  content hash is what a human approves. A line that depends on `APP_BASE_URL` would make a
+  replay on a host with a different value, or a draft stored before the deploy, fail the integrity
+  check. Until the base URL is pinned into the draft itself, the reviewer passes the link along
+  from the case file.
 
 ### Q36: Remediation patch as a downloadable artifact (2026-10-09)
 

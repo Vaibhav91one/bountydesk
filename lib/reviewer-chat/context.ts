@@ -30,7 +30,6 @@ const REDACTED = "[REDACTED]";
  */
 export function redactReviewerText(value: string): string {
   return toPlainText(value)
-    .replace(/\[\/?UNTRUSTED_REPORT_DATA\]/gi, "[redacted delimiter]")
     .replace(/<[^>]{0,400}>/g, "")
     .replace(/\b(?:authorization|proxy-authorization)\s*:\s*bearer\s+[^\s,;]+/gi, REDACTED)
     .replace(/\b(?:cookie|set-cookie)\s*:\s*[^\n]+/gi, REDACTED)
@@ -40,6 +39,8 @@ export function redactReviewerText(value: string): string {
     )
     .replace(/\b(?:SCOPE[_ -]?GUARD[_ -]?TOKEN|CAPABILITY[_ -]?TOKEN)\b/gi, REDACTED)
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, REDACTED)
+    // Last on purpose: stripping tags or redacting can splice text into a live delimiter.
+    .replace(/\[\/?UNTRUSTED_REPORT_DATA\]/gi, "[redacted delimiter]")
     .trim();
 }
 
@@ -71,6 +72,7 @@ export function buildReviewerChatContext(input: ReviewerChatContext): string {
     ].join("\n")),
   ];
 
+  context.appeals?.forEach((text, index) => parts.push(field(`Reporter appeal ${index + 1} (open)`, text)));
   if (context.targetName) parts.push(field("Target name", context.targetName));
   if (context.targetIdentityHash) parts.push(field("Pinned target identity hash", context.targetIdentityHash));
   if (context.outcome) parts.push(field("Draft outcome", context.outcome));
