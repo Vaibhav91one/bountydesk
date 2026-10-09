@@ -49,6 +49,14 @@ export const DVWA_EXPECTED_BUILD_MARKER =
 export const DVWA_TAG_PINNED_SNAPSHOT_IMAGE_REF =
   `${DVWA_IMAGE_NAME}:v1.9-bountydesk-sandbox`;
 
+export const WEBGOAT_IMAGE_NAME = "ghcr.io/vaibhav91one/webgoat";
+// v2025.3: one self-contained jar with the lessons bundled (embedded Tomcat and HSQLDB), so no
+// second lessons repository is needed the way the 7.1 tag required.
+export const WEBGOAT_EXPECTED_BUILD_MARKER =
+  "c3ed45a733377bc7313b93f57ff518254d81380f";
+export const WEBGOAT_TAG_PINNED_SNAPSHOT_IMAGE_REF =
+  `${WEBGOAT_IMAGE_NAME}:v2025.3-bountydesk-sandbox`;
+
 /**
  * A build marker only proves provenance once the operator has actually built the image and
  * baked the source commit into it (see lib/sandbox/build-marker.ts). The challenge targets
@@ -81,7 +89,7 @@ const TARGETS: TargetDefinition[] = [
       snapshotImageRefOverride: JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF,
     },
   },
-  // DVWA below is built (see DVWA_EXPECTED_BUILD_MARKER); the remaining targets are still
+  // DVWA and WebGoat are built (see their *_EXPECTED_BUILD_MARKER); the remaining targets are still
   // scaffolding: config and recipes an operator can build against, not live profiles. imageName
   // is where each fork is expected to be built and pushed, mirroring juice-shop's ghcr path; the
   // upstream public image each fork is based on is recorded in docs/additional-targets.md.
@@ -124,7 +132,8 @@ const TARGETS: TargetDefinition[] = [
     scopeRules: LOCALHOST_SCOPE,
     provisioning: {
       readinessPath: "/WebGoat/login",
-      expectedBuildMarker: PENDING_BUILD_MARKER,
+      expectedBuildMarker: WEBGOAT_EXPECTED_BUILD_MARKER,
+      snapshotImageRefOverride: WEBGOAT_TAG_PINNED_SNAPSHOT_IMAGE_REF,
     },
   },
   {

