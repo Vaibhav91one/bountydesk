@@ -57,7 +57,9 @@ export async function thinRecipePlan(archive: Buffer, reviewed: ReviewedUploadTa
 
   const { definition } = reviewed;
   const baseUrl = String(definition.config.baseUrl);
+  // Empty when the URL has no explicit port (URL also drops a default 80), and a bare EXPOSE fails the build.
   const port = new URL(baseUrl).port;
+  if (!port) return null;
   const startCommand = definition.provisioning.startCommand;
 
   let dockerfileText: string;

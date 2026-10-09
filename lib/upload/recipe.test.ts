@@ -32,15 +32,15 @@ function tarGz(files: Record<string, string>): Buffer {
 }
 
 // Built from the manifest validator directly: gate.ts pulls in the database at import time.
-const reviewed = (input: { startCommand?: string } = {}): ReviewedUploadTarget => ({
+const reviewed = (input: { startCommand?: string; baseUrl?: string } = {}): ReviewedUploadTarget => ({
   ecosystem: "none",
   definition: targetDefinitionFromManifest({
     name: "upload-r1",
     repoFullName: "upload/r1",
     imageName: "ghcr.io/bountydesk/upload-pending",
-    baseUrl: "http://localhost:8080",
     readinessPath: "/health",
     ...input,
+    baseUrl: input.baseUrl ?? "http://localhost:8080",
   }),
 });
 
@@ -64,6 +64,12 @@ test("the start command is quoted into CMD and cannot add Dockerfile lines", asy
   const plan = await thinRecipePlan(tarGz({ "package.json": "{}" }), reviewed({ startCommand: 'node app.js" ; echo hi' }));
   assert.ok(plan?.strategy === "agent-authored");
   assert.match(plan.dockerfileText, /^CMD \["sh", "-c", "node app\.js\\" ; echo hi"\]$/m);
+});
+
+test("a base URL with no explicit port authors no recipe", async () => {
+  const pkg = tarGz({ "package.json": "{}" });
+  assert.equal(await thinRecipePlan(pkg, reviewed({ baseUrl: "http://localhost" })), null);
+  assert.equal(await thinRecipePlan(pkg, reviewed({ baseUrl: "http://localhost:80" })), null);
 });
 
 test("python needs the reviewer's start command; other ecosystems get no recipe", async () => {
