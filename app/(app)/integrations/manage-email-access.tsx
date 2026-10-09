@@ -18,7 +18,7 @@ import {
 import { Input } from "@/components/ui/input";
 import type { ReviewerEntry } from "@/lib/auth/reviewers";
 
-import { connectEmail, disconnectEmail, verifyEmail } from "./reviewer-actions";
+import { connectEmail, disconnectEmail, setRole, verifyEmail } from "./reviewer-actions";
 import { OtpInput } from "./otp-input";
 
 type Step = "list" | "input" | "code";
@@ -49,7 +49,9 @@ export function ManageEmailAccess({
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const members = reviewers.filter((entry) => entry.role === "member");
+  // Any non-owner row is a member BountyDesk can manage, read-only ones included: "member" here
+  // means "not the env owner", not the specific "member" role value.
+  const members = reviewers.filter((entry) => entry.role !== "owner");
 
   function reset() {
     setStep("list");
@@ -108,6 +110,15 @@ export function ManageEmailAccess({
     });
   }
 
+  function toggleRole(target: string, current: "member" | "read_only") {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const result = await setRole(target, current === "read_only" ? "member" : "read_only");
+      if (!result.ok) setError(result.error);
+    });
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger render={<Button size="sm">Manage access</Button>} />
@@ -151,17 +162,34 @@ export function ManageEmailAccess({
                       ) : (
                         <span className="shrink-0 text-meta text-muted-foreground">Pending verification</span>
                       )}
+                      {member.role === "read_only" ? (
+                        <span className="shrink-0 rounded-full border border-border/50 px-2 py-0.5 text-meta text-muted-foreground">
+                          Read-only
+                        </span>
+                      ) : null}
                     </span>
                     {canManage ? (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        disabled={pending}
-                        onClick={() => remove(member.email)}
-                        aria-label={`Remove ${member.email}`}
-                      >
-                        <RollingIcon icon={Trash} className="size-4" />
-                      </Button>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() =>
+                            toggleRole(member.email, member.role as "member" | "read_only")
+                          }
+                        >
+                          {member.role === "read_only" ? "Allow changes" : "Make read-only"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          disabled={pending}
+                          onClick={() => remove(member.email)}
+                          aria-label={`Remove ${member.email}`}
+                        >
+                          <RollingIcon icon={Trash} className="size-4" />
+                        </Button>
+                      </span>
                     ) : null}
                   </li>
                 ))}

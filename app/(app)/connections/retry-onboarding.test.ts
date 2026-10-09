@@ -73,7 +73,7 @@ function rowOf(repoId: number) {
     .then((rows) => rows[0]);
 }
 
-const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null };
+const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null, role: "member" as const };
 
 test("a reviewer requeues a FAILED row from the start, with the name and clone URL from the grant", async () => {
   const repoId = await seed("FAILED");
@@ -90,7 +90,7 @@ test("a reviewer requeues a FAILED row from the start, with the name and clone U
 
 test("a non-reviewer or no session changes nothing", async () => {
   const repoId = await seed("FAILED");
-  for (const session of [null, { login: "stranger", email: "stranger@example.com", avatarUrl: null }]) {
+  for (const session of [null, { login: "stranger", email: "stranger@example.com", avatarUrl: null, role: "member" as const }]) {
     const result = await mod.retryOnboardingRequest(session, repoId);
     assert.equal(result.ok, false);
   }

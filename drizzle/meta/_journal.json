@@ -344,6 +344,13 @@
       "when": 1791303975105,
       "tag": "0048_peaceful_vision",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791522358466,
+      "tag": "0049_easy_sabra",
+      "breakpoints": true
     }
   ]
 }

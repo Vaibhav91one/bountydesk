@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireReviewer } from "@/lib/auth/dal";
+import { requireWriteAccess } from "@/lib/auth/dal";
 import {
   agentSession,
   and,
@@ -379,7 +379,9 @@ async function decide(
  * reviewer approves what they saw, not whatever happens to be pending at click time.
  */
 export async function allowVerdict(reportId: string, verdictId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return decide(reportId, verdictId, "APPROVED", session.login, undefined);
 }
 
@@ -393,7 +395,9 @@ export async function denyVerdict(
   verdictId: string,
   note?: string,
 ): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return decide(reportId, verdictId, "DENIED", session.login, note);
 }
 
@@ -410,7 +414,9 @@ export async function requestRecheckAction(
   verdictId: string,
   note?: string,
 ): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   // A server action is callable with any JSON, so the type is checked here, not just the length.
   if (note !== undefined && typeof note !== "string") {
     return { ok: false, error: "The note is not valid." };
@@ -437,7 +443,9 @@ export async function bindTargetAction(
   reportId: string,
   profileId: string,
 ): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   if (!isReportId(reportId) || !isReportId(profileId)) {
     return { ok: false, error: "That report or target is not valid." };
   }
@@ -458,7 +466,9 @@ export async function bindTargetAction(
  * hash when it sends, and never sends anything but the verdict the reporter already received.
  */
 export async function requestOwnerAdvisoryAction(reportId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
   try {
     const result = await requestOwnerAdvisory(reportId, session.login);
@@ -476,7 +486,9 @@ export async function requestOwnerAdvisoryAction(reportId: string): Promise<Acti
  * marker, and the send runs every gate again, so this chooses when to try, never what is sent.
  */
 export async function retryHeldDeliveryAction(reportId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
   let deliveryId: string;
   try {
@@ -503,7 +515,9 @@ export async function retryHeldDeliveryAction(reportId: string): Promise<ActionR
  * no send to cancel, and nothing goes to the reporter.
  */
 export async function cancelReportAction(reportId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   if (!isReportId(reportId)) return { ok: false, error: "That report is not valid." };
   try {
     const result = await cancelHeldReport(reportId, session.login);
@@ -538,13 +552,17 @@ async function gateDecision(
  * partial state rather than the generic failure message.
  */
 export async function rejectAtGateAction(reportId: string, spam: boolean): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return gateDecision(reportId, () => rejectAtGate(reportId, session.login, spam === true));
 }
 
 /** Release an outside report from the gate into the normal analysis-only run. */
 export async function runAnalysisAction(reportId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return gateDecision(reportId, () => releaseForAnalysis(reportId, session.login));
 }
 
@@ -553,7 +571,9 @@ export async function runAnalysisAction(reportId: string): Promise<ActionResult>
  * contact may be unproven, so it gets no canned reply either.
  */
 export async function dismissAdvisoryAction(reportId: string): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return gateDecision(reportId, () => denyAtGate(reportId, session.login));
 }
 
@@ -566,7 +586,9 @@ export async function approveUploadTargetAction(
   reportId: string,
   input: { port: number; readinessPath: string; startCommand?: string; ecosystem?: string },
 ): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   return gateDecision(reportId, () =>
     approveUploadTarget(reportId, session.login, {
       port: Number(input.port),
@@ -580,11 +602,11 @@ export async function approveUploadTargetAction(
 /**
  * Accept a target an authenticated reviewer uploaded from the dashboard, and queue its build.
  *
- * The trust boundary is this one line: requireReviewer runs first, so a signed-out or
- * non-allowlisted caller is redirected before any bytes are read, and the contact is overwritten
- * with the reviewer's own session email rather than taken from the form. That is what lets this
- * path skip the public OTP the anonymous /submit route needs: the reviewer's address is already
- * proven by their session, so no code round trip is used to prove it again.
+ * The trust boundary is this one line: requireWriteAccess runs first, so a signed-out,
+ * non-allowlisted, or read-only caller is turned away before any bytes are read, and the contact
+ * is overwritten with the reviewer's own session email rather than taken from the form. That is
+ * what lets this path skip the public OTP the anonymous /submit route needs: the reviewer's
+ * address is already proven by their session, so no code round trip is used to prove it again.
  *
  * Everything downstream is unchanged. The material is validated by parseUploadForm, the same
  * validator the public route runs, so the size caps, tarball check and image-registry allowlist
@@ -595,7 +617,9 @@ export async function approveUploadTargetAction(
 export async function submitReviewerUploadAction(
   formData: FormData,
 ): Promise<ActionResult & { reportId?: string }> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   // The contact is the authenticated reviewer, never a value the form supplied. Overwriting it
   // here is what binds the upload's delivery address to the signed-in identity.
   formData.set("contact", session.email);
@@ -633,7 +657,9 @@ export async function markDuplicateAction(
   reportId: string,
   duplicateOfId: string,
 ): Promise<ActionResult> {
-  const session = await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  const session = access.session;
   // Accept the short id printed on a case file (`#725dcfed`), not just the full uuid: a reviewer
   // pastes what they can see. A prefix that names no report, or more than one, is refused here.
   const resolved = await resolveReportId(duplicateOfId);
@@ -642,7 +668,8 @@ export async function markDuplicateAction(
 }
 
 export async function retryRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
   if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
   try {
     const result = await retryRecheck(reportId, runId);
@@ -654,7 +681,8 @@ export async function retryRecheckAction(reportId: string, runId: string): Promi
 }
 
 export async function cancelRecheckAction(reportId: string, runId: string): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
   if (!isReportId(reportId) || !isReportId(runId)) return { ok: false, error: RUN_NOT_FOUND };
   try {
     const result = await cancelRecheck(reportId, runId);
@@ -671,7 +699,8 @@ export async function cancelRecheckAction(reportId: string, runId: string): Prom
  * state, reproduction or verdict. A report with no connected repository has no source to read.
  */
 export async function runCodeReviewAction(reportId: string): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
   if (!isReportId(reportId)) return { ok: false, error: "The report id is not valid." };
   if (!(await loadCodeReviewInput(reportId))) {
     return { ok: false, error: "This report has no connected repository to review." };

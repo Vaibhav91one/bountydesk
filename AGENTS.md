@@ -24,7 +24,10 @@ No bound target, no `REPRODUCED`. A report with no authorised target, or one who
 grant has since been revoked, cannot produce a reproduced or not-reproduced verdict, whatever
 the agent's own investigation concluded; that run stays `ANALYSIS_ONLY` and a human decides. The
 defender-authored canary/fixture/negative-control pipeline is retained as a strictly stronger
-evidence source, not the sole gate on `REPRODUCED` (see `docs/decisions.md` Q22).
+evidence source, not the sole gate on `REPRODUCED` (see `docs/decisions.md` Q22). A live host
+(not yet built, see Q33) is bound the same way: a `TargetProfile` with a current, re-verified
+ownership proof counts as authorised, and an expired or missing proof means not authorised, the
+same as a revoked repository grant.
 
 A sandbox status file reports target readiness only. It is sandbox-controlled evidence and can
 never determine reproduction, severity or outbound content. `READY` means the target started

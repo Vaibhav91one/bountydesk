@@ -1,4 +1,4 @@
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { isReviewerWriter } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 import { enqueue } from "@/lib/build-onboarding/queue";
 import {
@@ -35,8 +35,11 @@ export async function retryOnboardingRequest(
 ): Promise<RetryResult> {
   // Re-checked here, not only at sign-in, so a reviewer taken off the list cannot retry with a
   // still-valid cookie (the same rule as approveOnboardingRequest).
-  if (!session || !(await isReviewerEmail(session.email))) {
+  if (!session) {
     return { ok: false, error: "You are not signed in as a reviewer." };
+  }
+  if (!(await isReviewerWriter(session.email))) {
+    return { ok: false, error: "This reviewer has read-only access." };
   }
 
   const repoId = Number(rawRepoId);

@@ -15,4 +15,8 @@ export type Session = {
   email: string;
   /** Profile image from the identity provider (e.g. a Google avatar), or null. */
   avatarUrl: string | null;
+  /** "read_only" can sign in and see everything but cannot approve, deny, or change a setting.
+   *  Re-checked fresh by every write path (lib/auth/reviewers.ts isReviewerWriter), so this
+   *  field is for display; it is never the thing that actually denies a write. */
+  role: "owner" | "member" | "read_only";
 };

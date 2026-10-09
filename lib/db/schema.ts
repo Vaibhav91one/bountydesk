@@ -83,6 +83,11 @@ export const approvalOutcome = pgEnum("approval_outcome", [
   "DENIED",
 ]);
 
+/** A member's write access. "owner" is never stored here: it comes from REVIEWER_EMAILS and
+ *  has no row. "member" keeps today's behavior; "read_only" can sign in and see everything but
+ *  cannot approve, deny, or change any setting. */
+export const reviewerRole = pgEnum("reviewer_role", ["member", "read_only"]);
+
 export const deliveryState = pgEnum("delivery_state", [
   "PENDING",
   "SENT",
@@ -338,6 +343,7 @@ export const reviewer = pgTable(
     codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
     /** Wrong tries against the outstanding code, so a guessing attempt runs out rather than looping. */
     codeAttempts: integer("code_attempts").notNull().default(0),
+    role: reviewerRole("role").notNull().default("member"),
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("reviewer_email_key").on(t.email)],
