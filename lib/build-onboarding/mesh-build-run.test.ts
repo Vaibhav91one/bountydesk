@@ -55,6 +55,7 @@ function makeRuntime(overrides: Partial<MeshBuildRuntime> = {}): {
     async deleteSnapshotByName(name) {
       deletedSnapshots.push(name);
     },
+    async waitForSnapshotActive() {},
     ...overrides,
   };
   return { runtime, commands, snapshots, deletedSnapshots };
@@ -251,3 +252,49 @@ test("buildMesh logs out even when the push itself fails", async () => {
   assert.ok(commands.some((command) => command.includes("docker logout")), "the credential must not linger");
 });
 
+
+test("buildMesh reclaims every service image, each only after its own snapshot is active", async () => {
+  const events: string[] = [];
+  const registry = {
+    ...CTX.registry,
+    push: CTX.registry.push.bind(CTX.registry),
+    async deleteImage(tag: string) {
+      events.push(`delete ${tag}`);
+    },
+  };
+  const { runtime } = makeRuntime({
+    async waitForSnapshotActive(id) {
+      events.push(`active ${id}`);
+    },
+  });
+
+  const result = await buildMesh(SANDBOX, meshPlan(), { ...CTX, registry, runtime });
+
+  assert.equal(result.services?.length, 2);
+  assert.equal(events.length, 4);
+  for (const service of result.services ?? []) {
+    const activeAt = events.indexOf(`active ${service.snapshotId}`);
+    assert.equal(events[activeAt + 1], `delete ${service.snapshotImageRef}`);
+  }
+});
+
+test("a reclaim failure never fails the mesh build", async () => {
+  const registry = {
+    ...CTX.registry,
+    push: CTX.registry.push.bind(CTX.registry),
+    async deleteImage() {
+      throw new Error("registry exploded");
+    },
+  };
+  const { runtime } = makeRuntime({
+    async waitForSnapshotActive() {
+      throw new Error("never active");
+    },
+  });
+  const result = await buildMesh(SANDBOX, meshPlan(), { ...CTX, registry, runtime });
+  assert.equal(result.services?.length, 2);
+
+  const ok = makeRuntime().runtime;
+  const result2 = await buildMesh(SANDBOX, meshPlan(), { ...CTX, registry, runtime: ok });
+  assert.equal(result2.services?.length, 2);
+});
