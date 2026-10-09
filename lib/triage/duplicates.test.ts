@@ -58,6 +58,26 @@ test("a cross-project report is dropped when a same-repo candidate exists", () =
   assert.ok(!ids.includes("cross-project"), "the cross-project report should be filtered out");
 });
 
+test("a trigram score surfaces a candidate that shares almost no whole words", () => {
+  // No two words in common with the target text, so bare word-set overlap scores it zero; the
+  // real pg_trgm similarity() is exercised separately in duplicates.db.test.ts, this proves the
+  // blend itself: whichever signal is stronger wins.
+  const rows = [{ id: "reworded", title: "unrelated words here", body: "nothing shared at all", trgmScore: 0.55 }];
+  assert.equal(bareScore(rows[0]), 0, "sanity: the fixture really shares no words");
+
+  const [candidate] = rankCandidates(targetText, rows);
+  assert.equal(candidate.reportId, "reworded");
+  assert.equal(candidate.score, 0.55, "the trigram score should carry the ranking on its own");
+});
+
+test("a low trigram score does not pull a genuine word-overlap match down", () => {
+  const rows = [
+    { id: "paraphrase", title: "Juice Shop login accepts a crafted email as admin", body: target.body, trgmScore: 0.1 },
+  ];
+  const [candidate] = rankCandidates(targetText, rows);
+  assert.ok(candidate.score > 0.5, `word overlap should still carry this, got ${candidate.score}`);
+});
+
 test("a cross-project report still surfaces when nothing shares the repo", () => {
   // No same-repo candidate to outrank it, so text overlap alone is all we have and it is kept.
   const rows = [

@@ -61,8 +61,16 @@ const client = postgres(url, {
     // silent worker loop before the cancel arrives.
     statement_timeout: 30_000,
     // Integration tests point this at a disposable schema so a run cannot see, or be handed,
-    // another run's rows. Unset everywhere else, which leaves the server default (public).
-    ...(process.env.DATABASE_SCHEMA ? { search_path: process.env.DATABASE_SCHEMA } : {}),
+    // another run's rows. public stays a fallback behind it, never first: every application
+    // table exists in the disposable schema too (the full migration history is replayed into
+    // it), so an unqualified table reference always resolves there first and public is only
+    // ever reached for something the disposable schema genuinely has no copy of, such as a
+    // Postgres extension's functions (pg_trgm's similarity()), which CREATE EXTENSION installs
+    // once, database-wide, not per schema. Unset everywhere else, which leaves the server
+    // default (public).
+    ...(process.env.DATABASE_SCHEMA
+      ? { search_path: `${process.env.DATABASE_SCHEMA}, public` }
+      : {}),
   },
 });
 
