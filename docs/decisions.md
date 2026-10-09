@@ -1156,3 +1156,13 @@ before it ships, not after.
 **Not scheduled.** No implementation starts on this until an actual appeal is requested, at which
 point this entry's open questions (discovery surface, appeal-state storage, rate limits) need
 answering concretely, not left as options.
+
+### Q36: Remediation patch as a downloadable artifact (2026-10-09)
+
+A finding may carry an optional `remediationPatch`, a unified diff the agent drafts with the
+verdict (#345). `recordVerdictArtifacts` validates it and records a `remediation-patch` artifact
+only for a REPRODUCED verdict on a report with a bound target; anything else records nothing. The
+diff is data: it is never applied, never part of the delivered comment or its content hash, and the
+reviewer-gated route `/api/reports/[id]/remediation-patch` serves it as an attachment for the
+current verdict only. This needs no new GitHub permission. The optional draft-PR path would need
+`contents:write` and waits on an operator decision to grant it.

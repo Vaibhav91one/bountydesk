@@ -11,7 +11,7 @@ Still open, in one place:
 
 - A tarball without a Dockerfile at its root.
 - Building from a non-GitHub git URL.
-- Reclaiming each mesh service's pushed image, and deleting images on registries other than GHCR.
+- Sweeping mesh images orphaned by a crashed build, and deleting images on Docker Hub.
 - A self-hosted private registry at multi-tenant scale.
 
 ## Source identity is resolved before customer code runs
@@ -64,9 +64,15 @@ about ten seconds with no sandbox create, and a sandbox then boots from the mate
 once the snapshot is active the origin registry tag is dead weight, and the driver deletes it,
 best-effort, after `waitForSnapshotActive`. GHCR deletion needs a delete-scoped token: set
 `REGISTRY_DELETE_TOKEN` (a token with `delete:packages`) to reclaim the image, otherwise it is left
-in place, which is harmless because the snapshot is self-contained. Only GHCR has a delete path: on
-any other registry host the image is left in place with a warning, whatever tokens are set. The mesh
-path pushes one image per service and does not yet reclaim them.
+in place, which is harmless because the snapshot is self-contained. GHCR uses the GitHub Packages
+API. Any other registry host uses the Docker Registry HTTP API v2: a HEAD on the tag reads
+`Docker-Content-Digest`, then a DELETE by digest, with Basic auth from `REGISTRY_USER` and
+`REGISTRY_DELETE_TOKEN`. A 404 means the image is already gone, and a 405 (the registry has deletes
+disabled) leaves it in place with a warning. Docker Hub and other registries that do not expose the
+v2 delete are not covered. The mesh path reclaims each service image right after that service's own
+snapshot is active, through the same `reclaimOriginImage`, so a failure never fails the build. Only
+the deletion paths were tested with mocked fetch; neither a real mesh build against GHCR nor a v2
+registry has been run.
 
 `sweepTrialSnapshots` (`lib/sandbox/daytona.ts`) reclaims build-created snapshots that no live target
 depends on: it deletes `onboarding-` snapshots whose id is not in the protected set, where the set is
@@ -81,8 +87,10 @@ next interval.
 
 Remaining work:
 
-- Reclaim each mesh service's pushed image the way the single-image path does.
-- Add a delete path for registries other than GHCR.
+- Sweep images orphaned by a build that crashed after pushing but before reclaiming. The pushed
+  tags are random per build (`bountydesk-<hex>`) and nothing records them, so a sweep needs either
+  a table of pushed refs or a registry listing; skipped as a schema change.
+- Live-verify mesh reclaim against GHCR and v2 delete against a real registry.
 - At multi-tenant scale, self-host a private registry. Zot is a single static binary over
   filesystem or S3 storage and is the lightweight option; Harbor adds per-project RBAC, which is
   per-tenant isolation, plus scanning and retention. This is the proper fix for customer images

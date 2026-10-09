@@ -36,6 +36,7 @@ const KIND_LABEL: Record<string, string> = {
   "verdict-payload": "Verdict payload",
   "findings-evidence": "Findings",
   "target-dockerfile": "Target Dockerfile",
+  "remediation-patch": "Suggested fix (diff)",
 };
 
 function formatBytes(bytes: number): string {
@@ -64,6 +65,7 @@ const DOWNLOAD_LABEL: Record<string, string> = {
   "verdict-payload": "Download Verdict payload",
   "findings-evidence": "Download Findings",
   "target-dockerfile": "Download Target Dockerfile",
+  "remediation-patch": "Download Suggested fix",
 };
 
 function ArtifactRow({ art }: { art: CaseArtifactView }) {
