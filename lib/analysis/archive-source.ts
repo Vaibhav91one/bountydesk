@@ -129,7 +129,7 @@ export function readArchive(archive: Buffer, maxEntryBytes = MAX_BLOB_BYTES): Ar
 
 /** The single top-level directory every file sits under ("project/" from `tar czf x project`), or
  *  "" when there is none. Stripped for matching so root manifests are found either way. */
-function commonRoot(paths: string[]): string {
+export function commonRoot(paths: string[]): string {
   const first = paths[0]?.split("/")[0];
   if (!first || paths.some((p) => !p.startsWith(`${first}/`))) return "";
   return `${first}/`;
