@@ -136,7 +136,11 @@ export async function findDuplicateCandidates(
       // lower() on both operands, matching wordSet's own normalization: without it a reword that
       // also changes case convention (ALL CAPS, Title Case) scores lower on trigrams than a
       // same-case reword, undercutting the whole point of blending in a second signal.
-      trgmScore: sql<number>`similarity(lower(${report.title} || ' ' || left(${report.body}, ${MAX_TEXT_CHARS})), lower(${truncated}))`,
+      // left(...) wraps the combined title-and-body, truncated once, the same as `truncated`
+      // below: title has no length cap in the schema (an outside email's subject lands there
+      // unbounded), so truncating body alone and leaving title untouched would still let an
+      // oversized subject make every future similarity() call against this row expensive.
+      trgmScore: sql<number>`similarity(lower(left(${report.title} || ' ' || ${report.body}, ${MAX_TEXT_CHARS})), lower(${truncated}))`,
     })
     .from(report)
     .where(and(ne(report.id, reportId), isNull(report.hiddenAt), isNull(report.duplicateOfReportId)))

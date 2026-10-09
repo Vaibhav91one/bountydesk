@@ -77,3 +77,14 @@ test("a reword that also changes case convention is not scored lower for it", as
     "the all-caps reword should still surface",
   );
 });
+
+test("an oversized title does not blow up the similarity comparison", async () => {
+  // report.title has no length cap in the schema; an outside email's subject lands there
+  // unbounded. Nothing here asserts a score, only that the query still completes: this is a
+  // cost guard (truncating what similarity() has to scan), not a correctness check.
+  const target = await seedReport("short title", "ordinary body text");
+  await seedReport("A".repeat(50_000), "unrelated body");
+
+  const [reportRow] = await dbm.db.select().from(dbm.report).where(dbm.eq(dbm.report.id, target));
+  await assert.doesNotReject(() => duplicates.findDuplicateCandidates(target, reportRow.title, reportRow.body));
+});
