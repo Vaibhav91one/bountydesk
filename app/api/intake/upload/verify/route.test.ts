@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
+process.env.OTP_HMAC_KEY = "test-otp-key";
+
 /**
  * The upload contact-verify route against a real Postgres. It guards untrusted input in order: the
  * size cap and JSON parse before anything, then the report-id shape, then the code check or a

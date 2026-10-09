@@ -6,6 +6,8 @@ import path from "node:path";
 import test, { after, before } from "node:test";
 import { gzipSync } from "node:zlib";
 
+process.env.OTP_HMAC_KEY = "test-otp-key";
+
 /**
  * Upload intake against a real Postgres: the held report, the contact proof that delivery depends on,
  * the daily limits, and the bounds on what an uploader may attach. Codes are captured by an injected

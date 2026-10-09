@@ -8,6 +8,7 @@ import test, { after, before } from "node:test";
  * call; the report still exists and the uploader can ask for another code.
  */
 delete process.env.RESEND_API_KEY;
+process.env.OTP_HMAC_KEY = "test-otp-key";
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");

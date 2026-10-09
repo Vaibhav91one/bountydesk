@@ -11,6 +11,7 @@ import test, { after, before } from "node:test";
 const REVIEWER_ID = 4242;
 const REVIEWER_EMAIL = "reviewer@bountydesk.test";
 process.env.REVIEWER_EMAILS = REVIEWER_EMAIL;
+process.env.OTP_HMAC_KEY = "test-otp-key";
 process.env.DAYTONA_TARGET_IMAGE_DIGEST = `sha256:${"0".repeat(64)}`;
 process.env.DAYTONA_TARGET_SNAPSHOT_ID = "snapshot-test";
 
