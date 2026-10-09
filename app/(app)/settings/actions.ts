@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireReviewer } from "@/lib/auth/dal";
+import { requireWriteAccess } from "@/lib/auth/dal";
 import { resolveApiKey, WELL_KNOWN_PROVIDER_TYPES } from "@/lib/trueforge/desired";
 import {
   applyManaged,
@@ -89,7 +89,8 @@ export async function saveModelProvider(
   _previous: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
 
   const parsed = providerSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -128,7 +129,8 @@ export async function saveSandboxProvider(
   _previous: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
 
   const parsed = sandboxSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0].message };
@@ -152,7 +154,8 @@ export async function applyManagedResources(
   _previous: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
-  await requireReviewer();
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
 
   const scope = scopeSchema.safeParse(formData.get("scope"));
   if (!scope.success) return { ok: false, error: "Unknown thing to apply." };

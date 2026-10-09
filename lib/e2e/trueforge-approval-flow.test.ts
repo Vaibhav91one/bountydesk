@@ -30,7 +30,7 @@ process.env.GITHUB_APP_WEBHOOK_SECRET = SECRET;
 
 // Mock the DAL directly so the test never loads @clerk/nextjs/server (its server-only guard and
 // headers() call have no request scope here). allowVerdict/denyVerdict go through requireReviewer.
-type MockSession = { login: string; email: string; avatarUrl: string | null };
+type MockSession = { login: string; email: string; avatarUrl: string | null; role: "owner" | "member" | "read_only" };
 let session: MockSession | null = null;
 mock.module("@/lib/auth/dal", {
   namedExports: {
@@ -39,6 +39,17 @@ mock.module("@/lib/auth/dal", {
       if (session) return session;
       const { redirect } = await import("next/navigation");
       redirect("/login");
+    },
+    requireWriteAccess: async () => {
+      if (!session) {
+        const { redirect } = await import("next/navigation");
+        redirect("/login");
+        return { ok: false, error: "unreachable" };
+      }
+      if (session.role === "read_only") {
+        return { ok: false, error: "This reviewer has read-only access." };
+      }
+      return { ok: true, session };
     },
   },
 });
@@ -86,7 +97,7 @@ after(async () => {
 });
 
 function signIn(): void {
-  session = { login: "reviewer", email: REVIEWER_EMAIL, avatarUrl: null };
+  session = { login: "reviewer", email: REVIEWER_EMAIL, avatarUrl: null, role: "member" };
 }
 
 /**

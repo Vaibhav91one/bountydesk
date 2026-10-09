@@ -42,7 +42,7 @@ async function seedRepo(active = true): Promise<number> {
 const rows = (repoId: number) =>
   dbm.db.select().from(dbm.targetOnboarding).where(dbm.eq(dbm.targetOnboarding.repoId, repoId));
 
-const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null };
+const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null, role: "member" as const };
 
 test("N repos enqueue N distinct rows, none past PENDING_PLAN", async () => {
   const ids = [await seedRepo(), await seedRepo(), await seedRepo()];
@@ -87,7 +87,7 @@ test("an invalid, inactive or duplicate id is skipped and reported", async () =>
 
 test("a non-reviewer or an empty batch changes nothing", async () => {
   const id = await seedRepo();
-  const stranger = { login: "x", email: "stranger@example.com", avatarUrl: null };
+  const stranger = { login: "x", email: "stranger@example.com", avatarUrl: null, role: "member" as const };
   assert.equal((await mod.batchOnboardRequest(stranger, [id])).ok, false);
   assert.equal((await mod.batchOnboardRequest(null, [id])).ok, false);
   assert.equal((await mod.batchOnboardRequest(reviewer, [])).ok, false);

@@ -17,7 +17,7 @@ import { computeContentHash } from "@/lib/verdicts/hash";
 const REVIEWER_ID = 5150;
 const REVIEWER_EMAIL = "reviewer@bountydesk.test";
 
-type MockSession = { login: string; email: string; avatarUrl: string | null };
+type MockSession = { login: string; email: string; avatarUrl: string | null; role: "owner" | "member" | "read_only" };
 let session: MockSession | null = null;
 let deliverCalls: { deliveryId: string; owner: string }[] = [];
 mock.module("@/lib/auth/dal", {
@@ -28,6 +28,17 @@ mock.module("@/lib/auth/dal", {
       // Same as the real DAL: a missing session redirects, which throws NEXT_REDIRECT.
       const { redirect } = await import("next/navigation");
       redirect("/login");
+    },
+    requireWriteAccess: async () => {
+      if (!session) {
+        const { redirect } = await import("next/navigation");
+        redirect("/login");
+        return { ok: false, error: "unreachable" };
+      }
+      if (session.role === "read_only") {
+        return { ok: false, error: "This reviewer has read-only access." };
+      }
+      return { ok: true, session };
     },
   },
 });
@@ -97,7 +108,7 @@ beforeEach(() => {
 // a session), any other id is a non-reviewer (the DAL would return null and requireReviewer would
 // redirect), so the existing call sites carry over unchanged.
 function signIn(userId: number, login = "reviewer") {
-  session = userId === REVIEWER_ID ? { login, email: REVIEWER_EMAIL, avatarUrl: null } : null;
+  session = userId === REVIEWER_ID ? { login, email: REVIEWER_EMAIL, avatarUrl: null, role: "member" } : null;
 }
 
 function signOut() {

@@ -42,7 +42,7 @@ function stateOf(repoId: number) {
     .then((rows) => rows[0]);
 }
 
-const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null };
+const reviewer = { login: "octocat", email: REVIEWER_EMAIL, avatarUrl: null, role: "member" as const };
 
 test("a reviewer moves an awaiting row to APPROVED and is recorded", async () => {
   const repoId = await seed("AWAITING_APPROVAL");
@@ -56,7 +56,7 @@ test("a reviewer moves an awaiting row to APPROVED and is recorded", async () =>
 test("a non-reviewer changes nothing", async () => {
   const repoId = await seed("AWAITING_APPROVAL");
   const result = await mod.approveOnboardingRequest(
-    { login: "stranger", email: "stranger@example.com", avatarUrl: null },
+    { login: "stranger", email: "stranger@example.com", avatarUrl: null, role: "member" as const },
     repoId,
   );
   assert.equal(result.ok, false);

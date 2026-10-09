@@ -22,7 +22,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const result = await approveOnboardingRequest({ login, email, avatarUrl: null }, rawRepoId);
+  // role is cosmetic here: approveOnboardingRequest re-checks write access against the real
+  // allowlist and role by email, not by whatever this object claims.
+  const result = await approveOnboardingRequest(
+    { login, email, avatarUrl: null, role: "member" },
+    rawRepoId,
+  );
 
   if (!result.ok) {
     console.error(result.error);

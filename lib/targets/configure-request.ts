@@ -1,4 +1,4 @@
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { isReviewerWriter } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 import {
   and,
@@ -100,8 +100,11 @@ async function authorizeReviewerRepository(
   session: Session | null,
   rawRepoId: unknown,
 ): Promise<AuthorizedReviewerRepository> {
-  if (!session || !(await isReviewerEmail(session.email))) {
+  if (!session) {
     return { ok: false, error: "You are not signed in as a reviewer." };
+  }
+  if (!(await isReviewerWriter(session.email))) {
+    return { ok: false, error: "This reviewer has read-only access." };
   }
 
   const repoId = Number(rawRepoId);

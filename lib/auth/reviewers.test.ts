@@ -151,6 +151,42 @@ test("listReviewers marks role, verification and whether a code is outstanding",
   assert.equal(n?.codeOutstanding, false, "no code means nothing was mailed");
 });
 
+test("a verified member defaults to a writer, and read_only strips write access without touching sign-in", async () => {
+  process.env.REVIEWER_EMAILS = OWNER;
+  const member = "readonly@example.com";
+  await mod.verifyCode(member, await code(member));
+
+  assert.equal(await mod.reviewerRole(member), "member");
+  assert.equal(await mod.isReviewerWriter(member), true);
+  assert.equal(await mod.isReviewerEmail(member), true);
+
+  await mod.setReviewerRole(member, "read_only");
+  assert.equal(await mod.reviewerRole(member), "read_only");
+  assert.equal(await mod.isReviewerWriter(member), false, "a read-only member cannot write");
+  assert.equal(await mod.isReviewerEmail(member), true, "but can still sign in and read");
+
+  await mod.setReviewerRole(member, "member");
+  assert.equal(await mod.isReviewerWriter(member), true, "restoring the role restores write access");
+});
+
+test("an owner is always a writer and has no row to set a role on", async () => {
+  process.env.REVIEWER_EMAILS = OWNER;
+  assert.equal(await mod.reviewerRole(OWNER), "owner");
+  assert.equal(await mod.isReviewerWriter(OWNER), true);
+  await assert.rejects(() => mod.setReviewerRole(OWNER, "read_only"), /no row to set a role on/);
+});
+
+test("a pending or unauthorized address is neither a reader nor a writer", async () => {
+  process.env.REVIEWER_EMAILS = OWNER;
+  assert.equal(await mod.reviewerRole("stranger@example.com"), null);
+  assert.equal(await mod.isReviewerWriter("stranger@example.com"), false);
+
+  const pending = "pending-role@example.com";
+  await mod.startVerification(pending, OWNER);
+  assert.equal(await mod.reviewerRole(pending), null, "unverified, so no role yet either");
+  assert.equal(await mod.isReviewerWriter(pending), false);
+});
+
 test("only owners may manage; the GitHub id allowlist is unchanged", () => {
   process.env.REVIEWER_EMAILS = OWNER;
   assert.equal(mod.canManageReviewers(OWNER), true);
