@@ -228,4 +228,6 @@ This project was built with AI coding assistance under human direction. All chan
 
 ## License
 
-No license file is committed yet.
+AGPL-3.0-only (see [`LICENSE`](LICENSE)). A hosted copy that offers BountyDesk as a service must
+publish its source, including any modifications, to its users. This covers the core only; a
+separate commercially licensed package carries the features gated behind a paid tier.
