@@ -183,11 +183,21 @@ export function CaseView({
       <Panel
         title="Artifacts"
         aside={
-          <Badge variant="outline">
-            {status.artifacts.length === 0
-              ? "None recorded"
-              : `${status.artifacts.length} recorded`}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {status.approval?.decision === "APPROVED" ? (
+              <a
+                href={`/api/reports/${reportId}/export`}
+                className="text-meta text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                Export full document
+              </a>
+            ) : null}
+            <Badge variant="outline">
+              {status.artifacts.length === 0
+                ? "None recorded"
+                : `${status.artifacts.length} recorded`}
+            </Badge>
+          </div>
         }
       >
         <ArtifactsPanel
