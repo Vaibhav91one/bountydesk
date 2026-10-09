@@ -508,8 +508,6 @@ An advisory's recipient is the repository grant, re-checked at send, and its rec
 
 Still open or deferred, so a plan knows where they stand:
 
-- The agent-authored `publish_verdict` path is merged but wants one fresh live run before it is
-  called live-proven; the recorded proof used the deterministic canary pipeline.
 - The open onboarding items in [`docs/onboarding-follow-ups.md`](docs/onboarding-follow-ups.md):
   rotating a connectionless profile, a tarball without a Dockerfile, reclaiming mesh images, and
   scheduling the trial-snapshot sweep.

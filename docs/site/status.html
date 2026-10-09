@@ -73,7 +73,7 @@
 <tr><th>Item</th><th>Date</th><th>State and evidence</th></tr>
 <tr><td>Deterministic canary pipeline against the pinned Juice Shop target (SQLi scenario)</td><td class="d">2026-08-29</td><td><span class="pill live">live-proven</span> <code>docs/plan.md</code> Phase 4 status, live proof dated 2026-08-29</td></tr>
 <tr><td>Sandbox pipeline, build then offline reproduction, against the pinned fork <code>Vaibhav91one/juice-shop</code> at v17.3.0</td><td class="d">earlier rounds</td><td><span class="pill live">live-proven</span> <code>AGENTS.md</code>: run live end to end</td></tr>
-<tr><td>Agent-authored investigation and <code>publish_verdict</code></td><td class="d">merged earlier</td><td><span class="pill open">not yet proven</span> the recorded proof used the deterministic canary pipeline (#355)</td></tr>
+<tr><td>Agent-authored investigation and <code>publish_verdict</code></td><td class="d">2026-10-09</td><td><span class="pill live">live-proven</span> report <code>65316ec8</code>, <code>docs/verification-matrix.md</code> (#355)</td></tr>
 <tr><td>Browser probe enabled, with a Juice Shop DOM XSS recipe (#262), offline render (#259), navigate on domcontentloaded (#265), output cap raised (#268)</td><td class="d">2026-09-25</td><td><span class="pill merged">merged</span> design in <code>docs/browser-probe.md</code></td></tr>
 <tr><td>Clientless target images reproduce through a listen-socket readiness fallback (#312)</td><td class="d">2026-09-26</td><td><span class="pill live">live-proven</span> report 05c7fc29</td></tr>
 <tr><td>Static review when a target cannot be built or deployed (#284); advisory OSV dependency scan (#318)</td><td class="d">2026-09-26 and 09-27</td><td><span class="pill live">live-proven</span> for the static fallback: build failure to ANALYSIS_ONLY, report f3f611e8 (before #310). The OSV scan (#318) is merged only</td></tr>
@@ -131,7 +131,6 @@
 <p>From the "Still open or deferred" list in <code>AGENTS.md</code>, plus gaps the verification matrix names.</p>
 <div class="tbl"><table>
 <tr><th>Item</th><th>Why</th><th>Issue</th></tr>
-<tr><td>Agent-authored <code>publish_verdict</code></td><td>Merged, but wants one fresh live run where the agent investigates and drafts the verdict itself. The recorded proof used the deterministic canary pipeline.</td><td>#355</td></tr>
 <tr><td>Onboarding follow-ups</td><td>Rotating a connectionless profile (code merged in #337), a tarball without a Dockerfile, reclaiming mesh images, and scheduling the trial-snapshot sweep. <code>docs/onboarding-follow-ups.md</code> says the sweep now runs from the worker daemon every six hours.</td><td>#351, #353</td></tr>
 <tr><td>Prebuilt image by digest, live</td><td>Test-covered only. A live submit needs a public image that can reproduce.</td><td>none</td></tr>
 <tr><td>Advisory delivery onto a private repository</td><td>Held for review, as designed: a free private repository has no security advisory feature. Needs GitHub Advanced Security on that repository.</td><td>none</td></tr>

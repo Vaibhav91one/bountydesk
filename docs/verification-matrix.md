@@ -78,6 +78,42 @@ the outcome does not change the delivery path that the REPRODUCED runs above exe
 | Nothing read and nothing drafted | OUT_OF_SCOPE | test-covered | target-scope tests |
 | Grant revoked mid-delivery, SPF/DKIM fail, lease loss, sweeper reclaim | held or refused | test-covered | need contrived infra to trigger live |
 
+## Agent-authored `publish_verdict`, live proof
+
+The SQLi live proof on record (`docs/demo-runbook.md`, `docs/decisions.md` Q18) predates Q22's
+agent-authored redesign and used the deterministic canary pipeline instead. This run is the
+first full pass of the current path: the TrueForge agent itself investigates and calls
+`publish_verdict`, with no canary runner involved.
+
+Target: the pinned fork `Vaibhav91one/juice-shop` at `v17.3.0`
+(`ghcr.io/vaibhav91one/juice-shop@sha256:477b2ed9...`). Scenario: UNION SQL injection on
+`GET /rest/products/search?q=`.
+
+Sequence, with evidence:
+
+1. Intake: issue [`Vaibhav91one/juice-shop#32`](https://github.com/Vaibhav91one/juice-shop/issues/32),
+   opened with a `/reproduce` command by an allowlisted reviewer. GitHub App delivery
+   `eb0a6342-c399-11f1-8618-bf6395f1a807`, response 202, `inbound_job`
+   `d33c3007-b5b9-47fb-a20a-7562568f2125`.
+   - A first attempt, issue #31, was opened without a `/reproduce` command. The receiver
+     accepted and correctly dropped it (`lib/github/commands.ts` intent gate): 202 "no
+     /reproduce command, not triggering a run", no job row. Not a defect; closed as superseded.
+2. Report `65316ec8-5f9e-4b0c-84b6-020aae66c621` created, `source_ref
+   github:1347703889:issue:32`.
+3. Agent session `9ccc8b70-2da3-4258-8b20-de244020683e` investigated against sandbox
+   `b5357ca7-116d-4a09-a7a9-29117d07d474`, then called `publish_verdict`
+   (`call_Gyjf8nH43MCYGzqOHfu2YmAg`); the turn ended on the pending call and the report moved to
+   AWAITING_APPROVAL.
+4. Verdict `f2595dc5-628b-4f54-809d-f8bc3110a867`, revision 1, outcome `REPRODUCED`, content hash
+   `56e49ded8c7d5697199836fab7fff7e5aab58368b8b337a2fbcd748e14590acb`.
+5. A reviewer read the exact drafted text on the case file and approved it
+   (`approval_decision` `1d1ab72b-5f4c-4e56-954b-2dafebf7f9c7`).
+6. Delivered as [comment 6074364696](https://github.com/Vaibhav91one/juice-shop/issues/32#issuecomment-6074364696),
+   report state `DELIVERED`.
+
+This is the first live run of the current agent-authored path; the August 2026 proof under the
+deterministic canary pipeline still stands as a separate, earlier proof and is not superseded.
+
 ## Cleanup performed this round
 
 - Three test advisories on juice-shop closed (`GHSA-qr4w`, `GHSA-q5pc`, `GHSA-hh99`). GitHub has no
