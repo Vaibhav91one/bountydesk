@@ -351,6 +351,13 @@
       "when": 1791522358466,
       "tag": "0049_easy_sabra",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1791534979873,
+      "tag": "0050_pg_trgm_extension",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createGunzip } from "node:zlib";
 
 import { EMAIL_SHAPE, normalizeEmail } from "@/lib/auth/otp";
 import { startContactVerification, verifyContactCode } from "@/lib/auth/report-contact";
@@ -29,6 +30,13 @@ export const UPLOAD_LIMITS = {
   maxRequestBytes: 4 * 1024 * 1024,
   maxTitleChars: 200,
   maxDockerfileBytes: 64 * 1024,
+  /** A gzip-compressed archive is refused if decompressing it would exceed this many bytes,
+   *  whatever the compressed size claims. Generous for a real lab-target source tree, tight
+   *  enough to stop a classic nested zip bomb well before it finishes decompressing. */
+  maxUncompressedArchiveBytes: 200 * 1024 * 1024,
+  /** Refused independently of the absolute cap: output more than this many times the compressed
+   *  input is a bomb shape even when the absolute size is still small. */
+  maxArchiveCompressionRatio: 2000,
   /** Uploads from one client address per day, on top of the per-sender and per-domain caps. */
   perAddressPerDay: 10,
   /** Codes one report may have mailed to its contact, the first one included. */
@@ -64,6 +72,58 @@ export function isTarball(bytes: Buffer): boolean {
   const gzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
   const ustar = bytes.length >= 262 && bytes.subarray(257, 262).toString("latin1") === "ustar";
   return gzip || ustar;
+}
+
+/**
+ * Refuse a gzip-compressed archive that would decompress beyond the configured size or ratio,
+ * before it is ever written to a report row. Decompresses the whole thing to find out, the only
+ * way to catch a bomb whose claimed sizes lie, but streams it: the output is counted chunk by
+ * chunk and the stream is torn down the moment either limit is crossed, so a true bomb never
+ * finishes decompressing here even once.
+ *
+ * A plain (non-gzip) ustar archive is not checked: it expands at most 1:1 against its own bytes,
+ * already bounded by UPLOAD_LIMITS.maxRequestBytes, modulo the GNU sparse-file extension, which
+ * is a narrower, less common bomb shape this does not cover (deep format validation is out of
+ * scope for this check, same as #348's own scope line).
+ */
+export async function checkDecompressionBound(
+  bytes: Buffer,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const isGzip = bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b;
+  if (!isGzip) return { ok: true };
+
+  const ratioCeiling = bytes.length * UPLOAD_LIMITS.maxArchiveCompressionRatio;
+
+  return new Promise((resolve) => {
+    const gunzip = createGunzip();
+    let uncompressed = 0;
+    let settled = false;
+
+    function finish(result: { ok: true } | { ok: false; reason: string }): void {
+      if (settled) return;
+      settled = true;
+      gunzip.destroy();
+      resolve(result);
+    }
+
+    gunzip.on("data", (chunk: Buffer) => {
+      uncompressed += chunk.length;
+      if (uncompressed > UPLOAD_LIMITS.maxUncompressedArchiveBytes) {
+        finish({
+          ok: false,
+          reason: `the archive expands beyond ${UPLOAD_LIMITS.maxUncompressedArchiveBytes} bytes uncompressed`,
+        });
+      } else if (uncompressed > ratioCeiling) {
+        finish({
+          ok: false,
+          reason: `the archive's compression ratio exceeds ${UPLOAD_LIMITS.maxArchiveCompressionRatio}:1`,
+        });
+      }
+    });
+    gunzip.on("end", () => finish({ ok: true }));
+    gunzip.on("error", () => finish({ ok: false, reason: "the archive could not be decompressed" }));
+    gunzip.end(bytes);
+  });
 }
 
 /**
@@ -134,6 +194,8 @@ export async function parseUploadForm(form: FormData, config: OutsideConfig): Pr
   if (archive) {
     const bytes = Buffer.from(await archive.arrayBuffer());
     if (!isTarball(bytes)) return { ok: false, reason: "the source archive must be a .tar or .tar.gz file" };
+    const bound = await checkDecompressionBound(bytes);
+    if (!bound.ok) return { ok: false, reason: bound.reason };
     material = { kind: "archive", archive: bytes };
   } else if (dockerfile) {
     if (dockerfile.size > UPLOAD_LIMITS.maxDockerfileBytes) {
