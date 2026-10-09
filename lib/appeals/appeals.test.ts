@@ -253,3 +253,12 @@ test("an appeal cannot be moved through a different report's id", async () => {
   assert.equal(result.ok, false);
   assert.equal((await appeals.listAppeals(a.reportId))[0].status, "OPEN");
 });
+
+test("spending codes does not free slots in the daily mail cap", async () => {
+  const s = await seed({ delivered: true });
+  const first = await ask(s.reportId, s.contact, "192.0.2.201");
+  await appeals.submitAppeal({ reportId: s.reportId, contact: s.contact, code: first.mailed!.code, body: "x" });
+  let sent = 1;
+  for (let i = 0; i < 4; i++) sent += (await ask(s.reportId, s.contact, `192.0.2.${202 + i}`)).mailed ? 1 : 0;
+  assert.equal(sent, appeals.APPEAL_LIMITS.maxCodesPerReportPerDay);
+});

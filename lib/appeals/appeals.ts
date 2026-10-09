@@ -123,7 +123,7 @@ export async function requestAppealCode(
         .where(
           and(
             eq(appealCode.reportId, reportId),
-            isNotNull(appealCode.codeHash),
+            isNotNull(appealCode.expiresAt),
             sql`${appealCode.createdAt} > now() - interval '1 day'`,
           ),
         );
@@ -204,8 +204,8 @@ export async function submitAppeal(input: {
         await tx.update(appealCode).set({ attempts: row.attempts + 1 }).where(eq(appealCode.id, row.id));
         return CODE_REFUSED;
       }
-      // Single use: spent before anything else can fail.
-      await tx.update(appealCode).set({ codeHash: null, expiresAt: null }).where(eq(appealCode.id, row.id));
+      // Single use: spent before anything else can fail. expires_at stays set so the daily mail cap still counts this code.
+      await tx.update(appealCode).set({ codeHash: null }).where(eq(appealCode.id, row.id));
 
       // Re-checked at filing: the code was issued for a delivered verdict and this binds the
       // appeal to the one that is delivered now.
