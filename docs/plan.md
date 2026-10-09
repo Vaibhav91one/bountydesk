@@ -61,9 +61,9 @@ no automated genuine/fake claim.
 
 ## Phase 4: Reproduction against pinned and dynamic targets
 
-**Status:** the deterministic pinned-target path is proven live for the SQLi scenario; the
-current agent-authored path is merged but still needs its own live proof. The dynamic tier is
-not started.
+**Status:** the deterministic pinned-target path is proven live for the SQLi scenario, and the
+agent-authored path is now proven live for the same scenario (`docs/verification-matrix.md`,
+report `65316ec8-5f9e-4b0c-84b6-020aae66c621`). The dynamic tier is not started.
 
 - Start with the provisioning spike. It gates everything else in this phase: prove that
   BountyDesk can provision the environment, that a `TargetProfile` selects the exact snapshot,
@@ -135,9 +135,14 @@ calls it. Exposing `reproduce()` as an optional MCP tool the agent can call mid-
 finding can carry the canary oracle's stronger evidence instead of only the agent's own read of
 a request/response pair, is a later, separate PR.
 
-**Status:** the code for the agent-authored path is merged. It has not yet been proven with a
-real live run producing an agent-drafted verdict; the 2026-08-29 live proof above predates this
-change and used the deterministic pipeline.
+**Status:** proven live 2026-10-09 for the SQLi scenario. A real GitHub issue
+(`Vaibhav91one/juice-shop#32`) with a `/reproduce` command from an allowlisted reviewer started a
+TrueForge agent session against the pinned snapshot; the agent investigated on its own and called
+`publish_verdict` with outcome `REPRODUCED`, a reviewer read the exact drafted text and approved
+it, and the delivery worker posted it as
+[comment 6074364696](https://github.com/Vaibhav91one/juice-shop/issues/32#issuecomment-6074364696).
+Full evidence trail in `docs/verification-matrix.md`. The 2026-08-29 live proof above predates
+this change and used the deterministic pipeline; both stand as separate proofs.
 
 PR #55 added self-booting DVWA and WebGoat demo skills and a generic report-repo runner for
 agent practice. Those are not report-shaped live targets for BountyDesk. A real report still
