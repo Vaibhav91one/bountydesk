@@ -141,6 +141,8 @@ export type UploadView = {
   sourceArchiveDigest: string | null;
   imageRef: string | null;
   imageDigest: string | null;
+  gitUrl: string | null;
+  gitCommitSha: string | null;
   materialBytes: number | null;
   buildState: string | null;
   buildError: string | null;
@@ -156,6 +158,8 @@ export async function readUpload(reportId: string): Promise<UploadView | null> {
       sourceArchiveDigest: uploadIntake.sourceArchiveDigest,
       imageRef: uploadIntake.imageRef,
       imageDigest: uploadIntake.imageDigest,
+      gitUrl: uploadIntake.gitUrl,
+      gitCommitSha: uploadIntake.gitCommitSha,
       materialBytes: uploadIntake.materialBytes,
       buildState: uploadIntake.buildState,
       buildError: uploadIntake.buildError,

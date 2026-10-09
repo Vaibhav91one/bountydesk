@@ -365,6 +365,13 @@
       "when": 1791569560226,
       "tag": "0051_eminent_terrax",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1791574554138,
+      "tag": "0052_ambiguous_doctor_spectrum",
+      "breakpoints": true
     }
   ]
 }

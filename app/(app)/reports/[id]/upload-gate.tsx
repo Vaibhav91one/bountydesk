@@ -49,6 +49,7 @@ const BUILD_STATE_TEXT: Record<string, string> = {
 
 function materialText(upload: UploadView): string {
   if (upload.materialKind === "image") return `Prebuilt image ${upload.imageRef}@${upload.imageDigest}`;
+  if (upload.materialKind === "git") return `Git source ${upload.gitUrl} at ${upload.gitCommitSha}`;
   const size = upload.materialBytes ? ` (${Math.ceil(upload.materialBytes / 1024)} KB)` : "";
   const what = upload.materialKind === "dockerfile" ? "A Dockerfile" : "A source tarball";
   return `${what}${size}, ${upload.sourceArchiveDigest}`;

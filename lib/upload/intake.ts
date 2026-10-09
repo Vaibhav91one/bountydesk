@@ -11,6 +11,7 @@ import { normalizeSender, overLimit, senderDomain } from "@/lib/email/outside-in
 import { sendVerificationEmail } from "@/lib/email/resend";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { ensureReport, recordEvent, recordEventLocked } from "@/lib/reports/lifecycle";
+import { parseGitSource } from "@/lib/upload/git-source";
 import { approveUploadTarget, reviewedUploadTarget, type UploadTargetInput } from "@/lib/upload/gate";
 
 /**
@@ -46,7 +47,8 @@ export const UPLOAD_LIMITS = {
 export type UploadMaterial =
   | { kind: "archive"; archive: Buffer }
   | { kind: "dockerfile"; archive: Buffer }
-  | { kind: "image"; imageRef: string; imageDigest: string };
+  | { kind: "image"; imageRef: string; imageDigest: string }
+  | { kind: "git"; gitUrl: string; gitCommitSha: string };
 
 export type UploadSubmission = {
   title: string;
@@ -185,9 +187,16 @@ export async function parseUploadForm(form: FormData, config: OutsideConfig): Pr
   const dockerfile = file(form, "dockerfile");
   const imageRef = text(form, "imageRef");
   const imageDigest = text(form, "imageDigest").toLowerCase();
-  const kinds = [archive, dockerfile, imageRef || imageDigest ? "image" : null].filter(Boolean);
+  const gitUrl = text(form, "gitUrl");
+  const gitCommit = text(form, "gitCommit");
+  const kinds = [
+    archive,
+    dockerfile,
+    imageRef || imageDigest ? "image" : null,
+    gitUrl || gitCommit ? "git" : null,
+  ].filter(Boolean);
   if (kinds.length > 1) {
-    return { ok: false, reason: "attach one kind of target material: a tarball, a Dockerfile, or an image" };
+    return { ok: false, reason: "attach one kind of target material: a tarball, a Dockerfile, an image, or a git URL" };
   }
 
   let material: UploadMaterial | null = null;
@@ -216,6 +225,10 @@ export async function parseUploadForm(form: FormData, config: OutsideConfig): Pr
     const refusal = imageRegistryRefusal(imageRef);
     if (refusal) return { ok: false, reason: refusal };
     material = { kind: "image", imageRef, imageDigest };
+  } else if (gitUrl || gitCommit) {
+    const git = parseGitSource(gitUrl, gitCommit);
+    if (!git.ok) return { ok: false, reason: git.reason };
+    material = { kind: "git", gitUrl: git.source.cloneUrl, gitCommitSha: git.source.commitSha };
   }
 
   return { ok: true, submission: { title, body, contact, material } };
@@ -273,7 +286,7 @@ export async function admitUpload(
   const senderKey = normalizeSender(submission.contact);
   const domain = senderDomain(submission.contact);
   const material = submission.material;
-  const archive = material && material.kind !== "image" ? material.archive : null;
+  const archive = material && "archive" in material ? material.archive : null;
 
   const admitted = await db.transaction(async (tx): Promise<{ reason: string } | { reportId: string }> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('upload-intake'))`);
@@ -309,6 +322,8 @@ export async function admitUpload(
       sourceArchiveDigest: archive ? `sha256:${createHash("sha256").update(archive).digest("hex")}` : null,
       imageRef: material?.kind === "image" ? material.imageRef : null,
       imageDigest: material?.kind === "image" ? material.imageDigest : null,
+      gitUrl: material?.kind === "git" ? material.gitUrl : null,
+      gitCommitSha: material?.kind === "git" ? material.gitCommitSha : null,
       materialBytes: archive?.length ?? null,
     });
     await recordEvent(reportId, "intake.accepted", { sourceRef, material: material?.kind ?? null }, { tx });
@@ -360,7 +375,7 @@ export async function admitReviewerUpload(
   }
 
   const contact = submission.contact;
-  const archive = material.kind !== "image" ? material.archive : null;
+  const archive = "archive" in material ? material.archive : null;
 
   const reportId = await db.transaction(async (tx): Promise<string> => {
     const sourceRef = `upload:${randomUUID()}`;
@@ -389,6 +404,8 @@ export async function admitReviewerUpload(
       sourceArchiveDigest: archive ? `sha256:${createHash("sha256").update(archive).digest("hex")}` : null,
       imageRef: material.kind === "image" ? material.imageRef : null,
       imageDigest: material.kind === "image" ? material.imageDigest : null,
+      gitUrl: material.kind === "git" ? material.gitUrl : null,
+      gitCommitSha: material.kind === "git" ? material.gitCommitSha : null,
       materialBytes: archive?.length ?? null,
     });
     await recordEvent(id, "intake.accepted", { sourceRef, material: material.kind, reviewer: reviewer.login }, { tx });

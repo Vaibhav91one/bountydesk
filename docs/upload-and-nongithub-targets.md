@@ -131,11 +131,21 @@ The body is parsed in the route process with bounds, not in the sandbox the desi
 email attachments. An uploaded archive is only extracted inside the build sandbox. The one other
 reader is the static review below, which parses it in memory and never extracts or runs it.
 
-Target material is optional and at most one of: a tarball (with a Dockerfile at its root, or a node or python project the build wraps), a single
+Target material is optional and at most one of: a public git URL with a commit, a tarball (with a Dockerfile at its root, or a node or python project the build wraps), a single
 Dockerfile of at most 64 KB with a `FROM` line (stored as a deterministic one-file tarball so it
 takes the archive path), or a prebuilt image named by tag and sha256 digest. A prebuilt image's
 registry is checked against `PREBUILT_IMAGE_REGISTRIES` at intake and again in the build driver.
-There is no git URL option.
+
+A git URL (`gitUrl` and `gitCommit` form fields, stored as `upload_intake.git_url` and
+`git_commit_sha`, migration 0052) is for GitLab, Bitbucket or a self-hosted host. The URL comes from
+an outside submitter and its host is added to the build sandbox's egress allow-list, so
+`parseGitSource` in `lib/upload/git-source.ts` accepts only https, with no credentials, query,
+fragment or port, a repository path of at least two segments, and a host that is a public-looking DNS
+name (no IP literal, no single-label host, no `.local`, `.internal` and similar). The commit must be
+a full 40-character SHA. The build boundary validates the stored values again before the driver sees
+them. The build clones anonymously, checks out the SHA and fails if `git rev-parse HEAD` differs.
+Private repositories and a git source without a root Dockerfile are not supported yet
+(`docs/onboarding-follow-ups.md`).
 
 Nothing builds until a reviewer releases the report at the gate with "Build target and run" and
 states the port, readiness path, optional start command and build ecosystem

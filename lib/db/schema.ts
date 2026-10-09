@@ -1349,6 +1349,9 @@ export const uploadIntake = pgTable(
     sourceArchiveDigest: text("source_archive_digest"),
     imageRef: text("image_ref"),
     imageDigest: text("image_digest"),
+    /** A public https clone URL and its full commit SHA, for material_kind git. */
+    gitUrl: text("git_url"),
+    gitCommitSha: text("git_commit_sha"),
     materialBytes: integer("material_bytes"),
     /** The reviewer-approved target definition and build plan. Null until a reviewer approves one. */
     reviewedTarget: jsonb("reviewed_target"),
@@ -1367,7 +1370,7 @@ export const uploadIntake = pgTable(
     index("upload_intake_build_state_idx").on(t.buildState),
     check(
       "upload_intake_material_kind_check",
-      sql`${t.materialKind} is null or ${t.materialKind} in ('archive', 'dockerfile', 'image')`,
+      sql`${t.materialKind} is null or ${t.materialKind} in ('archive', 'dockerfile', 'image', 'git')`,
     ),
     check(
       "upload_intake_build_state_check",
