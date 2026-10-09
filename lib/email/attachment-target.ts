@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 
 import { db, uploadIntake, type Executor } from "@/lib/db";
 import { recordEvent } from "@/lib/reports/lifecycle";
-import { isTarball, isValidDockerfileText, singleFileTar, UPLOAD_LIMITS } from "@/lib/upload/intake";
+import {
+  checkDecompressionBound,
+  isTarball,
+  isValidDockerfileText,
+  singleFileTar,
+  UPLOAD_LIMITS,
+} from "@/lib/upload/intake";
 
 import type { InboundAttachment } from "./resend";
 import { readOutsideConfig, type OutsideConfig } from "./outside-config";
@@ -31,14 +37,20 @@ function looksLikeDockerfileName(filename: string): boolean {
 /**
  * The first attachment that is a valid source tarball or Dockerfile, or null. A tarball is detected
  * by its magic bytes, the same as the upload form, so the extension does not matter; a Dockerfile is
- * detected by name and then validated as text with a FROM. An attachment over its size cap, or one
- * that is neither, is skipped and the scan continues, so an unrelated screenshot never blocks a real
- * target and an oversize attachment never becomes material.
+ * detected by name and then validated as text with a FROM. An attachment over its size cap, one that
+ * fails the decompression-bound check (the same zip-bomb guard the public upload form applies; this
+ * path feeds the same unbounded `tar -xf` in the build sandbox), or one that is neither, is skipped
+ * and the scan continues, so an unrelated screenshot never blocks a real target and an oversize or
+ * bomb-shaped attachment never becomes material.
  */
-export function selectTargetMaterial(attachments: InboundAttachment[], config: OutsideConfig): EmailTargetMaterial | null {
+export async function selectTargetMaterial(
+  attachments: InboundAttachment[],
+  config: OutsideConfig,
+): Promise<EmailTargetMaterial | null> {
   for (const attachment of attachments) {
     if (isTarball(attachment.content)) {
       if (attachment.content.length > config.maxBytes) continue;
+      if (!(await checkDecompressionBound(attachment.content)).ok) continue;
       return { kind: "archive", archive: attachment.content };
     }
     if (looksLikeDockerfileName(attachment.filename)) {
@@ -63,7 +75,7 @@ export async function attachEmailTarget(opts: {
   exec?: Executor;
 }): Promise<{ attached: boolean; kind?: string }> {
   const config = opts.config ?? (await readOutsideConfig());
-  const material = selectTargetMaterial(opts.attachments, config);
+  const material = await selectTargetMaterial(opts.attachments, config);
   if (!material) return { attached: false };
 
   const exec = opts.exec ?? db;
