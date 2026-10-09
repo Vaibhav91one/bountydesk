@@ -17,8 +17,8 @@ export type PanelAppeal = {
 
 /**
  * Appeals the reporter filed against a delivered verdict. The text is the reporter's own and is
- * rendered as plain text. Acknowledge and close only record status; the answer to the reporter
- * is a re-check on the verdict, which drafts a revision that needs its own approval.
+ * rendered as plain text. Acknowledge and close only record status. A delivered report cannot be
+ * re-checked, so the reviewer replies to the reporter outside the app and notes it on close.
  */
 export function AppealsPanel({
   reportId,

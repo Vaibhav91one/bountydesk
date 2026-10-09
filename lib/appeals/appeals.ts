@@ -246,8 +246,9 @@ export type ResolveResult = { ok: true } | { ok: false; error: string };
 
 /**
  * Move an appeal forward. Re-checks the writer role itself, so a read-only reviewer is refused
- * whichever surface calls this. A response to the reporter is not sent from here: the reviewer
- * answers through a recheck and a new verdict revision, which has its own approval.
+ * whichever surface calls this. Nothing is sent to the reporter from here. The report is DELIVERED,
+ * a terminal state with no edge back, so requestRecheck cannot run on it; the reviewer replies
+ * outside the app and records the outcome in the close note.
  */
 export async function resolveAppeal(
   reportId: string,

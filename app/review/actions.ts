@@ -712,9 +712,8 @@ export async function runCodeReviewAction(reportId: string): Promise<ActionResul
 }
 
 /**
- * Acknowledge or close a reporter's appeal. Answering it is a separate step through the recheck
- * above, which drafts a new verdict revision that needs its own approval; closing only records
- * that a reviewer is done with it.
+ * Acknowledge or close a reporter's appeal. This only records status and an optional note: the
+ * report is DELIVERED, so the recheck above cannot revise its verdict.
  */
 export async function resolveAppealAction(
   reportId: string,

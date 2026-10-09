@@ -1172,8 +1172,12 @@ before it ships, not after.
 - Surface: the public page `/appeal?report=<id>` and `POST /api/appeals`. Reviewers see the
   appeals, and the link to give a reporter, on the case file; Acknowledge and Close need
   `isReviewerWriter`. Open appeals are also in the reviewer-chat context as delimited, untrusted
-  text. A reviewer answers an appeal through the existing recheck and a new verdict revision, so
-  there is no second delivery channel.
+  text. Nothing in the app answers the reporter. An appeal exists only on a
+  DELIVERED report, which is terminal with no edge back, so `requestRecheck` (which accepts only
+  `AWAITING_APPROVAL` and `ANALYSIS_ONLY`) cannot run on it. The reviewer replies outside the app
+  and records the outcome in the close note. Revising a delivered verdict from an appeal needs a
+  lifecycle decision (a new edge out of `DELIVERED`, or a revision path that does not move the
+  report) and is left as a follow-up; no second delivery channel is added meanwhile.
 - Link in delivered text: not added. The delivered body is `buildAgentDraftedPayload`, rendered on
   the worker and the app and compared byte for byte on every replay of a parked draft, and its
   content hash is what a human approves. A line that depends on `APP_BASE_URL` would make a
