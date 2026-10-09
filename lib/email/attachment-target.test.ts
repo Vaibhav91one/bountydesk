@@ -34,42 +34,50 @@ after(async () => {
   await schema?.drop();
 });
 
-test("a Dockerfile attachment is selected and wrapped in a one-file tarball", () => {
+test("a Dockerfile attachment is selected and wrapped in a one-file tarball", async () => {
   const source = "FROM alpine:3.20\nCMD [\"true\"]\n";
-  const material = mod.selectTargetMaterial([attachment("Dockerfile", source)], CONFIG);
+  const material = await mod.selectTargetMaterial([attachment("Dockerfile", source)], CONFIG);
   assert.equal(material?.kind, "dockerfile");
   assert.deepEqual(material?.archive, uploadIntakeMod.singleFileTar("Dockerfile", Buffer.from(source)));
 });
 
-test("a .tar.gz is selected as archive material by its magic bytes, whatever its name", () => {
+test("a .tar.gz is selected as archive material by its magic bytes, whatever its name", async () => {
   const gz = gzipSync(uploadIntakeMod.singleFileTar("Dockerfile", Buffer.from("FROM alpine\n")));
-  const material = mod.selectTargetMaterial([attachment("source.bin", gz)], CONFIG);
+  const material = await mod.selectTargetMaterial([attachment("source.bin", gz)], CONFIG);
   assert.equal(material?.kind, "archive");
   assert.deepEqual(material?.archive, gz);
 });
 
-test("an oversize attachment is ignored, not accepted", () => {
+test("an oversize attachment is ignored, not accepted", async () => {
   const small = { ...CONFIG, maxBytes: 64 };
   const bigTar = gzipSync(uploadIntakeMod.singleFileTar("Dockerfile", Buffer.from("FROM alpine\n".repeat(50))));
   assert.ok(bigTar.length > small.maxBytes);
-  assert.equal(mod.selectTargetMaterial([attachment("big.tar.gz", bigTar)], small), null);
+  assert.equal(await mod.selectTargetMaterial([attachment("big.tar.gz", bigTar)], small), null);
 
   const bigDockerfile = attachment("Dockerfile", "FROM alpine\n" + "#".repeat(uploadIntakeMod.UPLOAD_LIMITS.maxDockerfileBytes));
-  assert.equal(mod.selectTargetMaterial([bigDockerfile], CONFIG), null);
+  assert.equal(await mod.selectTargetMaterial([bigDockerfile], CONFIG), null);
 });
 
-test("an unsupported or invalid attachment is ignored", () => {
-  assert.equal(mod.selectTargetMaterial([], CONFIG), null);
+// #348's review found this path was the one way a zip bomb could still reach the build
+// sandbox's unbounded `tar -xf`: the public submit form was gated, an email attachment was not,
+// though both land in the same upload_intake.archive column and the same build step.
+test("a gzip bomb attachment is refused the same way the public upload form refuses one", async () => {
+  const bomb = gzipSync(Buffer.alloc(210 * 1024 * 1024, 0));
+  assert.equal(await mod.selectTargetMaterial([attachment("source.tar.gz", bomb)], CONFIG), null);
+});
+
+test("an unsupported or invalid attachment is ignored", async () => {
+  assert.equal(await mod.selectTargetMaterial([], CONFIG), null);
   // A PNG-ish blob: not a tarball and not named like a Dockerfile.
-  assert.equal(mod.selectTargetMaterial([attachment("shot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]))], CONFIG), null);
+  assert.equal(await mod.selectTargetMaterial([attachment("shot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]))], CONFIG), null);
   // Named like a Dockerfile but binary, so it fails the text/FROM check.
-  assert.equal(mod.selectTargetMaterial([attachment("Dockerfile", Buffer.from([0, 1, 2, 3]))], CONFIG), null);
+  assert.equal(await mod.selectTargetMaterial([attachment("Dockerfile", Buffer.from([0, 1, 2, 3]))], CONFIG), null);
   // Named like a Dockerfile but no FROM instruction.
-  assert.equal(mod.selectTargetMaterial([attachment("Dockerfile", "RUN echo hi\n")], CONFIG), null);
+  assert.equal(await mod.selectTargetMaterial([attachment("Dockerfile", "RUN echo hi\n")], CONFIG), null);
 });
 
-test("the first valid attachment wins and the rest are ignored", () => {
-  const material = mod.selectTargetMaterial(
+test("the first valid attachment wins and the rest are ignored", async () => {
+  const material = await mod.selectTargetMaterial(
     [
       attachment("notes.txt", "just prose"),
       attachment("Dockerfile", "FROM node:20\n"),
