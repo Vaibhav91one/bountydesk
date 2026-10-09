@@ -257,3 +257,21 @@ test("an authored recipe whose build fails takes the same fail-safe path after i
     analysis: { ensureSession: async () => {}, run: async () => {} },
   });
 });
+
+test("a Dockerfile inside the archive's wrapping directory builds with that directory as its context", async () => {
+  const archive = tarGz([
+    { name: "myapp/Dockerfile", content: "FROM nginx:1.27\n" },
+    { name: "myapp/index.html", content: "<h1>hi</h1>\n" },
+  ]);
+  const reportId = await heldArchiveUpload(archive);
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+
+  const driver = fakeDriver();
+  assert.ok(await build.buildUploadOnce({ driver }));
+  const { plan } = driver.calls[0];
+  assert.ok(plan.strategy === "dockerfile" && plan.buildContext === "myapp" && plan.dockerfilePath === "Dockerfile");
+
+  await worker.runOnce("upload-archive-wrapped-test", {
+    analysis: { ensureSession: async () => {}, run: async () => {} },
+  });
+});
