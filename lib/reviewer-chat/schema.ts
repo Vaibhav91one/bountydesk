@@ -53,6 +53,8 @@ export const reviewerChatContextSchema = z.object({
   reportBody: boundedText(CONTEXT_FIELD_MAX_LENGTH),
   summary: boundedText(CONTEXT_FIELD_MAX_LENGTH),
   findings: z.array(contextFindingSchema).max(REVIEWER_CHAT_FINDINGS_MAX),
+  /** Open reporter appeals on the delivered verdict. Reporter text, untrusted like the report body. */
+  appeals: z.array(boundedText(CONTEXT_FIELD_MAX_LENGTH)).max(5).optional(),
   targetName: boundedText(500).optional(),
   targetIdentityHash: boundedText(256).optional(),
   outcome: z.string().max(100).transform(toPlainText).optional(),

@@ -705,6 +705,68 @@ export const verdictSupersession = pgTable(
   ],
 );
 
+/**
+ * A reporter's appeal of a delivered verdict. It sits beside the verdict the way
+ * verdict_supersession does and never touches the frozen report lifecycle: answering one goes
+ * through the existing recheck and a new verdict revision, not through a state of its own.
+ *
+ * body is untrusted reporter text. contact is the address that proved itself with a one-time code
+ * at filing time. Only one appeal per verdict can be active (OPEN or ACKNOWLEDGED) at once.
+ */
+export const appeal = pgTable(
+  "appeal",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    verdictId: uuid("verdict_id").notNull(),
+    body: text("body").notNull(),
+    contact: text("contact").notNull(),
+    status: text("status").notNull().default("OPEN"),
+    resolutionNote: text("resolution_note"),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "appeal_report_verdict_fk",
+      columns: [t.reportId, t.verdictId],
+      foreignColumns: [verdict.reportId, verdict.id],
+    }),
+    check("appeal_status_check", sql`${t.status} in ('OPEN', 'ACKNOWLEDGED', 'CLOSED')`),
+    check("appeal_body_length_check", sql`char_length(${t.body}) between 1 and 4000`),
+    uniqueIndex("appeal_active_verdict_key")
+      .on(t.verdictId)
+      .where(sql`${t.status} <> 'CLOSED'`),
+    index("appeal_report_idx").on(t.reportId, t.createdAt),
+  ],
+);
+
+/**
+ * One appeal code request. A row is written for every request, including ones for a contact that
+ * is not eligible (code_hash null, nothing mailed), so the per-address limit counts every attempt
+ * and the response never differs between "no such report" and "wrong address".
+ */
+export const appealCode = pgTable(
+  "appeal_code",
+  {
+    id: id(),
+    reportId: uuid("report_id").notNull(),
+    contact: text("contact").notNull(),
+    codeHash: text("code_hash"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    attempts: integer("attempts").notNull().default(0),
+    clientIp: text("client_ip"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("appeal_code_report_idx").on(t.reportId, t.createdAt),
+    index("appeal_code_ip_idx").on(t.clientIp, t.createdAt),
+  ],
+);
+
 export const approvalDecision = pgTable(
   "approval_decision",
   {

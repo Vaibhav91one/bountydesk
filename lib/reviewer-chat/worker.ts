@@ -1,4 +1,4 @@
-import { and, db, eq, reviewerChatMessage, reviewerChatThread, report, sql, verdict, verdictSupersession, targetProfile } from "@/lib/db";
+import { and, appeal, db, eq, reviewerChatMessage, reviewerChatThread, report, sql, verdict, verdictSupersession, targetProfile } from "@/lib/db";
 import { buildReviewerChatContext, redactReviewerText, type ReviewerChatContext } from "./context";
 import { chatReplySchema, MODEL_REPLY_MAX_LENGTH } from "./schema";
 import {
@@ -192,6 +192,15 @@ async function loadWork(lease: ChatLease): Promise<{
     }
   }
 
+  const openAppeals = (
+    await db
+      .select({ body: appeal.body })
+      .from(appeal)
+      .where(and(eq(appeal.reportId, lease.reportId), sql`${appeal.status} <> 'CLOSED'`))
+      .orderBy(sql`${appeal.createdAt} desc`)
+      .limit(5)
+  ).map((row) => row.body);
+
   const previous = await db
     .select({ id: reviewerChatMessage.id, sender: reviewerChatMessage.sender, body: reviewerChatMessage.body })
     .from(reviewerChatMessage)
@@ -205,6 +214,7 @@ async function loadWork(lease: ChatLease): Promise<{
     reportBody: caseReport.body,
     summary: verdictSnapshot?.summary ?? "No verdict has been drafted yet.",
     findings: findingsFromEvidence(verdictSnapshot?.evidence),
+    ...(openAppeals.length ? { appeals: openAppeals } : {}),
     ...(targetName ? { targetName } : {}),
     ...(targetIdentityHash ? { targetIdentityHash } : {}),
     ...(verdictSnapshot ? {
@@ -226,6 +236,7 @@ async function loadWork(lease: ChatLease): Promise<{
       reportBody: caseReport.body,
       summary: verdictSnapshot?.summary ?? "No verdict has been drafted yet.",
       findings: findingsFromEvidence(verdictSnapshot?.evidence),
+      ...(openAppeals.length ? { appeals: openAppeals } : {}),
       ...(targetName ? { targetName } : {}),
       ...(targetIdentityHash ? { targetIdentityHash } : {}),
       ...(verdictSnapshot ? {
