@@ -192,6 +192,17 @@ export function CaseView({
                 Export full document
               </a>
             ) : null}
+            {status.artifacts.some(
+              (art) =>
+                art.kind === "remediation-patch" && art.verdictRevision === status.verdict?.revision,
+            ) ? (
+              <a
+                href={`/api/reports/${reportId}/remediation-patch`}
+                className="text-meta text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              >
+                Download suggested fix
+              </a>
+            ) : null}
             <Badge variant="outline">
               {status.artifacts.length === 0
                 ? "None recorded"
