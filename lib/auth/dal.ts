@@ -2,7 +2,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 
-import { isReviewerEmail } from "./reviewers";
+import { isReviewerEmail, isReviewerWriter, reviewerRole } from "./reviewers";
 import type { Session } from "./session";
 
 /**
@@ -42,8 +42,12 @@ export const currentSession = cache(async (): Promise<Session | null> => {
   }
   if (!reviewerEmail) return null;
 
+  // The address just matched isReviewerEmail, so this is never null in practice; "member" is a
+  // safe floor rather than a silent escalation if the two ever raced.
+  const role = (await reviewerRole(reviewerEmail)) ?? "member";
+
   const login = user.username ?? user.firstName ?? reviewerEmail;
-  return { login, email: reviewerEmail, avatarUrl: user.imageUrl ?? null };
+  return { login, email: reviewerEmail, avatarUrl: user.imageUrl ?? null, role };
 });
 
 /**
@@ -57,4 +61,22 @@ export async function requireReviewer(): Promise<Session> {
 
   const { userId } = await auth();
   redirect(userId ? "/not-authorized" : "/login");
+}
+
+export type WriteAccessResult = { ok: true; session: Session } | { ok: false; error: string };
+
+/**
+ * For a server action that mutates something: the same session requireReviewer gets, plus a
+ * fresh (not session-cached) check that this reviewer can write. A server action returns a
+ * typed result rather than redirecting, so the denial does too, in the same
+ * `{ ok: false, error }` shape every action already returns. Checked fresh rather than trusting
+ * session.role so a demotion mid-session is enforced on the very next write, not the next
+ * sign-in.
+ */
+export async function requireWriteAccess(): Promise<WriteAccessResult> {
+  const session = await requireReviewer();
+  if (!(await isReviewerWriter(session.email))) {
+    return { ok: false, error: "This reviewer has read-only access." };
+  }
+  return { ok: true, session };
 }

@@ -1,4 +1,4 @@
-import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { isReviewerWriter } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 import { enqueue } from "@/lib/build-onboarding/queue";
 import { and, connectedRepository, db, eq, githubInstallation, isNull } from "@/lib/db";
@@ -22,8 +22,11 @@ export async function batchOnboardRequest(
   session: Session | null,
   rawRepoIds: unknown,
 ): Promise<BatchResult> {
-  if (!session || !(await isReviewerEmail(session.email))) {
+  if (!session) {
     return { ok: false, error: "You are not signed in as a reviewer." };
+  }
+  if (!(await isReviewerWriter(session.email))) {
+    return { ok: false, error: "This reviewer has read-only access." };
   }
   if (!Array.isArray(rawRepoIds) || rawRepoIds.length === 0 || rawRepoIds.length > MAX_BATCH) {
     return { ok: false, error: `Pick between 1 and ${MAX_BATCH} repositories.` };

@@ -3,7 +3,13 @@
 import { revalidatePath } from "next/cache";
 
 import { requireReviewer } from "@/lib/auth/dal";
-import { canManageReviewers, removeReviewer, startVerification, verifyCode } from "@/lib/auth/reviewers";
+import {
+  canManageReviewers,
+  removeReviewer,
+  setReviewerRole,
+  startVerification,
+  verifyCode,
+} from "@/lib/auth/reviewers";
 import { sendVerificationEmail } from "@/lib/email/resend";
 
 export type ReviewerActionResult = { ok: true; message?: string } | { ok: false; error: string };
@@ -57,6 +63,24 @@ export async function verifyEmail(email: string, code: string): Promise<Reviewer
 
   const result = await verifyCode(email, code);
   if (!result.ok) return result;
+
+  revalidatePath("/integrations/email");
+  return { ok: true };
+}
+
+/** Toggle a member between normal and read-only access. An env owner has no row to change. */
+export async function setRole(
+  email: string,
+  role: "member" | "read_only",
+): Promise<ReviewerActionResult> {
+  const owner = await requireOwnerEmail();
+  if (!owner) return { ok: false, error: "Only an owner can change a reviewer's access." };
+
+  try {
+    await setReviewerRole(email, role);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not change that reviewer's access." };
+  }
 
   revalidatePath("/integrations/email");
   return { ok: true };

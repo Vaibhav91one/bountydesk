@@ -1,4 +1,5 @@
 import { currentSession } from "@/lib/auth/dal";
+import { isReviewerWriter } from "@/lib/auth/reviewers";
 import { isReportId } from "@/lib/reports/case";
 import {
   ChatInvariantError,
@@ -39,6 +40,11 @@ export async function POST(
 ): Promise<Response> {
   const session = await currentSession();
   if (!session) return Response.json({ error: "unauthenticated" }, { status: 401 });
+  // A chat message steers a REVIEWER_GUIDANCE run, so it is a write, not a read: gated the same
+  // as every other mutation, re-checked fresh rather than trusted from the session.
+  if (!(await isReviewerWriter(session.email))) {
+    return Response.json({ error: "read-only access" }, { status: 403 });
+  }
   if (!reviewerChatEnabled()) return unavailable();
 
   const { id } = await context.params;

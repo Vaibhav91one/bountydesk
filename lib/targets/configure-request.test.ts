@@ -45,7 +45,7 @@ after(async () => {
 // so the existing session(REVIEWER_ID) call sites keep meaning "an authorized reviewer".
 function session(userId: number) {
   const email = userId === REVIEWER_ID ? REVIEWER_EMAIL : `outsider-${userId}@example.com`;
-  return { login: "someone", email, avatarUrl: null };
+  return { login: "someone", email, avatarUrl: null, role: "member" as const };
 }
 
 async function repo({
@@ -86,6 +86,23 @@ test("a signed-in user who is not a reviewer is denied and changes nothing", asy
 
   // A perfectly valid session: the cookie is real, the person is not on the allowlist.
   const result = await configure.configureRepositoryRequest(session(999_999), repoId);
+
+  assert.equal(result.ok, false);
+  assert.equal(await boundTarget(repoId), null, "no binding was written");
+});
+
+test("a read-only reviewer is denied and changes nothing, even though they can sign in", async () => {
+  const { startVerification, verifyCode, setReviewerRole } = await import("@/lib/auth/reviewers");
+  const email = "readonly-configure@example.com";
+  const { code } = (await startVerification(email, REVIEWER_EMAIL)) as { code: string };
+  await verifyCode(email, code);
+  await setReviewerRole(email, "read_only");
+
+  const repoId = await repo();
+  const result = await configure.configureRepositoryRequest(
+    { login: "readonly", email, avatarUrl: null, role: "read_only" },
+    repoId,
+  );
 
   assert.equal(result.ok, false);
   assert.equal(await boundTarget(repoId), null, "no binding was written");

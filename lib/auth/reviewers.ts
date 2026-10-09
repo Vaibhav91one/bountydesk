@@ -73,9 +73,39 @@ export async function isReviewerEmail(email: string | null | undefined): Promise
   return Boolean(row);
 }
 
+/**
+ * Which role a signed-in reviewer holds, for the session and the management screen. Owners
+ * short-circuit, same as isOwnerEmail. Null means not authorized at all: the caller already
+ * knows this from isReviewerEmail, so this is only ever called for an address that passed it.
+ */
+export async function reviewerRole(
+  email: string | null | undefined,
+): Promise<"owner" | "member" | "read_only" | null> {
+  const normalized = normalize(email);
+  if (!normalized) return null;
+  if (reviewerEmails().has(normalized)) return "owner";
+
+  const [row] = await db
+    .select({ role: reviewer.role })
+    .from(reviewer)
+    .where(and(eq(reviewer.email, normalized), isNotNull(reviewer.verifiedAt)))
+    .limit(1);
+  return row?.role ?? null;
+}
+
+/**
+ * May this address approve, deny, or change a setting? Re-checked fresh on every request, the
+ * same as isReviewerEmail: a read-only reviewer promoted mid-session, or demoted mid-session,
+ * takes effect at once rather than waiting for a new sign-in.
+ */
+export async function isReviewerWriter(email: string | null | undefined): Promise<boolean> {
+  const role = await reviewerRole(email);
+  return role !== null && role !== "read_only";
+}
+
 export type ReviewerEntry = {
   email: string;
-  role: "owner" | "member";
+  role: "owner" | "member" | "read_only";
   /** True for an owner; for a member, true once the one-time code has been entered. */
   verified: boolean;
   /** A pending member with a code that has been mailed and not yet expired, awaiting entry. */
@@ -103,7 +133,7 @@ export async function listReviewers(): Promise<ReviewerEntry[]> {
     .filter((row) => !owners.has(row.email))
     .map((row) => ({
       email: row.email,
-      role: "member",
+      role: row.role,
       verified: row.verifiedAt !== null,
       codeOutstanding:
         row.verifiedAt === null &&
@@ -218,6 +248,19 @@ export async function verifyCode(email: string, code: string): Promise<VerifyRes
     .set({ verifiedAt: new Date(), codeHash: null, codeExpiresAt: null, codeAttempts: 0 })
     .where(eq(reviewer.email, normalized));
   return { ok: true };
+}
+
+/** Set a member's role. An env owner has no row and cannot be changed here. */
+export async function setReviewerRole(
+  email: string,
+  role: "member" | "read_only",
+): Promise<void> {
+  const normalized = normalize(email);
+  if (!normalized) return;
+  if (reviewerEmails().has(normalized)) {
+    throw new Error("an owner is set in REVIEWER_EMAILS and has no row to set a role on");
+  }
+  await db.update(reviewer).set({ role }).where(eq(reviewer.email, normalized));
 }
 
 /** Remove a member (pending or verified). An env owner cannot be removed here. */
