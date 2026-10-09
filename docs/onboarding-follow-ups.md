@@ -189,7 +189,10 @@ Remaining work:
   the identity anchor.
 - Everything the agent commits is untrusted. `parseBuildPlan` re-validates it, and the plan is used
   only if its runtime base URL and readiness path equal what the reviewer approved, so the agent
-  cannot move the target to a different port than the one that gets bound. The final build, offline
+  cannot move the target to a different port than the one that gets bound. The plan's runtime is then
+  replaced with the reviewer's values (name, start command, warmup, env prefix, scope rules) and its
+  `extraEgressHosts` are dropped, so only the clone host widens the build egress. The row rests in
+  `UPLOAD_DONE` when the agent ends, which the snapshot and image sweeps treat as terminal. The final build, offline
   verify and connectionless bind are unchanged.
 - The fallbacks are ordered. If the agent is unavailable, errors, or commits nothing usable, a
   tarball falls back to the thin recipe the server authors (`lib/upload/recipe.ts`: a generic-base

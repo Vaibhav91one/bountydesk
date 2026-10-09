@@ -18,7 +18,8 @@ export { uploadBuildSource };
  * The loop that turns reviewer-approved upload material into a bound target.
  *
  * A row reaches this only after a reviewer released its report with a target definition (build_state
- * PENDING). The build runs through the non-GitHub build path (a BuildSource of kind archive or image),
+ * PENDING). The build runs through the non-GitHub build path (a BuildSource of kind archive, git or image;
+ * an archive with no Dockerfile and any git source are planned by the onboarding agent first),
  * the result is pinned with bindConnectionlessTargetFromBuild, and the report is bound to that profile.
  * Whatever happens, the report then gets the same analysis run the gate's "Run analysis" queues: with a
  * bound target it can reproduce. Without one (the build gave up at FAILED) the analysis driver runs the

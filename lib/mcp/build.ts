@@ -25,10 +25,11 @@ import {
  * session by an opaque capability token, exactly as probe_target resolves an agent_session, so the
  * model never sees a repo or sandbox id and cannot reach a row that is not its own.
  *
- * These tools deliberately do NOT drive the onboarding state machine. The build-onboarding worker
- * holds the row's lease while the agent turn runs; a tool advancing the state would fight that fence.
- * Instead commit/mark record their result on `build_plan` (an agent-authored plan, or a
- * not-flattenable reason) and the worker reads it after the turn and advances. Egress stays
+ * These tools deliberately do NOT drive the onboarding state machine. Whoever owns the row holds its
+ * lease while the agent turn runs (the build-onboarding worker for a GitHub row, the upload build loop
+ * for an upload row); a tool advancing the state would fight that fence. Instead commit/mark record
+ * their result on `build_plan` (an agent-authored plan, or a not-flattenable reason) and that owner
+ * reads it after the turn and advances. Egress stays
  * server-held: the sandbox's allow-list comes from the detected ecosystem, never from the model, and
  * the committed image is still rebuilt by the driver, offline-verified, and human-approved before it
  * can become a target.

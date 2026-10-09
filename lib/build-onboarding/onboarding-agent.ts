@@ -11,8 +11,8 @@ import { teardownBuildSandbox } from "@/lib/mcp/build";
  * iterates a Dockerfile until the app boots with its data present, then calls commit_target_image or
  * mark_unsandboxable. Those tools write the result onto the onboarding row's `build_plan` (an
  * agent-authored plan, or a not-flattenable reason); this driver just runs the turn to completion and
- * cleans up. The worker reads `build_plan` afterward and advances the state machine, so this function
- * never touches the state itself.
+ * cleans up. The caller (the build-onboarding worker, or the upload build loop for an upload row)
+ * reads `build_plan` afterward and advances the state, so this function never touches the state itself.
  *
  * The agent resolves its own onboarding row through an opaque capability token this driver mints and
  * stores on the row before the turn (the onboarding analogue of agent_session.capability_token). The

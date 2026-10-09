@@ -585,7 +585,7 @@ async function recordLineage(
 // A row past one of these has either bound its snapshot to a profile (CONFIGURED, so the profile
 // query protects it) or produced nothing worth keeping (UNSUPPORTED, FAILED). Every other state is
 // in flight, and its built snapshot must be protected from the sweep until the row records it.
-const ONBOARDING_TERMINAL = new Set(["CONFIGURED", "UNSUPPORTED", "FAILED"]);
+const ONBOARDING_TERMINAL = new Set(["CONFIGURED", "UNSUPPORTED", "FAILED", "UPLOAD_DONE"]);
 
 /** Snapshot ids on a stored services value. A target profile config holds `{ services: [...] }`; a
  *  target_onboarding built_services column is the array itself, so both shapes are read here. */

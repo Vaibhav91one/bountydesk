@@ -97,10 +97,22 @@ export async function agentBuildPlan(input: {
       instructions: agentInstructions(reviewed, source),
     });
   } catch (error) {
+    await db
+      .update(targetOnboarding)
+      .set({ state: "UPLOAD_DONE", updatedAt: new Date() })
+      .where(eq(targetOnboarding.id, row.id))
+      .catch(() => undefined);
     if (signal?.aborted) throw error;
     console.error(`upload ${uploadId} onboarding agent failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
+
+  // The row was only the agent's handle. Leaving it in UPLOAD_AGENT would keep its snapshots and images
+  // protected from the sweeps forever, so it rests in a terminal state whatever the outcome.
+  await db
+    .update(targetOnboarding)
+    .set({ state: "UPLOAD_DONE", agentCapabilityToken: null, updatedAt: new Date() })
+    .where(eq(targetOnboarding.id, row.id));
 
   const [done] = await db
     .select({ buildPlan: targetOnboarding.buildPlan })
@@ -120,5 +132,22 @@ export async function agentBuildPlan(input: {
   ) {
     return null;
   }
-  return plan;
+  // Pin everything the reviewer approved, and drop what widens the sandbox. The driver reads
+  // plan.runtime to boot and verify the build and plan.extraEgressHosts to open the allow-list, so the
+  // agent keeps neither: only the validated clone host (added by the driver) joins the base egress.
+  const provisioning = definition.provisioning;
+  const { extraEgressHosts: _dropped, ...rest } = plan;
+  void _dropped;
+  return {
+    ...rest,
+    runtime: {
+      name: definition.name,
+      baseUrl: String(definition.config.baseUrl),
+      readinessPath: provisioning.readinessPath,
+      ...(provisioning.startCommand ? { startCommand: provisioning.startCommand } : {}),
+      ...(provisioning.warmupSeconds !== undefined ? { warmupSeconds: provisioning.warmupSeconds } : {}),
+      envPrefix: definition.envPrefix,
+      scopeRules: definition.scopeRules,
+    },
+  };
 }

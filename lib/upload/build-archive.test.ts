@@ -278,7 +278,7 @@ test("a Dockerfile inside the archive's wrapping directory builds with that dire
 
 /** An agent stand-in that commits a Dockerfile the way commit_target_image would. */
 function committingAgent(
-  runtime: { baseUrl: string; readinessPath: string },
+  runtime: { baseUrl: string; readinessPath: string } & Record<string, unknown>,
   seen: Array<{ onboardingId: string; instructions?: string }>,
 ) {
   return async (input: { onboardingId: string; repoFullName: string; instructions?: string }) => {
@@ -290,7 +290,8 @@ function committingAgent(
       dockerfileText: 'FROM node:20\nWORKDIR /app\nCOPY . .\nCMD ["node","server.js"]\n',
       buildContext: ".",
       seed: { kind: "none" },
-      runtime: { name: "agent-app", ...runtime },
+      ...("extraEgressHosts" in runtime ? { extraEgressHosts: runtime.extraEgressHosts } : {}),
+      runtime: { name: "agent-app", ...runtime, extraEgressHosts: undefined },
     });
     await dbm.db
       .update(dbm.targetOnboarding)
@@ -331,7 +332,8 @@ test("a Dockerfile-less tarball is built from the plan the onboarding agent comm
     .where(dbm.eq(dbm.targetOnboarding.id, seen[0].onboardingId));
   assert.equal(row.uploadId, upload.id);
   assert.ok(row.repoId < 0);
-  assert.equal(row.state, "UPLOAD_AGENT");
+  // The row rests in a terminal state once the agent ends, so the sweeps stop protecting it.
+  assert.equal(row.state, "UPLOAD_DONE");
   assert.equal(row.sourceArchiveDigest, upload.sourceArchiveDigest);
   assert.equal(upload.buildState, "BUILT");
   await drain("upload-agent-ok");
@@ -387,4 +389,40 @@ test("target_onboarding is either a repository onboarding or an upload onboardin
   await dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: -5, uploadId: upload.id });
   // One onboarding row per upload.
   await assert.rejects(dbm.db.insert(dbm.targetOnboarding).values({ ...base, repoId: -6, uploadId: upload.id }));
+});
+
+test("an agent plan cannot widen egress or change what the reviewer approved", async () => {
+  const reportId = await heldArchiveUpload(noDockerfile());
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  const driver = fakeDriver();
+  const agent = committingAgent(
+    {
+      baseUrl: "http://localhost:8080",
+      readinessPath: "/health",
+      extraEgressHosts: ["evil.example"],
+      startCommand: "node other.js",
+      warmupSeconds: 600,
+      envPrefix: "EVIL",
+      scopeRules: [{ allow: "evil.example" }],
+    },
+    [],
+  );
+  assert.ok(await build.buildUploadOnce({ driver, agent }));
+  const { plan } = driver.calls[0];
+  assert.ok(plan.strategy === "agent-authored");
+  assert.equal(plan.extraEgressHosts, undefined);
+  assert.equal(plan.runtime?.startCommand, undefined);
+  assert.equal(plan.runtime?.warmupSeconds, undefined);
+  assert.notEqual(plan.runtime?.envPrefix, "EVIL");
+  assert.ok(!JSON.stringify(plan).includes("evil.example"));
+  await drain("upload-agent-pinned");
+});
+
+test("a finished upload onboarding no longer protects its snapshots from the sweep", async () => {
+  const { collectProtectedSnapshotIds } = await import("@/lib/build-onboarding/worker");
+  const [row] = await dbm.db.select().from(dbm.targetOnboarding).limit(1);
+  await dbm.db.update(dbm.targetOnboarding).set({ snapshotId: "snap-upload-done", state: "UPLOAD_AGENT" }).where(dbm.eq(dbm.targetOnboarding.id, row.id));
+  assert.ok((await collectProtectedSnapshotIds()).has("snap-upload-done"));
+  await dbm.db.update(dbm.targetOnboarding).set({ state: "UPLOAD_DONE" }).where(dbm.eq(dbm.targetOnboarding.id, row.id));
+  assert.ok(!(await collectProtectedSnapshotIds()).has("snap-upload-done"));
 });
