@@ -39,13 +39,23 @@ export const JUICE_SHOP_EXPECTED_BUILD_MARKER =
 export const JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF =
   `${JUICE_SHOP_IMAGE_NAME}:v17.3.0-bountydesk-sandbox`;
 
+export const DVWA_IMAGE_NAME = "ghcr.io/vaibhav91one/dvwa";
+// v1.9, the last pre-Dockerization tag and the version this image's command-injection path and
+// readiness check were verified against. MariaDB bundled into the same image (a Daytona sandbox
+// boots one container, not the fork's own two-container compose.yml); schema and seed data come
+// from the app's own setup.php, triggered once at boot by the image's start script.
+export const DVWA_EXPECTED_BUILD_MARKER =
+  "3cd38c444249e3a016fc203c79ecb68052283f54";
+export const DVWA_TAG_PINNED_SNAPSHOT_IMAGE_REF =
+  `${DVWA_IMAGE_NAME}:v1.9-bountydesk-sandbox`;
+
 /**
  * A build marker only proves provenance once the operator has actually built the image and
- * baked the source commit into it (see lib/sandbox/build-marker.ts). The four challenge
- * targets below are not built yet, so they carry this sentinel instead of a real commit.
- * buildMarkerCheck compares it against what booted inside the sandbox and will refuse to
- * proceed while it is still the sentinel, which is the behaviour we want: nothing reproduces
- * against an unbuilt target. Replace it with the fork's pinned commit when the image is built.
+ * baked the source commit into it (see lib/sandbox/build-marker.ts). The challenge targets
+ * still scaffolded below carry this sentinel instead of a real commit. buildMarkerCheck
+ * compares it against what booted inside the sandbox and will refuse to proceed while it is
+ * still the sentinel, which is the behaviour we want: nothing reproduces against an unbuilt
+ * target. Replace it with the fork's pinned commit when the image is built.
  */
 export const PENDING_BUILD_MARKER = "PENDING_OPERATOR_BUILD";
 
@@ -71,14 +81,15 @@ const TARGETS: TargetDefinition[] = [
       snapshotImageRefOverride: JUICE_SHOP_TAG_PINNED_SNAPSHOT_IMAGE_REF,
     },
   },
-  // The four targets below are scaffolding: config and recipes an operator can build against,
-  // not live profiles. imageName is where each fork is expected to be built and pushed, mirroring
-  // juice-shop's ghcr path; the upstream public image each fork is based on is recorded in
-  // docs/additional-targets.md. imageDigest and snapshotId come from the operator build step and
-  // stay unset here on purpose (the seed script reads them from the environment and rejects the
-  // env.example placeholders), and expectedBuildMarker is PENDING_BUILD_MARKER until a build
-  // bakes a real commit in. baseUrl carries the app's own port, which is what authorize-
-  // reproduction turns into the sandbox preview port.
+  // DVWA below is built (see DVWA_EXPECTED_BUILD_MARKER); the remaining targets are still
+  // scaffolding: config and recipes an operator can build against, not live profiles. imageName
+  // is where each fork is expected to be built and pushed, mirroring juice-shop's ghcr path; the
+  // upstream public image each fork is based on is recorded in docs/additional-targets.md.
+  // imageDigest and snapshotId come from the operator build step and stay unset here on purpose
+  // (the seed script reads them from the environment and rejects the env.example placeholders),
+  // and expectedBuildMarker is PENDING_BUILD_MARKER until a build bakes a real commit in. baseUrl
+  // carries the app's own port, which is what authorize-reproduction turns into the sandbox
+  // preview port.
   {
     // DVWA (Damn Vulnerable Web Application), a PHP/MySQL app. Serves on port 80.
     name: "dvwa",
@@ -92,7 +103,12 @@ const TARGETS: TargetDefinition[] = [
     scopeRules: LOCALHOST_SCOPE,
     provisioning: {
       readinessPath: "/login.php",
-      expectedBuildMarker: PENDING_BUILD_MARKER,
+      expectedBuildMarker: DVWA_EXPECTED_BUILD_MARKER,
+      snapshotImageRefOverride: DVWA_TAG_PINNED_SNAPSHOT_IMAGE_REF,
+      // MariaDB inits on first boot (schema plus seed data via setup.php), the Java-app
+      // equivalent of what warmupSeconds already exists for: extra time before the readiness
+      // probe gives up.
+      warmupSeconds: 20,
     },
   },
   {
