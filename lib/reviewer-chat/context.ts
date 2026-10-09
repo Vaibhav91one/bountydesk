@@ -71,6 +71,7 @@ export function buildReviewerChatContext(input: ReviewerChatContext): string {
     ].join("\n")),
   ];
 
+  context.appeals?.forEach((text, index) => parts.push(field(`Reporter appeal ${index + 1} (open)`, text)));
   if (context.targetName) parts.push(field("Target name", context.targetName));
   if (context.targetIdentityHash) parts.push(field("Pinned target identity hash", context.targetIdentityHash));
   if (context.outcome) parts.push(field("Draft outcome", context.outcome));

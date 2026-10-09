@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft } from "@phosphor-icons/react/ssr";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { appealPath, listAppeals } from "@/lib/appeals/appeals";
 import { requireReviewer } from "@/lib/auth/dal";
 import { readCase } from "@/lib/reports/case";
 import { listTargetProfiles } from "@/lib/targets/bind";
@@ -11,6 +12,7 @@ import { readGate } from "@/lib/triage/gate";
 import { readUpload } from "@/lib/upload/gate";
 
 import { AdvisoryGate } from "./advisory-gate";
+import { AppealsPanel } from "./appeals-panel";
 import { CaseApproval } from "./case-approval";
 import { CaseRealtimeBadges } from "./case-realtime-badges";
 import { CaseView } from "./case-view";
@@ -130,7 +132,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // The target suggestion is a third read that stays off this path: it walks the github.com
   // links in the body and asks GitHub about each, seconds of network on a cold cache, so it is
   // loaded client-side after paint through /api/reports/[id]/targets (TargetControl).
-  const [targetProfiles, gate, upload] = await Promise.all([
+  const [targetProfiles, gate, upload, appeals] = await Promise.all([
     file.target ? Promise.resolve([]) : listTargetProfiles(),
     file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
     // Both channels can carry target material: an upload always, an email only when an attachment
@@ -138,6 +140,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     // build; the standalone UploadGate is for the upload channel alone, so its reply-less dismiss
     // never lands on an email report that deserves the out-of-scope reply.
     file.channel === "upload" || file.channel === "email" ? readUpload(file.id) : Promise.resolve(null),
+    listAppeals(file.id),
   ]);
 
   // Where the report came from, which is not always the repository on the row. A GitHub report
@@ -239,6 +242,21 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
 
       {file.channel === "advisory" ? (
         <AdvisoryGate reportId={file.id} state={file.state} closingReason={closingReason} />
+      ) : null}
+
+      {file.state === "DELIVERED" || appeals.length > 0 ? (
+        <AppealsPanel
+          reportId={file.id}
+          appealPath={appealPath(file.id)}
+          appeals={appeals.map((item) => ({
+            id: item.id,
+            status: item.status,
+            body: item.body,
+            contact: item.contact,
+            createdAt: item.createdAt.toISOString(),
+            resolutionNote: item.resolutionNote,
+          }))}
+        />
       ) : null}
 
       <CaseView

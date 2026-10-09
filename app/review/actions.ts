@@ -15,6 +15,7 @@ import {
   verdictSupersession,
 } from "@/lib/db";
 import { enqueueCodeReview, loadCodeReviewInput } from "@/lib/analysis/code-review";
+import { resolveAppeal } from "@/lib/appeals/appeals";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
@@ -708,4 +709,30 @@ export async function runCodeReviewAction(reportId: string): Promise<ActionResul
   await enqueueCodeReview(reportId);
   revalidateReportViews(reportId);
   return { ok: true };
+}
+
+/**
+ * Acknowledge or close a reporter's appeal. Answering it is a separate step through the recheck
+ * above, which drafts a new verdict revision that needs its own approval; closing only records
+ * that a reviewer is done with it.
+ */
+export async function resolveAppealAction(
+  reportId: string,
+  appealId: string,
+  action: "acknowledge" | "close",
+  note?: string,
+): Promise<ActionResult> {
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  if (!isReportId(reportId) || !isReportId(appealId)) return { ok: false, error: "That appeal is not valid." };
+  if (action !== "acknowledge" && action !== "close") return { ok: false, error: "That action is not valid." };
+  if (note !== undefined && typeof note !== "string") return { ok: false, error: "The note is not valid." };
+  try {
+    const result = await resolveAppeal(appealId, action, access.session, note);
+    revalidateReportViews(reportId);
+    return result;
+  } catch (error) {
+    console.error(`resolving appeal ${appealId} failed: ${safeErrorText(error)}`);
+    return { ok: false, error: "Could not update the appeal." };
+  }
 }
