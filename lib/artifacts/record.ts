@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { artifact, db, eq, report, sessionEvent, targetProfile, verdict } from "@/lib/db";
+import { buildRemediationPatch } from "@/lib/remediation/patch";
 import type { Finding } from "@/lib/mcp/verdict-draft";
 import { verdictFindings } from "@/lib/reports/case-facts";
 import { uploadArtifact } from "@/lib/storage/artifacts";
@@ -35,7 +36,8 @@ type ArtifactKind =
   | "investigation-transcript"
   | "verdict-payload"
   | "findings-evidence"
-  | "target-dockerfile";
+  | "target-dockerfile"
+  | "remediation-patch";
 
 function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
@@ -126,14 +128,15 @@ async function recordOne(
   verdictId: string,
   kind: ArtifactKind,
   text: string,
+  file: { ext: string; contentType: string } = { ext: "md", contentType: CONTENT_TYPE },
 ): Promise<void> {
   const bytes = Buffer.from(text, "utf8");
   const digest = sha256(bytes);
-  const path = `${reportId}/${verdictId}/${kind}.md`;
+  const path = `${reportId}/${verdictId}/${kind}.${file.ext}`;
 
   // Upload first; the row records whether it landed. A null storage_path is the honest record
   // of "produced, not stored" when Storage is off or the upload failed.
-  const storagePath = await uploadArtifact(path, bytes, CONTENT_TYPE);
+  const storagePath = await uploadArtifact(path, bytes, file.contentType);
 
   await db
     .insert(artifact)
@@ -144,7 +147,7 @@ async function recordOne(
       storagePath,
       sha256: digest,
       bytes: bytes.byteLength,
-      contentType: CONTENT_TYPE,
+      contentType: file.contentType,
     })
     // A retried verdict draft reuses the same (verdict_id, kind); the first write wins and the
     // retry is a no-op, matching how ensureInitialVerdict treats the verdict itself.
@@ -154,7 +157,7 @@ async function recordOne(
 export async function recordVerdictArtifacts(reportId: string, verdictId: string): Promise<void> {
   try {
     const [verdictRow] = await db
-      .select({ payload: verdict.payload, evidence: verdict.evidence })
+      .select({ payload: verdict.payload, evidence: verdict.evidence, outcome: verdict.outcome })
       .from(verdict)
       .where(eq(verdict.id, verdictId))
       .limit(1);
@@ -181,13 +184,25 @@ export async function recordVerdictArtifacts(reportId: string, verdictId: string
     // against it, keyed by this verdict. Null for the hand-built demo target, which never went
     // through the pipeline and has no stored Dockerfile.
     const [targetRow] = await db
-      .select({ dockerfileText: targetProfile.dockerfileText })
+      .select({ dockerfileText: targetProfile.dockerfileText, targetProfileId: report.targetProfileId })
       .from(report)
-      .innerJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+      .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
       .where(eq(report.id, reportId))
       .limit(1);
     if (targetRow?.dockerfileText) {
       await recordOne(reportId, verdictId, "target-dockerfile", targetRow.dockerfileText);
+    }
+
+    // Remediation advice exists only for a reproduced finding on a bound target; anything else
+    // records nothing, even if the agent attached a diff.
+    if (verdictRow.outcome === "REPRODUCED" && targetRow?.targetProfileId) {
+      const patch = buildRemediationPatch(findings);
+      if (patch) {
+        await recordOne(reportId, verdictId, "remediation-patch", patch, {
+          ext: "diff",
+          contentType: "text/x-diff",
+        });
+      }
     }
   } catch (error) {
     console.error(

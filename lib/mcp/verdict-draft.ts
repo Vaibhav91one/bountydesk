@@ -19,6 +19,10 @@ import { z } from "zod";
 const CVSS_31_VECTOR =
   /^CVSS:3\.1\/AV:[NALP]\/AC:[LH]\/PR:[NLH]\/UI:[NR]\/S:[UC]\/C:[NLH]\/I:[NLH]\/A:[NLH](\/[A-Za-z]{1,3}:[A-Za-z0-9]{1,3})*$/;
 
+/** Upper bound on one finding's suggested patch, in characters. A real fix for one weakness is a
+ * few hunks; the cap keeps a runaway draft out of the verdict's evidence row. */
+export const MAX_PATCH_CHARS = 50_000;
+
 export const findingSchema = z.object({
   title: z.string().min(1).max(200),
   severity: z.enum(["critical", "high", "medium", "low", "info"]),
@@ -35,6 +39,16 @@ export const findingSchema = z.object({
   // under 100 characters. The real bound is the regex above; this is a second, cheap backstop
   // against a value built from enough repeated extension segments to still match it.
   cvssVector: z.string().max(200).regex(CVSS_31_VECTOR).optional(),
+  // A suggested fix as a unified diff against the target source. Advice for a human only: it is
+  // stored as data, never applied, never part of the delivered comment, and lib/remediation/
+  // patch.ts decides at record time whether it is well formed enough to offer for download.
+  remediationPatch: z
+    .string()
+    .max(MAX_PATCH_CHARS)
+    .optional()
+    .describe(
+      "Optional. A unified diff (---/+++ headers and @@ hunks, repo-relative paths) that would fix this finding. Only for a finding you reproduced; omit it when unsure.",
+    ),
 });
 
 export const verdictDraftSchema = z.object({
