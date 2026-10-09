@@ -146,8 +146,8 @@ export async function deleteV2Image(host: string, user: string, pullableTag: str
     });
     if (head.status === 404) return;
     const digest = head.headers.get("docker-content-digest");
-    if (!head.ok || !digest) {
-      console.warn(`could not read the digest of ${pullableTag}: ${head.status}`);
+    if (!head.ok || !digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+      console.warn(`could not read a valid digest of ${pullableTag}: ${head.status}`);
       return;
     }
     const deleted = await fetch(`${base}/${digest}`, { method: "DELETE", headers, signal: AbortSignal.timeout(15_000) });

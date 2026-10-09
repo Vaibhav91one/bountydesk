@@ -149,6 +149,16 @@ test("v2 delete logs and returns when the registry has deletes disabled", async 
   );
 });
 
+test("v2 delete refuses a malformed digest header and sends no DELETE", async () => {
+  await withFetch(
+    () => new Response(null, { status: 200, headers: { "docker-content-digest": "sha256:abc/../../x" } }),
+    async (calls) => {
+      await v2Registry().deleteImage(V2_TAG);
+      assert.deepEqual(calls.map((c) => c.method), ["HEAD"]);
+    },
+  );
+});
+
 test("v2 delete does not throw when the registry is unreachable", async () => {
   const original = globalThis.fetch;
   const warn = console.warn;

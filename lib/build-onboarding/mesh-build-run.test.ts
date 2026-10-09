@@ -252,7 +252,6 @@ test("buildMesh logs out even when the push itself fails", async () => {
   assert.ok(commands.some((command) => command.includes("docker logout")), "the credential must not linger");
 });
 
-
 test("buildMesh reclaims every service image, each only after its own snapshot is active", async () => {
   const events: string[] = [];
   const registry = {
