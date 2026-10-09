@@ -66,10 +66,14 @@ test("the start command is quoted into CMD and cannot add Dockerfile lines", asy
   assert.match(plan.dockerfileText, /^CMD \["sh", "-c", "node app\.js\\" ; echo hi"\]$/m);
 });
 
-test("a base URL with no explicit port authors no recipe", async () => {
+test("a base URL with no explicit port (or :80, which URL drops) exposes port 80", async () => {
   const pkg = tarGz({ "package.json": "{}" });
-  assert.equal(await thinRecipePlan(pkg, reviewed({ baseUrl: "http://localhost" })), null);
-  assert.equal(await thinRecipePlan(pkg, reviewed({ baseUrl: "http://localhost:80" })), null);
+  for (const baseUrl of ["http://localhost", "http://localhost:80"]) {
+    const plan = await thinRecipePlan(pkg, reviewed({ baseUrl }));
+    assert.ok(plan?.strategy === "agent-authored");
+    assert.match(plan.dockerfileText, /^EXPOSE 80$/m);
+    assert.match(plan.dockerfileText, /^ENV PORT=80$/m);
+  }
 });
 
 test("python needs the reviewer's start command; other ecosystems get no recipe", async () => {

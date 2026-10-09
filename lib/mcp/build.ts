@@ -1,14 +1,18 @@
 import { db, eq, targetOnboarding } from "@/lib/db";
 import { requireEnv } from "@/lib/env";
+import type { BuildSource } from "@/lib/build-onboarding/build-driver";
 import { parseBuildPlan, type Ecosystem } from "@/lib/build-onboarding/build-plan";
+import { cloneHostOf, stageSource } from "@/lib/build-onboarding/daytona-build-driver";
 import { selectEgressHosts } from "@/lib/build-onboarding/egress-profiles";
 import { revokeInstallationToken } from "@/lib/github/app-auth";
 import { gitCloneCommand, redactToken, repoReadToken } from "@/lib/github/repo-access";
+import { loadUploadSource } from "@/lib/upload/source";
 import {
   createBuildSandbox,
   deleteSandbox,
   execute,
   getSandbox,
+  type ExecResult,
   type Sandbox,
 } from "@/lib/sandbox/daytona";
 
@@ -21,10 +25,11 @@ import {
  * session by an opaque capability token, exactly as probe_target resolves an agent_session, so the
  * model never sees a repo or sandbox id and cannot reach a row that is not its own.
  *
- * These tools deliberately do NOT drive the onboarding state machine. The build-onboarding worker
- * holds the row's lease while the agent turn runs; a tool advancing the state would fight that fence.
- * Instead commit/mark record their result on `build_plan` (an agent-authored plan, or a
- * not-flattenable reason) and the worker reads it after the turn and advances. Egress stays
+ * These tools deliberately do NOT drive the onboarding state machine. Whoever owns the row holds its
+ * lease while the agent turn runs (the build-onboarding worker for a GitHub row, the upload build loop
+ * for an upload row); a tool advancing the state would fight that fence. Instead commit/mark record
+ * their result on `build_plan` (an agent-authored plan, or a not-flattenable reason) and that owner
+ * reads it after the turn and advances. Egress stays
  * server-held: the sandbox's allow-list comes from the detected ecosystem, never from the model, and
  * the committed image is still rebuilt by the driver, offline-verified, and human-approved before it
  * can become a target.
@@ -79,7 +84,25 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
     return { ok: true, message: "a build sandbox is already open for this session; reuse it" };
   }
 
-  const hosts = selectEgressHosts({ ecosystem: ecosystemOf(row) });
+  // An upload onboarding stages its stored material instead of cloning GitHub. The source is read
+  // from the upload row the server tied to this onboarding, never from anything the agent supplied,
+  // and a git source adds only its own validated host to the egress allow-list.
+  let upload: Exclude<BuildSource, { kind: "image" }> | null = null;
+  if (row.uploadId) {
+    let loaded: BuildSource | null = null;
+    try {
+      loaded = await loadUploadSource(row.uploadId);
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    if (!loaded || loaded.kind === "image") return { ok: false, reason: "the upload has no source to build" };
+    upload = loaded;
+  }
+  const cloneHost = upload?.kind === "git" ? cloneHostOf(upload.cloneUrl) : undefined;
+  const hosts = selectEgressHosts({
+    ecosystem: ecosystemOf(row),
+    ...(cloneHost ? { extraEgressHosts: [cloneHost] } : {}),
+  });
   const sandbox = await createBuildSandbox(
     {
       snapshot: requireEnv("BUILD_BASE_SNAPSHOT"),
@@ -97,40 +120,21 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
     .set({ agentSandboxId: sandbox.id, progressNote: "opened build sandbox", updatedAt: new Date() })
     .where(eq(targetOnboarding.id, row.id));
 
-  // Clone the repo and start dockerd so the agent can build straight away. The clone URL is the
-  // server-held repository name, never a model-supplied ref. These two steps are required: if
-  // either fails, the sandbox is unusable, so surface the error and tear it down rather than
-  // reporting a ready sandbox the agent then works against blindly.
-  const cloneUrl = `https://github.com/${row.repoFullName}.git`;
-  if (!row.resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(row.resolvedCommitSha)) {
-    return failOpen(row.id, sandbox.id, "the server has not resolved an immutable source commit");
-  }
-  // A private repository clones with a read token minted for this clone alone and revoked before the
-  // agent can run anything in the sandbox. Without Contents: read it is refused (POLICY_REFUSED).
-  let token: string | null;
-  try {
-    token = await repoReadToken(row.repoFullName);
-  } catch (error) {
-    return failOpen(row.id, sandbox.id, error instanceof Error ? error.message : String(error));
-  }
-  let clone: { exitCode: number; output: string };
-  try {
-    clone = await runInit(sandbox, gitCloneCommand(cloneUrl, "/work/source", token));
-  } finally {
-    if (token) await revokeInstallationToken(token);
-  }
-  clone = { ...clone, output: redactToken(clone.output, token) };
-  if (clone.exitCode === 0) {
-    const checkout = await runInit(
-      sandbox,
-      `cd /work/source && git checkout --detach ${shArg(row.resolvedCommitSha)}`,
-    );
-    if (checkout.exitCode !== 0) {
-      return failOpen(row.id, sandbox.id, `could not checkout the resolved source commit: ${checkout.output.slice(-500)}`);
+  // Stage the source and start dockerd so the agent can build straight away. Both steps are
+  // required: if either fails, the sandbox is unusable, so surface the error and tear it down rather
+  // than reporting a ready sandbox the agent then works against blindly.
+  if (upload) {
+    // stageSource re-hashes an archive and checks a clone resolves to the pinned commit, so the agent
+    // iterates on exactly the bytes the final build will be pinned on.
+    try {
+      await stageSource(stageRun, sandbox, upload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return failOpen(row.id, sandbox.id, `could not stage the upload source: ${message.slice(-500)}`);
     }
-  }
-  if (clone.exitCode !== 0) {
-    return failOpen(row.id, sandbox.id, `could not clone the repository: ${clone.output.slice(-500)}`);
+  } else {
+    const failure = await cloneGithubSource(row, sandbox);
+    if (failure) return failOpen(row.id, sandbox.id, failure);
   }
   const docker = await runInit(
     sandbox,
@@ -152,7 +156,7 @@ export async function openBuildSandbox(capability: string): Promise<BuildToolRes
   return {
     ok: true,
     message:
-      "build sandbox open. The repo is cloned at /work/source and dockerd is running. Write a Dockerfile, build it, run the container, and curl it, all via run_build_command.",
+      "build sandbox open. The source is at /work/source and dockerd is running. Write a Dockerfile, build it, run the container, and curl it, all via run_build_command.",
   };
 }
 
@@ -305,6 +309,48 @@ export async function markUnsandboxable(capability: string, reason: string): Pro
     .where(eq(targetOnboarding.id, row.id));
 
   return { ok: true, message: "recorded that this repository cannot be sandboxed; its reports will go the analysis-only route" };
+}
+
+/** stageSource's runner: a non-zero exit throws, with the output tail as the message. */
+async function stageRun(sandbox: Sandbox, command: string): Promise<ExecResult> {
+  const result = await execute(sandbox, `sh -lc ${shArg(command)}`, EXEC_TIMEOUT_S);
+  if (result.exitCode !== 0) throw new Error(result.result.slice(-500));
+  return result;
+}
+
+/** Clone the connected repository at its resolved commit into /work/source. The clone URL is the
+ *  server-held repository name, never a model-supplied ref. Returns a failure reason, or null. */
+async function cloneGithubSource(row: OnboardingRow, sandbox: Sandbox): Promise<string | null> {
+  const cloneUrl = `https://github.com/${row.repoFullName}.git`;
+  if (!row.resolvedCommitSha || !/^[0-9a-f]{40}$/i.test(row.resolvedCommitSha)) {
+    return "the server has not resolved an immutable source commit";
+  }
+  // A private repository clones with a read token minted for this clone alone and revoked before the
+  // agent can run anything in the sandbox. Without Contents: read it is refused (POLICY_REFUSED).
+  let token: string | null;
+  try {
+    token = await repoReadToken(row.repoFullName);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  let clone: { exitCode: number; output: string };
+  try {
+    clone = await runInit(sandbox, gitCloneCommand(cloneUrl, "/work/source", token));
+  } finally {
+    if (token) await revokeInstallationToken(token);
+  }
+  clone = { ...clone, output: redactToken(clone.output, token) };
+  if (clone.exitCode === 0) {
+    const checkout = await runInit(
+      sandbox,
+      `cd /work/source && git checkout --detach ${shArg(row.resolvedCommitSha)}`,
+    );
+    if (checkout.exitCode !== 0) {
+      return `could not checkout the resolved source commit: ${checkout.output.slice(-500)}`;
+    }
+  }
+  if (clone.exitCode !== 0) return `could not clone the repository: ${clone.output.slice(-500)}`;
+  return null;
 }
 
 /** Run one required setup command in a fresh sandbox, normalising a thrown error into a non-zero

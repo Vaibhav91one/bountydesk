@@ -1135,6 +1135,11 @@ export const targetOnboarding = pgTable(
     repoFullName: text("repo_full_name").notNull(),
     /** Provenance URL or ref supplied by intake. It is not an immutable build pin. */
     sourceRef: text("source_ref").notNull(),
+    /** Set for an upload onboarding (a Dockerfile-less archive or a git URL the onboarding agent
+     *  builds); null for a GitHub onboarding. An upload row has no GitHub repository, so its repo_id
+     *  is a negative synthetic id, and the upload build loop drives it, not the build-onboarding
+     *  worker (its state is never one the worker claims). */
+    uploadId: uuid("upload_id").references(() => uploadIntake.id, { onDelete: "restrict" }),
     /** Full commit SHA resolved by the trusted controller before customer code runs. */
     resolvedCommitSha: text("resolved_commit_sha"),
     /** Digest of a trusted source archive, when the controller stages one. */
@@ -1211,6 +1216,13 @@ export const targetOnboarding = pgTable(
     index("target_onboarding_claim_idx").on(t.state, t.nextAttemptAt),
     index("target_onboarding_lease_idx").on(t.leaseExpiresAt),
     uniqueIndex("target_onboarding_agent_capability_token_key").on(t.agentCapabilityToken),
+    uniqueIndex("target_onboarding_upload_id_key").on(t.uploadId),
+    // A row is a GitHub onboarding (no upload, a real positive repo id) or an upload onboarding
+    // (an upload and a synthetic negative repo id that can never collide with a GitHub id).
+    check(
+      "target_onboarding_source_check",
+      sql`(${t.uploadId} is null and ${t.repoId} > 0) or (${t.uploadId} is not null and ${t.repoId} < 0)`,
+    ),
   ],
 );
 

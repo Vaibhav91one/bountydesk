@@ -11,8 +11,8 @@ import { teardownBuildSandbox } from "@/lib/mcp/build";
  * iterates a Dockerfile until the app boots with its data present, then calls commit_target_image or
  * mark_unsandboxable. Those tools write the result onto the onboarding row's `build_plan` (an
  * agent-authored plan, or a not-flattenable reason); this driver just runs the turn to completion and
- * cleans up. The worker reads `build_plan` afterward and advances the state machine, so this function
- * never touches the state itself.
+ * cleans up. The caller (the build-onboarding worker, or the upload build loop for an upload row)
+ * reads `build_plan` afterward and advances the state, so this function never touches the state itself.
  *
  * The agent resolves its own onboarding row through an opaque capability token this driver mints and
  * stores on the row before the turn (the onboarding analogue of agent_session.capability_token). The
@@ -33,7 +33,7 @@ export class OnboardingAgentError extends Error {
   }
 }
 
-function buildOnboardingTurnMessage(repoFullName: string, capability: string): string {
+function buildOnboardingTurnMessage(repoFullName: string, capability: string, instructions?: string): string {
   return [
     `Onboard the repository ${repoFullName} as a BountyDesk reproduction target.`,
     "",
@@ -44,6 +44,7 @@ function buildOnboardingTurnMessage(repoFullName: string, capability: string): s
     "request returns real content, then call commit_target_image. If the repository cannot be built",
     "into one bootable offline image, call mark_unsandboxable with a specific reason. Do not reply",
     "with prose instead of a tool call; the outcome is the tool call you make.",
+    ...(instructions ? ["", instructions] : []),
   ].join("\n");
 }
 
@@ -61,7 +62,8 @@ async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-export type RunOnboardingAgentInput = { onboardingId: string; repoFullName: string };
+/** `instructions` is server-authored text appended to the turn (an upload's reviewed settings). */
+export type RunOnboardingAgentInput = { onboardingId: string; repoFullName: string; instructions?: string };
 
 export async function runOnboardingAgent(
   client: TrueForgeClient,
@@ -79,7 +81,7 @@ export async function runOnboardingAgent(
   try {
     const { turnId } = await client.createTurn(
       sessionId,
-      [{ type: "user.message", content: buildOnboardingTurnMessage(input.repoFullName, capability) }],
+      [{ type: "user.message", content: buildOnboardingTurnMessage(input.repoFullName, capability, input.instructions) }],
       { signal: opts.signal },
     );
 
