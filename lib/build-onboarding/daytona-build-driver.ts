@@ -429,9 +429,11 @@ export type MeshBuildRuntime = {
   run(sandbox: Sandbox, command: string): Promise<ExecResult>;
   createSnapshot(spec: CreateSnapshotSpec): Promise<SnapshotInfo>;
   deleteSnapshotByName(name: string): Promise<void>;
+  /** Injectable so a test needs no live Daytona to pass the snapshot-active gate. */
+  waitForSnapshotActive(snapshotId: string): Promise<unknown>;
 };
 
-const liveMeshRuntime: MeshBuildRuntime = { run, createSnapshot, deleteSnapshotByName };
+const liveMeshRuntime: MeshBuildRuntime = { run, createSnapshot, deleteSnapshotByName, waitForSnapshotActive };
 
 /**
  * Build a compose-mesh: one image per service, one snapshot per service. A service with a build
@@ -512,6 +514,7 @@ export async function buildMesh(
       await runtime.run(sandbox, `cd /work/gen && docker build -t ${imageRef} .`);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.registry, runtime);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
+      await reclaimOriginImage(ctx.registry, snapshotId, imageRef, runtime);
       const built: BuiltService = {
         ...common,
         imageName,
@@ -544,6 +547,7 @@ export async function buildMesh(
       const startCommand = await inspectMeshStartCommand(sandbox, imageRef, svc, runtime);
       const imageDigest = await pushAndDigest(sandbox, imageRef, ctx.registry, runtime);
       const snapshotId = await registerServiceSnapshot(serviceSlug, imageRef, runtime);
+      await reclaimOriginImage(ctx.registry, snapshotId, imageRef, runtime);
       services.push({ ...common, imageName, imageDigest, snapshotId, snapshotImageRef: imageRef, startCommand });
     }
   }
@@ -595,9 +599,10 @@ async function reclaimOriginImage(
   registry: RegistryHandoff,
   snapshotId: string,
   pullableTag: string,
+  runtime: Pick<MeshBuildRuntime, "waitForSnapshotActive"> = { waitForSnapshotActive },
 ): Promise<void> {
   try {
-    await waitForSnapshotActive(snapshotId);
+    await runtime.waitForSnapshotActive(snapshotId);
     await registry.deleteImage(pullableTag);
   } catch (error) {
     console.warn(`could not reclaim origin image ${pullableTag}: ${error instanceof Error ? error.message : String(error)}`);
