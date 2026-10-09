@@ -24,8 +24,8 @@ outcome `REPRODUCED`, delivered as
 whose body matched the approved content hash exactly. Replaying the same webhook delivery
 afterward produced no second job, report, or comment. The approval gate and the delivery
 idempotency it proved still work the same way; the steps below describe today's agent-driven
-flow, not that run's canary pipeline. Unless a newer run has concrete evidence attached to it,
-do not say the agent-authored TrueForge path has been live-proven.
+flow, not that run's canary pipeline. The agent-authored path has its own separate live proof
+now, from 2026-10-09 (above, and `docs/verification-matrix.md`).
 
 ---
 
