@@ -80,3 +80,96 @@ test("parseGhcrRef splits owner, package and tag; pickVersionIdByTag finds the t
   assert.equal(pickVersionIdByTag(versions, "bountydesk-onboarding"), 2);
   assert.equal(pickVersionIdByTag(versions, "missing"), null);
 });
+
+type Call = { url: string; method: string; headers: Record<string, string> };
+
+async function withFetch(
+  respond: (call: Call) => Response,
+  body: (calls: Call[]) => Promise<void>,
+): Promise<void> {
+  const original = globalThis.fetch;
+  const calls: Call[] = [];
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    assert.ok(init?.signal, "every registry fetch carries an abort signal");
+    const call = { url: String(input), method: init?.method ?? "GET", headers: (init?.headers ?? {}) as Record<string, string> };
+    calls.push(call);
+    return respond(call);
+  }) as typeof fetch;
+  const warn = console.warn;
+  console.warn = () => undefined;
+  try {
+    await body(calls);
+  } finally {
+    globalThis.fetch = original;
+    console.warn = warn;
+  }
+}
+
+const V2_TAG = "registry.example.com/team/widget:bountydesk-abc";
+const V2_DIGEST = `sha256:${"b".repeat(64)}`;
+const v2Registry = () =>
+  createRegistry({ host: "registry.example.com", user: "bot", namespace: "registry.example.com/team", pushToken: "p", deleteToken: "del" });
+
+test("v2 delete reads the manifest digest with HEAD, then deletes by digest", async () => {
+  await withFetch(
+    (call) =>
+      call.method === "HEAD"
+        ? new Response(null, { status: 200, headers: { "docker-content-digest": V2_DIGEST } })
+        : new Response(null, { status: 202 }),
+    async (calls) => {
+      await v2Registry().deleteImage(V2_TAG);
+      assert.equal(calls.length, 2);
+      assert.equal(calls[0].method, "HEAD");
+      assert.equal(calls[0].url, "https://registry.example.com/v2/team/widget/manifests/bountydesk-abc");
+      assert.match(calls[0].headers.accept, /application\/vnd\.oci\.image\.index\.v1\+json/);
+      assert.equal(calls[1].method, "DELETE");
+      assert.equal(calls[1].url, `https://registry.example.com/v2/team/widget/manifests/${V2_DIGEST}`);
+      assert.equal(calls[1].headers.authorization, `Basic ${Buffer.from("bot:del").toString("base64")}`);
+    },
+  );
+});
+
+test("v2 delete treats a missing tag as already gone", async () => {
+  await withFetch(() => new Response(null, { status: 404 }), async (calls) => {
+    await v2Registry().deleteImage(V2_TAG);
+    assert.equal(calls.length, 1);
+  });
+});
+
+test("v2 delete logs and returns when the registry has deletes disabled", async () => {
+  await withFetch(
+    (call) =>
+      call.method === "HEAD"
+        ? new Response(null, { status: 200, headers: { "docker-content-digest": V2_DIGEST } })
+        : new Response(null, { status: 405 }),
+    async (calls) => {
+      await v2Registry().deleteImage(V2_TAG);
+      assert.equal(calls.length, 2);
+    },
+  );
+});
+
+test("v2 delete refuses a malformed digest header and sends no DELETE", async () => {
+  await withFetch(
+    () => new Response(null, { status: 200, headers: { "docker-content-digest": "sha256:abc/../../x" } }),
+    async (calls) => {
+      await v2Registry().deleteImage(V2_TAG);
+      assert.deepEqual(calls.map((c) => c.method), ["HEAD"]);
+    },
+  );
+});
+
+test("v2 delete does not throw when the registry is unreachable", async () => {
+  const original = globalThis.fetch;
+  const warn = console.warn;
+  console.warn = () => undefined;
+  globalThis.fetch = (async () => {
+    throw new Error("connect ECONNREFUSED");
+  }) as typeof fetch;
+  try {
+    await v2Registry().deleteImage(V2_TAG);
+  } finally {
+    globalThis.fetch = original;
+    console.warn = warn;
+  }
+});

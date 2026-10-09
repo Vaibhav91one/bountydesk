@@ -100,17 +100,64 @@ class EnvRegistry implements RegistryHandoff {
   }
 
   async deleteImage(pullableTag: string): Promise<void> {
-    if (this.host !== "ghcr.io") {
-      console.warn(`registry ${this.host} has no image-delete path yet; ${pullableTag} is left in place`);
-      return;
-    }
     if (!this.deleteToken) {
       // The push token is not delete-scoped. This is the documented default: the snapshot is
       // self-contained once active, so the leftover image is harmless, just unreclaimed.
-      console.warn(`origin image ${pullableTag} not deleted: set REGISTRY_DELETE_TOKEN (delete:packages) to reclaim it`);
+      console.warn(`origin image ${pullableTag} not deleted: set REGISTRY_DELETE_TOKEN to reclaim it`);
       return;
     }
-    await deleteGhcrImage(pullableTag, this.deleteToken);
+    if (this.host === "ghcr.io") {
+      await deleteGhcrImage(pullableTag, this.deleteToken);
+      return;
+    }
+    await deleteV2Image(this.host, this.user, pullableTag, this.deleteToken);
+  }
+}
+
+const MANIFEST_ACCEPT = [
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+].join(", ");
+
+/**
+ * Delete a tagged image through the Docker Registry HTTP API v2: HEAD the tag for its manifest digest,
+ * then DELETE by digest (the API refuses delete-by-tag). Basic auth with the configured user and the
+ * delete token, which Harbor, Zot and distribution accept. A registry with deletes disabled answers
+ * 405 and the image stays; a 404 means it is already gone. Never throws, like deleteImage's contract.
+ */
+export async function deleteV2Image(host: string, user: string, pullableTag: string, token: string): Promise<void> {
+  const prefix = `${host}/`;
+  const tagAt = pullableTag.lastIndexOf(":");
+  if (!pullableTag.startsWith(prefix) || tagAt <= prefix.length) {
+    console.warn(`could not parse ${pullableTag} for deletion on ${host}`);
+    return;
+  }
+  const name = pullableTag.slice(prefix.length, tagAt);
+  const tag = pullableTag.slice(tagAt + 1);
+  const base = `https://${host}/v2/${name}/manifests`;
+  const headers = { authorization: `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}` };
+  try {
+    const head = await fetch(`${base}/${encodeURIComponent(tag)}`, {
+      method: "HEAD",
+      headers: { ...headers, accept: MANIFEST_ACCEPT },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (head.status === 404) return;
+    const digest = head.headers.get("docker-content-digest");
+    if (!head.ok || !digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+      console.warn(`could not read a valid digest of ${pullableTag}: ${head.status}`);
+      return;
+    }
+    const deleted = await fetch(`${base}/${digest}`, { method: "DELETE", headers, signal: AbortSignal.timeout(15_000) });
+    if (deleted.status === 405) {
+      console.warn(`registry ${host} has deletes disabled; ${pullableTag} is left in place`);
+    } else if (!deleted.ok && deleted.status !== 404) {
+      console.warn(`could not delete ${pullableTag}: ${deleted.status}`);
+    }
+  } catch (error) {
+    console.warn(`could not delete ${pullableTag}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
