@@ -1,6 +1,6 @@
 import { ne } from "drizzle-orm";
 
-import { and, db, desc, isNull, report } from "@/lib/db";
+import { and, db, desc, isNull, report, sql } from "@/lib/db";
 import { repositoryMentions } from "@/lib/targets/suggest";
 
 /**
@@ -11,10 +11,15 @@ import { repositoryMentions } from "@/lib/targets/suggest";
  * more. A score is a hint beside a report link. Nothing here closes, links or replies; only a
  * reviewer's "Mark duplicate" does, and they may pick a report that is not on this list.
  *
- * ponytail: Jaccard over word sets, boosted by shared github.com links, computed in the worker.
- * The repo signal is what stops a NodeGoat login report standing in for a Juice Shop login report
- * on the word "login" alone, and lifts a same-repo paraphrase over the trust line. Upgrade to
- * pg_trgm or embeddings once the report table is large or the misses start to matter.
+ * Jaccard over word sets, boosted by shared github.com links, blended with Postgres's pg_trgm
+ * trigram similarity (migration 0050) and computed in the worker. The repo signal is what stops
+ * a NodeGoat login report standing in for a Juice Shop login report on the word "login" alone,
+ * and lifts a same-repo paraphrase over the trust line. trigram similarity is what catches a
+ * paraphrase that shares few exact whole words (a rewording, a typo-laden resend): it scores on
+ * three-character substrings, so "SQL injectoin" and "SQL injection" still score high where exact
+ * word overlap would not. The two signals catch different misses, so the stronger of the two
+ * wins rather than one replacing the other. ponytail: embeddings are a deliberately deferred
+ * upgrade, only if pg_trgm measurably misses (#347).
  */
 const SCAN_LIMIT = 500;
 const TOP_K = 3;
@@ -67,7 +72,7 @@ function sharesAny(a: Set<string>, b: Set<string>): boolean {
 
 export function rankCandidates(
   text: string,
-  rows: { id: string; title: string; body: string }[],
+  rows: { id: string; title: string; body: string; trgmScore?: number }[],
 ): DuplicateCandidate[] {
   const target = wordSet(text);
   const targetRepos = repoSet(text);
@@ -80,7 +85,10 @@ export function rankCandidates(
     const sharesRepo = targetRepos.size > 0 && sharesAny(targetRepos, rowRepos);
     // Both sides name a repo and they disagree: a different project that only shares generic words.
     const crossProject = targetRepos.size > 0 && rowRepos.size > 0 && !sharesRepo;
-    const base = jaccard(target, wordSet(rowText));
+    // Whichever signal is stronger wins: trigram similarity catches a reworded paraphrase that
+    // word-set overlap misses, and vice versa for a long report that shares its gist in different
+    // characters but the same key terms.
+    const base = Math.max(jaccard(target, wordSet(rowText)), row.trgmScore ?? 0);
     const score = sharesRepo ? Math.min(1, base * SAME_REPO_BOOST) : base;
     return {
       reportId: row.id,
@@ -116,11 +124,20 @@ export async function findDuplicateCandidates(
   title: string,
   body: string,
 ): Promise<DuplicateCandidate[]> {
+  const text = `${title}\n${body}`;
+  // Same truncation wordSet applies: a trigram comparison against the full body of a very long
+  // report is both slower and less meaningful than one against its first MAX_TEXT_CHARS.
+  const truncated = text.slice(0, MAX_TEXT_CHARS);
   const rows = await db
-    .select({ id: report.id, title: report.title, body: report.body })
+    .select({
+      id: report.id,
+      title: report.title,
+      body: report.body,
+      trgmScore: sql<number>`similarity(${report.title} || ' ' || left(${report.body}, ${MAX_TEXT_CHARS}), ${truncated})`,
+    })
     .from(report)
     .where(and(ne(report.id, reportId), isNull(report.hiddenAt), isNull(report.duplicateOfReportId)))
     .orderBy(desc(report.createdAt))
     .limit(SCAN_LIMIT);
-  return rankCandidates(`${title}\n${body}`, rows);
+  return rankCandidates(text, rows);
 }
