@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test, { after, before } from "node:test";
+import { gzipSync } from "node:zlib";
 
 /**
  * Upload intake against a real Postgres: the held report, the contact proof that delivery depends on,
@@ -217,6 +218,35 @@ test("an uncompressed ustar .tar is accepted as archive material, not just a gzi
   const parsed = await parse({ archive: new Blob([Uint8Array.from(ustarTar)]) });
   assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
   assert.equal(parsed.submission.material?.kind, "archive");
+});
+
+test("a legitimately small gzip-compressed archive is accepted, not just ustar", async () => {
+  const tar = intake.singleFileTar("app.js", Buffer.from("console.log('hi')\n"));
+  const gzipped = gzipSync(tar);
+  assert.equal(gzipped[0], 0x1f, "sanity: this really is gzip, the branch the next test exercises");
+  const parsed = await parse({ archive: new Blob([Uint8Array.from(gzipped)]) });
+  assert.ok(parsed.ok, parsed.ok ? "" : parsed.reason);
+  assert.equal(parsed.submission.material?.kind, "archive");
+});
+
+test("a zip bomb is refused before it finishes decompressing, whatever its compressed size claims", async () => {
+  // Over the 200MB absolute cap, by a single repeated byte: deflate's achievable ratio on a run
+  // like this is nowhere near the 2000:1 the ratio guard alone would need, so the absolute cap is
+  // what actually trips here, and that is the point of having both. The real decompression still
+  // happens: this is not a header check, so a forged size field could not slip past it.
+  const bomb = gzipSync(Buffer.alloc(210 * 1024 * 1024, 0));
+  const bound = await intake.checkDecompressionBound(bomb);
+  assert.equal(bound.ok, false);
+  if (!bound.ok) assert.match(bound.reason, /compression ratio|uncompressed/);
+
+  const parsed = await parse({ archive: new Blob([Uint8Array.from(bomb)]) });
+  assert.equal(parsed.ok, false);
+  if (!parsed.ok) assert.match(parsed.reason, /compression ratio|uncompressed/);
+});
+
+test("checkDecompressionBound passes a non-gzip archive through untouched", async () => {
+  const ustarTar = intake.singleFileTar("app.js", Buffer.from("console.log('hi')\n"));
+  assert.deepEqual(await intake.checkDecompressionBound(ustarTar), { ok: true });
 });
 
 test("an emailed report's attachment row does not spend the submit-page daily caps", async () => {
