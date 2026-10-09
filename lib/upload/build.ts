@@ -8,6 +8,7 @@ import { bindTarget } from "@/lib/targets/bind";
 import type { GateAnalysisPayload } from "@/lib/triage/gate";
 
 import { uploadBuildPlan, type ReviewedUploadTarget } from "./gate";
+import { archiveShape, thinRecipePlan } from "./recipe";
 
 /**
  * The loop that turns reviewer-approved upload material into a bound target.
@@ -176,12 +177,29 @@ async function buildAndBind(upload: ClaimedUpload, driver: BuildDriver, signal?:
 
   let profileId = existing?.id;
   if (!profileId) {
+    const source = uploadBuildSource(upload);
+    let plan = uploadBuildPlan({ kind: upload.materialKind, imageRef: upload.imageRef }, ecosystem);
+    // A tarball with no Dockerfile gets a server-authored thin recipe. Without one nothing is built,
+    // and the report ends ANALYSIS_ONLY on the static review like any other failed build.
+    if (source.kind === "archive") {
+      const shape = archiveShape(source.archive);
+      if (shape.hasDockerfile) {
+        // The sandbox extracts a wrapped archive under its directory, so the Dockerfile is found there.
+        if (plan.strategy === "dockerfile") plan = { ...plan, buildContext: shape.contextDir };
+      } else {
+        const authored = await thinRecipePlan(source.archive, upload.reviewedTarget);
+        if (!authored) {
+          throw new UploadBuildSkipped("the archive has no Dockerfile and no build recipe could be authored for it");
+        }
+        plan = authored;
+      }
+    }
     const result = await driver.build(
       {
         repoFullName: definition.repoFullName,
         sourceRef: `upload:${upload.reportId}`,
-        source: uploadBuildSource(upload),
-        plan: uploadBuildPlan({ kind: upload.materialKind, imageRef: upload.imageRef }, ecosystem),
+        source,
+        plan,
       },
       { signal },
     );

@@ -9,7 +9,7 @@ each section says what is built and what is still open.
 
 Still open, in one place:
 
-- A tarball without a Dockerfile at its root.
+- Recipes for a tarball without a Dockerfile beyond node and python (see below).
 - Building from a non-GitHub git URL.
 - Sweeping mesh images orphaned by a crashed build, and deleting images on Docker Hub.
 - A self-hosted private registry at multi-tenant scale.
@@ -169,9 +169,15 @@ current claim (the upload build passes its lease check); otherwise the drift err
 
 Remaining work:
 
-- A tarball without a Dockerfile. The upload build plan always uses `Dockerfile` at the archive root;
-  the onboarding agent that writes a Dockerfile for a GitHub repository is not wired to uploads, so
-  such a build fails and the report gets the static review of its archive (`COULD_NOT_BUILD`).
+- A tarball without a Dockerfile builds from a thin recipe the server authors (`lib/upload/recipe.ts`),
+  not from the onboarding agent: that agent's tools resolve a `target_onboarding` row and clone from
+  GitHub, and an upload has neither. The recipe is a generic-base Dockerfile for node or python, from
+  the reviewer's ecosystem or the manifest files in the archive, with the reviewer's port and start
+  command. It runs as the existing `agent-authored` plan, pinned on the archive digest. Any other
+  ecosystem, or python without a start command, authors nothing: the build is skipped and the report
+  gets the static review of its archive (`COULD_NOT_BUILD`). Still open: more ecosystems, and letting
+  the onboarding agent author the recipe for archives the templates do not cover. Not yet run live
+  against Daytona.
 - A non-GitHub git URL. The `git` source kind accepts any clone URL, but no intake or onboarding path
   produces one.
 

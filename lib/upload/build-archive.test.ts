@@ -183,9 +183,39 @@ test("a multi-file source tarball builds from the archive path and binds on its 
   assert.equal(ran, reportId);
 });
 
-test("a tarball with no root Dockerfile lands FAILED and still queues the static analysis-only run", async () => {
-  // A valid archive that carries no Dockerfile: intake accepts it (it is a real tarball), and the
-  // refusal is build-time, when `docker build` finds no Dockerfile at the root.
+
+test("a Dockerfile-less node tarball builds from a server-authored recipe pinned on the archive digest", async () => {
+  const archive = tarGz([
+    { name: "package.json", content: '{"name":"app","scripts":{"start":"node server.js"}}\n' },
+    { name: "server.js", content: "require('http').createServer((q, r) => r.end('ok')).listen(8080)\n" },
+  ]);
+  const expectedDigest = `sha256:${createHash("sha256").update(archive).digest("hex")}`;
+  const reportId = await heldArchiveUpload(archive);
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+
+  const driver = fakeDriver();
+  assert.ok(await build.buildUploadOnce({ driver }));
+  assert.equal(driver.calls.length, 1);
+  const { plan, source } = driver.calls[0];
+  assert.ok(plan.strategy === "agent-authored" && plan.dockerfileText.startsWith("FROM node:"));
+  assert.ok(source?.kind === "archive" && source.sourceArchiveDigest === expectedDigest);
+
+  assert.equal((await uploadRow(reportId)).buildState, "BUILT");
+  const [profile] = await dbm.db
+    .select()
+    .from(dbm.targetProfile)
+    .where(dbm.eq(dbm.targetProfile.id, (await reportRow(reportId)).targetProfileId!));
+  assert.equal(profile.sourceArchiveDigest, expectedDigest);
+
+  // Drain the queued run so the next test's worker call claims its own job (claim() is global-FIFO).
+  await worker.runOnce("upload-archive-authored-test", {
+    analysis: { ensureSession: async () => {}, run: async () => {} },
+  });
+});
+
+test("a tarball with no Dockerfile and no recipe to author is not built, and still queues the static analysis-only run", async () => {
+  // No manifest the thin recipes cover, so nothing is authored. The build is skipped (not retried)
+  // and the report gets its analysis-only run, the tier-3 static review (COULD_NOT_BUILD).
   const archive = tarGz([
     { name: "app.js", content: "console.log('no dockerfile here')\n" },
     { name: "README.md", content: "source without a Dockerfile\n" },
@@ -194,17 +224,11 @@ test("a tarball with no root Dockerfile lands FAILED and still queues the static
   await gate.approveUploadTarget(reportId, "reviewer", TARGET);
   const driver = fakeDriver("fail");
 
-  // First attempt keeps the row retryable; the second gives up.
   await build.buildUploadOnce({ driver });
-  assert.equal((await uploadRow(reportId)).buildState, "PENDING");
-  assert.equal(await analysisJob(reportId), undefined);
-
-  await build.buildUploadOnce({ driver });
+  assert.equal(driver.calls.length, 0);
   const upload = await uploadRow(reportId);
   assert.equal(upload.buildState, "FAILED");
-  assert.match(upload.buildError ?? "", /docker build exited 1/);
-  // No target was bound, so reproduction cannot run; the report still gets its analysis-only run,
-  // which is the tier-3 static review (COULD_NOT_BUILD) over the stored archive.
+  assert.match(upload.buildError ?? "", /no build recipe could be authored/);
   assert.equal((await reportRow(reportId)).targetProfileId, null);
   assert.ok(await analysisJob(reportId));
 
@@ -214,4 +238,40 @@ test("a tarball with no root Dockerfile lands FAILED and still queues the static
     analysis: { ensureSession: async () => {}, run: async ({ reportId: id }) => void (ran = id) },
   });
   assert.equal(ran, reportId);
+});
+
+test("an authored recipe whose build fails takes the same fail-safe path after its retry", async () => {
+  const archive = tarGz([{ name: "package.json", content: '{"name":"broken"}\n' }]);
+  const reportId = await heldArchiveUpload(archive);
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  const driver = fakeDriver("fail");
+
+  await build.buildUploadOnce({ driver });
+  assert.equal((await uploadRow(reportId)).buildState, "PENDING");
+  await build.buildUploadOnce({ driver });
+  assert.equal((await uploadRow(reportId)).buildState, "FAILED");
+  assert.equal((await reportRow(reportId)).targetProfileId, null);
+  assert.ok(await analysisJob(reportId));
+
+  await worker.runOnce("upload-archive-authored-fail-test", {
+    analysis: { ensureSession: async () => {}, run: async () => {} },
+  });
+});
+
+test("a Dockerfile inside the archive's wrapping directory builds with that directory as its context", async () => {
+  const archive = tarGz([
+    { name: "myapp/Dockerfile", content: "FROM nginx:1.27\n" },
+    { name: "myapp/index.html", content: "<h1>hi</h1>\n" },
+  ]);
+  const reportId = await heldArchiveUpload(archive);
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+
+  const driver = fakeDriver();
+  assert.ok(await build.buildUploadOnce({ driver }));
+  const { plan } = driver.calls[0];
+  assert.ok(plan.strategy === "dockerfile" && plan.buildContext === "myapp" && plan.dockerfilePath === "Dockerfile");
+
+  await worker.runOnce("upload-archive-wrapped-test", {
+    analysis: { ensureSession: async () => {}, run: async () => {} },
+  });
 });

@@ -59,8 +59,14 @@ The build driver stages three source kinds (`lib/build-onboarding/build-driver.t
 What this does not relax: reproduction still runs in the no-egress sandbox, and the agent still
 reaches the app only through `probe_target` and `probe_target_write`.
 
+A tarball with no Dockerfile at its root (or inside its single wrapping directory) gets a thin
+recipe from `lib/upload/recipe.ts`: a generic node or python base, the reviewer's port and start
+command, and nothing taken from the archive except which manifest files exist. It builds as the
+`agent-authored` plan and is pinned on the archive digest like any other archive. When no recipe
+can be authored, nothing is built and the report ends `ANALYSIS_ONLY` on the static review.
+
 Not built: rotating a connectionless profile (a changed re-bind throws `TargetProfileExistsError`),
-a tarball without a Dockerfile at its root, and a non-GitHub git URL. They are listed in
+recipes beyond node and python, and a non-GitHub git URL. They are listed in
 `docs/onboarding-follow-ups.md`.
 
 ## Pluggable and ephemeral registry handoff
@@ -125,7 +131,7 @@ The body is parsed in the route process with bounds, not in the sandbox the desi
 email attachments. An uploaded archive is only extracted inside the build sandbox. The one other
 reader is the static review below, which parses it in memory and never extracts or runs it.
 
-Target material is optional and at most one of: a tarball with a Dockerfile at its root, a single
+Target material is optional and at most one of: a tarball (with a Dockerfile at its root, or a node or python project the build wraps), a single
 Dockerfile of at most 64 KB with a `FROM` line (stored as a deterministic one-file tarball so it
 takes the archive path), or a prebuilt image named by tag and sha256 digest. A prebuilt image's
 registry is checked against `PREBUILT_IMAGE_REGISTRIES` at intake and again in the build driver.
