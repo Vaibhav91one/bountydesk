@@ -133,7 +133,10 @@ export async function findDuplicateCandidates(
       id: report.id,
       title: report.title,
       body: report.body,
-      trgmScore: sql<number>`similarity(${report.title} || ' ' || left(${report.body}, ${MAX_TEXT_CHARS}), ${truncated})`,
+      // lower() on both operands, matching wordSet's own normalization: without it a reword that
+      // also changes case convention (ALL CAPS, Title Case) scores lower on trigrams than a
+      // same-case reword, undercutting the whole point of blending in a second signal.
+      trgmScore: sql<number>`similarity(lower(${report.title} || ' ' || left(${report.body}, ${MAX_TEXT_CHARS})), lower(${truncated}))`,
     })
     .from(report)
     .where(and(ne(report.id, reportId), isNull(report.hiddenAt), isNull(report.duplicateOfReportId)))

@@ -56,3 +56,24 @@ test("a near-verbatim reword with almost no shared whole words still surfaces vi
     "an unrelated report must not surface",
   );
 });
+
+test("a reword that also changes case convention is not scored lower for it", async () => {
+  const target = await seedReport(
+    "Reflected cross site scripting in the search box",
+    "The /search endpoint reflects the q parameter unescaped into the page, so a script tag in q executes in the victim's browser.",
+  );
+  // Same reword as above, but shouted: similarity() is case-sensitive by default, so this would
+  // score lower than the same-case version without the lower()-wrapped comparison.
+  await seedReport(
+    "UNESCAPED REFLEXION OF Q INTO /SEARCH ALLOWS A SCRIPTABLE TAG TO RUN",
+    "THE SEARCH ENDPOINT REFLEXION OF ITS Q PARAM IS UNESCAPED; A SCRIPTABLE TAG PLACED IN Q WILL RUN IN A VICTIM BROWSER.",
+  );
+
+  const [reportRow] = await dbm.db.select().from(dbm.report).where(dbm.eq(dbm.report.id, target));
+  const candidates = await duplicates.findDuplicateCandidates(target, reportRow.title, reportRow.body);
+
+  assert.ok(
+    candidates.some((c) => c.title.startsWith("UNESCAPED")),
+    "the all-caps reword should still surface",
+  );
+});
