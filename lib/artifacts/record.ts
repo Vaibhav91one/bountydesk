@@ -109,6 +109,7 @@ export function buildFindingsEvidence(
       `## ${index + 1}. ${finding.title}`,
       "",
       `Severity: ${finding.severity}`,
+      ...(finding.cvssVector ? [`CVSS: ${finding.cvssVector}`] : []),
       "",
       finding.description,
       "",

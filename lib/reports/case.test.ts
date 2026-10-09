@@ -475,6 +475,19 @@ test("findings render only from an agent-drafted verdict, and only the entries t
     [good],
     "a malformed entry is dropped, not thrown on, and a valid sibling still renders",
   );
+
+  const withCvss = { ...good, cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" };
+  assert.deepEqual(
+    verdictFindings({ source: "agent-drafted", findings: [withCvss] }),
+    [withCvss],
+    "a drafted CVSS vector passes through unchanged",
+  );
+  const badCvss = { ...good, cvssVector: "not a real vector" };
+  assert.deepEqual(
+    verdictFindings({ source: "agent-drafted", findings: [badCvss] }),
+    [],
+    "a malformed CVSS vector drops the whole finding, same as any other malformed field",
+  );
 });
 
 test("a report id has to be a uuid, not thirty-six characters from its alphabet", () => {
