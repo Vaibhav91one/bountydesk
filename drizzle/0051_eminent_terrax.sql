@@ -29,4 +29,6 @@ ALTER TABLE "appeal" ADD CONSTRAINT "appeal_report_verdict_fk" FOREIGN KEY ("rep
 CREATE UNIQUE INDEX "appeal_active_verdict_key" ON "appeal" USING btree ("verdict_id") WHERE "appeal"."status" <> 'CLOSED';--> statement-breakpoint
 CREATE INDEX "appeal_report_idx" ON "appeal" USING btree ("report_id","created_at");--> statement-breakpoint
 CREATE INDEX "appeal_code_report_idx" ON "appeal_code" USING btree ("report_id","created_at");--> statement-breakpoint
-CREATE INDEX "appeal_code_ip_idx" ON "appeal_code" USING btree ("client_ip","created_at");
+CREATE INDEX "appeal_code_ip_idx" ON "appeal_code" USING btree ("client_ip","created_at");--> statement-breakpoint
+ALTER TABLE "appeal" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "appeal_code" ENABLE ROW LEVEL SECURITY;
