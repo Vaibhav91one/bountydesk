@@ -31,7 +31,10 @@ export const findingSchema = z.object({
   // recheck.ts) is how a reviewer who disagrees with a drafted vector gets a fresh one, the same
   // way they would push back on a drafted outcome or severity today, rather than a second
   // single-field edit mechanism invented just for this.
-  cvssVector: z.string().regex(CVSS_31_VECTOR).optional(),
+  // 200 is generous: a full base vector plus every optional temporal/environmental metric is
+  // under 100 characters. The real bound is the regex above; this is a second, cheap backstop
+  // against a value built from enough repeated extension segments to still match it.
+  cvssVector: z.string().max(200).regex(CVSS_31_VECTOR).optional(),
 });
 
 export const verdictDraftSchema = z.object({
