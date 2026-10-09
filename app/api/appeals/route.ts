@@ -1,3 +1,5 @@
+import { after } from "next/server";
+
 import { APPEAL_LIMITS, requestAppealCode, submitAppeal } from "@/lib/appeals/appeals";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { readBoundedBody } from "@/lib/github/webhook";
@@ -33,7 +35,7 @@ export async function POST(request: Request): Promise<Response> {
     if (input.action === "request_code") {
       // A malformed id gets the same answer as an unknown one.
       if (!wellFormed) return Response.json({ ok: true });
-      const result = await requestAppealCode(reportId, str(input.contact), clientAddress(request.headers));
+      const result = await requestAppealCode(reportId, str(input.contact), clientAddress(request.headers), undefined, (task) => after(task));
       return result.ok ? Response.json({ ok: true }) : Response.json({ error: result.error }, { status: result.status });
     }
     if (input.action === "submit") {

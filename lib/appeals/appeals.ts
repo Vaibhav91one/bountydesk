@@ -93,6 +93,9 @@ export async function requestAppealCode(
   rawContact: string,
   clientIp: string | null,
   sendCode: SendCode = defaultSendCode,
+  // A route hands in next/server `after` so the Resend call is off the response path; otherwise the
+  // matching case would take visibly longer than the others.
+  defer: (task: () => Promise<void>) => void | Promise<void> = (task) => task(),
 ): Promise<CodeRequest> {
   const contact = normalizeEmail(rawContact) ?? "";
   const wellFormed = EMAIL_SHAPE.test(contact) && contact.length <= 254;
@@ -139,11 +142,13 @@ export async function requestAppealCode(
 
   if (outcome === "limited") return { ok: false, status: 429, error: "Too many requests from this address. Try again tomorrow." };
   if (outcome === "mail") {
-    try {
-      await sendCode(contact, code);
-    } catch (error) {
-      console.error(`appeal: code for ${reportId} did not send: ${safeErrorText(error)}`);
-    }
+    await defer(async () => {
+      try {
+        await sendCode(contact, code);
+      } catch (error) {
+        console.error(`appeal: code for ${reportId} did not send: ${safeErrorText(error)}`);
+      }
+    });
   }
   return { ok: true };
 }
@@ -159,8 +164,9 @@ const CODE_REFUSED: SubmitAppeal = {
 };
 
 /**
- * File the appeal. Every failure to prove the contact (unknown report, other address, no code,
- * expired, wrong, attempts spent) gets the same answer. Only after the code checks out does the
+ * File the appeal. Input-shape checks (code format, empty or over-long body) answer first and say
+ * what is wrong. After those, every failure to prove the contact (unknown report, other address, no
+ * code, expired, wrong, attempts spent) gets the same answer. Only after the code checks out does the
  * caller learn why an otherwise valid appeal is refused, since by then they have proven they own
  * the report's contact.
  */
@@ -244,6 +250,7 @@ export type ResolveResult = { ok: true } | { ok: false; error: string };
  * answers through a recheck and a new verdict revision, which has its own approval.
  */
 export async function resolveAppeal(
+  reportId: string,
   appealId: string,
   action: "acknowledge" | "close",
   reviewer: { email: string; login: string },
@@ -263,7 +270,7 @@ export async function resolveAppeal(
   const updated = await db
     .update(appeal)
     .set(set)
-    .where(and(eq(appeal.id, appealId), from))
+    .where(and(eq(appeal.id, appealId), eq(appeal.reportId, reportId), from))
     .returning({ id: appeal.id });
   return updated.length ? { ok: true } : { ok: false, error: "That appeal cannot move that way." };
 }

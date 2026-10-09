@@ -728,7 +728,7 @@ export async function resolveAppealAction(
   if (action !== "acknowledge" && action !== "close") return { ok: false, error: "That action is not valid." };
   if (note !== undefined && typeof note !== "string") return { ok: false, error: "The note is not valid." };
   try {
-    const result = await resolveAppeal(appealId, action, access.session, note);
+    const result = await resolveAppeal(reportId, appealId, action, access.session, note);
     revalidateReportViews(reportId);
     return result;
   } catch (error) {

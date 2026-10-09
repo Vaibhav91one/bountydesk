@@ -159,7 +159,7 @@ test("a second appeal on the same verdict is refused while the first is active, 
   if (!dup.ok) assert.equal(dup.status, 409);
   assert.equal((await appeals.listAppeals(s.reportId)).length, 1);
 
-  const closed = await appeals.resolveAppeal((await appeals.listAppeals(s.reportId))[0].id, "close", { email: OWNER, login: "owner" }, "answered");
+  const closed = await appeals.resolveAppeal(s.reportId, (await appeals.listAppeals(s.reportId))[0].id, "close", { email: OWNER, login: "owner" }, "answered");
   assert.equal(closed.ok, true);
   const third = await ask(s.reportId, s.contact);
   const again = await appeals.submitAppeal({ reportId: s.reportId, contact: s.contact, code: third.mailed!.code, body: "three" });
@@ -229,16 +229,27 @@ test("only a writer reviewer can acknowledge or close an appeal", async () => {
 
   await dbm.db.insert(dbm.reviewer).values({ email: "viewer@bountydesk.test", role: "read_only", verifiedAt: new Date() });
   for (const email of ["viewer@bountydesk.test", "stranger@outside.test", s.contact]) {
-    const refused = await appeals.resolveAppeal(row.id, "close", { email, login: "x" });
+    const refused = await appeals.resolveAppeal(s.reportId, row.id, "close", { email, login: "x" });
     assert.equal(refused.ok, false, email);
   }
   assert.equal((await appeals.listAppeals(s.reportId))[0].status, "OPEN");
 
-  assert.equal((await appeals.resolveAppeal(row.id, "acknowledge", { email: OWNER, login: "owner" })).ok, true);
+  assert.equal((await appeals.resolveAppeal(s.reportId, row.id, "acknowledge", { email: OWNER, login: "owner" })).ok, true);
   assert.equal((await appeals.listAppeals(s.reportId))[0].status, "ACKNOWLEDGED");
-  assert.equal((await appeals.resolveAppeal(row.id, "close", { email: OWNER, login: "owner" }, "done")).ok, true);
+  assert.equal((await appeals.resolveAppeal(s.reportId, row.id, "close", { email: OWNER, login: "owner" }, "done")).ok, true);
   const [closed] = await appeals.listAppeals(s.reportId);
   assert.equal(closed.status, "CLOSED");
   assert.equal(closed.resolvedBy, "owner");
-  assert.equal((await appeals.resolveAppeal(row.id, "acknowledge", { email: OWNER, login: "owner" })).ok, false);
+  assert.equal((await appeals.resolveAppeal(s.reportId, row.id, "acknowledge", { email: OWNER, login: "owner" })).ok, false);
+});
+
+test("an appeal cannot be moved through a different report's id", async () => {
+  const a = await seed({ delivered: true });
+  const b = await seed({ delivered: true });
+  const { mailed } = await ask(a.reportId, a.contact);
+  await appeals.submitAppeal({ reportId: a.reportId, contact: a.contact, code: mailed!.code, body: "x" });
+  const [row] = await appeals.listAppeals(a.reportId);
+  const result = await appeals.resolveAppeal(b.reportId, row.id, "close", { email: OWNER, login: "owner" });
+  assert.equal(result.ok, false);
+  assert.equal((await appeals.listAppeals(a.reportId))[0].status, "OPEN");
 });
