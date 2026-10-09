@@ -32,7 +32,18 @@ export interface RegistryHandoff {
   /** Delete an image the build pushed, once its snapshot has materialised so it is no longer needed
    *  to boot the target. Best-effort by contract: it reclaims storage, so it never throws. */
   deleteImage(pullableTag: string): Promise<void>;
+  /** Every tagged image under the namespace, for the orphan sweep. Throws on a listing failure, and
+   *  the sweep turns that into a warning. Needs the delete token, since only the sweep calls it. */
+  listTags(): Promise<RegistryTag[]>;
 }
+
+export type RegistryTag = {
+  /** The full pullable reference, `<host>/<package>:<tag>`. */
+  ref: string;
+  tag: string;
+  /** When the registry says the version was created. The v2 API has no timestamp, so it is absent there. */
+  createdAt?: Date;
+};
 
 export type RegistryConfig = {
   host: string;
@@ -112,6 +123,82 @@ class EnvRegistry implements RegistryHandoff {
     }
     await deleteV2Image(this.host, this.user, pullableTag, this.deleteToken);
   }
+
+  async listTags(): Promise<RegistryTag[]> {
+    if (!this.deleteToken) throw new Error("listing tags needs REGISTRY_DELETE_TOKEN");
+    if (this.host === "ghcr.io") return listGhcrTags(this.namespace, this.deleteToken);
+    return listV2Tags(this.host, this.user, this.namespace, this.deleteToken);
+  }
+}
+
+const MAX_LIST_PAGES = 20;
+
+async function getJson(url: string, headers: Record<string, string>): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(15_000) });
+  if (res.status === 404) return { status: 404, body: null };
+  // The status only: the URL and headers carry the owner and the token.
+  if (!res.ok) throw new Error(`registry listing failed: ${res.status}`);
+  return { status: res.status, body: await res.json() };
+}
+
+async function pagedGhcr<T>(base: string, headers: Record<string, string>, extra = ""): Promise<T[] | null> {
+  const all: T[] = [];
+  for (let page = 1; page <= MAX_LIST_PAGES; page++) {
+    const { status, body } = await getJson(`${base}?per_page=100&page=${page}${extra}`, headers);
+    if (status === 404) return null;
+    const items = body as T[];
+    all.push(...items);
+    if (items.length < 100) return all;
+  }
+  return all;
+}
+
+/** Every tagged version of every container package under the namespace owner. */
+async function listGhcrTags(namespace: string, token: string): Promise<RegistryTag[]> {
+  const owner = namespace.split("/")[1];
+  if (!owner) throw new Error(`not a ghcr.io namespace: ${namespace}`);
+  const headers = {
+    authorization: `Bearer ${token}`,
+    accept: "application/vnd.github+json",
+    "user-agent": "bountydesk-onboarding",
+    "x-github-api-version": "2022-11-28",
+  };
+  for (const root of [`https://api.github.com/orgs/${owner}/packages`, `https://api.github.com/users/${owner}/packages`]) {
+    const packages = await pagedGhcr<{ name: string }>(root, headers, "&package_type=container");
+    if (!packages) continue;
+    const out: RegistryTag[] = [];
+    for (const pkg of packages) {
+      const versions = await pagedGhcr<GhcrPackageVersion & { created_at?: string }>(
+        `${root}/container/${encodeURIComponent(pkg.name)}/versions`,
+        headers,
+      );
+      for (const version of versions ?? []) {
+        for (const tag of version.metadata?.container?.tags ?? []) {
+          out.push({
+            ref: `ghcr.io/${owner}/${pkg.name}:${tag}`,
+            tag,
+            createdAt: version.created_at ? new Date(version.created_at) : undefined,
+          });
+        }
+      }
+    }
+    return out;
+  }
+  throw new Error("registry listing failed: owner not found as org or user");
+}
+
+/** ponytail: one `_catalog` page (up to 1000 repositories) and no timestamps; a bigger registry needs
+ *  `Link` pagination, and an age check needs the config blob's `created` per tag. */
+async function listV2Tags(host: string, user: string, namespace: string, token: string): Promise<RegistryTag[]> {
+  const headers = { authorization: `Basic ${Buffer.from(`${user}:${token}`).toString("base64")}` };
+  const prefix = `${namespace.slice(host.length + 1)}/`;
+  const catalog = (await getJson(`https://${host}/v2/_catalog?n=1000`, headers)).body as { repositories?: string[] } | null;
+  const out: RegistryTag[] = [];
+  for (const name of (catalog?.repositories ?? []).filter((repo) => repo.startsWith(prefix))) {
+    const listed = (await getJson(`https://${host}/v2/${name}/tags/list`, headers)).body as { tags?: string[] | null } | null;
+    for (const tag of listed?.tags ?? []) out.push({ ref: `${host}/${name}:${tag}`, tag });
+  }
+  return out;
 }
 
 const MANIFEST_ACCEPT = [

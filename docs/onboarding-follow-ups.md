@@ -11,7 +11,7 @@ Still open, in one place:
 
 - Recipes for a tarball without a Dockerfile beyond node and python (see below).
 - A non-GitHub git URL without a root Dockerfile, a private one, and a live GitLab clone in Daytona (see below).
-- Sweeping mesh images orphaned by a crashed build, and deleting images on Docker Hub.
+- Deleting images on Docker Hub, and a live run of the orphan image sweep.
 - A self-hosted private registry at multi-tenant scale.
 
 ## Source identity is resolved before customer code runs
@@ -85,12 +85,19 @@ leaves `PENDING_BUILD`, an upload build when it binds the profile), so a pass th
 row in `PENDING_BUILD` or an upload row in `PENDING` or `BUILDING` deletes nothing and waits for the
 next interval.
 
+`sweepOrphanImages` reclaims images a build pushed and then crashed before reclaiming. It lists
+`bountydesk-*` tags through `RegistryHandoff.listTags` (the GitHub Packages API for GHCR, `_catalog`
+and `tags/list` for a v2 registry), protects every ref found in `target_profile.config` and in the
+`built_services` of non-terminal onboarding rows, and deletes the rest that are older than 24 hours,
+at most 50 per pass. It runs after the snapshot sweep on the same six-hour slot, behind the same
+in-flight guard, and only when `REGISTRY_DELETE_TOKEN` is set. A v2 registry reports no creation time,
+so there a tag must be unprotected on two consecutive sweeps (tracked in memory, reset by a restart)
+before it goes. The v2 listing reads one `_catalog` page. A listing failure logs a warning and
+deletes nothing. It is tested with mocked fetch only.
+
 Remaining work:
 
-- Sweep images orphaned by a build that crashed after pushing but before reclaiming. The pushed
-  tags are random per build (`bountydesk-<hex>`) and nothing records them, so a sweep needs either
-  a table of pushed refs or a registry listing; skipped as a schema change.
-- Live-verify mesh reclaim against GHCR and v2 delete against a real registry.
+- Live-verify mesh reclaim, the orphan image sweep and v2 delete against GHCR and a real registry.
 - At multi-tenant scale, self-host a private registry. Zot is a single static binary over
   filesystem or S3 storage and is the lightweight option; Harbor adds per-project RBAC, which is
   per-tenant isolation, plus scanning and retention. This is the proper fix for customer images

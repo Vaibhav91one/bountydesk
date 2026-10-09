@@ -173,3 +173,45 @@ test("v2 delete does not throw when the registry is unreachable", async () => {
     console.warn = warn;
   }
 });
+
+test("listTags on GHCR walks packages and versions, falls back to the user endpoint, and keeps created_at", async () => {
+  const urls: string[] = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    urls.push(url);
+    assert.ok(init?.signal, "every fetch has a timeout signal");
+    if (url.includes("/orgs/")) return new Response("{}", { status: 404 });
+    if (url.includes("/versions")) {
+      return Response.json([{ id: 1, created_at: "2026-01-02T00:00:00Z", metadata: { container: { tags: ["bountydesk-abc", "latest"] } } }]);
+    }
+    return Response.json([{ name: "widget" }]);
+  }) as typeof fetch;
+  try {
+    const registry = createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/acme", pushToken: "p", deleteToken: "d" });
+    const tags = await registry.listTags();
+    assert.deepEqual(tags.map((t) => t.ref), ["ghcr.io/acme/widget:bountydesk-abc", "ghcr.io/acme/widget:latest"]);
+    assert.equal(tags[0].createdAt?.toISOString(), "2026-01-02T00:00:00.000Z");
+    assert.ok(urls.some((u) => u.includes("/users/acme/packages/container/widget/versions")));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("listTags on a v2 registry reads the catalog under the namespace and never leaks the token in an error", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("_catalog")) return Response.json({ repositories: ["proj/app", "other/x"] });
+    return Response.json({ tags: ["bountydesk-1", "v1"] });
+  }) as typeof fetch;
+  try {
+    const registry = createRegistry({ host: "reg.example.com", user: "u", namespace: "reg.example.com/proj", pushToken: "p", deleteToken: "sekrit" });
+    const tags = await registry.listTags();
+    assert.deepEqual(tags.map((t) => t.ref), ["reg.example.com/proj/app:bountydesk-1", "reg.example.com/proj/app:v1"]);
+    globalThis.fetch = (async () => new Response("no", { status: 500 })) as typeof fetch;
+    await assert.rejects(registry.listTags(), (e: Error) => !e.message.includes("sekrit") && /500/.test(e.message));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
