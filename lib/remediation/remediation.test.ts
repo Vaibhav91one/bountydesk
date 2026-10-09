@@ -50,6 +50,7 @@ after(async () => {
 test("isValidUnifiedDiff accepts a well-formed diff", async () => {
   const { isValidUnifiedDiff } = await import("./patch");
   assert.equal(isValidUnifiedDiff(GOOD), true);
+  assert.equal(isValidUnifiedDiff(`${GOOD}\n\n`), true, "trailing blank lines are fine");
   assert.equal(isValidUnifiedDiff(`diff --git a/x b/x\nindex 1..2 100644\n${GOOD}`), true);
 });
 
