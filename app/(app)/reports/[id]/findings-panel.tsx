@@ -175,8 +175,17 @@ export function FindingsPanel({
             <>
               <SheetHeader className="gap-3 border-b border-border/50 p-6">
                 <SheetTitle className="text-title break-words">{selected.title}</SheetTitle>
-                <SheetDescription>
+                <SheetDescription className="flex flex-wrap items-center gap-2">
                   <Badge variant={SEVERITY_VARIANT[selected.severity]}>{selected.severity}</Badge>
+                  {selected.cvssVector ? (
+                    // The agent's own drafted vector, not a reviewer-edited one: there is no
+                    // separate approved copy (see the comment on findingSchema.cvssVector). A
+                    // reviewer who disagrees pushes back with guidance for a fresh revision, the
+                    // same way they would for the outcome or the severity label next to it.
+                    <span className="font-mono text-meta text-muted-foreground">
+                      {selected.cvssVector}
+                    </span>
+                  ) : null}
                 </SheetDescription>
               </SheetHeader>
 

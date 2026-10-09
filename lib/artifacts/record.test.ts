@@ -249,6 +249,24 @@ test("the findings file carries each finding and the reference it cited", () => 
   assert.match(text, /Evidence reference: \/opt\/tf\/tool-results\/sqli_response\.json/);
 });
 
+test("a drafted CVSS vector is carried; a finding with none omits the line entirely", () => {
+  const withCvss = record.buildFindingsEvidence("report-1", "verdict-1", [
+    {
+      title: "Has a vector",
+      severity: "high",
+      description: "d",
+      evidenceRef: "ref",
+      cvssVector: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+    },
+  ]);
+  assert.match(withCvss, /CVSS: CVSS:3\.1\/AV:N\/AC:L\/PR:N\/UI:N\/S:U\/C:H\/I:H\/A:H/);
+
+  const withoutCvss = record.buildFindingsEvidence("report-1", "verdict-1", [
+    { title: "No vector", severity: "low", description: "d", evidenceRef: "ref" },
+  ]);
+  assert.ok(!withoutCvss.includes("CVSS:"), "no CVSS line should appear when the field is absent");
+});
+
 test("a report bound to an onboarded target records the Dockerfile as an artifact", async () => {
   const { reportId, verdictId } = await seedVerdictWithEvents(undefined, "FROM node:20\nCMD node server.js");
 
