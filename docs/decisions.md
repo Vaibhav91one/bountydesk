@@ -1052,3 +1052,107 @@ switch per run, a request-rate cap, a full request log through the egress proxy,
 government, military and large-platform domains, and immediate proof revocation on an abuse
 report. None of this is built. #325 and #327 do not start until this entry's mechanism and the
 write-probe change above are implemented and tested.
+
+### Q34: Fix-verification after a confirmed bug is patched (design record, not yet built)
+
+A verdict is terminal today: `REPRODUCED`, `NOT_REPRODUCED`, `INCONCLUSIVE` or `ANALYSIS_ONLY`,
+with no way to ask "is this actually fixed now?" after the target owner ships a patch. Every
+competitor BountyDesk is positioned against treats that question as core to the loop (#344's own
+context: NodeZero's hack-fix-verify-repeat, Strix's retest-and-route, Astra's per-deploy rerun,
+Splunk's fixed/partially-fixed/not-fixed taxonomy), and it is the single most obvious thing a
+reporter or a target owner asks after a `REPRODUCED` ships. This entry is the design; issue #344
+tracks it and is not merged.
+
+**The seed this issue names does not fit.** #159's re-check (`requestRecheck` in
+`lib/investigation-runs/recheck.ts`) looks like the obvious reuse point and is not one: it only
+operates on a verdict still pending approval, and explicitly refuses once an `approval_decision`
+row exists for it ("verdict already has an approval decision"). Fix-verification needs exactly
+the opposite precondition, a verdict that was already approved and delivered, retested sometime
+later after the target changed. A future implementation starts a fresh investigation run the same
+way `ensureInitialRun` already does for every other run; it does not extend `requestRecheck`.
+
+**New outcomes live in a new table, not `verdict_outcome`.** The enum (`REPRODUCED`,
+`NOT_REPRODUCED`, `INCONCLUSIVE`, `ANALYSIS_ONLY`) is read in the oracle decision logic, the
+delivery copy and the board, none of which have any business handling `FIXED`,
+`PARTIALLY_FIXED` or `NOT_FIXED`, values that only ever apply to a retest, never a first-pass
+verdict. Widening the enum would force every one of those call sites to account for values that
+cannot occur there. A dedicated `retest` row, foreign-keyed to the original (immutable) verdict
+it retests, keeps the original verdict enum and every reader of it untouched, matching this
+document's own preference throughout for the smaller change. The original verdict is never
+mutated; a retest is append-only evidence beside it, the same relationship `verdict_supersession`
+already has to the verdict it supersedes.
+
+**Trigger: a reviewer on demand, and a new webhook on the bound repository.** Nothing today
+listens for a GitHub `push` or `release` event; `LIFECYCLE_EVENTS`
+(`lib/github/lifecycle.ts`) only covers installation and repository lifecycle, not source
+changes. A future implementation adds `push`/`release` to the App's subscribed events and a
+handler that enqueues a retest job through the existing durable jobs table
+(`lib/jobs/queue.ts`'s `enqueue`), the same idempotency-by-`(channel, delivery_id)` every other
+inbound channel already gets. A reviewer-requested retest reuses the same enqueue path without
+waiting for a webhook.
+
+**Re-pin before retest, same authorization shape as the first run.** A retest cannot reuse the
+original `TargetProfile`'s pinned commit, by definition; it needs to build and verify a new
+snapshot at the fixed ref first, through the same `lib/build-onboarding` pipeline and the same
+digest-and-build-marker verification every onboarded target already gets, before anything is
+reproduced against it. The retest's own authorization check, re-run just before its result is
+written, follows Q16's pattern: no verified rebuild, no `FIXED`/`NOT_FIXED` claim, whatever the
+agent's own investigation concluded.
+
+**A retest is evidence like any other.** A human still approves whatever retest text goes out;
+nothing here changes or shortcuts the `publish_verdict` gate. This is explicitly a smaller claim
+than Q22's main verdict path, not a parallel one: the same human-approval invariant applies.
+
+**Sequencing.** #343 (class-specific oracles) is a soft dependency: the broader the oracle
+coverage, the more report classes this can actually fix-verify, so a full build today would be
+narrow and need revisiting once #343 lands. The design above (the retest table shape, the
+webhook trigger, the re-pin path) can be built and tested against the one oracle that exists now
+(SQLi); the comparison logic deciding `FIXED` vs. `PARTIALLY_FIXED` vs. `NOT_FIXED` for a class
+with no oracle yet waits on that class having one.
+
+### Q35: Researcher appeal path (design record, not yet built)
+
+A reporter has no way to contest a verdict (a `NOT_REPRODUCED`, an `OUT_OF_SCOPE`) once it
+ships; the conversation just ends. #349 asks for an appeal path, paired with drafted CVSS (which
+shipped separately, PR #369; this entry covers only the appeal half). This entry is the design;
+issue #349 tracks it and is not merged. Demand for this is sourced from competitor feature
+matching in the issue's own context, not a reporter request on record; the design is worth
+writing down now because it resolves real architectural ambiguity cheaply, but the implementation
+stays backlog until an actual appeal is asked for.
+
+**This cannot be a new report-lifecycle state.** The enum is frozen (see `AGENTS.md`'s
+architecture invariants), and the reason is stated plainly there: "there is no reporter-reply
+state: the reviewer chat is the only conversation channel, so `AWAITING_REPORTER` is not part of
+the enum." An appeal has to be a new kind of inbound message, not a new value in
+`report_lifecycle_state`.
+
+**No reporter-facing channel exists to build on.** `lib/reviewer-chat/` is reviewer-only today,
+gated to `isReviewerWriter` on both read and write (`lib/auth/reviewers.ts`, PR #365): nothing
+lets an outside reporter post into it. Two things are missing before an appeal can exist at all,
+and both need deciding, not assuming:
+
+- *Proving the appeal is from the real reporter.* The reusable building block is already in the
+  codebase: the OTP contact-verification pattern upload and email intake use
+  (`lib/auth/report-contact.ts`, `lib/auth/otp.ts`) proves control of the contact a report
+  recorded, without a full account. An appeal most naturally reuses this exact mechanism rather
+  than inventing a second one.
+- *A reporter has no delivered-verdict read surface to appeal from.* Delivery today is a GitHub
+  comment, an email reply, or an advisory edit, three different channels with no shared
+  reporter-facing page. Where the appeal link lives, and how it survives across all three
+  channels, is an open question this entry does not resolve.
+
+**States, kept out of the frozen enum.** An appeal's own status (open, under review, resolved)
+belongs on a new append-only table or column scoped to the appeal itself, the same relationship
+`verdict_supersession` has to a verdict: adjacent to the report, never inside
+`report_lifecycle_state`. A resolved appeal does not retroactively change the report's own state;
+it is a parallel record a reviewer can see and act on through the existing reviewer-chat surface
+once the message reaches it.
+
+**Abuse surface.** An appeal channel is reporter-authenticated but still outside-facing, the same
+risk class upload intake already carries guards for (per-contact and per-domain daily limits,
+`lib/upload/intake.ts`'s `UPLOAD_LIMITS`). Whatever is built needs the same shape of limits
+before it ships, not after.
+
+**Not scheduled.** No implementation starts on this until an actual appeal is requested, at which
+point this entry's open questions (discovery surface, appeal-state storage, rate limits) need
+answering concretely, not left as options.
