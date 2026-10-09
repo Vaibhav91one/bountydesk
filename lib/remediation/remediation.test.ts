@@ -64,8 +64,24 @@ test("isValidUnifiedDiff rejects prose, truncated hunks, bad paths and oversized
   assert.equal(isValidUnifiedDiff("--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n a\n-b\n+c\n"), false);
   assert.equal(isValidUnifiedDiff(GOOD.replace(/src\/login\.ts/g, "../../etc/passwd")), false);
   assert.equal(isValidUnifiedDiff(GOOD.replace(/src\/login\.ts/g, "/etc/passwd")), false);
+  const hdr = (line: string) => `${line}\n${GOOD}`;
+  assert.equal(isValidUnifiedDiff(hdr("rename to ../x")), false);
+  assert.equal(isValidUnifiedDiff(hdr("copy from /etc/passwd")), false);
+  assert.equal(isValidUnifiedDiff(hdr("diff --git a/x b/../y")), false);
+  assert.equal(isValidUnifiedDiff(hdr("diff --git a/x b/y")), true);
   assert.equal(isValidUnifiedDiff(`${GOOD}trailing prose\n`), false);
   assert.equal(isValidUnifiedDiff(`${GOOD}${"+x\n".repeat(MAX_PATCH_CHARS)}`), false);
+});
+
+test("buildRemediationPatch drops patches past the aggregate cap", async () => {
+  const { buildRemediationPatch, MAX_TOTAL_PATCH_CHARS } = await import("./patch");
+  const body = Array.from({ length: 1000 }, (_, k) => `+line ${k}`);
+  const big = `--- a/f\n+++ b/f\n@@ -0,0 +1,${body.length} @@\n${body.join("\n")}\n`;
+  const finding = (n: number) => ({ title: `f${n}`, severity: "low" as const, description: "d", evidenceRef: "e", remediationPatch: big });
+  const count = Math.ceil(MAX_TOTAL_PATCH_CHARS / big.length) + 3;
+  const out = buildRemediationPatch(Array.from({ length: count }, (_, n) => finding(n)))!;
+  assert.ok(out.length <= MAX_TOTAL_PATCH_CHARS);
+  assert.ok(out.includes("# Finding 1:") && !out.includes(`# Finding ${count}:`));
 });
 
 let seq = 0;

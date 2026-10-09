@@ -1,5 +1,7 @@
 import { MAX_PATCH_CHARS, type Finding } from "@/lib/mcp/verdict-draft";
 
+export const MAX_TOTAL_PATCH_CHARS = 200_000;
+
 /**
  * A finding's suggested fix is model output, so it is checked as data and never applied or run.
  * The check is structural: file headers, then hunks whose line counts match their @@ headers.
@@ -11,14 +13,27 @@ const HUNK = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
 // Git's extended header lines that may sit between file diffs. "Binary files" and "GIT binary
 // patch" are left out on purpose: a source fix has no binary part.
 const EXTENDED_HEADER =
-  /^(diff --git |index |old mode |new mode |new file mode |deleted file mode |similarity index |rename (from|to) )/;
+  /^(diff --git |index |old mode |new mode |new file mode |deleted file mode |similarity index |rename (from|to) |copy (from|to) )/;
 
-function safePath(header: string): boolean {
-  // "--- a/src/x.ts\t<timestamp>" and "+++ b/src/x.ts": take the path before any tab.
-  const raw = header.slice(4).split("\t")[0].trim();
+function safePathValue(raw: string): boolean {
   if (raw === "/dev/null") return true;
   const path = raw.replace(/^[ab]\//, "");
   return path.length > 0 && !path.startsWith("/") && !path.split("/").includes("..");
+}
+
+function safePath(header: string): boolean {
+  // "--- a/src/x.ts\t<timestamp>" and "+++ b/src/x.ts": take the path before any tab.
+  return safePathValue(header.slice(4).split("\t")[0].trim());
+}
+
+// Every line that names a path is checked, not only ---/+++: "diff --git a/x b/../y" and
+// "rename to ../y" would otherwise carry a traversal past the validator.
+function safeExtendedHeader(line: string): boolean {
+  if (line.startsWith("diff --git ")) {
+    return line.slice(11).split(" ").every(safePathValue);
+  }
+  const m = /^(?:rename|copy) (?:from|to) (.*)$/.exec(line);
+  return m ? safePathValue(m[1].trim()) : true;
 }
 
 export function isValidUnifiedDiff(text: string): boolean {
@@ -60,6 +75,7 @@ export function isValidUnifiedDiff(text: string): boolean {
       if (fileHunks === 0) return false;
       hunks += fileHunks;
     } else if (EXTENDED_HEADER.test(line)) {
+      if (!safeExtendedHeader(line)) return false;
       i += 1;
     } else {
       return false;
@@ -76,11 +92,16 @@ export function isValidUnifiedDiff(text: string): boolean {
  */
 export function buildRemediationPatch(findings: Finding[]): string | null {
   const parts: string[] = [];
+  let total = 0;
   findings.forEach((finding, index) => {
     const patch = finding.remediationPatch;
     if (!patch || !isValidUnifiedDiff(patch)) return;
     const title = finding.title.replace(/\s+/g, " ");
-    parts.push(`# Finding ${index + 1}: ${title}\n${patch.replace(/\n*$/, "\n")}`);
+    const part = `# Finding ${index + 1}: ${title}\n${patch.replace(/\n*$/, "\n")}`;
+    // Twenty findings at the per-patch cap would be a megabyte; past the total, later patches drop.
+    if (total + part.length > MAX_TOTAL_PATCH_CHARS) return;
+    total += part.length;
+    parts.push(part);
   });
   return parts.length > 0 ? parts.join("\n") : null;
 }

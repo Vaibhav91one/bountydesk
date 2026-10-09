@@ -9,7 +9,7 @@ import { buildRemediationPatch } from "./patch";
  * live verdict may no longer claim the finding is reproduced.
  *
  * The artifact row is the eligibility record (REPRODUCED, bound target, patch validated when the
- * verdict was drafted). The bytes are rebuilt from the verdict's stored evidence rather than read
+ * artifacts were recorded). The bytes are rebuilt from the verdict's stored evidence rather than read
  * back from Storage, so the download works when Storage is not configured and cannot drift from
  * the sha256 the row recorded.
  */
