@@ -333,6 +333,13 @@ test("webgoat oracle: the canary only in feedback, not output, is false", async 
   assert.equal(await webgoat.oracleCheck({ status: 200, body }, canary), false);
 });
 
+test("webgoat oracle: the canary only in the echoed query suffix is false", async () => {
+  const webgoat = onlyRecipe("webgoat", WEBGOAT_CONFIG);
+  const canary = freshCanary();
+  const body = JSON.stringify({ output: `incompatible data types<br> Your query was: SELECT '${canary}'` });
+  assert.equal(await webgoat.oracleCheck({ status: 200, body }, canary), false);
+});
+
 test("webgoat oracle: a non-JSON body does not throw and is false", async () => {
   const webgoat = onlyRecipe("webgoat", WEBGOAT_CONFIG);
   const canary = freshCanary();

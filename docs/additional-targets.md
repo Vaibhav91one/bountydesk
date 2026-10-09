@@ -1,13 +1,13 @@
 # Additional reproduction targets
 
-BountyDesk has two targets with a built, registered image: juice-shop at v17.3.0, and now DVWA
-at v1.9 (PR #371). This document covers four more that are scaffolded in code: a target profile
-in the registry and a reproduction recipe each, wired into the same lookup juice-shop uses.
-WebGoat, dsvw and log4shell-cve-lab are not live. What exists for those three is the config and
-the recipe an operator needs to build and register the image, which is the state juice-shop and
-DVWA were in before their snapshots were built.
+BountyDesk has three targets with a built, registered image: juice-shop at v17.3.0, DVWA at v1.9
+(PR #371) and WebGoat at v2025.3. This document covers four that are scaffolded in code: a target
+profile in the registry and a reproduction recipe each, wired into the same lookup juice-shop
+uses. dsvw and log4shell-cve-lab are not live. What exists for those two is the config and the
+recipe an operator needs to build and register the image, which is the state juice-shop, DVWA and
+WebGoat were in before their snapshots were built.
 
-DVWA's image being built does not by itself make the target ready for a verdict: its recipe
+DVWA's and WebGoat's images being built do not by themselves make the target ready for a verdict: its recipe
 still carries `oracleReady: false` (see the next section; dsvw-sqli is the one exception),
 because the orchestrator gap below (form-encoded bodies, an authenticated session) is still open. Building and registering the
 image was the harder, infrastructure half; closing the orchestrator gap is separate work.
@@ -80,18 +80,10 @@ gap is orchestrator work.
     exploitable at all. This is orchestrator work (carrying a session across the run, or baking
     the security-level change into the image's own start script, the way the database creation
     already is) and is not done.
-  - For WebGoat, the SQL injection lesson is not reachable because it does not exist in this
-    fork at all. The pinned `7.1` tag's lesson content, including the lesson the recipe targets,
-    lives in a separate `WebGoat-Lessons` repository the project's own developer bootstrap script
-    clones alongside this one and builds into a second artifact before the container module can
-    serve it. Confirmed by reading `webgoat_developer_bootstrap.sh` and by grep: no lesson class
-    for SQL injection exists anywhere in the `Vaibhav91one/WebGoat` fork outside a test file that
-    references it by name. The base `webgoat-container` module itself builds and runs fine as a
-    WAR (`mvn -pl webgoat-container tomcat7:run-war`, matching the registry's port 8080 and
-    `/WebGoat` context path); it is specifically the lesson content that is missing. Closing this
-    needs forking and pinning a `WebGoat-Lessons` commit compatible with the `7.1`-era lesson API
-    (not a later restructured one), wiring it into the build as a second source, and verifying
-    `assignment5a` actually resolves once both are built together.
+  - For WebGoat, the image is built and the lesson is reachable (see "WebGoat version choice"
+    below). What still blocks `oracleReady` is the registration and login: the lesson endpoint
+    was only exercised with a session cookie from `POST /WebGoat/register.mvc` and
+    `POST /WebGoat/login`, and carrying that session is the same orchestrator gap as DVWA's.
 - `dsvw` takes its injection through a GET query string. The orchestrator does not substitute the
   canary into a request path today, only into a body, so this recipe needs path substitution (or
   a POST variant of the endpoint on the built image) before it can run.
@@ -102,11 +94,46 @@ gap is orchestrator work.
   query. The canary also belongs in the injected header, and header substitution is not wired
   either.
 
-One assumption is worth calling out. The WebGoat recipe targets `assignment5a`, the WebGoat 8.x
-string-injection assignment, and its UNION payload assumes a column count for `user_data`. Both
-the lesson path and the column count are version specific, so confirm them against the image you
-actually build and adjust the payload if the schema differs. This is marked in the recipe with a
-`ponytail:` comment.
+## WebGoat version choice
+
+The first plan pinned the `7.1` tag, to match the older lesson path. That tag has no SqlInjection
+lesson: 7.x kept lessons in a separate `WebGoat-Lessons` repository built into a second artifact,
+so it needed a second fork and a compatible lessons commit. The `v2025.3` tag (fork commit
+`c3ed45a733377bc7313b93f57ff518254d81380f`) is a single Spring Boot jar with every lesson
+bundled, an embedded Tomcat and an embedded HSQLDB, so there is no datastore to bundle and no
+second source. It still serves `POST /WebGoat/SqlInjection/assignment5a` on port 8080 with the
+`/WebGoat` context path, so the registry's path and port did not change. That is simpler and
+satisfies the issue, so the 7.1 route was dropped.
+
+The jar is built from the pinned source (not the upstream release asset) with `mvn package` on
+JDK 23: the pom sets `release 23`, and Lombok 1.18.36 does not compile under a JDK 24 host, so the
+build ran inside `maven:3.9-eclipse-temurin-23`. The image is `eclipse-temurin:23-jdk-noble` plus
+the jar, the fork's own entrypoint flags, and the build marker at `/etc/bountydesk-build-marker`.
+It is a plain `COPY` of the one jar, and the jar is architecture independent, so cross-building
+the image for `linux/amd64` costs nothing.
+
+The image is pushed as `ghcr.io/vaibhav91one/webgoat@sha256:0cdce0e66e20a2d010dad765313ae4dd8066308487933c7f77af6245de7fab13`
+and registered as the Daytona snapshot `bountydesk-webgoat-marker`
+(`62258ce4-552f-4a8a-8a1f-6071ab7d7bef`, 2 CPU, 4 GB, 10 GB disk). In a real Daytona sandbox
+created from it, the build marker matched, the JVM started from the image's own `ENTRYPOINT` with
+no start command, and `/WebGoat/login` answered `HTTP/1.1 200` after about 40 seconds. The registry
+entry sets no `warmupSeconds`, so set one (about 60) if the readiness poll turns out too short.
+The image has no `curl`, so check readiness with `wget` or a bash `/dev/tcp` probe. An
+authenticated lesson request was not completed inside the sandbox (the `wget` cookie handling
+returned the login page), so the exploit result below comes from the local boot only.
+
+`container image push` hung for over 15 minutes twice with no layer completing, though the uplink
+was fine. The image was instead saved with `container image save` and uploaded blob by blob with
+the registry HTTP API, then the single-platform manifest was put under the tag.
+
+Checked against a local boot of the same image (arm64, because `container run` cannot run amd64):
+`/WebGoat/login` answers 200 with no session, and after registering and logging in a user the
+lesson endpoint runs the injection. The recipe's old payload failed with `incompatible data
+types in combination`, because `user_data` has seven columns (`userid` and `login_count` are
+integers) and HSQLDB rejects a string literal in those positions. The recipe now selects
+`1,'{{canary}}','x','x','x','x',1`, which returned the canary as a result row. The lesson also
+appends `Your query was: <sql>` to every `output`, which echoes the canary even when the injection
+errored, so the oracle only reads the text before that suffix.
 
 ## Bundling a datastore into one image
 
@@ -142,6 +169,9 @@ this situation:
 Building and testing locally before any cloud spend, with Apple's native `container build` /
 `container run`, surfaced two real tool limitations worth knowing before the next build:
 
+- **Keep the build context under `$HOME`, not `/private/tmp`.** A context in `/private/tmp` failed
+  with `"/webgoat.jar": not found` for a file that was on disk with the right mode; the same
+  directory copied to `$HOME` built fine.
 - **Always pass an absolute build context path**, never `.`. A relative context silently breaks
   the tool's ability to resolve any `COPY`/`ADD` source, failing with a "not found" error that
   looks like a missing file rather than a context-resolution problem.
@@ -162,8 +192,9 @@ Building and testing locally before any cloud spend, with Apple's native `contai
 ## Operator steps that remain, per target
 
 These mirror the juice-shop path. Steps 1 through 3 and 5 are done for DVWA (PR #371); step 4 is
-only half done for DVWA (database creation, not the security level), and none of the five is
-done yet for the other three.
+only half done for DVWA (database creation, not the security level). For WebGoat, steps 1 through
+4 are done (the image boots on its own `ENTRYPOINT` and answers `/WebGoat/login`); step 5 binds a
+repository and is left to the operator. None of them is done for the other two.
 
 1. Fork the upstream app into `Vaibhav91one` (already done for all four) and pin it at a commit.
 2. Build a `linux/amd64` image from the fork, baking the source commit in as the build marker the
