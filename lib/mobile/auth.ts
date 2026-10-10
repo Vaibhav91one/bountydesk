@@ -1,6 +1,4 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
-
-import { currentSession } from "@/lib/auth/dal";
+import { clerkProfile, currentSession, signedInUserId } from "@/lib/auth/dal";
 import { isReviewerWriter } from "@/lib/auth/reviewers";
 import type { Session } from "@/lib/auth/session";
 
@@ -32,8 +30,7 @@ export function jsonError(error: string, status: number): Response {
 }
 
 export async function mobileAuth(options: { write?: boolean } = {}): Promise<MobileAuth> {
-  const { userId } = await auth();
-  if (!userId) return { ok: false, response: jsonError("unauthenticated", 401) };
+  if (!(await signedInUserId())) return { ok: false, response: jsonError("unauthenticated", 401) };
 
   const session = await currentSession();
   if (!session) return { ok: false, response: jsonError("not an allowlisted reviewer", 403) };
@@ -56,8 +53,7 @@ export type MobileMe =
 
 /** Who the token belongs to. The one route that also answers for a signed-in non-reviewer. */
 export async function mobileMe(): Promise<MobileMe | null> {
-  const { userId } = await auth();
-  if (!userId) return null;
+  if (!(await signedInUserId())) return null;
 
   const session = await currentSession();
   if (session) {
@@ -70,11 +66,5 @@ export async function mobileMe(): Promise<MobileMe | null> {
     };
   }
 
-  const user = await currentUser();
-  return {
-    allowlisted: false,
-    login: user?.username ?? user?.firstName ?? null,
-    email: user?.primaryEmailAddress?.emailAddress ?? null,
-    avatarUrl: user?.imageUrl ?? null,
-  };
+  return { allowlisted: false, ...(await clerkProfile()) };
 }

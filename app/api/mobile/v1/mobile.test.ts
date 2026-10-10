@@ -5,13 +5,12 @@ import test, { after, before, beforeEach, mock } from "node:test";
 import { computeContentHash } from "@/lib/verdicts/hash";
 
 /**
- * The mobile API against a disposable schema. Clerk, the DAL and the writer check are mocked so
+ * The mobile API against a disposable schema. The DAL and the writer check are mocked so
  * the test controls who is calling; everything under them (the route handlers, `decide`, the
  * queries) is real, because the guarantees here are the gate's and the database's.
  *
  * Clerk's own bearer-token verification is not exercised: it lives in clerkMiddleware, which a
- * plain node:test process cannot run. These tests start from what auth() and currentSession()
- * return once it has.
+ * plain node:test process cannot run. These tests start from what the DAL returns once it has.
  */
 type Caller = {
   userId: string | null;
@@ -19,19 +18,12 @@ type Caller = {
 };
 let caller: Caller = { userId: null, session: null };
 
-mock.module("@clerk/nextjs/server", {
-  namedExports: {
-    auth: async () => ({ userId: caller.userId }),
-    currentUser: async () => ({
-      username: "outsider",
-      firstName: null,
-      imageUrl: null,
-      primaryEmailAddress: { emailAddress: "outsider@example.test" },
-    }),
-  },
-});
 mock.module("@/lib/auth/dal", {
-  namedExports: { currentSession: async () => caller.session },
+  namedExports: {
+    signedInUserId: async () => caller.userId,
+    currentSession: async () => caller.session,
+    clerkProfile: async () => ({ login: "outsider", email: "outsider@example.test", avatarUrl: null }),
+  },
 });
 mock.module("@/lib/auth/reviewers", {
   namedExports: { isReviewerWriter: async () => caller.session !== null && caller.session.role !== "read_only" },
