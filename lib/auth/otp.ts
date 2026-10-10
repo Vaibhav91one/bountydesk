@@ -28,10 +28,6 @@ export function hashCode(code: string): string {
   return crypto.createHmac("sha256", requireSecret("OTP_HMAC_KEY")).update(code).digest("hex");
 }
 
-function legacyHashCode(code: string): string {
-  return crypto.createHash("sha256").update(code).digest("hex");
-}
-
 /** A six-digit code, kept as a fixed-width string so a leading zero stays part of it. */
 export function generateCode(): string {
   return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
@@ -40,11 +36,6 @@ export function generateCode(): string {
 /** Compare a submitted code against a stored hash in constant time. */
 export function codeMatches(storedHash: string, submitted: string): boolean {
   const expected = Buffer.from(storedHash, "hex");
-  const equal = (hash: string) => {
-    const actual = Buffer.from(hash, "hex");
-    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
-  };
-  // ponytail: legacy unkeyed branch covers codes issued before this deploy (10 min TTL); delete it after one deploy cycle.
-  const keyed = equal(hashCode(submitted));
-  return equal(legacyHashCode(submitted)) || keyed;
+  const actual = Buffer.from(hashCode(submitted), "hex");
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }

@@ -13,8 +13,8 @@ test("hashCode is keyed, so it differs from the unkeyed SHA-256", () => {
   assert.ok(codeMatches(hashCode("123456"), "123456"));
 });
 
-test("a legacy unkeyed hash still verifies", () => {
-  assert.ok(codeMatches(legacy("123456"), "123456"));
+test("a legacy unkeyed hash is refused", () => {
+  assert.equal(codeMatches(legacy("123456"), "123456"), false);
 });
 
 test("a wrong code is refused in both forms", () => {
