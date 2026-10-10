@@ -10,6 +10,7 @@ import test, { after, before } from "node:test";
  */
 const OWNER = "owner@bountydesk.test";
 process.env.REVIEWER_EMAILS = OWNER;
+process.env.OTP_HMAC_KEY = "test-otp-key";
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");

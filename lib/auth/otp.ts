@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+import { requireSecret } from "@/lib/env";
+
 /**
  * The one-time-code primitives, shared by the reviewer allowlist and by report-scoped contact
  * verification. They live here so the two callers cannot drift on the parts that matter for
@@ -17,7 +19,16 @@ export function normalizeEmail(email: string | null | undefined): string | null 
   return trimmed.length ? trimmed : null;
 }
 
+/**
+ * HMAC-SHA256 under a dedicated key. A six-digit code has only a million values, so an unkeyed
+ * hash lets anyone who can read the table recover a live code. requireSecret throws when the key
+ * is unset, so issuing and verifying both fail closed instead of falling back to the unkeyed form.
+ */
 export function hashCode(code: string): string {
+  return crypto.createHmac("sha256", requireSecret("OTP_HMAC_KEY")).update(code).digest("hex");
+}
+
+function legacyHashCode(code: string): string {
   return crypto.createHash("sha256").update(code).digest("hex");
 }
 
@@ -29,6 +40,11 @@ export function generateCode(): string {
 /** Compare a submitted code against a stored hash in constant time. */
 export function codeMatches(storedHash: string, submitted: string): boolean {
   const expected = Buffer.from(storedHash, "hex");
-  const actual = Buffer.from(hashCode(submitted), "hex");
-  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  const equal = (hash: string) => {
+    const actual = Buffer.from(hash, "hex");
+    return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+  };
+  // ponytail: legacy unkeyed branch covers codes issued before this deploy (10 min TTL); delete it after one deploy cycle.
+  const keyed = equal(hashCode(submitted));
+  return equal(legacyHashCode(submitted)) || keyed;
 }

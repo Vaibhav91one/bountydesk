@@ -8,6 +8,7 @@ import test, { after, before } from "node:test";
  * expired or exhausted code is refused. The uploader never lands in the reviewer allowlist.
  */
 process.env.REVIEWER_EMAILS = "owner@bountydesk.test";
+process.env.OTP_HMAC_KEY = "test-otp-key";
 
 let schema: import("@/lib/db/testing").DisposableSchema;
 let dbm: typeof import("@/lib/db");
