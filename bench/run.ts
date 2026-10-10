@@ -100,7 +100,7 @@ function readManifest(runId: string): Manifest {
 /** The connected repository's ids, read once. Fails loudly rather than seeding one itself: a
  *  benchmark run should bind to whatever target this database already has, the same one a real
  *  report would, not conjure a fresh one that nothing else points at. */
-async function demoTarget(): Promise<{ connectedRepositoryId: string; targetProfileId: string | null }> {
+async function demoTarget(): Promise<{ connectedRepositoryId: string; targetProfileId: string }> {
   const [row] = await db
     .select({ id: connectedRepository.id, targetProfileId: connectedRepository.targetProfileId })
     .from(connectedRepository)
@@ -109,6 +109,15 @@ async function demoTarget(): Promise<{ connectedRepositoryId: string; targetProf
   if (!row) {
     throw new Error(
       `no connected repository ${TARGET_REPO_FULL_NAME} in this database; run npm run seed:target first`,
+    );
+  }
+  // Every bound case in this corpus expects reproduction to actually run against a built,
+  // pinned snapshot. A repository connected but not yet onboarded to a TargetProfile would
+  // file these as ANALYSIS_ONLY for the wrong reason (no target, not "investigated and found
+  // nothing"), silently corrupting every bound case's result, so refuse rather than file them.
+  if (!row.targetProfileId) {
+    throw new Error(
+      `${TARGET_REPO_FULL_NAME} has no targetProfileId yet; onboard it before filing bound cases`,
     );
   }
   return { connectedRepositoryId: row.id, targetProfileId: row.targetProfileId };
