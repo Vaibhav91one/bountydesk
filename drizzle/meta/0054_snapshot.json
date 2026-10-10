@@ -1,5 +1,5 @@
 {
-  "id": "b90cab51-fac2-4b0a-938b-03b3d8efa0dc",
+  "id": "26eb63f2-6b2c-4c5d-9041-88d6c473e2a4",
   "prevId": "2488e5a8-80d0-49f1-bec7-11aa20b54dc1",
   "version": "7",
   "dialect": "postgresql",
@@ -3024,6 +3024,27 @@
           "columns": [
             {
               "expression": "child_report_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "retest_verdict_commit_key": {
+          "name": "retest_verdict_commit_key",
+          "columns": [
+            {
+              "expression": "original_verdict_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "commit_sha",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

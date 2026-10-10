@@ -736,6 +736,8 @@ export const retest = pgTable(
       foreignColumns: [verdict.reportId, verdict.id],
     }),
     uniqueIndex("retest_child_report_id_key").on(t.childReportId),
+    // One retest per verdict and commit; the insert races on this, not on a prior read.
+    uniqueIndex("retest_verdict_commit_key").on(t.originalVerdictId, t.commitSha),
     index("retest_original_report_idx").on(t.originalReportId),
   ],
 );

@@ -13,5 +13,6 @@ ALTER TABLE "retest" ADD CONSTRAINT "retest_original_verdict_id_verdict_id_fk" F
 ALTER TABLE "retest" ADD CONSTRAINT "retest_child_report_id_report_id_fk" FOREIGN KEY ("child_report_id") REFERENCES "public"."report"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "retest" ADD CONSTRAINT "retest_original_report_verdict_fk" FOREIGN KEY ("original_report_id","original_verdict_id") REFERENCES "public"."verdict"("report_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "retest_child_report_id_key" ON "retest" USING btree ("child_report_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "retest_verdict_commit_key" ON "retest" USING btree ("original_verdict_id","commit_sha");--> statement-breakpoint
 CREATE INDEX "retest_original_report_idx" ON "retest" USING btree ("original_report_id");--> statement-breakpoint
 ALTER TABLE "retest" ENABLE ROW LEVEL SECURITY;

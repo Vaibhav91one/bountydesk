@@ -179,6 +179,19 @@ test("a retest creates a git-material child with no contact and leaves the origi
 
   const again = await retests.startRetest(seeded.original.id, SHA, REVIEWER);
   assert.equal(again.ok, false, "the same commit is not retested twice for one verdict");
+  await assert.rejects(
+    dbm.db.insert(dbm.retest).values({
+      originalReportId: seeded.original.id,
+      originalVerdictId: seeded.verdict.id,
+      childReportId: seeded.original.id,
+      commitSha: SHA,
+      actor: "racer",
+    }),
+    "the database, not a prior read, stops a concurrent duplicate",
+  );
+  assert.equal(await retests.canOfferRetest(seeded.original.id), true);
+  await dbm.db.update(dbm.connectedRepository).set({ active: false }).where(dbm.eq(dbm.connectedRepository.id, seeded.repo.id));
+  assert.equal(await retests.canOfferRetest(seeded.original.id), false, "a revoked grant hides the control");
 
   const of = await retests.readRetestOf(child.id);
   assert.equal(of?.originalReportId, seeded.original.id);

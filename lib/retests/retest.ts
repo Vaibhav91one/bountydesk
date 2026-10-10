@@ -14,7 +14,7 @@ import {
   uploadIntake,
   verdict,
 } from "@/lib/db";
-import { ensureReport, recordEvent } from "@/lib/reports/lifecycle";
+import { ensureReport, recordEvent, transition } from "@/lib/reports/lifecycle";
 import { approveUploadTarget, reviewedUploadTarget, type UploadTargetInput } from "@/lib/upload/gate";
 import { parseGitSource } from "@/lib/upload/git-source";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
@@ -178,7 +178,11 @@ export async function startRetest(
   // The reviewer triggering the retest is the approver, so the child skips the gate and goes to
   // the build; the same call the reviewer upload path makes.
   const approved = await approveUploadTarget(childReportId, reviewer.login, target.input);
-  if (!approved.ok) return { ok: false, reason: approved.reason };
+  if (!approved.ok) {
+    // Close the child so it is not left at the gate; the retest row stays and reads INCONCLUSIVE.
+    await transition(childReportId, "NEEDS_DECISION", "DENIED").catch(() => undefined);
+    return { ok: false, reason: approved.reason };
+  }
   return { ok: true, childReportId };
 }
 
@@ -282,6 +286,8 @@ export async function canOfferRetest(reportId: string): Promise<boolean> {
     .where(eq(report.id, reportId))
     .limit(1);
   if (!row || !row.repoId || row.isPrivate !== false || !RETESTABLE_STATES.includes(row.state)) return false;
+  const grant = await loadRepositoryGrantSnapshot(reportId, db);
+  if (!grant || !hasActiveRepositoryGrant(grant)) return false;
   const [latest] = await db
     .select({ outcome: verdict.outcome })
     .from(verdict)
