@@ -1053,7 +1053,7 @@ government, military and large-platform domains, and immediate proof revocation 
 report. None of this is built. #325 and #327 do not start until this entry's mechanism and the
 write-probe change above are implemented and tested.
 
-### Q34: Fix-verification after a confirmed bug is patched (design record, not yet built)
+### Q34: Fix-verification after a confirmed bug is patched (first slice built)
 
 A verdict is terminal today: `REPRODUCED`, `NOT_REPRODUCED`, `INCONCLUSIVE` or `ANALYSIS_ONLY`,
 with no way to ask "is this actually fixed now?" after the target owner ships a patch. Every
@@ -1109,6 +1109,35 @@ narrow and need revisiting once #343 lands. The design above (the retest table s
 webhook trigger, the re-pin path) can be built and tested against the one oracle that exists now
 (SQLi); the comparison logic deciding `FIXED` vs. `PARTIALLY_FIXED` vs. `NOT_FIXED` for a class
 with no oracle yet waits on that class having one.
+
+**As built (first slice), and where it departs from the design above.** The first slice does not
+wait for #343's class oracles and does not re-pin the original target. The retest is the agent's
+own investigation, run on a child report:
+
+- A reviewer with write access gives a full 40-character commit SHA on the case file of a report
+  whose latest verdict is `REPRODUCED` and approved (`DELIVERING` or `DELIVERED`). The target must
+  be bound through a connected, public GitHub repository whose grant is live (`lib/retests/retest.ts`).
+  Private repositories are refused: a private clone needs an installation token inside the build
+  sandbox, which the upload path does not have.
+- The platform creates an internal child report on the upload channel with `git` material
+  (`https://github.com/<repo>` at that SHA, through `parseGitSource`) and approves it as the
+  triggering reviewer, so it goes straight into the existing upload build, the onboarding agent and
+  the normal investigation. The child's run settings (port, readiness path, start command,
+  ecosystem) are copied from the original target. The original report, its verdict, its
+  `TargetProfile` and `connected_repository.target_profile_id` are never written.
+- The child has no reporter contact, so `enqueueApprovedVerdictDelivery` refuses it
+  ("no verified reporter contact") and no outbound row can exist. Its verdict is evidence for a
+  human, never sent.
+- The `retest` table links original report, original verdict, child report, commit and actor. The
+  result is not stored: it is derived when read from the child's latest verdict. `REPRODUCED` is
+  `NOT_FIXED`, `NOT_REPRODUCED` is `FIXED`, `ANALYSIS_ONLY`, `INCONCLUSIVE`, a failed build or a
+  child that ended without a verdict is `INCONCLUSIVE`, and no verdict yet is "running".
+  `PARTIALLY_FIXED` is reserved and never assigned automatically, because one agent run cannot
+  tell a partial fix from an incomplete retest.
+
+Still open: the `push`/`release` webhook trigger, upload and non-GitHub targets, private
+repositories, and oracle-backed comparison once #343 exists. The migration (`0054_retest`) is run
+by hand on production after merge.
 
 ### Q35: Researcher appeal path (built)
 

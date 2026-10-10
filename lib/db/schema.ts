@@ -706,6 +706,43 @@ export const verdictSupersession = pgTable(
 );
 
 /**
+ * A fix-verification retest of a confirmed report (docs/decisions.md Q34). The retest runs as a
+ * separate child report built through the upload path at the fixed commit, so the original report,
+ * its verdict and its target are never touched; this row only links the two. The result is not
+ * stored: it is derived from the child's latest verdict when read (lib/retests/retest.ts), so there
+ * is nothing to keep in sync.
+ */
+export const retest = pgTable(
+  "retest",
+  {
+    id: id(),
+    originalReportId: uuid("original_report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    originalVerdictId: uuid("original_verdict_id")
+      .notNull()
+      .references(() => verdict.id, { onDelete: "restrict" }),
+    childReportId: uuid("child_report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    commitSha: text("commit_sha").notNull(),
+    actor: text("actor").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    foreignKey({
+      name: "retest_original_report_verdict_fk",
+      columns: [t.originalReportId, t.originalVerdictId],
+      foreignColumns: [verdict.reportId, verdict.id],
+    }),
+    uniqueIndex("retest_child_report_id_key").on(t.childReportId),
+    // One retest per verdict and commit; the insert races on this, not on a prior read.
+    uniqueIndex("retest_verdict_commit_key").on(t.originalVerdictId, t.commitSha),
+    index("retest_original_report_idx").on(t.originalReportId),
+  ],
+);
+
+/**
  * A reporter's appeal of a delivered verdict. It sits beside the verdict the way
  * verdict_supersession does and never touches the frozen report lifecycle: answering one goes
  * through the existing recheck and a new verdict revision, not through a state of its own.

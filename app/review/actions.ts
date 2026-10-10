@@ -20,6 +20,7 @@ import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
 import { enqueueApprovedVerdictDelivery } from "@/lib/mcp/publish-verdict";
+import { startRetest } from "@/lib/retests/retest";
 import {
   cancelRecheck,
   requestRecheck,
@@ -429,6 +430,30 @@ export async function requestRecheckAction(
   const result = await requestRecheck(reportId, verdictId, guidance, session.login);
   revalidateReportViews(reportId);
   return result.ok ? { ok: true } : { ok: false, error: result.reason };
+}
+
+/**
+ * Start a fix-verification retest of a REPRODUCED report at a commit the reviewer names. The
+ * retest runs as a separate child report, so this never edits the original report or its target,
+ * and the child's verdict is never delivered (it has no reporter contact).
+ */
+export async function requestRetestAction(
+  reportId: string,
+  commitSha: string,
+): Promise<ActionResult & { childReportId?: string }> {
+  const access = await requireWriteAccess();
+  if (!access.ok) return access;
+  // A server action is callable with any JSON, so the types are checked here.
+  if (typeof reportId !== "string" || !isReportId(reportId) || typeof commitSha !== "string") {
+    return { ok: false, error: "That report or commit is not valid." };
+  }
+  try {
+    const result = await startRetest(reportId, commitSha.trim(), { login: access.session.login });
+    revalidateReportViews(reportId);
+    return result.ok ? { ok: true, childReportId: result.childReportId } : { ok: false, error: result.reason };
+  } catch (error) {
+    return thrownActionError(error, "retest");
+  }
 }
 
 /**
