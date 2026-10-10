@@ -47,7 +47,7 @@ export const findingSchema = z.object({
     .max(MAX_PATCH_CHARS)
     .optional()
     .describe(
-      "Optional. A unified diff (---/+++ headers and @@ hunks, repo-relative paths) that would fix this finding. Only for a finding you reproduced; omit it when unsure.",
+      "Optional. A unified diff that would fix this finding, only for one you reproduced. Read the file first and use its real path relative to the target source root in `--- a/<path>` / `+++ b/<path>`, real `@@ -a,b +c,d @@` hunk headers with matching counts, and unchanged context lines from its exact current text. Omit it if you could not read the file or are unsure.",
     ),
 });
 

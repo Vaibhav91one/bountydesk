@@ -52,8 +52,12 @@ per-host report format enforced:
 - Every severity is a DRAFT until a human approves the exact `publish_verdict`
   content; nothing here is delivered on your say-so.
 - When the verdict is REPRODUCED and the fix is clear, attach it as a unified
-  diff (repo-relative paths, `---`/`+++` headers, `@@` hunks) in that finding's
-  `remediationPatch` field. Omit the field when you are unsure; a malformed
+  diff in that finding's `remediationPatch` field. Read the affected file
+  first, by its real path relative to the target source root (as in the source
+  tree or code-review output), and base the diff on its exact current lines.
+  Use `--- a/<path>` and `+++ b/<path>` with that path, real `@@ -a,b +c,d @@`
+  hunk headers whose counts match the lines, and a few unchanged context lines.
+  If you could not read the file or are unsure, omit the field; a malformed
   diff is dropped, and it is only ever offered to the reviewer as a download.
 - Remediation advice stays advisory: propose fixes, never apply changes to
   the target. Fixing is out of scope and would need its own approval flow.
