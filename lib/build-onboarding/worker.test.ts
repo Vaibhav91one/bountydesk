@@ -859,3 +859,100 @@ test("the snapshot sweep deletes an unprotected trial snapshot and never a prote
   assert.equal(skipped.skipped, true);
   assert.deepEqual(deleted, [], "nothing is deleted while a build is in flight");
 });
+
+const NS = "ghcr.io/acme";
+const HOUR = 60 * 60_000;
+
+function fakeRegistry(tags: { tag: string; pkg?: string; ageH?: number }[], opts: { fail?: boolean } = {}) {
+  const deleted: string[] = [];
+  const now = new Date();
+  const registry = {
+    namespace: NS,
+    async listTags() {
+      if (opts.fail) throw new Error("registry listing failed: 500");
+      return tags.map((t) => ({
+        ref: `${NS}/${t.pkg ?? "widget"}:${t.tag}`,
+        tag: t.tag,
+        createdAt: t.ageH === undefined ? undefined : new Date(now.getTime() - t.ageH * HOUR),
+      }));
+    },
+    async deleteImage(ref: string) {
+      deleted.push(ref);
+    },
+  } as unknown as import("./registry").RegistryHandoff;
+  return { registry, deleted };
+}
+
+async function clearBuilds() {
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "FAILED" })
+    .where(dbm.eq(dbm.targetOnboarding.state, "PENDING_BUILD"));
+}
+
+test("the image sweep keeps protected, young and non-bountydesk tags and deletes an old orphan", async () => {
+  await clearBuilds();
+  await dbm.db.insert(dbm.targetProfile).values({
+    name: "img-live",
+    imageDigest: `sha256:${"d".repeat(64)}`,
+    snapshotId: "img-live-snap",
+    config: { services: [{ snapshotImageRef: `${NS}/widget:bountydesk-aaaa1111` }] },
+  });
+  const held = await connectedRepo("acme/img-held");
+  await queue.enqueue({ repoId: held, repoFullName: "acme/img-held", sourceRef: "https://x/h.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db
+    .update(dbm.targetOnboarding)
+    .set({ state: "AWAITING_APPROVAL", builtServices: [{ imageName: `${NS}/held`, snapshotImageRef: `${NS}/held:bountydesk-bbbb2222` }] })
+    .where(dbm.eq(dbm.targetOnboarding.repoId, held));
+
+  const { registry, deleted } = fakeRegistry([
+    { tag: "bountydesk-aaaa1111", ageH: 100 },
+    { tag: "bountydesk-cccc3333", pkg: "held", ageH: 100 },
+    { tag: "bountydesk-bbbb2222", pkg: "held", ageH: 100 },
+    { tag: "bountydesk-dddd4444", ageH: 1 },
+    { tag: "v17.3.0-bountydesk-sandbox", ageH: 100 },
+    { tag: "latest", ageH: 100 },
+    { tag: "bountydesk-eeee5555", ageH: 100 },
+  ]);
+  const result = await worker.sweepOrphanImages(registry);
+  assert.equal(result.skipped, false);
+  assert.deepEqual(deleted.sort(), [`${NS}/held:bountydesk-cccc3333`, `${NS}/widget:bountydesk-eeee5555`]);
+});
+
+test("the image sweep waits while a build is in flight", async () => {
+  await clearBuilds();
+  const building = await connectedRepo("acme/img-building");
+  await queue.enqueue({ repoId: building, repoFullName: "acme/img-building", sourceRef: "https://x/b.git", resolvedCommitSha: "a".repeat(40) });
+  await dbm.db.update(dbm.targetOnboarding).set({ state: "PENDING_BUILD" }).where(dbm.eq(dbm.targetOnboarding.repoId, building));
+  const { registry, deleted } = fakeRegistry([{ tag: "bountydesk-ffff6666", ageH: 100 }]);
+  const result = await worker.sweepOrphanImages(registry);
+  assert.equal(result.skipped, true);
+  assert.deepEqual(deleted, []);
+  await clearBuilds();
+});
+
+test("the image sweep deletes at most 50 per pass", async () => {
+  await clearBuilds();
+  const { registry, deleted } = fakeRegistry(
+    Array.from({ length: 60 }, (_, i) => ({ tag: `bountydesk-cap${String(i).padStart(4, "0")}`, pkg: "capped", ageH: 100 })),
+  );
+  await worker.sweepOrphanImages(registry);
+  assert.equal(deleted.length, 50);
+});
+
+test("without a creation time a tag is deleted only on its second unprotected sweep", async () => {
+  await clearBuilds();
+  const { registry, deleted } = fakeRegistry([{ tag: "bountydesk-v2only1", pkg: "v2pkg" }]);
+  await worker.sweepOrphanImages(registry);
+  assert.deepEqual(deleted, [], "first sighting is kept");
+  await worker.sweepOrphanImages(registry);
+  assert.deepEqual(deleted, [`${NS}/v2pkg:bountydesk-v2only1`]);
+});
+
+test("a listing failure is a warning, not a throw", async () => {
+  await clearBuilds();
+  const { registry, deleted } = fakeRegistry([], { fail: true });
+  const result = await worker.sweepOrphanImages(registry);
+  assert.deepEqual(result, { deleted: [], skipped: false });
+  assert.deepEqual(deleted, []);
+});

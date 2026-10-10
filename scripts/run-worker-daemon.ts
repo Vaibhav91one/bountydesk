@@ -27,9 +27,11 @@ import { sweepExpiredLeases as sweepDeliveries } from "@/lib/delivery/queue";
 import { deliverOnce } from "@/lib/delivery/worker";
 import { adviseOnce } from "@/lib/delivery/advisory";
 import { createTrueForgeClient } from "@/lib/trueforge/client";
-import { onboardOnce, sweepOrphanSnapshots } from "@/lib/build-onboarding/worker";
+import { onboardOnce, sweepOrphanImages, sweepOrphanSnapshots } from "@/lib/build-onboarding/worker";
+import { resolveRegistry } from "@/lib/build-onboarding/registry";
 import { sweepExpiredLeases as sweepOnboarding } from "@/lib/build-onboarding/queue";
 import { createDaytonaBuildDriver } from "@/lib/build-onboarding/daytona-build-driver";
+import { runOnboardingAgent } from "@/lib/build-onboarding/onboarding-agent";
 import { buildUploadOnce } from "@/lib/upload/build";
 import {
   reviewerChatEnabled,
@@ -291,7 +293,12 @@ async function main(): Promise<void> {
       // A reviewer-approved upload's target build. Its claim re-takes an expired lease itself, so
       // there is nothing to sweep.
       name: "upload-build",
-      claimOnce: (signal) => buildUploadOnce({ driver: buildDriver, signal }),
+      claimOnce: (signal) =>
+        buildUploadOnce({
+          driver: buildDriver,
+          signal,
+          agent: (input) => runOnboardingAgent(trueForgeClient, input, { signal }),
+        }),
       sweepOnce: async () => null,
     },
     ...(reviewerChatEnabled()
@@ -354,6 +361,14 @@ async function main(): Promise<void> {
         const result = await sweepOrphanSnapshots();
         if (result.deleted.length) {
           console.log(`snapshot sweep: deleted ${result.deleted.length} orphan snapshots: ${result.deleted.join(", ")}`);
+        }
+        if (process.env.REGISTRY_DELETE_TOKEN) {
+          try {
+            const images = await sweepOrphanImages(resolveRegistry());
+            if (images.deleted.length) console.log(`image sweep: deleted ${images.deleted.length} orphan images`);
+          } catch (error) {
+            console.warn(`image sweep skipped: ${error instanceof Error ? error.message : String(error)}`);
+          }
         }
         return result;
       }),

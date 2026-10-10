@@ -35,7 +35,10 @@ export type OnboardingState =
   | "APPROVED"
   | "CONFIGURED"
   | "FAILED"
-  | "UNSUPPORTED";
+  | "UNSUPPORTED"
+  // Upload onboardings (lib/upload/agent-plan.ts): the upload build loop drives these, never the worker.
+  | "UPLOAD_AGENT"
+  | "UPLOAD_DONE";
 
 /** The states the worker may pick up. The human gate, the terminal and the refusal are excluded. */
 const CLAIMABLE: OnboardingState[] = ["PENDING_PLAN", "PENDING_BUILD", "PENDING_MANIFEST", "APPROVED", "FAILED"];

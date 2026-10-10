@@ -10,6 +10,7 @@ import {
   type MeshServiceAuth,
 } from "@/lib/sandbox/provision";
 import { sweepTrialSnapshots, type SnapshotSweepOps } from "@/lib/sandbox/daytona";
+import type { RegistryHandoff } from "./registry";
 import type { TrueForgeClient } from "@/lib/trueforge/client";
 
 import { parseBuildPlan, planToManifest, type BuildPlan } from "./build-plan";
@@ -584,7 +585,7 @@ async function recordLineage(
 // A row past one of these has either bound its snapshot to a profile (CONFIGURED, so the profile
 // query protects it) or produced nothing worth keeping (UNSUPPORTED, FAILED). Every other state is
 // in flight, and its built snapshot must be protected from the sweep until the row records it.
-const ONBOARDING_TERMINAL = new Set(["CONFIGURED", "UNSUPPORTED", "FAILED"]);
+const ONBOARDING_TERMINAL = new Set(["CONFIGURED", "UNSUPPORTED", "FAILED", "UPLOAD_DONE"]);
 
 /** Snapshot ids on a stored services value. A target profile config holds `{ services: [...] }`; a
  *  target_onboarding built_services column is the array itself, so both shapes are read here. */
@@ -658,4 +659,73 @@ export async function sweepOrphanSnapshots(
     .limit(1);
   if (building || uploading) return { deleted: [], kept: [], skipped: true };
   return { ...(await sweepTrialSnapshots(await collectProtectedSnapshotIds(), ops)), skipped: false };
+}
+
+const ORPHAN_IMAGE_MIN_AGE_MS = 24 * 60 * 60_000;
+const ORPHAN_IMAGE_DELETE_CAP = 50;
+// Refs a previous sweep saw unprotected, for registries that report no creation time.
+// ponytail: in memory, so a worker restart resets the two-sweep wait; persist it if restarts get frequent.
+let seenOrphanRefs = new Set<string>();
+
+const IMAGE_REF_RE = /[^\s"'@]+:bountydesk-[A-Za-z0-9._-]+/g;
+
+function collectImageRefs(value: unknown, namespace: string, into: Set<string>): void {
+  if (typeof value === "string") {
+    for (const [ref] of value.matchAll(IMAGE_REF_RE)) if (ref.startsWith(`${namespace}/`)) into.add(ref);
+  } else if (Array.isArray(value)) {
+    for (const item of value) collectImageRefs(item, namespace, into);
+  } else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) collectImageRefs(item, namespace, into);
+  }
+}
+
+/**
+ * Delete `bountydesk-*` images no live record points at, which a build that crashed after pushing and
+ * before reclaiming leaves behind. It sits behind the same in-flight guard as sweepOrphanSnapshots: a
+ * build pushes before the database records the ref, so any build in flight means wait. Never throws.
+ */
+export async function sweepOrphanImages(
+  registry: RegistryHandoff,
+  now: Date = new Date(),
+): Promise<{ deleted: string[]; skipped: boolean }> {
+  try {
+    const [building] = await db
+      .select({ id: targetOnboarding.id })
+      .from(targetOnboarding)
+      .where(eq(targetOnboarding.state, "PENDING_BUILD"))
+      .limit(1);
+    const [uploading] = await db
+      .select({ id: uploadIntake.id })
+      .from(uploadIntake)
+      .where(inArray(uploadIntake.buildState, ["PENDING", "BUILDING"]))
+      .limit(1);
+    if (building || uploading) return { deleted: [], skipped: true };
+
+    const protectedRefs = new Set<string>();
+    for (const profile of await db.select({ config: targetProfile.config }).from(targetProfile)) {
+      collectImageRefs(profile.config, registry.namespace, protectedRefs);
+    }
+    const rows = await db
+      .select({ state: targetOnboarding.state, builtServices: targetOnboarding.builtServices })
+      .from(targetOnboarding);
+    for (const row of rows) {
+      if (!ONBOARDING_TERMINAL.has(row.state)) collectImageRefs(row.builtServices, registry.namespace, protectedRefs);
+    }
+
+    const orphans = (await registry.listTags()).filter((t) => t.tag.startsWith("bountydesk-") && !protectedRefs.has(t.ref));
+    const previouslySeen = seenOrphanRefs;
+    seenOrphanRefs = new Set(orphans.map((t) => t.ref));
+    const old = orphans.filter((t) =>
+      t.createdAt ? now.getTime() - t.createdAt.getTime() >= ORPHAN_IMAGE_MIN_AGE_MS : previouslySeen.has(t.ref),
+    );
+    const deleted: string[] = [];
+    for (const orphan of old.slice(0, ORPHAN_IMAGE_DELETE_CAP)) {
+      await registry.deleteImage(orphan.ref);
+      deleted.push(orphan.ref);
+    }
+    return { deleted, skipped: false };
+  } catch (error) {
+    console.warn(`orphan image sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+    return { deleted: [], skipped: false };
+  }
 }

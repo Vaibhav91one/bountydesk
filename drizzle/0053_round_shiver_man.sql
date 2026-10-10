@@ -1,0 +1,4 @@
+ALTER TABLE "target_onboarding" ADD COLUMN "upload_id" uuid;--> statement-breakpoint
+ALTER TABLE "target_onboarding" ADD CONSTRAINT "target_onboarding_upload_id_upload_intake_id_fk" FOREIGN KEY ("upload_id") REFERENCES "public"."upload_intake"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "target_onboarding_upload_id_key" ON "target_onboarding" USING btree ("upload_id");--> statement-breakpoint
+ALTER TABLE "target_onboarding" ADD CONSTRAINT "target_onboarding_source_check" CHECK (("target_onboarding"."upload_id" is null and "target_onboarding"."repo_id" > 0) or ("target_onboarding"."upload_id" is not null and "target_onboarding"."repo_id" < 0));

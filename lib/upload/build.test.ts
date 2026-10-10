@@ -336,3 +336,45 @@ test("a stale worker's build cannot repoint a profile the re-claiming worker alr
   // The stale attempt failed safe: it did not bind the report to its own build.
   assert.equal((await reportRow(reportId)).targetProfileId, null);
 });
+
+test("a public git URL goes to the onboarding agent first, then keeps the Dockerfile plan if it commits nothing", async () => {
+  const sha = "ab12cd".repeat(6) + "abcd";
+  const seen: Array<{ onboardingId: string; instructions?: string }> = [];
+  const reportId = await heldUpload({ gitUrl: "https://gitlab.com/group/app", gitCommit: sha });
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+
+  const driver = fakeDriver();
+  const { parseBuildPlan } = await import("@/lib/build-onboarding/build-plan");
+  const agent = async (input: { onboardingId: string; repoFullName: string; instructions?: string }) => {
+    seen.push(input);
+    const plan = parseBuildPlan({
+      strategy: "agent-authored",
+      ecosystem: "none",
+      dockerfileText: 'FROM python:3.12-slim\nCOPY . /app\nCMD ["python","/app/app.py"]\n',
+      buildContext: ".",
+      seed: { kind: "none" },
+      runtime: { name: "agent-app", baseUrl: "http://localhost:8080", readinessPath: "/health" },
+    });
+    await dbm.db
+      .update(dbm.targetOnboarding)
+      .set({ buildPlan: plan })
+      .where(dbm.eq(dbm.targetOnboarding.id, input.onboardingId));
+  };
+  assert.ok(await build.buildUploadOnce({ driver, agent }));
+  assert.ok(driver.calls[0].plan.strategy === "agent-authored");
+  assert.equal(driver.calls[0].source?.kind, "git");
+
+  // The agent's row is pinned on the validated commit, not on a ref the agent could pick.
+  const [row] = await dbm.db
+    .select()
+    .from(dbm.targetOnboarding)
+    .where(dbm.eq(dbm.targetOnboarding.id, seen[0].onboardingId));
+  assert.equal(row.resolvedCommitSha, sha);
+  assert.equal(row.sourceArchiveDigest, null);
+
+  const second = await heldUpload({ gitUrl: "https://gitlab.com/group/other", gitCommit: sha });
+  await gate.approveUploadTarget(second, "reviewer", TARGET);
+  const fallback = fakeDriver();
+  assert.ok(await build.buildUploadOnce({ driver: fallback, agent: async () => {} }));
+  assert.equal(fallback.calls[0].plan.strategy, "dockerfile");
+});
