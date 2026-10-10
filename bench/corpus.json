@@ -1,0 +1,335 @@
+{
+  "target": {
+    "repo": "Vaibhav91one/juice-shop",
+    "ref": "1867b926c5f50e4e692dc9c8f61821413cebe0cd",
+    "tag": "v17.3.0",
+    "note": "The already-pinned BountyDesk demo target. No second app was added: see docs/benchmark.md for why XBOW validation-benchmarks apps were left out of this starter set."
+  },
+  "cases": [
+    {
+      "id": "p-sqli-login",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Login bypass via SQL injection in the login form",
+      "body": "POST /rest/user/login with email set to ' or 1=1-- and any password authenticates as the first row in the Users table (the store admin) without knowing a password. The email field is concatenated into the SQL query instead of being parameterized. Steps: curl -X POST http://localhost:3000/rest/user/login -H 'Content-Type: application/json' -d '{\"email\":\"' or 1=1--\",\"password\":\"x\"}' and the response carries a valid auth token for the admin account.",
+      "rationale": "Classic unparameterized login query, present in every stock Juice Shop build; this is the demo app's best-known bug.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account"
+    },
+    {
+      "id": "p-idor-basket",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "IDOR lets any logged-in user read another user's shopping basket",
+      "body": "After logging in and adding an item to my basket, the client stores a numeric bid in session storage and calls GET /rest/basket/:bid to render it. The server does not check that the basket belongs to the caller's user id: incrementing or decrementing the id in the URL (e.g. GET /rest/basket/2 while my own basket is 1) returns another user's basket contents, including whatever products they added.",
+      "rationale": "Missing object-level authorization on the basket endpoint; the bid is sequential and the server trusts it.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket"
+    },
+    {
+      "id": "p-ftp-listing",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Directory listing on /ftp exposes internal files including an acquisitions memo",
+      "body": "The About Us page links to /ftp/legal.md. Changing the URL to just /ftp (no trailing filename) returns a directory listing instead of a 403 or 404, exposing every file under that path. One of the listed files, /ftp/acquisitions.md, is an internal-sounding document that was never meant to be reachable from a link on the public site.",
+      "rationale": "Static file serving with directory listing enabled on a path that should only expose the one linked file.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document"
+    },
+    {
+      "id": "p-sqli-exfil",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "SQL injection in the product search endpoint allows reading arbitrary tables",
+      "body": "GET /rest/products/search?q=<payload> is vulnerable to SQL injection in the q parameter. Searching for qwert')) UNION SELECT sql,'2','3','4','5','6','7','8','9' FROM sqlite_master-- returns the CREATE TABLE statement for an internal table inside the JSON product list, which means any table in the database can be read through this endpoint by swapping the FROM clause and the selected columns (I confirmed this also works against the Users table, returning email and password hash columns).",
+      "rationale": "Unparameterized query building on a public search endpoint; a textbook UNION-based SQLi with full schema and data read access.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection"
+    },
+    {
+      "id": "p-default-admin-creds",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Store admin account uses a guessable default password",
+      "body": "The administrator account admin@juice-sh.op logs in successfully with the password admin123 via POST /rest/user/login. This credential pair was never rotated and is easy to find by searching for the product's default admin account online.",
+      "rationale": "Hardcoded/weak default admin credential, independent of the SQLi login bypass (no injection needed).",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_credentials_without_previously_changing_them_or_applying_sql_injection"
+    },
+    {
+      "id": "p-forgot-password-weak-question",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Account takeover through a guessable security question on password reset",
+      "body": "POST /rest/user/reset-password lets anyone reset a victim's password once they answer their chosen security question. For the account jim@juice-sh.op the question is \"Your eldest sibling's middle name?\". The user's product reviews and a saved delivery address on the account strongly hint at a public fictional identity, and the answer derived from that public information (Samuel) is accepted, after which an attacker sets an arbitrary new password and logs in as that user.",
+      "rationale": "Security questions with answers derivable from public profile data or guesswork, with no rate limiting on attempts, is a real account-takeover path.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_reset_jims_password_via_the_forgot_password_mechanism"
+    },
+    {
+      "id": "p-stacktrace-disclosure",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Unhandled server errors leak a stack trace and internal query text",
+      "body": "Requesting a nonexistent REST route, e.g. GET /rest/qwertz, returns a 500 response whose body includes a Node.js stack trace. Sending a single quote (') as the email field to POST /rest/user/login triggers a different error path that reflects part of the underlying SQL query text in the JSON error body returned to the client.",
+      "rationale": "A global error handler that forwards raw stack traces and query fragments to the client; low severity on its own but a real information-disclosure bug.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_provoke_an_error_that_is_neither_very_gracefully_nor_consistently_handled"
+    },
+    {
+      "id": "p-review-author-spoof",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Product review edit endpoint does not check the author field against the caller",
+      "body": "When editing a product review the client sends a PUT request to /rest/products/reviews with the review id, the new text, and an author identifier. The server trusts the author value from the request body instead of deriving it from the caller's session: changing it to another user's email (for example admin@juice-sh.op) edits that user's review and makes it look like they wrote the new text, from a completely different, unprivileged account.",
+      "rationale": "Server trusts a client-supplied identity field on a write endpoint instead of the authenticated session, a broken-access-control bug distinct from the basket IDOR.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_post_a_product_review_as_another_user_or_edit_any_users_existing_review"
+    },
+    {
+      "id": "p-dom-xss-search",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "DOM XSS in the product search field via an unsanitized iframe payload",
+      "body": "Typing <iframe src=\"javascript:alert(`xss`)\"> into the storefront's search box and pressing Enter runs the payload: the search term is rendered into the DOM without sanitizing an iframe src using the javascript: scheme, so arbitrary script executes in the victim's session merely from a crafted search-page link.",
+      "rationale": "Real client-side DOM XSS, included deliberately: it renders only in a browser DOM, not in a plain HTTP response body, so it is a known-hard case for an HTTP-only probe (see dom-xss-http-probe-blind.md) and exercises whether the agent's browser probe catches it.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_perform_a_dom_xss_attack"
+    },
+    {
+      "id": "p-csrf-profile-name",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "No CSRF protection on the profile name update endpoint",
+      "body": "POST /profile, which changes the logged-in user's display name, accepts the request based on the session cookie alone with no CSRF token and no SameSite=Strict cookie attribute. A plain auto-submitting HTML form hosted on a different origin (username=CSRF as the only field) changes the victim's name the moment they open the page while already logged in, with no further confirmation step.",
+      "rationale": "Missing CSRF defenses on a state-changing, cookie-authenticated endpoint; a standard CSRF finding.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_change_the_name_of_a_user_by_performing_cross-site_request_forgery_from_another_origin"
+    },
+
+    {
+      "id": "n-fixed-1",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "fixed",
+      "expected": "NOT_REPRODUCED",
+      "title": "Admin dashboard exposes a debug endpoint that dumps the full environment, including secrets",
+      "body": "GET /rest/admin/environment-dump returns the process's environment variables as JSON, including DATABASE_URL and the session signing secret, to any authenticated user regardless of role. This should require the admin role at minimum, and arguably should not exist at all outside of local development.",
+      "rationale": "No such endpoint exists in this build; it is an invented route that returns 404. Written to look exactly like a real finding.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching route in the pinned build)"
+    },
+    {
+      "id": "n-fixed-2",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "fixed",
+      "expected": "NOT_REPRODUCED",
+      "title": "Password reset email leaks the reset token in the response body",
+      "body": "Calling POST /rest/user/reset-password/request-token with a valid email returns the generated reset token directly in the JSON response instead of only mailing it, so anyone who knows a victim's email can read the token from the HTTP response and reset their password without touching their inbox.",
+      "rationale": "This build's reset flow does not return a token in the response at all (the security-question flow is the only reset path proven in p-forgot-password-weak-question); the endpoint and the token-in-response behavior described do not exist.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching behavior in the pinned build)"
+    },
+    {
+      "id": "n-fixed-3",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "fixed",
+      "expected": "NOT_REPRODUCED",
+      "title": "Checkout accepts a negative quantity and credits the attacker's account",
+      "body": "Submitting an order via POST /rest/basket/:id/checkout with a basket line item quantity of -5 is accepted, and the resulting total is negative, which the payment step then treats as a refund onto the attacker's stored payment method rather than a charge.",
+      "rationale": "The basket and checkout endpoints in this build reject a negative quantity with a validation error; the described refund behavior does not occur.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching behavior in the pinned build)"
+    },
+    {
+      "id": "n-fixed-4",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "fixed",
+      "expected": "NOT_REPRODUCED",
+      "title": "Deluxe membership can be granted for free by replaying an old coupon",
+      "body": "The coupon code WMNSDY2019 (from the 2019 Women's Day promotion) is still accepted at checkout in the deluxe membership upgrade flow and applies a 100% discount, even though the promotion ended years ago.",
+      "rationale": "That specific coupon code is expired and rejected by the pinned build's coupon validation; there is a real expired-coupon class of bug in Juice Shop, but not through this particular code, so a report naming it does not reproduce.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_successfully_redeem_an_expired_campaign_coupon_code (different code family; the one named here is not live)"
+    },
+
+    {
+      "id": "n-wrong-1",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "wrong-payload",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in the login form via the password field",
+      "body": "Sending ' or 1=1-- as the password field (with a normal email address, e.g. test@test.com) on POST /rest/user/login logs in as the first user in the table without knowing their real password. The injection point is the password parameter.",
+      "rationale": "The real injectable field on this endpoint is email, not password (see p-sqli-login); the password field is not concatenated into the query, so this exact payload-in-this-field does not authenticate.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account (injection is in the email field)"
+    },
+    {
+      "id": "n-wrong-2",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "wrong-payload",
+      "expected": "NOT_REPRODUCED",
+      "title": "Directory listing exposed at /backup",
+      "body": "Browsing to /backup on the running instance returns a directory listing of server-side backup files, the same class of bug as other exposed static paths in this app.",
+      "rationale": "The real exposed path in this build is /ftp (see p-ftp-listing); /backup returns a plain 404, there is no listing there.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document (real path is /ftp)"
+    },
+    {
+      "id": "n-wrong-3",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "wrong-payload",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in /rest/products/search via the limit parameter",
+      "body": "GET /rest/products/search?q=apple&limit=10') UNION SELECT sql,'2','3','4','5','6','7','8','9' FROM sqlite_master-- returns table schema information from the sqlite_master table, demonstrating that the limit parameter is concatenated unsafely into the SQL query.",
+      "rationale": "The real injectable parameter on that endpoint is q, not limit (see p-sqli-exfil); limit is not part of the vulnerable query construction and this payload does not return schema data.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection (injection is in q)"
+    },
+    {
+      "id": "n-wrong-4",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "wrong-payload",
+      "expected": "NOT_REPRODUCED",
+      "title": "IDOR on the order history endpoint exposes other users' orders",
+      "body": "GET /rest/track-order/:id with an order id that isn't mine still returns full order details for whatever user placed it, with no ownership check against the requesting session.",
+      "rationale": "That endpoint resolves orders by their random order token and does not leak other orders by incrementing an id (the real IDOR in this app is on the basket endpoint, see p-idor-basket); track-order for an id I don't own returns a not-found result, not another user's order.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket (real IDOR is on /rest/basket/:id)"
+    },
+
+    {
+      "id": "n-info-1",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "informative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Pasting a script tag into my own basket's product note reflects back to me, unescaped",
+      "body": "If I add a note to a product in my own basket containing <script>alert(1)</script>, and then view that note later, the script runs in my own browser session. I can trigger an alert box this way.",
+      "rationale": "Self-XSS against the reporter's own account and own content is not a cross-user security boundary violation; nothing is gained that the user didn't already have access to.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (expected behavior, not a vulnerability: self-inflicted, no other user affected)"
+    },
+    {
+      "id": "n-info-2",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "informative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The admin panel link is visible in the page's compiled JavaScript bundle before logging in",
+      "body": "Searching the client's main.js bundle for the string \"admin\" reveals a route definition mapping to path: \"administration\", meaning the admin panel's existence and URL can be discovered by anyone without logging in, before ever reaching the page itself.",
+      "rationale": "A client-side route being visible in a bundled SPA's JavaScript is expected behavior for a single-page app: the route itself still enforces its own access control (a 403 for a non-admin visitor) and nothing confidential is disclosed by the route string being present.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_the_administration_section_of_the_store (route discovery step, not the access-control bug itself)"
+    },
+    {
+      "id": "n-info-3",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "informative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The application returns a 404 page listing every registered REST route when a route is misspelled",
+      "body": "Requesting a route that doesn't exist, like /rest/produkts, returns a 404 JSON body that lists the application's registered route prefixes as part of its error payload, which an attacker could use to map the API surface faster than brute-forcing it.",
+      "rationale": "The 404 handler in this build returns a plain not-found message with no route enumeration; this is an exaggerated, non-reproducing description of ordinary 404 behavior, not an information-disclosure bug.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no route-listing behavior observed)"
+    },
+    {
+      "id": "n-info-4",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "informative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /ftp directory only lists files that are already linked from public pages",
+      "body": "Visiting /ftp shows a directory index, but every file in it (legal.md, the terms of use) is already linked from the About Us page, so nothing is exposed that a regular visitor couldn't already reach by clicking around the site.",
+      "rationale": "This description is a watered-down, inaccurate account of the real /ftp bug (see p-ftp-listing): the listing in fact exposes acquisitions.md, a file with no public link anywhere on the site, so the report's own premise (\"only already-linked files\") does not hold and there is nothing extra for a reproduction run to confirm beyond expected behavior.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document (the real listing exposes an unlinked file)"
+    },
+
+    {
+      "id": "n-dup-1",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "duplicate",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as admin works with a crafted email containing a SQL comment",
+      "body": "On the login form, entering admin@juice-sh.op'-- as the email and literally any password authenticates as the store administrator, because the trailing SQL comment truncates the password check from the query.",
+      "rationale": "Same root cause and same endpoint as p-sqli-login (unparameterized email field on /rest/user/login), filed with a different payload string. In this benchmark duplicates score the same way as the already-triaged original and are not independently REPRODUCED.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account"
+    },
+    {
+      "id": "n-dup-2",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "duplicate",
+      "expected": "NOT_REPRODUCED",
+      "title": "Changing the basket id in the URL bar after checkout shows someone else's past order basket",
+      "body": "After completing a purchase, if I manually edit the numeric id in the basket URL to a nearby value, the page loads and shows a different basket than mine, with different products in it, belonging to another account.",
+      "rationale": "Same IDOR on /rest/basket/:id as p-idor-basket, described from the checkout-history angle rather than the pre-purchase angle; not a distinct vulnerability.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket"
+    },
+    {
+      "id": "n-dup-3",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "duplicate",
+      "expected": "NOT_REPRODUCED",
+      "title": "The product search box executes injected SQL through the UNION keyword",
+      "body": "Typing qwert')) UNION SELECT sql,'2','3','4','5','6','7','8','9' FROM sqlite_master-- into the storefront's visible search box and submitting it returns internal database schema text inside the rendered search results.",
+      "rationale": "Same bug and same endpoint as p-sqli-exfil (GET /rest/products/search?q=), described from the UI search box rather than a raw request; the exact payload is identical to the one in the companion guide for that already-known issue.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection"
+    },
+    {
+      "id": "n-dup-4",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "duplicate",
+      "expected": "NOT_REPRODUCED",
+      "title": "admin123 works as the password for the built-in administrator account",
+      "body": "I tried the email admin@juice-sh.op with the password admin123 on the normal login form and it logged me straight into the administrator account, no injection needed.",
+      "rationale": "Identical finding to p-default-admin-creds, same credential pair and same endpoint, worded almost exactly like the already-filed original.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_credentials_without_previously_changing_them_or_applying_sql_injection"
+    },
+
+    {
+      "id": "n-unbound-1",
+      "split": "dev",
+      "kind": "negative",
+      "negativeType": "unbound",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Our internal billing portal leaks customer invoices to any logged-in employee",
+      "body": "At billing.acme-internal.example/invoices, any employee account (not just finance) can list and open every customer's invoice PDF by changing the invoiceId query parameter, with no check that the invoice belongs to a customer the employee's account is allowed to see.",
+      "rationale": "Names a host that is not Vaibhav91one/juice-shop and has no connected repository or target profile; there is nothing to bind reproduction to, so the report cannot clear the authorization gate regardless of whether the described bug is real.",
+      "source": "n/a — fabricated target outside the authorized scope, by design"
+    },
+    {
+      "id": "n-unbound-2",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "unbound",
+      "expected": "ANALYSIS_ONLY",
+      "title": "SQL injection in the login endpoint of our staging deployment at staging.acme-shop.example",
+      "body": "POST https://staging.acme-shop.example/rest/user/login with email ' or 1=1-- and any password authenticates as the admin account, the same bug class as other Juice Shop forks I've tested.",
+      "rationale": "References a live host with no TargetProfile and no re-verified ownership proof bound to it in this system, even though the bug it describes mirrors p-sqli-login; an unauthorized host cannot produce REPRODUCED or NOT_REPRODUCED however plausible the report reads.",
+      "source": "n/a — fabricated live host with no ownership proof, by design"
+    },
+    {
+      "id": "n-unbound-3",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "unbound",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Exposed .git directory on our marketing site leaks source and commit history",
+      "body": "GET https://www.acme-marketing-site.example/.git/config returns the repository's git config file, and the rest of the .git directory is similarly browsable, exposing the full commit history and any secrets that were ever committed.",
+      "rationale": "This report never names a repository or installation this system has a GitHub App grant for; it reads like a real, common bug class, but with no connected repository and no TargetProfile there is no authorized target to reproduce against.",
+      "source": "n/a — fabricated host outside any connected repository, by design"
+    },
+    {
+      "id": "n-unbound-4",
+      "split": "test",
+      "kind": "negative",
+      "negativeType": "unbound",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Our password reset API at api.acme-corp.example rate-limits by IP only, so a botnet can brute force it",
+      "body": "POST https://api.acme-corp.example/v2/auth/reset has no per-account rate limit, only a per-source-IP limit, so distributing the brute-force attempts for one target account's security question across many IPs bypasses the throttle entirely.",
+      "rationale": "Describes a plausible real-world bug against a host this installation has no connected repository or target binding for; a report with no bound target stays ANALYSIS_ONLY no matter how the investigation reads the described behavior.",
+      "source": "n/a — fabricated host with no bound target, by design"
+    }
+  ]
+}

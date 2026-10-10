@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# benchmark run manifests and results (local run output, never committed)
+bench/.runs/
+
 # HyperFrames demo local outputs
 videos/bountydesk-demo/node_modules/
 videos/bountydesk-demo/snapshots/
