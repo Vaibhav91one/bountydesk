@@ -62,7 +62,7 @@ export function ReviewerUploadForm() {
           onChange={(event) => setMaterial(event.target.value as Material)}
           className="h-9 rounded-md bg-input/50 px-3 text-sm"
         >
-          <option value="archive">Source tarball (.tar or .tar.gz with a Dockerfile at its root)</option>
+          <option value="archive">Source tarball (.tar or .tar.gz, a Dockerfile is optional)</option>
           <option value="dockerfile">A Dockerfile</option>
           <option value="image">A prebuilt image and its digest</option>
         </select>

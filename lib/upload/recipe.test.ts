@@ -85,3 +85,22 @@ test("python needs the reviewer's start command; other ecosystems get no recipe"
   assert.equal(await thinRecipePlan(tarGz({ "go.mod": "module x\n" }), reviewed()), null);
   assert.equal(await thinRecipePlan(tarGz({ "app.js": "1" }), reviewed()), null);
 });
+
+test("macOS AppleDouble entries beside the wrapping directory do not hide it", () => {
+  const shape = archiveShape(
+    tarGz({
+      "._hello-express": "x",
+      "hello-express/._package.json": "x",
+      "hello-express/package.json": "{}",
+      "hello-express/server.js": "1",
+    }),
+  );
+  assert.equal(shape.contextDir, "hello-express");
+});
+
+test("a wrapped Dockerfile-less archive builds from the wrapping directory, an unwrapped one from the root", async () => {
+  const wrapped = await thinRecipePlan(tarGz({ "hello-express/package.json": "{}", "hello-express/server.js": "1" }), reviewed());
+  assert.equal(wrapped?.strategy === "agent-authored" && wrapped.buildContext, "hello-express");
+  const flat = await thinRecipePlan(tarGz({ "package.json": "{}", "server.js": "1" }), reviewed());
+  assert.equal(flat?.strategy === "agent-authored" && flat.buildContext, ".");
+});
