@@ -73,6 +73,9 @@ export function score(results: readonly CaseResult[]): Scorecard {
     const collapsed = collapse(actual);
     matrix[expected][collapsed] += 1;
 
+    // Declining to call it is only an abstention when ground truth wanted a definitive call.
+    // An unbound case's own ground truth IS ANALYSIS_ONLY, so landing there is a correct call,
+    // not a decline; the expected !== "ANALYSIS_ONLY" guard is what keeps those out of this count.
     const isAbstention = collapsed === "ANALYSIS_ONLY" && expected !== "ANALYSIS_ONLY";
 
     if (expected !== "REPRODUCED") {

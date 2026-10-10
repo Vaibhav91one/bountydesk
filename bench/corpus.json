@@ -236,10 +236,10 @@
       "kind": "negative",
       "negativeType": "informative",
       "expected": "NOT_REPRODUCED",
-      "title": "The /ftp directory only lists files that are already linked from public pages",
-      "body": "Visiting /ftp shows a directory index, but every file in it (legal.md, the terms of use) is already linked from the About Us page, so nothing is exposed that a regular visitor couldn't already reach by clicking around the site.",
-      "rationale": "This description is a watered-down, inaccurate account of the real /ftp bug (see p-ftp-listing): the listing in fact exposes acquisitions.md, a file with no public link anywhere on the site, so the report's own premise (\"only already-linked files\") does not hold and there is nothing extra for a reproduction run to confirm beyond expected behavior.",
-      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document (the real listing exposes an unlinked file)"
+      "title": "The CAPTCHA endpoint hands out the image and its id to anyone, with no login required",
+      "body": "GET /rest/captcha/ returns a CAPTCHA image and a numeric captchaId to any anonymous caller, no session or authentication needed. Anyone who can reach the contact form can fetch an unlimited number of these without ever proving who they are.",
+      "rationale": "This is how a CAPTCHA endpoint is supposed to work: it has to be reachable by a logged-out visitor filling in a public form, and handing out the challenge image and its id is the whole point, not a leak. No security boundary is crossed.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_submit_10_or_more_customer_feedbacks_within_10_seconds (names the /rest/captcha/ endpoint as part of the normal, intended flow)"
     },
 
     {
