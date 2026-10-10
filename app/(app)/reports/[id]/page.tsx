@@ -19,6 +19,9 @@ import { CaseView } from "./case-view";
 import { resolveReportId } from "./resolve-id";
 import { TriageGate } from "./triage-gate";
 import { UploadGate } from "./upload-gate";
+import { RetestPanel } from "./retest-panel";
+import { canOfferRetest, listRetests, readRetestOf } from "@/lib/retests/retest";
+import { isReviewerWriter } from "@/lib/auth/reviewers";
 
 export const metadata = { title: "Case file · BountyDesk" };
 
@@ -114,7 +117,7 @@ function Reporter({
  * re-ran readCase and a five second TrueForge call for markup that mostly had not changed.
  */
 export default async function CaseFilePage({ params }: { params: Promise<{ id: string }> }) {
-  await requireReviewer();
+  const session = await requireReviewer();
   const { id } = await params;
 
   // A full uuid resolves directly; the short id shown on this page (`#725dcfed`) resolves when it
@@ -132,7 +135,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // The target suggestion is a third read that stays off this path: it walks the github.com
   // links in the body and asks GitHub about each, seconds of network on a cold cache, so it is
   // loaded client-side after paint through /api/reports/[id]/targets (TargetControl).
-  const [targetProfiles, gate, upload, appeals] = await Promise.all([
+  const [targetProfiles, gate, upload, appeals, retests, retestOf, offerRetest] = await Promise.all([
     file.target ? Promise.resolve([]) : listTargetProfiles(),
     file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
     // Both channels can carry target material: an upload always, an email only when an attachment
@@ -141,6 +144,10 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     // never lands on an email report that deserves the out-of-scope reply.
     file.channel === "upload" || file.channel === "email" ? readUpload(file.id) : Promise.resolve(null),
     listAppeals(file.id),
+    listRetests(file.id),
+    readRetestOf(file.id),
+    // The control is for writers only; startRetest re-checks the report and the writer on submit.
+    isReviewerWriter(session.email).then((writer) => (writer ? canOfferRetest(file.id) : false)),
   ]);
 
   // Where the report came from, which is not always the repository on the row. A GitHub report
@@ -207,6 +214,20 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                 </>
               ) : null}
 
+              {retestOf ? (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>Retest of</span>
+                  <Link
+                    href={`/reports/${retestOf.originalReportId}`}
+                    className="text-foreground underline-offset-4 hover:text-brand-soft hover:underline"
+                  >
+                    #{retestOf.originalReportId.slice(0, 8)} {retestOf.originalTitle}
+                  </Link>
+                  <span>at {retestOf.commitSha.slice(0, 12)}</span>
+                </>
+              ) : null}
+
               {file.repliesTo ? (
                 <>
                   <span aria-hidden="true">·</span>
@@ -255,6 +276,21 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             contact: item.contact,
             createdAt: item.createdAt.toISOString(),
             resolutionNote: item.resolutionNote,
+          }))}
+        />
+      ) : null}
+
+      {offerRetest || retests.length > 0 ? (
+        <RetestPanel
+          reportId={file.id}
+          canStart={offerRetest}
+          retests={retests.map((item) => ({
+            id: item.id,
+            childReportId: item.childReportId,
+            commitSha: item.commitSha,
+            actor: item.actor,
+            createdAt: item.createdAt.toISOString(),
+            result: item.result,
           }))}
         />
       ) : null}

@@ -52,3 +52,9 @@ test("a short SHA, a branch, a tag, HEAD and a 64-char hash are refused", () => 
     assert.equal(parseGitSource("https://gitlab.com/g/p", commit).ok, false, commit);
   }
 });
+
+test("a github.com repository URL is accepted, since the retest path builds from it", () => {
+  const result = parseGitSource("https://github.com/example/app", "a".repeat(40));
+  assert.ok(result.ok);
+  if (result.ok) assert.equal(result.source.cloneUrl, "https://github.com/example/app");
+});

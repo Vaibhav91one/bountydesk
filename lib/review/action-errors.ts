@@ -7,7 +7,8 @@ export type RecheckAction =
   | "cancel-report"
   | "bind"
   | "notify"
-  | "redeliver";
+  | "redeliver"
+  | "retest";
 
 const FAILURE: Record<RecheckAction, string> = {
   retry: "Could not retry the re-check.",
@@ -16,6 +17,7 @@ const FAILURE: Record<RecheckAction, string> = {
   bind: "Could not bind that target.",
   notify: "Could not ask for the owner to be notified.",
   redeliver: "Could not retry the delivery.",
+  retest: "Could not start the retest.",
 };
 
 export function genericFailure(action: RecheckAction): string {
