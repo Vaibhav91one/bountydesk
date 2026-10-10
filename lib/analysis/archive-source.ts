@@ -128,10 +128,14 @@ export function readArchive(archive: Buffer, maxEntryBytes = MAX_BLOB_BYTES): Ar
 }
 
 /** The single top-level directory every file sits under ("project/" from `tar czf x project`), or
- *  "" when there is none. Stripped for matching so root manifests are found either way. */
+ *  "" when there is none. Stripped for matching so root manifests are found either way. macOS tar
+ *  adds AppleDouble entries (`._project`, `__MACOSX/`) beside the project directory; they are not
+ *  project files, and counting them hides the wrapping directory, so the build context lands one
+ *  level too high and misses package.json. */
 export function commonRoot(paths: string[]): string {
-  const first = paths[0]?.split("/")[0];
-  if (!first || paths.some((p) => !p.startsWith(`${first}/`))) return "";
+  const real = paths.filter((p) => !/^(\._[^/]*|__MACOSX)(\/|$)/.test(p));
+  const first = real[0]?.split("/")[0];
+  if (!first || real.some((p) => !p.startsWith(`${first}/`))) return "";
   return `${first}/`;
 }
 

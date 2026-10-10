@@ -114,7 +114,7 @@ export const INTEGRATIONS: Integration[] = [
     sections: [
       {
         title: "Overview",
-        body: "Anyone can submit a report on the public page at /submit, with an email contact and, optionally, target material: a source tarball with a Dockerfile at its root, a single Dockerfile, or a prebuilt image named with its sha256 digest. The report waits at the gate until a reviewer decides, so nothing is built, started or analysed before then.",
+        body: "Anyone can submit a report on the public page at /submit, with an email contact and, optionally, target material: a source tarball (a Dockerfile is optional), a single Dockerfile, or a prebuilt image named with its sha256 digest. The report waits at the gate until a reviewer decides, so nothing is built, started or analysed before then.",
       },
       {
         title: "Delivery",

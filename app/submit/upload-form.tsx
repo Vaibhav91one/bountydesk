@@ -130,7 +130,7 @@ export function UploadForm() {
           className="h-9 rounded-md bg-input/50 px-3 text-sm"
         >
           <option value="none">None</option>
-          <option value="archive">Source tarball (.tar or .tar.gz with a Dockerfile at its root)</option>
+          <option value="archive">Source tarball (.tar or .tar.gz, a Dockerfile is optional)</option>
           <option value="dockerfile">A Dockerfile</option>
           <option value="image">A prebuilt image and its digest</option>
           <option value="git">A public git URL and commit (GitLab, Bitbucket, self-hosted)</option>
