@@ -9,7 +9,7 @@
  */
 import { View, Text, ScrollView, StyleSheet, Dimensions } from "react-native"
 
-import { useApiQuery } from "@/lib/use-query"
+import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { HomeSummary } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
@@ -69,12 +69,19 @@ export default function HomeScreen() {
   const { colors } = useTheme()
   const { data: summary, error } = useApiQuery<HomeSummary>("/home")
 
-  if (error) {
+  // 401/403 are handled by useApiQuery's shared effect (sign out / not-authorized).
+  // Only surface a retryable inline message for other errors.
+  const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
+  if (error && !isAuthError) {
     return (
       <View style={styles.centered}>
         <Text style={[styles.error, { color: colors.red }]}>{error.message}</Text>
       </View>
     )
+  }
+
+  if (error) {
+    return null
   }
 
   return (

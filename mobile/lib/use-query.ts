@@ -6,7 +6,9 @@
  * that is backed by the persisted QueryClient.
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useEffect } from "react"
 import { api, ApiError } from "./api"
+import { useHandleApiError } from "./use-api-error"
 
 export { ApiError }
 
@@ -14,10 +16,24 @@ export { ApiError }
 export const queryKey = (path: string) => [path]
 
 export function useApiQuery<T>(path: string) {
-  return useQuery<T>({
+  const handleApiError = useHandleApiError()
+  const query = useQuery<T>({
     queryKey: queryKey(path),
     queryFn: () => api<T>(path),
   })
+
+  // Route 401/403 through the shared handler so every screen's query gets the
+  // same auth/allowlist response. This runs in an effect (not during render)
+  // so we never call signOut()/router.replace() while React is reconciling the
+  // error tree. Non-auth errors stay in `query.error` for the caller to render
+  // inline (e.g. a "try again" message).
+  useEffect(() => {
+    if (query.error) {
+      handleApiError(query.error)
+    }
+  }, [query.error, handleApiError])
+
+  return query
 }
 
 export function useApiMutation<TData = unknown, TVariables = unknown>(path: string) {
