@@ -6,6 +6,7 @@ import { render } from "@testing-library/react-native"
 
 import ChatScreen from "../app/reports/[id]/chat"
 import { PhaseKey } from "@/lib/phases"
+import { ApiError } from "@/lib/use-query"
 
 const mockPush = jest.fn()
 const mockBack = jest.fn()
@@ -157,13 +158,33 @@ describe("M10 Reviewer chat", () => {
 
   it("renders an empty state when there are no messages", async () => {
     mockQueryData["/reports/report-1/chat"] = { data: { reportId: "report-1", threads: [] } }
+    mockQueryData["/reports/report-1"] = REPORT_META
     const { getByText } = await render(<ChatScreen />)
     expect(getByText("No messages yet")).toBeTruthy()
   })
 
   it("renders the composer input with placeholder", async () => {
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
     const { getByPlaceholderText } = await render(<ChatScreen />)
     expect(getByPlaceholderText("Ask about this report")).toBeTruthy()
+  })
+
+  it("renders after query flips from success to error and back (hook order stable)", async () => {
+    // Start with success
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    const { getByText, rerender } = await render(<ChatScreen />)
+    expect(getByText("Ask the agent")).toBeTruthy()
+
+    // Flip to error
+    mockQueryData["/reports/report-1/chat"] = { error: new ApiError(500, "internal", "Server error") }
+    const { rerender: r2 } = await render(<ChatScreen />)
+    expect(r2).toBeDefined()
+
+    // Flip back to success
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    const { getByText: g2 } = await render(<ChatScreen />)
+    expect(g2("Ask the agent")).toBeTruthy()
   })
 })

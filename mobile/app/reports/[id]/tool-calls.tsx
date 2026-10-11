@@ -18,21 +18,50 @@ type ToolCallStatus = "Pass" | "Allowed" | "Denied" | "Gated"
 
 /**
  * The mockup shows Pass, Allowed, Denied and Gated pills. The mobile API's
- * toolCalls array does not carry a per-call result field, so the status is
- * derived from the tool name cross-referenced with agent.scope_tool_denied
- * events in the event stream. scope_check always passes, publish_verdict is
- * always gated, and probes are Allowed unless a matching denial event exists.
+ * toolCalls array carries both call events and agent.scope_tool_denied events
+ * (the mobile CaseEvent type surfaces toolName but not the underlying data
+ * field). So:
+ *   1. Filter toolCalls to actual calls by excluding scope_tool_denied type.
+ *   2. For each call, pair it with the next scope_tool_denied event for the
+ *      same tool in sequence order — each row's status comes from its own
+ *      result, never from a different call with the same name.
+ * scope_check always passes, publish_verdict is always gated, and probes are
+ * Allowed unless a matching denial event follows.
  *
- * OPEN QUESTION: the mobile CaseEvent type lacks a `data` field, so the denial
- * reason is not accessible. The presence of a scope_tool_denied event with the
- * same toolName is the only signal available.
+ * OPEN QUESTION: the mobile CaseEvent type lacks a `data` field and the mobile
+ * view drops eventKey (the call id), so the denial reason is not accessible and
+ * matching is by toolName + sequence proximity only.
  */
-function deriveStatus(toolName: string | null, events: CaseEvent[]): ToolCallStatus {
-  if (toolName === "publish_verdict") return "Gated"
-  if (toolName === "scope_check") return "Pass"
-  if (toolName && events.some((e) => e.type === "agent.scope_tool_denied" && e.toolName === toolName)) {
-    return "Denied"
-  }
+function isToolCall(call: CaseEvent): boolean {
+  return !call.type.startsWith("agent.scope_tool_denied")
+}
+
+/** Find a scope_tool_denied event for the same toolName that comes after call.seq
+ *  but before the next tool_call event for the same toolName. This pairs each
+ *  actual call with its own scope-guard denial, not a different call's. */
+function findDenialAfter(call: CaseEvent, events: CaseEvent[]): boolean {
+  const allEvents = events
+  const callSeq = call.seq
+  const tool = call.toolName
+  // Find the next tool_call event (same tool) after this call.
+  const nextCallSeq = allEvents
+    .filter((e) => e.type.startsWith("agent.tool_call:") && e.toolName === tool && e.seq > callSeq)
+    .sort((a, b) => a.seq - b.seq)[0]?.seq
+
+  // A matching denial sits between call.seq and the next call of the same tool.
+  return allEvents.some(
+    (e) =>
+      e.type === "agent.scope_tool_denied" &&
+      e.toolName === tool &&
+      e.seq > callSeq &&
+      (nextCallSeq === undefined || e.seq < nextCallSeq),
+  )
+}
+
+function deriveStatus(call: CaseEvent, events: CaseEvent[]): ToolCallStatus {
+  if (call.toolName === "publish_verdict") return "Gated"
+  if (call.toolName === "scope_check") return "Pass"
+  if (findDenialAfter(call, events)) return "Denied"
   return "Allowed"
 }
 
@@ -43,9 +72,10 @@ function statusPhaseKey(status: ToolCallStatus): PhaseKey {
 }
 
 function splitSections(toolCalls: CaseEvent[]): { investigation: CaseEvent[]; humanGate: CaseEvent[] } {
+  const actualCalls = toolCalls.filter(isToolCall)
   const investigation: CaseEvent[] = []
   const humanGate: CaseEvent[] = []
-  for (const call of toolCalls) {
+  for (const call of actualCalls) {
     if (call.toolName === "publish_verdict") {
       humanGate.push(call)
     } else {
@@ -133,7 +163,7 @@ function Section({ title, calls, events, colors, phase, mono }: SectionProps) {
       <Text style={[styles.sectionHeader, { color: colors.foreground }]}>{title}</Text>
       <View style={[styles.card, { backgroundColor: colors.card }]}>
         {calls.map((call) => {
-          const status = deriveStatus(call.toolName, events)
+          const status = deriveStatus(call, events)
           const statusPhase = statusPhaseKey(status)
           return (
             <ToolCallRow

@@ -115,6 +115,42 @@ export default function ChatScreen() {
     `/reports/${id}/chat`,
   )
 
+  // Polling: after a POST, refetch every 2s until the agent replies or 90s pass.
+  // Hooks above early returns so hook order is stable when data is undefined.
+  const [isPolling, setIsPolling] = useState(false)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollStartRef = useRef<number>(0)
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+  }, [])
+
+  const startPolling = useCallback((lastSentRequestId: string) => {
+    setIsPolling(true)
+    pollStartRef.current = Date.now()
+    pollTimerRef.current = setInterval(async () => {
+      const elapsed = Date.now() - pollStartRef.current
+      if (elapsed > 90000) {
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+        setIsPolling(false)
+        return
+      }
+      const result = await refetch()
+      const currentThread = useActiveThread(result.data)
+      if (currentThread) {
+        const hasReply = currentThread.messages.some(
+          (m) => m.sender === "AGENT" && m.clientRequestId === lastSentRequestId,
+        )
+        if (hasReply) {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+          setIsPolling(false)
+        }
+      }
+    }, 2000)
+  }, [refetch])
+
   const thread = useActiveThread(status)
   const messages = thread?.messages ?? []
   const isAgentWorking = thread && (thread.status === "OPEN" || thread.status === "RUNNING")
@@ -133,43 +169,6 @@ export default function ChatScreen() {
   const reportTitle = report?.title ?? ""
   const reportId = status?.reportId ?? id ?? ""
   const meta = `${reportId} · ${reportTitle}`
-
-  // Polling: after a POST, refetch every 2s until the agent replies or 90s pass.
-  const [isPolling, setIsPolling] = useState(false)
-  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const pollStartRef = useRef<number>(0)
-
-  useEffect(() => {
-    return () => {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
-    }
-  }, [])
-
-  const startPolling = useCallback((lastSentRequestId: string) => {
-    setIsPolling(true)
-    pollStartRef.current = Date.now()
-    pollTimerRef.current = setInterval(async () => {
-      const elapsed = Date.now() - pollStartRef.current
-      if (elapsed > 90000) {
-        // 90s timeout
-        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
-        setIsPolling(false)
-        return
-      }
-      const result = await refetch()
-      const currentThread = useActiveThread(result.data)
-      if (currentThread) {
-        // Check if an agent message with matching clientRequestId has arrived
-        const hasReply = currentThread.messages.some(
-          (m) => m.sender === "AGENT" && m.clientRequestId === lastSentRequestId,
-        )
-        if (hasReply) {
-          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
-          setIsPolling(false)
-        }
-      }
-    }, 2000)
-  }, [refetch])
 
   const handleSend = () => {
     const body = input.trim()
