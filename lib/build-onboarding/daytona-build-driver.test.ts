@@ -1,29 +1,15 @@
 import assert from "node:assert/strict";
-import test, { mock } from "node:test";
+import test from "node:test";
 
 import { createHash } from "node:crypto";
 
 import type { Sandbox } from "@/lib/sandbox/daytona";
 
-// Mock createBuildSandbox so the driver reaches readToken without a real Daytona API key.
-const buildSandbox = mock.fn(async () => ({}) as Sandbox);
-mock.module("@/lib/sandbox/daytona", {
-  exports: {
-    createBuildSandbox: buildSandbox,
-    createSnapshot: mock.fn(),
-    deleteSandbox: mock.fn(),
-    deleteSnapshotByName: mock.fn(),
-    waitForSnapshotActive: mock.fn(),
-    execute: mock.fn(),
-    PURPOSE_LABEL: "test",
-    BUILD_PURPOSE: "test",
-  },
-});
-
 import { onboardingSnapshotImageRef, type BuildInput, type BuildSource } from "./build-driver";
 import {
   cloneHostOf,
   cloneUrlsMatch,
+  shouldMintToken,
   createDaytonaBuildDriver,
   dockerEnvLine,
   egressAllowList,
@@ -362,6 +348,8 @@ test("an explicit git source adds only its own clone host to the build egress al
 });
 
 test("cloneUrlsMatch matches github.com URLs regardless of trailing slash or .git suffix", () => {
+  // The parseGitSource cloneUrl has no .git suffix, so the driver must accept it as matching
+  // the connected repository's full name for token mintage on private repos.
   const matches = [
     "https://github.com/acme/app",
     "https://github.com/acme/app.git",
@@ -374,80 +362,21 @@ test("cloneUrlsMatch matches github.com URLs regardless of trailing slash or .gi
   // A sub-path that is not exactly the repo is not confused with a prefix match.
   assert.equal(cloneUrlsMatch("https://github.com/acme/app-extra", "acme/app"), false);
   assert.equal(cloneUrlsMatch("https://github.com/acme/app/tree/main", "acme/app"), false);
-  // A case-insensitive host never matches a different host.
+  // A different host never matches.
   assert.equal(cloneUrlsMatch("https://gitlab.com/acme/app", "acme/app"), false);
   assert.equal(cloneUrlsMatch("ssh://git@github.com/acme/app.git", "acme/app"), false);
   // Garbage does not throw.
   assert.equal(cloneUrlsMatch("not-a-url", "acme/app"), false);
 });
 
-async function withBuildEnv<T>(fn: () => Promise<T>): Promise<T> {
-  const env: Record<string, string | undefined> = {};
-  for (const key of ["BUILD_BASE_SNAPSHOT", "GHCR_NAMESPACE", "GHCR_PUSH_TOKEN"]) {
-    env[key] = process.env[key];
-  }
-  process.env.BUILD_BASE_SNAPSHOT = "snap-base";
-  process.env.GHCR_NAMESPACE = "ns";
-  process.env.GHCR_PUSH_TOKEN = "token";
-  const restore = () => {
-    for (const [k, v] of Object.entries(env)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  };
-  try {
-    return await fn();
-  } finally {
-    restore();
-  }
-}
-
-test("the build driver mints a token for a private clone whose URL has no .git suffix", async () => {
-  // parseGitSource produces a cloneUrl without a trailing .git, which must still match against the
-  // connected repo's full name so the Contents:read token path is taken for private repos.
-  const commit = "b".repeat(40);
-  let tokenCalls: string[] = [];
-  const driver = createDaytonaBuildDriver({
-    readToken: async (repoFullName) => {
-      tokenCalls.push(repoFullName);
-      return "ghs_testToken";
-    },
-    revokeToken: async () => {},
-  });
-  await withBuildEnv(async () => {
-    await driver
-      .build({
-        repoFullName: "acme/app",
-        sourceRef: "https://github.com/acme/app",
-        resolvedCommitSha: commit,
-        source: { kind: "git", cloneUrl: "https://github.com/acme/app", resolvedCommitSha: commit },
-        plan: PLAN,
-      })
-      .catch(() => {});
-  });
-  assert.deepEqual(tokenCalls, ["acme/app"], "readToken was called once with the repo full name");
-});
-
-test("the build driver does not mint a token for a clone on a different host", async () => {
-  const commit = "b".repeat(40);
-  let tokenCalls: string[] = [];
-  const driver = createDaytonaBuildDriver({
-    readToken: async (repoFullName) => {
-      tokenCalls.push(repoFullName);
-      return "ghs_testToken";
-    },
-    revokeToken: async () => {},
-  });
-  await withBuildEnv(async () => {
-    await driver
-      .build({
-        repoFullName: "acme/app",
-        sourceRef: "https://gitlab.com/acme/app",
-        resolvedCommitSha: commit,
-        source: { kind: "git", cloneUrl: "https://gitlab.com/acme/app", resolvedCommitSha: commit },
-        plan: PLAN,
-      })
-      .catch(() => {});
-  });
-  assert.equal(tokenCalls.length, 0, "no token is minted for a non-github.com host");
+test("shouldMintToken gates token mintage on a git source matching the connected repo on github.com", () => {
+  // A git source whose cloneUrl points at the connected repo on github.com (with or without .git)
+  // mints a token; a non-git source never does.
+  const gitNoGit = { kind: "git" as const, cloneUrl: "https://github.com/acme/app", resolvedCommitSha: "b".repeat(40) };
+  const gitWithGit = { kind: "git" as const, cloneUrl: "https://github.com/acme/app.git", resolvedCommitSha: "b".repeat(40) };
+  const archive = { kind: "archive" as const, archive: Buffer.from("x"), sourceArchiveDigest: `sha256:${"a".repeat(64)}` };
+  assert.equal(shouldMintToken(gitNoGit, "acme/app"), true, "no-.git clone URL still matches");
+  assert.equal(shouldMintToken(gitWithGit, "acme/app"), true, "canonical .git clone URL matches");
+  assert.equal(shouldMintToken(archive, "acme/app"), false, "non-git sources never mint a token");
+  assert.equal(shouldMintToken({ kind: "git" as const, cloneUrl: "https://gitlab.com/acme/app", resolvedCommitSha: "b".repeat(40) }, "acme/app"), false, "a different host never mints a token");
 });

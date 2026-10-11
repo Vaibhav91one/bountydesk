@@ -214,7 +214,7 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         // a host the connected repository does not live on. The token is minted right before the clone
         // and revoked right after it, before the repository's own build steps run in this sandbox.
         const cloneToken =
-          source.kind === "git" && cloneUrlsMatch(source.cloneUrl, input.repoFullName)
+          shouldMintToken(source, input.repoFullName)
             ? await readToken(input.repoFullName)
             : null;
         let buildMarker: string;
@@ -864,6 +864,16 @@ export function cloneUrlsMatch(cloneUrl: string, repoFullName: string): boolean 
   } catch {
     return false;
   }
+}
+
+/**
+ * Decides whether the build driver should mint a Contents:read token for a private clone.
+ * Only a git source whose clone URL resolves to the connected repository on github.com qualifies;
+ * an explicit git source pointing anywhere else is always cloned anonymously, so a token is never
+ * handed to a host the connected repository does not live on.
+ */
+export function shouldMintToken(source: BuildSource, repoFullName: string): boolean {
+  return source.kind === "git" && cloneUrlsMatch(source.cloneUrl, repoFullName);
 }
 
 export function egressAllowList(plan: BuildPlan, extraHost?: string): string[] {
