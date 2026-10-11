@@ -89,7 +89,7 @@ let ConnectionDetailScreen: React.ComponentType
 
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ConnectionDetailScreen = require("../[id]").default
+  ConnectionDetailScreen = require("../[id]/index").default
 })
 
 describe("M15 Connection detail", () => {

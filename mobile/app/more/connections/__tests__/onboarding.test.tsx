@@ -1,8 +1,9 @@
 /**
- * M15 connection detail has an Onboarding row that routes to the new path.
+ * M27 onboarding renders the connection's real onboarding record.
+ * The screen fetches GET /api/mobile/v1/connections and finds the row by repoId.
  */
 import React from "react"
-import { render, fireEvent, waitFor } from "@testing-library/react-native"
+import { render, waitFor } from "@testing-library/react-native"
 
 import type { ConnectionRow } from "@/lib/types"
 
@@ -10,10 +11,11 @@ const mockPush = jest.fn()
 const mockRoutes = { id: "123" }
 
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ push: mockPush, replace: jest.fn() }),
+  useRouter: () => ({ push: mockPush }),
   useLocalSearchParams: () => mockRoutes,
 }))
 
+// Mock useApiQuery to return controlled rows.
 const mockUseApiQuery = jest.fn()
 jest.mock("@/lib/use-query", () => ({
   useApiQuery: (path: string) => mockUseApiQuery(path),
@@ -42,9 +44,6 @@ jest.mock("@/theme", () => ({
       card: "#111",
       line: "#222",
       raised: "#222",
-      "glass-edge": "#333",
-      glass: "#111",
-      "sheet-card": "#111",
     },
     spacing: { itemMinHeight: 56 },
     typography: { fontMono: "GeistMono" },
@@ -67,17 +66,17 @@ jest.mock("@/components/primitives", () => {
     Card: ({ children, style }: any) => React.createElement(View, { style }, children),
     KvRow: ({ label, value }: any) =>
       React.createElement(View, { "data-testid": "kvrow" },
-        React.createElement(Text, {}, label),
-        React.createElement(Text, {}, typeof value === "string" ? value : "value"),
+        React.createElement(Text, { "data-testid": `kvlabel-${label}` }, label),
+        React.createElement(Text, { "data-testid": `kvvalue-${label}` }, value),
       ),
     SectionHeader: ({ title }: any) => React.createElement(Text, { "data-testid": `section-${title}` }, title),
     ScreenHeader: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
-    Mono: ({ children }: any) => React.createElement(Text, {}, children),
+    Mono: ({ children, style }: any) => React.createElement(Text, { style, "data-testid": "mono" }, children),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),
   }
 })
 
-import ConnectionDetailScreen from "./[id]"
+import OnboardingScreen from "../[id]/onboarding"
 
 const BASE_ROW: ConnectionRow = {
   id: "repo-1",
@@ -104,26 +103,74 @@ const BASE_ROW: ConnectionRow = {
   onboardingDetail: null,
 }
 
-describe("M15 ConnectionDetailScreen", () => {
+describe("M27 OnboardingScreen", () => {
   beforeEach(() => {
     jest.clearAllMocks()
   })
 
-  it("has an Onboarding row that routes to the new path", async () => {
+  it("renders row.fullName and the buildMarker short from a real-shaped row", async () => {
+    const detail = {
+      state: "CONFIGURED",
+      progressNote: null,
+      reason: null,
+      strategy: "docker",
+      ecosystem: "node",
+      imageName: "ghcr.io/test/repo",
+      imageDigest: "sha256:abcdef1234567890abcdef1234567890abcdef12",
+      buildMarker: "1867b926c5f50e4e692dc9c8f61821413cebe0cd",
+      approvedBy: "alice",
+      approvedAt: "2024-01-01T00:00:00Z",
+      review: null,
+      hasDockerfile: true,
+      hasBuildLog: false,
+      hasManifest: true,
+      hasBuildPlan: true,
+    }
+    mockUseApiQuery.mockReturnValue({
+      data: [{ ...BASE_ROW, fullName: "test/repo", onboardingDetail: detail, onboarding: null }],
+      error: undefined,
+    })
+
+    const { getByText, queryAllByText } = await render(<OnboardingScreen />)
+
+    await waitFor(() => {
+      // Repository shows fullName
+      expect(getByText("test/repo")).toBeTruthy()
+    })
+
+    // buildMarker first 7 chars shown via Mono
+    expect(queryAllByText("1867b92")).toHaveLength(1)
+    // imageDigest first 12 chars shown
+    expect(queryAllByText("sha256:abcdef12")).toBeTruthy()
+  })
+
+  it("shows the reason when onboardingProgress state is FAILED", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [{
+        ...BASE_ROW,
+        onboardingProgress: { state: "FAILED", reason: "build exceeded 10 minutes" },
+        onboardingDetail: null,
+      }],
+      error: undefined,
+    })
+
+    const { getByText } = await render(<OnboardingScreen />)
+
+    await waitFor(() => {
+      expect(getByText("build exceeded 10 minutes")).toBeTruthy()
+    })
+  })
+
+  it("shows 'Not onboarded yet' when there is no onboarding record", async () => {
     mockUseApiQuery.mockReturnValue({
       data: [{ ...BASE_ROW }],
       error: undefined,
     })
 
-    const { getByText, getByTestId } = await render(<ConnectionDetailScreen />)
+    const { getByText } = await render(<OnboardingScreen />)
 
     await waitFor(() => {
-      expect(getByTestId("onboarding-row")).toBeTruthy()
+      expect(getByText("Not onboarded yet")).toBeTruthy()
     })
-
-    const row = getByTestId("onboarding-row")
-    await fireEvent.press(row)
-
-    expect(mockPush).toHaveBeenCalledWith("/more/connections/123/onboarding")
   })
 })

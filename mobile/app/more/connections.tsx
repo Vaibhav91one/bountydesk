@@ -31,6 +31,8 @@ const CONNECTIONS_URL = `${process.env.EXPO_PUBLIC_API_BASE}/connections`
 export default function ConnectionsScreen() {
   const { colors } = useTheme()
   const { data: rows, error } = useApiQuery<ConnectionRow[]>("/connections")
+  // M27 is per repository, so the shortcut opens the first one with an onboarding record.
+  const onboardingRepo = rows?.find((r) => r.onboardingDetail || r.onboardingProgress) ?? null
   const router = useRouter()
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
@@ -116,13 +118,17 @@ export default function ConnectionsScreen() {
           {/* Targets */}
           <SectionHeader title="Targets" chevron={false} />
           <Card style={styles.card}>
-            <TargetLink
-              icon="cube"
-              title="View onboarding"
-              subtitle="How a repository becomes a bound target"
-              onPress={() => router.push("/more/onboarding")}
-            />
-            <View style={[styles.divider, { backgroundColor: colors.line }]} />
+            {onboardingRepo ? (
+              <>
+                <TargetLink
+                  icon="cube"
+                  title="View onboarding"
+                  subtitle={onboardingRepo.fullName}
+                  onPress={() => router.push(`/more/connections/${onboardingRepo.repoId}/onboarding`)}
+                />
+                <View style={[styles.divider, { backgroundColor: colors.line }]} />
+              </>
+            ) : null}
             <TargetLink
               icon="upload"
               title="Upload a target"

@@ -6,7 +6,7 @@
  * status pills, and the target links to onboarding and submit-a-target.
  */
 import React from "react"
-import { render, waitFor } from "@testing-library/react-native"
+import { render, waitFor, fireEvent } from "@testing-library/react-native"
 
 const mockUseApiQuery = jest.fn()
 const mockPush = jest.fn()
@@ -201,7 +201,7 @@ describe("M14 Connections", () => {
 
   it("renders the installation header and three repository rows with status pills", async () => {
     mockUseApiQuery.mockReturnValue({ data: mockData, error: null })
-    const { getByText, getAllByText } = await render(<ConnectionsScreen />)
+    const { getByText, getAllByText, queryByText } = await render(<ConnectionsScreen />)
 
     await waitFor(() => {
       expect(getAllByText("Connections").length).toBeGreaterThan(0)
@@ -220,7 +220,8 @@ describe("M14 Connections", () => {
     expect(getByText("Public · Archived")).toBeTruthy()
     expect(getByText("Private · Disconnected")).toBeTruthy()
     // Target links
-    expect(getByText("View onboarding")).toBeTruthy()
+    // No row has an onboarding record, so the per-repo shortcut is hidden.
+    expect(queryByText("View onboarding")).toBeNull()
     expect(getByText("Upload a target")).toBeTruthy()
     // Install button
     expect(getByText("Install GitHub App")).toBeTruthy()
@@ -231,5 +232,14 @@ describe("M14 Connections", () => {
     mockUseApiQuery.mockReturnValue({ data: undefined, error: err })
     const { getByText } = await render(<ConnectionsScreen />)
     expect(getByText("Network failed")).toBeTruthy()
+  })
+  it("opens onboarding for the first repository that has a record", async () => {
+    const withOnboarding = mockData.map((r: Record<string, unknown>, i: number) =>
+      i === 1 ? { ...r, onboardingProgress: { state: "PENDING_BUILD", reason: null } } : r,
+    )
+    mockUseApiQuery.mockReturnValue({ data: withOnboarding, error: null })
+    const { getByText } = await render(<ConnectionsScreen />)
+    await fireEvent.press(getByText("View onboarding"))
+    expect(mockPush).toHaveBeenCalledWith(`/more/connections/${withOnboarding[1].repoId}/onboarding`)
   })
 })
