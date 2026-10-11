@@ -2,7 +2,7 @@
  * M10 Reviewer chat render tests: loading, data, and empty states.
  */
 import React from "react"
-import { render } from "@testing-library/react-native"
+import { render, fireEvent, act } from "@testing-library/react-native"
 
 import ChatScreen from "../app/reports/[id]/chat"
 import { PhaseKey } from "@/lib/phases"
@@ -18,6 +18,7 @@ jest.mock("expo-router", () => ({
 
 const mockQueryData: Record<string, unknown> = {}
 let mockRefetchResult: { data?: unknown; error?: Error } = {}
+let mockSendSucceeds = false
 jest.mock("@/lib/use-query", () => ({
   ApiError: class ApiError extends Error {
     status: number
@@ -36,7 +37,9 @@ jest.mock("@/lib/use-query", () => ({
     }
   },
   useApiMutation: () => ({
-    mutate: jest.fn(),
+    mutate: jest.fn((_vars: unknown, opts?: { onSuccess?: () => void }) => {
+      if (mockSendSucceeds) opts?.onSuccess?.()
+    }),
     isPending: false,
   }),
 }))
@@ -197,5 +200,29 @@ describe("M10 Reviewer chat", () => {
     const { getByPlaceholderText } = await render(<ChatScreen />)
     const input = getByPlaceholderText("Ask about this report")
     expect(input).toBeTruthy()
+  })
+  it("stops waiting and shows an error when the agent turn ends in ERROR", async () => {
+    jest.useFakeTimers()
+    mockSendSucceeds = true
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    mockRefetchResult = {
+      data: { ...CHAT_STATUS, threads: [{ ...CHAT_STATUS.threads[0], status: "ERROR" }] },
+    }
+    const { getByPlaceholderText, getByLabelText, getByText, queryByText } = await render(<ChatScreen />)
+    await fireEvent.changeText(getByPlaceholderText("Ask about this report"), "why?")
+    await fireEvent.press(getByLabelText("Send"))
+    await act(async () => {
+      jest.advanceTimersByTime(2100)
+    })
+    // The interval awaits refetch(); let that promise and the state update settle.
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(getByText("The agent could not answer. Try again.")).toBeTruthy()
+    expect(queryByText("Agent Bounty is thinking\u2026")).toBeNull()
+    mockSendSucceeds = false
+    jest.useRealTimers()
   })
 })

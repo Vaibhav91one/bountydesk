@@ -95,7 +95,7 @@ function formatDayStamp(date: Date): string {
 }
 
 /** The single active thread — newest messages last. */
-function useActiveThread(status: ChatStatus | undefined): ChatThread | undefined {
+function activeThread(status: ChatStatus | undefined): ChatThread | undefined {
   if (!status || status.threads.length === 0) return undefined
   return status.threads[status.threads.length - 1]
 }
@@ -118,6 +118,7 @@ export default function ChatScreen() {
   // Polling: after a POST, refetch every 2s until the agent replies or 90s pass.
   // Hooks above early returns so hook order is stable when data is undefined.
   const [isPolling, setIsPolling] = useState(false)
+  const [replyFailed, setReplyFailed] = useState(false)
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollStartRef = useRef<number>(0)
 
@@ -130,6 +131,7 @@ export default function ChatScreen() {
   const startPolling = useCallback((lastSentRequestId: string) => {
     // Clear any existing interval before creating a new one.
     if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    setReplyFailed(false)
     setIsPolling(true)
     pollStartRef.current = Date.now()
     const timerId = setInterval(async () => {
@@ -141,8 +143,17 @@ export default function ChatScreen() {
         return
       }
       const result = await refetch()
-      const currentThread = useActiveThread(result.data)
+      const currentThread = activeThread(result.data)
       if (currentThread) {
+        // ERROR and CANCELLED end a turn without an agent message (lib/reviewer-chat/queue.ts),
+        // so stop waiting and say so instead of spinning until the timeout.
+        if (currentThread.status === "ERROR" || currentThread.status === "CANCELLED") {
+          clearInterval(timerId)
+          pollTimerRef.current = null
+          setIsPolling(false)
+          setReplyFailed(true)
+          return
+        }
         const hasReply = currentThread.messages.some(
           (m) => m.sender === "AGENT" && m.clientRequestId === `${lastSentRequestId}:agent`,
         )
@@ -156,7 +167,7 @@ export default function ChatScreen() {
     pollTimerRef.current = timerId
   }, [refetch])
 
-  const thread = useActiveThread(status)
+  const thread = activeThread(status)
   const messages = thread?.messages ?? []
   const isAgentWorking = thread && (thread.status === "OPEN" || thread.status === "RUNNING")
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
@@ -234,7 +245,12 @@ export default function ChatScreen() {
             </View>
           }
         />
-        {(isPolling || isAgentWorking || mutation.isPending) ? (
+        {replyFailed ? (
+          <View style={styles.typingRow}>
+            <Text style={[styles.typingText, { color: colors.red }]}>The agent could not answer. Try again.</Text>
+          </View>
+        ) : null}
+        {!replyFailed && (isPolling || isAgentWorking || mutation.isPending) ? (
           <View style={styles.typingRow}>
             <Text style={[styles.typingDots, { color: colors.faint }]}>{"\u2022\u2022\u2022"}</Text>
             <Text style={[styles.typingText, { color: colors.muted }]}>Agent Bounty is thinking…</Text>
