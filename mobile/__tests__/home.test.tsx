@@ -363,4 +363,10 @@ describe("M4 Home", () => {
     expect(getByText(String(delivered + closed))).toBeTruthy()
     expect(queryByText("5")).toBeNull()
   })
+  it("shows the error instead of an empty board when /queue fails", async () => {
+    mockQueryData["/queue?limit=50"] = { error: new Error("queue unavailable") }
+    const { getByText, queryByText } = await render(<HomeScreen />)
+    expect(getByText("queue unavailable")).toBeTruthy()
+    expect(queryByText("Nothing needs you")).toBeNull()
+  })
 })

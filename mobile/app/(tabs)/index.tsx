@@ -79,7 +79,7 @@ export default function HomeScreen() {
   const { colors, phase } = useTheme()
   const router = useRouter()
   const { data: summary, error } = useApiQuery<HomeSummary>("/home")
-  const { data: queue } = useApiQuery<QueueResponse>("/queue?limit=50")
+  const { data: queue, error: queueError } = useApiQuery<QueueResponse>("/queue?limit=50")
 
   const columns = queue?.columns ?? []
   const colByKey = (key: string) => columns.find((c) => c.key === key)
@@ -95,11 +95,13 @@ export default function HomeScreen() {
 
   // 401/403 are handled by useApiQuery's shared effect (sign out / not-authorized).
   // Only surface a retryable inline message for other errors.
-  const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
-  if (error && !isAuthError) {
+  // A failed /queue must not read as an empty board ("Nothing needs you"), so either failure shows the error.
+  const failed = error ?? queueError
+  const isAuthError = failed instanceof ApiError && (failed.status === 401 || failed.status === 403)
+  if (failed && !isAuthError) {
     return (
       <View style={styles.centered}>
-        <Text style={[styles.error, { color: colors.red }]}>{error.message}</Text>
+        <Text style={[styles.error, { color: colors.red }]}>{failed.message}</Text>
       </View>
     )
   }
