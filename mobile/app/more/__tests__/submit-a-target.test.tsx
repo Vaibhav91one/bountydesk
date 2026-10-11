@@ -165,18 +165,19 @@ describe("M28 Submit a target", () => {
 
     const [, init] = mockApi.mock.calls[0]
     const form = init.body as FormData
-    // The server expects: title, body, archive, port, readinessPath, startCommand, ecosystem
+    // The server expects: title, body, archive, port, readinessPath, startCommand
+    // ecosystem is optional — the server defaults to "none" and auto-detects from the archive
     expect(form.get("title")).toBe("Reviewer upload")
     expect(form.get("body")).toBe("The q parameter on the search page is stored and rendered without encoding.")
     expect(form.get("port")).toBe("3000")
     expect(form.get("readinessPath")).toBe("/")
     expect(form.get("startCommand")).toBe("npm start")
-    expect(form.get("ecosystem")).toBe("node")
+    // Must NOT send "ecosystem" (not selected in the UI) or a "material" field
+    expect(form.get("ecosystem")).toBeNull()
+    expect(form.get("material")).toBeNull()
     // The archive field must be present (file appended from picked uri)
     const archive = form.get("archive")
     expect(archive).toBeTruthy()
-    // Must NOT send a "material" field
-    expect(form.get("material")).toBeNull()
     // Should navigate back to Connections on success
     expect(mockPush).toHaveBeenCalledWith("/more/connections")
   })

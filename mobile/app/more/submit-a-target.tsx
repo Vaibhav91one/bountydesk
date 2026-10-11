@@ -74,7 +74,6 @@ function SubmitTargetInner() {
       form.append("port", port)
       form.append("readinessPath", readinessPath)
       form.append("startCommand", startCommand)
-      form.append("ecosystem", "node")
 
       if (source === "image") {
         form.append("imageRef", imageRef)
