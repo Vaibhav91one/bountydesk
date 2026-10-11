@@ -87,13 +87,13 @@ function openReportsCount(columns: QueueColumnView[]): number {
   // m5.html: "8 open reports" = sum of the four active phases.
   return columns
     .filter((c) => !["delivered", "closed"].includes(c.key))
-    .reduce((sum, c) => sum + c.cards.length, 0)
+    .reduce((sum, c) => sum + c.total, 0)
 }
 
 function QueueScreenContent() {
   const { colors } = useTheme()
   const router = useRouter()
-  const { data, error, isError, isFetching } = useApiQuery<QueueResponse>("/queue")
+  const { data, error, isError, isFetching } = useApiQuery<QueueResponse>("/queue?limit=50")
   const toast = useToast()
 
   const [lpReportId, setLpReportId] = useState<string | null>(null)
@@ -109,18 +109,21 @@ function QueueScreenContent() {
 
   const cols = data?.columns ?? []
   const colByKey = new Map(cols.map((c) => [c.key, c]))
-  const sections: { key: string; phase: PhaseKey; label: string; cards: QueueCardView[] }[] = []
+  // count is the server's total, not cards.length: a column is paged, so cards can be short of it.
+  // Reproducing and Analysis only share one server column, so their split counts are the loaded
+  // cards, marked "+" when that column holds more than was loaded.
+  const sections: { key: string; phase: PhaseKey; label: string; cards: QueueCardView[]; count: string }[] = []
 
   for (const { key, phase, label } of SHOWN_PHASES) {
-    if (key === "reproducing") {
+    if (key === "reproducing" || key === "analysis") {
       const col = colByKey.get("analysis-only")
-      sections.push({ key, phase, label, cards: col ? col.cards.filter((c) => c.state === "REPRODUCING") : [] })
-    } else if (key === "analysis") {
-      const col = colByKey.get("analysis-only")
-      sections.push({ key, phase, label, cards: col ? col.cards.filter((c) => c.state === "ANALYSIS_ONLY") : [] })
+      const state = key === "reproducing" ? "REPRODUCING" : "ANALYSIS_ONLY"
+      const cards = col ? col.cards.filter((c) => c.state === state) : []
+      const more = col ? col.total > col.cards.length : false
+      sections.push({ key, phase, label, cards, count: `${cards.length}${more ? "+" : ""}` })
     } else {
       const col = colByKey.get(key)
-      sections.push({ key, phase, label, cards: col ? col.cards : [] })
+      sections.push({ key, phase, label, cards: col ? col.cards : [], count: String(col?.total ?? 0) })
     }
   }
 
@@ -152,7 +155,7 @@ function QueueScreenContent() {
           <View key={s.key} style={styles.section}>
             <View style={styles.sh}>
               <Text style={[styles.shText, { color: colors.foreground }]}>{s.label}</Text>
-              <Text style={[styles.shCount, { color: colors.muted }]}>{s.cards.length}</Text>
+              <Text style={[styles.shCount, { color: colors.muted }]}>{s.count}</Text>
             </View>
             <View style={[styles.list, { backgroundColor: colors.card, borderRadius: 24, overflow: "hidden" }]}>
               {s.cards.map((card, i) => (

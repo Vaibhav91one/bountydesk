@@ -287,4 +287,16 @@ describe("M5 Queue", () => {
     expect(hookWarnings.length).toBe(0)
     warnSpy.mockRestore()
   })
+  it("counts from the server total when a column is paged short", async () => {
+    const paged = {
+      ...mockQueueData,
+      columns: mockQueueData.columns.map((c: { key: string }) =>
+        c.key === "awaiting-approval" ? { ...c, total: 25 } : c,
+      ),
+    }
+    mockUseApiQuery.mockReturnValue({ data: paged, error: undefined, isError: false, isFetching: false })
+    const { getByText } = await render(<QueueScreen />)
+    expect(getByText("25")).toBeTruthy()
+    expect(mockUseApiQuery).toHaveBeenCalledWith("/queue?limit=50")
+  })
 })

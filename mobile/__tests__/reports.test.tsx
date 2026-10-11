@@ -197,23 +197,56 @@ describe("M6 Reports", () => {
     expect(getByPlaceholderText("Search reports")).toBe(before)
   })
 
-  it("filters by search term", async () => {
-    mockUseApiQuery.mockReturnValue({
-      data: mockReportsData,
-      error: undefined,
-      isError: false,
-      isFetching: false,
+  // The server answers ?q= (GET /reports matches title, source and target); this stands in for it.
+  function serveSearch() {
+    mockUseApiQuery.mockImplementation((path: string) => {
+      const q = new URLSearchParams(path.split("?")[1]).get("q")?.toLowerCase()
+      const reports = q
+        ? mockReportsData.reports.filter((r: { title: string }) => r.title.toLowerCase().includes(q))
+        : mockReportsData.reports
+      return {
+        data: { ...mockReportsData, reports, total: reports.length, nextOffset: null },
+        error: undefined,
+        isError: false,
+        isFetching: false,
+      }
     })
+  }
 
+  it("sends the search term to the server as q", async () => {
+    serveSearch()
     const { getByPlaceholderText, getByText, queryByText } = await render(<ReportsScreen />)
+    await fireEvent.changeText(getByPlaceholderText("Search reports"), "XSS")
+    await waitFor(() => {
+      expect(mockUseApiQuery).toHaveBeenCalledWith("/reports?limit=50&q=XSS")
+    })
+    await waitFor(() => {
+      expect(queryByText("Missing rate limit on login")).toBeNull()
+    })
+    expect(getByText("Stored XSS in search results")).toBeTruthy()
+  })
 
-    const searchInput = getByPlaceholderText("Search reports")
-    fireEvent.changeText(searchInput, "XSS")
+  it("shows no-results state when the server finds nothing", async () => {
+    serveSearch()
+    const { getByPlaceholderText, getByText } = await render(<ReportsScreen />)
+    await fireEvent.changeText(getByPlaceholderText("Search reports"), "nonexistent report")
+    await waitFor(() => {
+      expect(getByText(/No reports match/)).toBeTruthy()
+    })
+    expect(getByText("Clear search")).toBeTruthy()
+  })
 
+  it("clears search from the no-results state", async () => {
+    serveSearch()
+    const { getByPlaceholderText, getByText } = await render(<ReportsScreen />)
+    await fireEvent.changeText(getByPlaceholderText("Search reports"), "nonexistent")
+    await waitFor(() => {
+      expect(getByText("Clear search")).toBeTruthy()
+    })
+    await fireEvent.press(getByText("Clear search"))
     await waitFor(() => {
       expect(getByText("Stored XSS in search results")).toBeTruthy()
     })
-    expect(queryByText("Missing rate limit on login")).toBeNull()
   })
 
   it("filters by phase chip", async () => {
@@ -232,48 +265,6 @@ describe("M6 Reports", () => {
       expect(getByText("Open redirect on /login")).toBeTruthy()
     })
     expect(queryByText("Stored XSS in search results")).toBeNull()
-  })
-
-  it("shows no-results state when no reports match", async () => {
-    mockUseApiQuery.mockReturnValue({
-      data: mockReportsData,
-      error: undefined,
-      isError: false,
-      isFetching: false,
-    })
-
-    const { getByPlaceholderText, getByText } = await render(<ReportsScreen />)
-
-    const searchInput = getByPlaceholderText("Search reports")
-    fireEvent.changeText(searchInput, "nonexistent report")
-
-    await waitFor(() => {
-      expect(getByText(/No reports match/)).toBeTruthy()
-    })
-    expect(getByText("Clear search")).toBeTruthy()
-  })
-
-  it("clears search and filter from the no-results state", async () => {
-    mockUseApiQuery.mockReturnValue({
-      data: mockReportsData,
-      error: undefined,
-      isError: false,
-      isFetching: false,
-    })
-
-    const { getByPlaceholderText, getByText } = await render(<ReportsScreen />)
-
-    const searchInput = getByPlaceholderText("Search reports")
-    fireEvent.changeText(searchInput, "nonexistent")
-
-    await waitFor(() => {
-      expect(getByText("Clear search")).toBeTruthy()
-    })
-    fireEvent.press(getByText("Clear search"))
-
-    await waitFor(() => {
-      expect(getByText("Stored XSS in search results")).toBeTruthy()
-    })
   })
 
   it("renders loading state while fetching", async () => {

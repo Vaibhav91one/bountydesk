@@ -103,33 +103,36 @@ function ReportsScreenContent() {
   const [hasMore, setHasMore] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const { data: firstPage, error, isError, isFetching } = useApiQuery<ReportsResponse>("/reports?limit=50")
+  // Search runs on the server (GET /reports?q= matches the whole index), debounced so each
+  // keystroke does not fire a request. The loaded pages belong to one query path.
+  const [debouncedSearch, setDebouncedSearch] = useState("")
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => clearTimeout(t)
+  }, [search])
+  const qs = debouncedSearch ? `&q=${encodeURIComponent(debouncedSearch)}` : ""
+  const path = `/reports?limit=50${qs}`
+  const [pagesFor, setPagesFor] = useState<string | null>(null)
+  const { data: firstPage, error, isError, isFetching } = useApiQuery<ReportsResponse>(path)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
 
-  // Prime the first page when it arrives, but only once: a background refetch
-  // of firstPage must not drop pages already loaded by loadMore.
+  // Prime pages once per query path: a background refetch of the same path must not drop pages
+  // loaded by loadMore, and a new search starts from its own first page.
   React.useEffect(() => {
-    if (firstPage && pages.length === 0) {
+    if (firstPage && pagesFor !== path) {
       setPages([firstPage.reports])
       setNextOffset(firstPage.nextOffset)
       setHasMore(firstPage.nextOffset != null)
+      setLoadError(null)
+      setPagesFor(path)
     }
-  }, [firstPage, pages.length])
-
-  // Reset paging when the search term or phase chip changes.
-  React.useEffect(() => {
-    if (firstPage) {
-      setPages([firstPage.reports])
-      setNextOffset(firstPage.nextOffset)
-      setHasMore(firstPage.nextOffset != null)
-    }
-  }, [search, activeChip, firstPage])
+  }, [firstPage, path, pagesFor])
 
   const loadMore = async () => {
     if (!hasMore || isFetching) return
     try {
-      const more: ReportsResponse = await api<ReportsResponse>(`/reports?limit=50&offset=${nextOffset}`)
+      const more: ReportsResponse = await api<ReportsResponse>(`/reports?limit=50&offset=${nextOffset}${qs}`)
       setPages((prev) => [...prev, more.reports])
       setNextOffset(more.nextOffset)
       setHasMore(more.nextOffset != null)
@@ -159,12 +162,9 @@ function ReportsScreenContent() {
     )
   }
 
-  // Filter by search term (title, source, origin) and phase chip, in place.
+  // Search is server-side; the phase chip filters the loaded rows.
   const needle = search.trim().toLowerCase()
   const filtered = allReports.filter((r) => {
-    if (needle && ![r.title, r.sourceLabel, r.origin].some((f) => f?.toLowerCase().includes(needle))) {
-      return false
-    }
     if (activeChip !== "all" && phaseForRow(r) !== activeChip) return false
     return true
   })
