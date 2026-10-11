@@ -7,7 +7,7 @@ module.exports = {
     "^.+\\.svg$": "<rootDir>/jest.svg.js",
   },
   moduleNameMapper: {
-    "\\.svg$": "<rootDir>/jest.svg.js",
+    "\\.svg$": "<rootDir>/jest.svg.mock.js",
   },
   testPathIgnorePatterns: ["/node_modules/", "/.expo/"],
 }

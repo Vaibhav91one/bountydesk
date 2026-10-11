@@ -14,6 +14,10 @@ config.transformer = {
 
 config.resolver = {
   ...config.resolver,
+  // Remove "svg" from assetExts so Metro does not treat .svg files as assets
+  // (which would make require("...svg").default === undefined), and add "svg"
+  // to sourceExts so react-native-svg-transformer compiles them to components.
+  assetExts: config.resolver.assetExts.filter((ext) => ext !== "svg"),
   sourceExts: [...config.resolver.sourceExts.filter((ext) => ext !== "svg"), "svg"],
 }
 

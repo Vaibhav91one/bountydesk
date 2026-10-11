@@ -77,6 +77,12 @@ export interface SvgImageProps {
 export function SvgImage({ name, width, height, style, accessibilityLabel, preserveAspectRatio = "xMidYMid meet" }: SvgImageProps) {
   const Asset = ASSETS[name]
   if (!Asset) {
+    // Surface a missing asset loudly in dev instead of silently rendering nothing
+    // (this is exactly how the empty logo bug hid for a sprint).
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.warn(`SvgImage: no asset registered for "${name}"`)
+    }
     return null
   }
   return (
