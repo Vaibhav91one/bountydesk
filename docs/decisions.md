@@ -1082,14 +1082,16 @@ document's own preference throughout for the smaller change. The original verdic
 mutated; a retest is append-only evidence beside it, the same relationship `verdict_supersession`
 already has to the verdict it supersedes.
 
-**Trigger: a reviewer on demand, and a new webhook on the bound repository.** Nothing today
-listens for a GitHub `push` or `release` event; `LIFECYCLE_EVENTS`
-(`lib/github/lifecycle.ts`) only covers installation and repository lifecycle, not source
-changes. A future implementation adds `push`/`release` to the App's subscribed events and a
-handler that enqueues a retest job through the existing durable jobs table
-(`lib/jobs/queue.ts`'s `enqueue`), the same idempotency-by-`(channel, delivery_id)` every other
-inbound channel already gets. A reviewer-requested retest reuses the same enqueue path without
-waiting for a webhook.
+**Trigger: a reviewer on demand, and an optional default-branch poll.** Nothing today
+listens for a GitHub `push` event, and our App does not hold Contents read for public
+repositories, so a push webhook would only fire for installations that opted into private repo
+reproduction -- too narrow. Instead, the reconcile tick polls the public GitHub REST API for
+the default branch head of every connected repository that has at least one `REPRODUCED`
+report, and stores the latest commit SHA on `connected_repository.latest_pushed_commit_sha`.
+This is SUGGEST ONLY: the case file shows a one-click retest suggestion when that commit
+differs from the report's pinned commit and no retest exists yet, but polling never starts a
+retest by itself. A reviewer-requested retest reuses the existing `startRetest` path without
+waiting for a poll.
 
 **Re-pin before retest, same authorization shape as the first run.** A retest cannot reuse the
 original `TargetProfile`'s pinned commit, by definition; it needs to build and verify a new
@@ -1143,9 +1145,24 @@ re-pin the original target. The retest is the agent's own investigation, run on 
   Deduplication runs on the material's identity anchor: a git commit SHA, an image digest, or the
   archive digest, so the same fix is not retested twice for one verdict.
 
-Still open: the `push`/`release` webhook trigger and oracle-backed comparison once #343 exists.
-Private repositories and upload/non-GitHub targets are now built. The migration
-(`0055_retest_material_kind`) is run by hand on production after merge.
+Still open: oracle-backed comparison once #343 exists. Private repositories and upload/non-GitHub
+targets are now built. The migration (`0055_retest_material_kind`) and the
+`0057_retest_push_suggestion` migration are run by hand on production after merge.
+
+The default-branch commit trigger from issue #344 was implemented as SUGGEST ONLY via
+polling: the reconcile tick reads the default branch head from the public GitHub REST API
+for every connected repository with a REPRODUCED report, and stores it on
+`connected_repository.latest_pushed_commit_sha` and `latest_pushed_branch`. The case file
+shows a one-click retest suggestion when that commit differs from the report's pinned
+commit and no retest exists yet for it. Polling never starts a retest by itself, so it does
+not spend sandbox credits. No App subscription or Contents read is required: the public
+commits endpoint is unauthenticated. A suspended, deleted, or removed installation or
+repository shows no suggestion, because the grant check in `readPushSuggestion` fails.
+Private repositories are excluded because the retest runs through the upload path, which
+cannot hold an installation token for a private clone (see Q34's as-built section).
+Latency is one reconcile interval. See `lib/github/reconcile.ts`
+(`reconcilePushSuggestions`), `lib/retests/push-suggestion.ts` (`readPushSuggestion`),
+and `app/(app)/reports/[id]/retest-panel.tsx`.
 
 ### Q35: Researcher appeal path (built)
 

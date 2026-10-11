@@ -64,6 +64,7 @@ export const INTEGRATIONS: Integration[] = [
           "installation. A suspended or deleted installation stops intake and delivery at once.",
           "installation_repositories. Adding or removing a repository from the grant.",
           "repository. Rename, transfer, archive.",
+          "push. A push to the default branch records the latest commit on the connected repository. The case file offers a one-click retest at that commit on a reproduced report whose pinned commit is behind it. Nothing is started automatically; Contents read is not required.",
         ],
       },
       {

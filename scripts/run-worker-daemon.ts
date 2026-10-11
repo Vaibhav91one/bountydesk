@@ -39,7 +39,7 @@ import {
 } from "@/lib/reviewer-chat/queue";
 import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
 import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue";
-import { reconcileGitHubAccess } from "@/lib/github/reconcile";
+import { reconcileGitHubAccess, reconcilePushSuggestions } from "@/lib/github/reconcile";
 import { sweepExpiredReports } from "@/lib/reports/expiry";
 
 import { runCodeReviewOnce, sweepStaleCodeReviews } from "@/lib/analysis/code-review";
@@ -340,6 +340,11 @@ async function main(): Promise<void> {
         const summary = await reconcileGitHubAccess({ signal: AbortSignal.timeout(FAST_LOOP_TIMEOUT_MS - 5_000) });
         if (summary.installationsRevoked || summary.repositoriesRevoked || summary.errors.length) {
           console.log(`github reconcile: ${JSON.stringify(summary)}`);
+        }
+        // Poll default-branch heads for the retest suggestion trigger.
+        const pushChecked = await reconcilePushSuggestions({ signal: AbortSignal.timeout(FAST_LOOP_TIMEOUT_MS - 5_000) });
+        if (pushChecked > 0) {
+          console.log(`github reconcile: checked ${pushChecked} push suggestions`);
         }
         return summary;
       }),
