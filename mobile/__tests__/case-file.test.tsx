@@ -190,7 +190,7 @@ describe("M7 Case file", () => {
 
     const { getByText } = await render(<CaseFileScreen />)
     expect(getByText("Awaiting approval")).toBeTruthy()
-    expect(getByText(/BD-482 · opened/)).toBeTruthy()
+    expect(getByText(/#482 · opened/)).toBeTruthy()
   })
 
   it("renders the Report section with Severity, Channel, Reporter", async () => {
