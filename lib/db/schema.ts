@@ -1315,6 +1315,62 @@ export const scopeGuardAudit = pgTable(
 );
 
 /**
+ * A mobile push token registered for a reviewer. Tokens belong to the reviewer email from
+ * mobileAuth().session.email, so a removed reviewer stops receiving pushes on their next
+ * sweep (isReviewerEmail re-checks the allowlist at send time).
+ */
+export const devicePushToken = pgTable(
+  "device_push_token",
+  {
+    id: id(),
+    reviewerEmail: text("reviewer_email").notNull(),
+    token: text("token").notNull().unique(),
+    /** "ios" or "android" — which push service to route the token through. */
+    platform: text("platform").notNull(),
+    createdAt: createdAt(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Null until the token is revoked, either by the owner or by a DeviceNotRegistered error. */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      "device_push_token_platform_check",
+      sql`${t.platform} in ('ios', 'android')`,
+    ),
+  ],
+);
+
+/**
+ * One push notification sent for a report lifecycle event. Insert-only: a report reaching
+ * AWAITING_APPROVAL or DELIVERED is notified once, and the unique constraint on (report_id,
+ * kind, ref_id) enforces that even across repeated sweeps.
+ */
+export const notificationEvent = pgTable(
+  "notification_event",
+  {
+    id: id(),
+    reportId: uuid("report_id")
+      .notNull()
+      .references(() => report.id, { onDelete: "restrict" }),
+    /** "AWAITING_APPROVAL" or "DELIVERED" — the report state that triggered the notification. */
+    kind: text("kind").notNull(),
+    /**
+     * The verdict id (for AWAITING_APPROVAL) or the outbound delivery id (for DELIVERED) that
+     * this notification carries as its ref_id, so a resend can find the same row and no-op.
+     */
+    refId: text("ref_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    check(
+      "notification_event_kind_check",
+      sql`${t.kind} in ('AWAITING_APPROVAL', 'DELIVERED')`,
+    ),
+    unique("notification_event_report_kind_ref_key").on(t.reportId, t.kind, t.refId),
+  ],
+);
+
+/**
  * Single-use grants backing `verify_grant`/`request_intrusive_approval`, replacing Sentinel's
  * in-memory `Map` (see lib/scope-guard/grants.ts). Minting a grant inserts an `issued` row;
  * consuming it inserts a matching `consumed` row rather than updating the issued one, which is
