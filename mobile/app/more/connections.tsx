@@ -81,7 +81,7 @@ export default function ConnectionsScreen() {
                 </View>
                 <View style={styles.installMain}>
                   <Text style={[styles.installTitle, { color: colors.foreground }]}>
-                    {firstAccount ?? "Vaibhav91one"}
+                    {firstAccount ?? "GitHub App not installed"}
                   </Text>
                   <Text style={[styles.installSubtitle, { color: colors.muted }]}>
                     GitHub App installed · {repoCount} {repoCount === 1 ? "repository" : "repositories"}

@@ -48,7 +48,7 @@ function SubmitTargetInner() {
   )
   const [port, setPort] = useState("3000")
   const [readinessPath, setReadinessPath] = useState("/")
-  const [startCommand, setStartCommand] = useState("npm start")
+  const [startCommand, setStartCommand] = useState("")
   const [pickedFile, setPickedFile] = useState<{ uri: string; name: string } | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
@@ -204,7 +204,7 @@ function SubmitTargetInner() {
               <TextInput
                 value={imageRef}
                 onChangeText={setImageRef}
-                placeholder="docker.io/bkimminich/juice-shop"
+                placeholder="docker.io/owner/image"
                 placeholderTextColor={colors.faint}
                 style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground, borderColor: colors.line }]}
                 autoCapitalize="none"
@@ -246,7 +246,8 @@ function SubmitTargetInner() {
         <Card style={styles.card}>
           <KvRowEdit label="Port" value={port} onChange={setPort} colors={colors} numeric />
           <KvRowEdit label="Readiness path" value={readinessPath} onChange={setReadinessPath} colors={colors} mono />
-          <KvRowEdit label="Start command" value={startCommand} onChange={setStartCommand} colors={colors} mono />
+          <KvRowEdit label="Start command" value={startCommand} onChange={setStartCommand} colors={colors} mono placeholder="npm start"
+          />
         </Card>
         <Text style={[styles.note, { color: colors.muted }]}>
           The build runs in a sandbox. The drafted verdict still needs your approval before anything is delivered.
@@ -315,6 +316,7 @@ function KvRowEdit({
   colors,
   mono,
   numeric,
+  placeholder,
 }: {
   label: string
   value: string
@@ -322,6 +324,7 @@ function KvRowEdit({
   colors: { foreground: string; muted: string; raised: string; line: string; faint: string }
   mono?: boolean
   numeric?: boolean
+  placeholder?: string
 }) {
   return (
     <View style={[styles.kvRow, { borderBottomColor: colors.line }]}>
@@ -329,7 +332,7 @@ function KvRowEdit({
       <TextInput
         value={value}
         onChangeText={onChange}
-        placeholder={label}
+        placeholder={placeholder ?? label}
         placeholderTextColor={colors.faint}
         style={[styles.kvValue, mono && styles.kvValueMono, numeric && styles.kvValueNumeric, { color: colors.foreground }]}
         autoCapitalize="none"

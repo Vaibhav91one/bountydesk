@@ -5,12 +5,13 @@
  * M22 (target-and-scope) is opened from a report, not from here, so this screen
  * shows the bound target inline as a plain KvRow.
  */
-import { View, Text, ScrollView, StyleSheet } from "react-native"
-import { useLocalSearchParams } from "expo-router"
+import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
+import { useLocalSearchParams, useRouter } from "expo-router"
 
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
+import { Icon } from "@/components/icons"
 import { Card, KvRow, SectionHeader, ScreenHeader, EmptyState } from "@/components/primitives"
 
 // Fixed by the GitHub App's least-privilege scope described in docs/mobile-api.md:
@@ -26,6 +27,7 @@ export default function ConnectionDetailScreen() {
   const { colors } = useTheme()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { data: rows, error } = useApiQuery<ConnectionRow[]>("/connections")
+  const router = useRouter()
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {
@@ -89,6 +91,22 @@ export default function ConnectionDetailScreen() {
           ))}
         </Card>
         <Text style={[styles.note, { color: colors.muted }]}>Contents is only needed for private repositories.</Text>
+
+        {/* Onboarding — navigates to the M27 onboarding screen for this repo. */}
+        <SectionHeader title="Onboarding" chevron={false} />
+        <Card style={styles.card}>
+          <Pressable
+            onPress={() => router.push(`/more/connections/${row.repoId}/onboarding`)}
+            style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+            accessibilityLabel="View onboarding"
+            testID="onboarding-row"
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 56, paddingHorizontal: 18 }}>
+              <Text style={{ fontSize: 17, fontWeight: "500", color: colors.foreground }}>Onboarding</Text>
+              <Icon name="chev" size={18} stroke={colors.faint} />
+            </View>
+          </Pressable>
+        </Card>
 
         {/* Bound target — shown inline as a plain KvRow, no press-through. */}
         <SectionHeader title="Bound target" chevron={false} />

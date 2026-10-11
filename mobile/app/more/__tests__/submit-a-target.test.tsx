@@ -118,14 +118,14 @@ describe("M28 Submit a target", () => {
     })
     fireEvent.press(getByText("Image"))
     await waitFor(() => {
-      expect(getByPlaceholderText("docker.io/bkimminich/juice-shop")).toBeTruthy()
+      expect(getByPlaceholderText("docker.io/owner/image")).toBeTruthy()
     })
-    expect(getByPlaceholderText("docker.io/bkimminich/juice-shop")).toBeTruthy()
+    expect(getByPlaceholderText("docker.io/owner/image")).toBeTruthy()
     expect(getByPlaceholderText("sha256:")).toBeTruthy()
   })
 
   it("shows default run settings in How the target runs", async () => {
-    const { getByText, getByDisplayValue, getAllByText } = await render(<SubmitTargetScreen />)
+    const { getByText, getByDisplayValue, getByPlaceholderText, getAllByText } = await render(<SubmitTargetScreen />)
     await waitFor(() => {
       expect(getAllByText("Submit a target").length).toBeGreaterThan(0)
     })
@@ -134,7 +134,7 @@ describe("M28 Submit a target", () => {
     expect(getByText("Start command")).toBeTruthy()
     expect(getByDisplayValue("3000")).toBeTruthy()
     expect(getByDisplayValue("/")).toBeTruthy()
-    expect(getByDisplayValue("npm start")).toBeTruthy()
+    expect(getByPlaceholderText("npm start")).toBeTruthy()
   })
 
   it("appends the picked file as 'archive' in FormData when building a tarball target", async () => {
@@ -171,7 +171,7 @@ describe("M28 Submit a target", () => {
     expect(form.get("body")).toBe("The q parameter on the search page is stored and rendered without encoding.")
     expect(form.get("port")).toBe("3000")
     expect(form.get("readinessPath")).toBe("/")
-    expect(form.get("startCommand")).toBe("npm start")
+    expect(form.get("startCommand")).toBe("")
     // Must NOT send "ecosystem" (not selected in the UI) or a "material" field
     expect(form.get("ecosystem")).toBeNull()
     expect(form.get("material")).toBeNull()

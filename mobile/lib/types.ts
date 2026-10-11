@@ -177,9 +177,67 @@ export type ConnectionRow = {
   lastReportAt: string | null
   lastSyncedAt: string
   manageUrl: string | null
-  onboarding: unknown | null
-  onboardingProgress: unknown | null
-  onboardingDetail: unknown | null
+  onboarding: OnboardingProposal | null
+  onboardingProgress: OnboardingProgress | null
+  onboardingDetail: OnboardingDetail | null
+}
+
+/**
+ * Onboarding proposal copied from OnboardingProposal in lib/github/connections.ts.
+ * Shown so a reviewer approves a specific build, not a name.
+ */
+export type OnboardingProposal = {
+  manifest: TargetManifest
+  /** The pushed image and its digest. */
+  imageName: string | null
+  imageDigest: string | null
+}
+
+/**
+ * Onboarding progress copied from OnboardingProgress in lib/github/connections.ts.
+ * Where onboarding is when it is not yet approvable: classifying, building,
+ * failed, or an honest UNSUPPORTED with a reason. Null when nothing is in flight.
+ */
+export type OnboardingProgress = {
+  state: "PENDING_PLAN" | "PENDING_BUILD" | "PENDING_MANIFEST" | "FAILED" | "UNSUPPORTED"
+  /** The not-flattenable reason for UNSUPPORTED, or the last error for FAILED; null otherwise. */
+  reason: string | null
+}
+
+/**
+ * Onboarding detail copied from OnboardingDetail in lib/github/connections.ts.
+ * The full onboarding record for the panel: what was built, the recipe, the
+ * sandboxability verdict, the approver, and which artifacts can be downloaded.
+ */
+export type OnboardingDetail = {
+  state: string
+  /** A live note on what onboarding is doing now, for in-flight states. */
+  progressNote: string | null
+  /** The UNSUPPORTED not-flattenable reason or the FAILED last error; null otherwise. */
+  reason: string | null
+  strategy: string | null
+  ecosystem: string | null
+  imageName: string | null
+  imageDigest: string | null
+  /** The source commit baked into the image and re-verified from inside the sandbox. */
+  buildMarker: string | null
+  approvedBy: string | null
+  /** ISO string, so it crosses from the server component into the client one. */
+  approvedAt: string | null
+  /** The sandboxability review's verdict and reason. */
+  review: { verdict: string; reason: string } | null
+  hasDockerfile: boolean
+  hasBuildLog: boolean
+  hasManifest: boolean
+  hasBuildPlan: boolean
+}
+
+/**
+ * Target manifest shape, copied from lib/targets/manifest.ts reviewableManifest.
+ */
+export type TargetManifest = {
+  startCommand: string | null
+  scopeRules: unknown[]
 }
 
 /**
