@@ -66,16 +66,26 @@ export interface SvgImageProps {
   style?: ViewStyle
   /** accessibilityLabel for screen readers. */
   accessibilityLabel?: string
+  /** Aligns the asset's intrinsic aspect ratio within the box. Defaults to meet. */
+  preserveAspectRatio?: string
 }
 
 /**
  * Renders a named SVG asset. Logo and mascot files carry their own fills,
  * so pass a `style` with `tintColor` to re-color when needed.
  */
-export function SvgImage({ name, width, height, style, accessibilityLabel }: SvgImageProps) {
+export function SvgImage({ name, width, height, style, accessibilityLabel, preserveAspectRatio = "xMidYMid meet" }: SvgImageProps) {
   const Asset = ASSETS[name]
   if (!Asset) {
     return null
   }
-  return <Asset width={width} height={height} style={style} accessibilityLabel={accessibilityLabel} />
+  return (
+    <Asset
+      width={width}
+      height={height}
+      style={style}
+      accessibilityLabel={accessibilityLabel}
+      preserveAspectRatio={preserveAspectRatio}
+    />
+  )
 }
