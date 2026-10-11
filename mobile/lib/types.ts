@@ -120,14 +120,16 @@ export type CaseEvent = {
 }
 
 /**
- * One integration row from GET /integrations.
- * Matches the API response documented in docs/mobile-api.md.
+ * One integration row from GET /integrations. Copied from IntegrationRow in
+ * app/(app)/integrations/integration-list.tsx, which integrationRows() returns.
  */
 export type IntegrationRow = {
   id: string
   name: string
-  type: string
-  configured: boolean
+  detail: string
+  icon: string
+  installed: boolean
+  action: { kind: "link"; href: string; label: string } | { kind: "none"; label: string }
 }
 
 /**
@@ -140,7 +142,8 @@ export type EmailReviewer = {
   verified: boolean
   codeOutstanding: boolean
   addedByEmail: string | null
-  createdAt: string
+  /** null for an env-configured owner, who has no row. */
+  createdAt: string | null
 }
 
 /**

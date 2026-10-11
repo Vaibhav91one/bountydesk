@@ -27,33 +27,6 @@ const INTEGRATION_LABELS: Record<string, string> = {
   upload: "Upload",
 }
 
-// Resolves the subtitle for an integration row, matching the mockup.
-function getSubtitle(integration: IntegrationRow, verifiedCount: number): string {
-  if (integration.id === "email") {
-    const total = verifiedCount
-    return `${total} reviewers verified`
-  }
-  if (integration.id === "github") {
-    return "1 installation"
-  }
-  return integration.type
-}
-
-// Resolves the status pill label for an integration row.
-function getStatusLabel(integration: IntegrationRow): string {
-  if (integration.id === "email") return "Active"
-  if (integration.id === "github") return integration.configured ? "Connected" : "Not configured"
-  return integration.configured ? "Configured" : "Not configured"
-}
-
-// Resolves the pill phase color key.
-function getStatusPhase(integration: IntegrationRow): "delivered" | "closed" {
-  if (integration.configured) {
-    return "delivered"
-  }
-  return "closed"
-}
-
 export default function IntegrationsScreen() {
   const theme = useTheme()
   const { colors } = theme
@@ -66,16 +39,23 @@ export default function IntegrationsScreen() {
     (emailReviewers.error instanceof ApiError && (emailReviewers.error.status === 401 || emailReviewers.error.status === 403))
 
   if (isAuthError) return null
+  if (integrations.error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <Text style={{ color: colors.red, fontSize: 16, textAlign: "center" }}>{integrations.error.message}</Text>
+      </View>
+    )
+  }
 
-  const verifiedCount = emailReviewers.data?.filter((r) => r.verified).length ?? 3
+  const items = integrations.data ?? []
+  const verifiedCount = emailReviewers.data?.filter((r) => r.verified).length
 
-  // Mock data matching m16.html when API returns empty/loading.
-  const mockIntegrations: IntegrationRow[] = [
-    { id: "email", name: "Email", type: "email", configured: true },
-    { id: "github", name: "GitHub", type: "github", configured: true },
-  ]
-
-  const items = integrations.data && integrations.data.length > 0 ? integrations.data : mockIntegrations
+  // The email row's subtitle counts verified reviewers when the list has loaded; every other row
+  // uses the server's own detail line.
+  const subtitle = (integration: IntegrationRow) =>
+    integration.id === "email" && verifiedCount !== undefined
+      ? `${verifiedCount} ${verifiedCount === 1 ? "reviewer" : "reviewers"} verified`
+      : integration.detail
 
   const handlePress = (integration: IntegrationRow) => {
     if (integration.id === "email") {
@@ -100,9 +80,8 @@ export default function IntegrationsScreen() {
           <Card style={styles.list}>
             {items.map((integration) => {
               const iconName = INTEGRATION_ICONS[integration.id] ?? "mail"
-              const label = getStatusLabel(integration)
-              const phase = getStatusPhase(integration)
-              const pillColor = phase === "delivered" ? theme.phase.delivered : theme.phase.closed
+              const label = integration.installed ? "Connected" : "Not configured"
+              const pillColor = integration.installed ? theme.phase.delivered : theme.phase.closed
               return (
                 <Pressable
                   key={integration.id}
@@ -114,7 +93,7 @@ export default function IntegrationsScreen() {
                   </View>
                   <View style={styles.main}>
                     <Text style={[styles.itemT, { color: colors.foreground }]}>{INTEGRATION_LABELS[integration.id] ?? integration.name}</Text>
-                    <Text style={[styles.itemS, { color: colors.muted }]}>{getSubtitle(integration, verifiedCount)}</Text>
+                    <Text style={[styles.itemS, { color: colors.muted }]}>{subtitle(integration)}</Text>
                   </View>
                   <View style={styles.rowTrailing}>
                     <View style={[styles.pill, { backgroundColor: pillColor + "29" }]}>

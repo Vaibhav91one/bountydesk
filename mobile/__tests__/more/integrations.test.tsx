@@ -87,34 +87,42 @@ describe("M16 Integrations", () => {
     expect(getAllByText("Where reports come in and verdicts go out").length).toBeGreaterThan(0)
   })
 
-  it("renders data state with channels", async () => {
+  it("renders data state with channels from the real integration rows", async () => {
+    // Shape copied from IntegrationRow in app/(app)/integrations/integration-list.tsx.
     mockQueryResult["/integrations"] = {
       data: [
-        { id: "email", name: "Email", type: "email", configured: true },
-        { id: "github", name: "GitHub", type: "github", configured: true },
+        { id: "email", name: "Email", detail: "Reviewers on the allowlist", icon: "mail", installed: true, action: { kind: "none", label: "Built in" } },
+        { id: "github", name: "GitHub", detail: "2 repositories, 1 accepting reports", icon: "github", installed: true, action: { kind: "link", href: "/connections", label: "Manage" } },
+        { id: "upload", name: "Upload", detail: "The public submit page", icon: "upload", installed: false, action: { kind: "none", label: "Not set up" } },
       ],
       error: undefined,
       isPending: false,
     }
     mockQueryResult["/integrations/email"] = {
-      data: [{ email: "alex@example.com", role: "owner", verified: true, codeOutstanding: false, addedByEmail: null, createdAt: "2024-01-01" }],
+      data: [{ email: "alex@example.com", role: "owner", verified: true, codeOutstanding: false, addedByEmail: null, createdAt: null }],
       error: undefined,
       isPending: false,
     }
-    const { getByText } = await renderWithClient(<IntegrationsScreen />)
+    const { getByText, getAllByText } = await renderWithClient(<IntegrationsScreen />)
     expect(getByText("Channels")).toBeTruthy()
-    expect(getByText("Email")).toBeTruthy()
-    expect(getByText("GitHub")).toBeTruthy()
-    expect(getByText("Active")).toBeTruthy()
-    expect(getByText("Connected")).toBeTruthy()
+    expect(getByText("1 reviewer verified")).toBeTruthy()
+    expect(getByText("2 repositories, 1 accepting reports")).toBeTruthy()
+    expect(getAllByText("Connected")).toHaveLength(2)
+    expect(getByText("Not configured")).toBeTruthy()
   })
 
-  it("renders empty state with mock data", async () => {
+  it("shows no sample rows when the server returns none", async () => {
     mockQueryResult["/integrations"] = { data: [], error: undefined, isPending: false }
     mockQueryResult["/integrations/email"] = { data: [], error: undefined, isPending: false }
+    const { queryByText } = await renderWithClient(<IntegrationsScreen />)
+    expect(queryByText("GitHub")).toBeNull()
+    expect(queryByText("1 installation")).toBeNull()
+  })
+
+  it("shows the error when /integrations fails", async () => {
+    mockQueryResult["/integrations"] = { data: undefined, error: new Error("integrations unavailable"), isPending: false }
     const { getByText } = await renderWithClient(<IntegrationsScreen />)
-    expect(getByText("Email")).toBeTruthy()
-    expect(getByText("GitHub")).toBeTruthy()
+    expect(getByText("integrations unavailable")).toBeTruthy()
   })
 })
 
@@ -218,14 +226,15 @@ describe("M19 Settings", () => {
       error: undefined,
       isPending: false,
     }
-    const { getByText, getAllByText } = await renderWithClient(<SettingsScreen />)
+    const { getByText, getAllByText, queryByText } = await renderWithClient(<SettingsScreen />)
     expect(getByText("alex")).toBeTruthy()
     expect(getByText("alex@example.com")).toBeTruthy()
     expect(getAllByText("Theme").length).toBeGreaterThan(0)
     expect(getByText("System")).toBeTruthy()
     expect(getByText("Connections")).toBeTruthy()
     expect(getByText("Integrations")).toBeTruthy()
-    expect(getByText("Target and scope")).toBeTruthy()
+    // Target and scope is per report now, reached from the case file, not Settings.
+    expect(queryByText("Target and scope")).toBeNull()
     expect(getAllByText("Privacy").length).toBeGreaterThan(0)
     expect(getAllByText("Terms").length).toBeGreaterThan(0)
     expect(getAllByText("Sign out").length).toBeGreaterThan(0)

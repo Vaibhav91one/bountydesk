@@ -7,7 +7,7 @@
  *   Tarball and Dockerfile show a "Choose a file" button that opens the system
  *   document picker (expo-document-picker). Image shows text inputs for the
  *   image reference and digest.
- * - Section "Report": a textarea pre-filled with the mockup's example report.
+ * - Section "Report": an empty textarea for the reviewer's description.
  * - Section "How the target runs": KvRows for Port, Readiness path and Start
  *   command, shown as editable inputs with the mockup defaults.
  * - Footer bar with a "Build and bind target" button that posts to
@@ -43,9 +43,7 @@ function SubmitTargetInner() {
   const [source, setSource] = useState<SourceKind>("tar")
   const [imageRef, setImageRef] = useState("")
   const [digest, setDigest] = useState("")
-  const [report, setReport] = useState(
-    "The q parameter on the search page is stored and rendered without encoding.",
-  )
+  const [report, setReport] = useState("")
   const [port, setPort] = useState("3000")
   const [readinessPath, setReadinessPath] = useState("/")
   const [startCommand, setStartCommand] = useState("")

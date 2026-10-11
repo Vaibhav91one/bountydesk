@@ -31,7 +31,7 @@ it("every navigation target resolves to a route file", () => {
   const dead: string[] = []
   for (const f of sources) {
     const text = fs.readFileSync(f, "utf8")
-    const pattern = /(?:push|replace|navigate)\(\s*[`"](\/[^`"]*)[`"]|pathname:\s*[`"](\/[^`"]*)[`"]/g
+    const pattern = /(?:push|replace|navigate)\(\s*[`"](\/[^`"]*)[`"]|(?:pathname|route|href):\s*[`"](\/[^`"]*)[`"]/g
     for (const m of text.matchAll(pattern)) {
       const target = m[1] ?? m[2]
       if (!resolves(target)) dead.push(`${path.relative(root, f)} -> ${target}`)

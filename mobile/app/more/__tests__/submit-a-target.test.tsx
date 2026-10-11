@@ -91,12 +91,12 @@ describe("M28 Submit a target", () => {
     expect(getByText("Build and bind target")).toBeTruthy()
   })
 
-  it("renders the report text from the mockup", async () => {
-    const { getByDisplayValue, getAllByText } = await render(<SubmitTargetScreen />)
+  it("starts with an empty report field, not sample text", async () => {
+    const { getByPlaceholderText, getAllByText } = await render(<SubmitTargetScreen />)
     await waitFor(() => {
       expect(getAllByText("Submit a target").length).toBeGreaterThan(0)
     })
-    expect(getByDisplayValue(/stored and rendered without encoding/)).toBeTruthy()
+    expect(getByPlaceholderText("Describe the target and what it should run").props.value).toBe("")
   })
 
   it("shows the file picker button for Dockerfile", async () => {
@@ -145,10 +145,14 @@ describe("M28 Submit a target", () => {
     })
     mockApi.mockResolvedValueOnce({ reportId: "BD-1042" })
 
-    const { getByText, getAllByText } = await render(<SubmitTargetScreen />)
+    const { getByText, getAllByText, getByPlaceholderText } = await render(<SubmitTargetScreen />)
     await waitFor(() => {
       expect(getAllByText("Submit a target").length).toBeGreaterThan(0)
     })
+    await fireEvent.changeText(
+      getByPlaceholderText("Describe the target and what it should run"),
+      "The q parameter on the search page is stored and rendered without encoding.",
+    )
 
     // Pick a file
     fireEvent.press(getByText("Choose a file"))

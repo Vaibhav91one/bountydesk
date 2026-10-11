@@ -24,7 +24,6 @@ const THEME_LABELS = { system: "System", light: "Light", dark: "Dark" }
 const WORKSPACE_ITEMS: { label: string; subtitle: string; icon: IconName; route: string }[] = [
   { label: "Connections", subtitle: "GitHub App and repositories", icon: "github", route: "/more/connections" },
   { label: "Integrations", subtitle: "Email access", icon: "mail", route: "/more/integrations" },
-  { label: "Target and scope", subtitle: "juice-shop v17.3.0", icon: "target", route: "/more/target-and-scope" },
 ]
 
 const ABOUT_ITEMS: { label: string; icon: IconName; route: string }[] = [
