@@ -46,10 +46,10 @@ export function usePhaseColor(key: PhaseKey): string {
 }
 
 /**
- * PhasePill tint: color-mix(in oklab, var(--c) 16%, transparent).
- * Native can't do oklch mix, so we blend the phase hue at ~16% over the card
- * surface using an 18% opacity overlay, matching the visual weight of c.css.
- * Returns the phase hue (for the label and dot) which the pill itself styles.
+ * PhasePill tint. c.css does `color-mix(in oklab, var(--c) 16%, transparent)`,
+ * so the pill background is the phase hue at 16% opacity over the card surface.
+ * Native has no oklch/oklab mix, so we append an ~16% alpha byte (0x29) to the
+ * resolved hex, matching the c.css visual weight for the pill body only.
  */
 export function phaseTint(color: string): string {
   return color + "29"
