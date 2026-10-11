@@ -20,6 +20,54 @@ export function parsePage(params: URLSearchParams): PageParams | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** The transport receipt label for M12, derived from the delivery target the worker recorded. */
+const GITHUB_TARGET = /^github:\d+:issue:(\d+)$/;
+const GITHUB_ADVISORY_TARGET = /^github:\d+:advisory:(.+)$/;
+
+export function transportReceiptFor(delivery: {
+  state: string;
+  target: string | null;
+}): string | null {
+  if (!delivery.target) return null;
+  if (GITHUB_TARGET.test(delivery.target)) {
+    return `issue comment ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  }
+  // An advisory delivery target is github:<repoId>:advisory:<ghsaId> (or ...:advisory:create).
+  // GitHub accepted the edit or creation, which is the receipt for that channel.
+  if (GITHUB_ADVISORY_TARGET.test(delivery.target)) {
+    return `advisory ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  }
+  // An email address: Resend accepted the send (SENT) or the delivered webhook confirmed it
+  // (DELIVERED). Anything else, mirror the raw state.
+  if (delivery.target.includes("@")) return delivery.state === "DELIVERED" ? "email delivered" : `email ${delivery.state.toLowerCase()}`;
+  return delivery.state;
+  return delivery.state;
+}
+
+/** The type of a row as the inbox renders it, built from listAllReports. */
+export type InboxCard = {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  channel: string;
+  targetName: string | null;
+  outcome: string | null;
+  verdictSuperseded: boolean;
+  deliveryState: string | null;
+  state: string;
+  awaitingVerdictId: string | null;
+  updatedAt: Date;
+};
+
+/** A paged inbox section. `truncated` is only set on "earlier": it means listAllReports hit
+ * its INDEX_LIMIT cap and the full set may be larger. "needs you" is uncapped and never truncated. */
+export type InboxSection = {
+  items: InboxCard[];
+  total: number;
+  nextOffset: number | null;
+  truncated?: boolean;
+};
+
 /** One page of `items`, with the offset of the next page or null at the end. */
 export function paginate<T>(items: T[], { limit, offset }: PageParams) {
   const slice = items.slice(offset, offset + limit);
@@ -80,6 +128,8 @@ export function mobileCaseView(
     failed: live.failed,
 
     target: live.target,
+    /** Target profile scope and provisioning for M22, read alongside the case file. */
+    targetScope: file.targetScope ?? null,
     summary: live.finalSummary,
     destination: live.destination,
 
@@ -99,6 +149,8 @@ export function mobileCaseView(
     approval: live.approval,
     delivery: live.delivery && {
       state: live.delivery.state,
+      target: live.delivery.target,
+      transportReceipt: transportReceiptFor(live.delivery),
       deliveredAt: live.delivery.deliveredAt,
       requiresHumanReview: live.delivery.requiresHumanReview,
     },

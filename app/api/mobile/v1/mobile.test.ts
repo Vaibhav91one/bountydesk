@@ -25,11 +25,44 @@ mock.module("@/lib/auth/dal", {
     clerkProfile: async () => ({ login: "outsider", email: "outsider@example.test", avatarUrl: null }),
   },
 });
+const reviewerState = {
+  // alice is an owner, bob is a verified member, carol is pending.
+  canAdd: (email: string) => email.toLowerCase() === "alice@bountydesk.test",
+  list: () => [
+    { email: "alice@bountydesk.test", role: "owner" as const, verified: true, codeOutstanding: false, addedByEmail: null, createdAt: null },
+    { email: "bob@example.com", role: "member" as const, verified: true, codeOutstanding: false, addedByEmail: "alice@bountydesk.test", createdAt: new Date() },
+    { email: "carol@example.com", role: "member" as const, verified: false, codeOutstanding: true, addedByEmail: "alice@bountydesk.test", createdAt: new Date() },
+  ],
+  startCode: null as string | null,
+  verifyOk: true,
+  verifyError: null as string | null,
+};
 mock.module("@/lib/auth/reviewers", {
-  namedExports: { isReviewerWriter: async () => caller.session !== null && caller.session.role !== "read_only" },
+  namedExports: {
+    isReviewerWriter: async () => caller.session !== null && caller.session.role !== "read_only",
+    isReviewerEmail: async () => caller.session !== null,
+    canManageReviewers: (email: string | null | undefined) => reviewerState.canAdd(email ?? ""),
+    listReviewers: async () => reviewerState.list(),
+    startVerification: async () => {
+      reviewerState.startCode = "123456";
+      return { status: "code_sent" as const, code: "123456" };
+    },
+    verifyCode: async (email: string, code: string) => {
+      if (!reviewerState.verifyOk) return { ok: false as const, error: reviewerState.verifyError ?? "bad code" };
+      // The mock code is always "123456"; anything else fails.
+      if (code.trim() !== "123456" || !/^\d{6}$/.test(code.trim())) {
+        return { ok: false as const, error: "that code is not correct." };
+      }
+      return { ok: true as const };
+    },
+  },
 });
 mock.module("next/cache", { namedExports: { revalidatePath: () => undefined } });
 mock.module("@/lib/delivery/worker", { namedExports: { deliverById: async (id: string) => id } });
+mock.module("@/lib/email/resend", {
+  namedExports: { sendVerificationEmail: async () => undefined },
+});
+mock.module("@/lib/email/outside-config", { namedExports: { readOutsideConfig: async () => ({ maxBytes: 1024 * 1024 }) } });
 
 const reviewer = { login: "alice", email: "alice@bountydesk.test", avatarUrl: null, role: "member" as const };
 const asReviewer = () => (caller = { userId: "user_1", session: reviewer });
@@ -49,6 +82,10 @@ let deny: typeof import("./reports/[id]/deny/route");
 let chat: typeof import("./reports/[id]/chat/route");
 let connections: typeof import("./connections/route");
 let integrations: typeof import("./integrations/route");
+let emailAccess: typeof import("./integrations/email/route");
+let emailVerify: typeof import("./integrations/email/verify/route");
+let inbox: typeof import("./inbox/route");
+let upload: typeof import("./integrations/upload/route");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -64,6 +101,10 @@ before(async () => {
   chat = await import("./reports/[id]/chat/route");
   connections = await import("./connections/route");
   integrations = await import("./integrations/route");
+  emailAccess = await import("./integrations/email/route");
+  emailVerify = await import("./integrations/email/verify/route");
+  inbox = await import("./inbox/route");
+  upload = await import("./integrations/upload/route");
 });
 
 after(async () => {
@@ -153,6 +194,9 @@ test("every route answers 401 without a token", async () => {
     await deny.POST(post(body), ctx(reportId)),
     await connections.GET(),
     await integrations.GET(),
+    await emailAccess.GET(),
+    await inbox.GET(get()),
+    await upload.POST(post({})),
   ];
   for (const response of responses) assert.equal(response.status, 401);
 });
@@ -171,6 +215,10 @@ test("a signed-in account that is not allowlisted gets 403 everywhere but /me", 
     await approve.POST(post(body), ctx(reportId)),
     await connections.GET(),
     await integrations.GET(),
+    await emailAccess.GET(),
+    await emailAccess.POST(post({ email: "new@example.com" })),
+    await emailVerify.POST(post({ email: "new@example.com", code: "123456" })),
+    await inbox.GET(get()),
   ]) {
     assert.equal(response.status, 403);
   }
@@ -199,6 +247,17 @@ test("a read-only reviewer can read but is refused approve, deny and chat", asyn
   assert.equal((await deny.POST(post(body), ctx(reportId))).status, 403);
   assert.equal((await chat.POST(post({ clientRequestId: "c1", body: "hi" }), ctx(reportId))).status, 403);
   assert.equal((await decisions(verdictId)).length, 0);
+});
+
+test("a read-only reviewer can read the inbox and email access but not add reviewers", async () => {
+  asReadOnly();
+  await seedPendingReport();
+
+  assert.equal((await inbox.GET(get())).status, 200);
+  assert.equal((await emailAccess.GET()).status, 200);
+  assert.equal((await emailAccess.POST(post({ email: "new@example.com" }))).status, 403);
+  assert.equal((await emailVerify.POST(post({ email: "new@example.com", code: "123456" }))).status, 403);
+  assert.equal((await upload.POST(post({}))).status, 403);
 });
 
 test("approve refuses a content hash that is not the verdict's, and records nothing", async () => {
@@ -279,6 +338,63 @@ test("the case file carries the exact drafted text and the hash the app must sen
   assert.equal((await reportCase.GET(get(), ctx(randomUUID()))).status, 404);
 });
 
+test("the case file reads readinessPath and startCommand from the provisioning config", async () => {
+  const [profileRow] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: "test-target",
+      imageName: "ghcr.io/example/test",
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      config: {
+        baseUrl: "http://localhost:3000",
+        provisioning: {
+          readinessPath: "/ready",
+          startCommand: "npm start",
+          expectedBuildMarker: "built",
+        },
+      },
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "manual",
+      sourceRef: `manual:mobile-${seq}`,
+      title: `Target report ${seq}`,
+      body: "body",
+      state: "AWAITING_APPROVAL",
+      targetProfileId: profileRow.id,
+    })
+    .returning({ id: dbm.report.id });
+
+  const verdictId = randomUUID();
+  const payload = `drafted comment ${seq}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+  const contentHash = computeContentHash(payload);
+  await dbm.db.insert(dbm.verdict).values({
+    id: verdictId,
+    reportId: reportRow.id,
+    outcome: "ANALYSIS_ONLY",
+    summary: "summary",
+    payload,
+    contentHash,
+  });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: reportRow.id,
+    capabilityToken: `cap-mobile-${seq}`,
+    sessionId: `sess-mobile-${seq}`,
+    pendingThreadId: `thread-${seq}`,
+    pendingToolCallId: `call-${seq}`,
+    pendingVerdictId: verdictId,
+    pendingApprovedContentHash: contentHash,
+  });
+
+  const file = await (await reportCase.GET(get(), ctx(reportRow.id))).json();
+  assert.equal(file.targetScope?.readinessPath, "/ready");
+  assert.equal(file.targetScope?.startCommand, "npm start");
+});
+
 test("list routes return the web read models, paged", async () => {
   const { reportId } = await seedPendingReport();
 
@@ -302,4 +418,269 @@ test("list routes return the web read models, paged", async () => {
   const rows = await (await integrations.GET()).json();
   assert.deepEqual(rows.map((row: { id: string }) => row.id), ["github", "email", "upload"]);
   assert.ok(Array.isArray(await (await connections.GET()).json()));
+});
+
+test("inbox splits reports into needs-you and earlier", async () => {
+  const { reportId } = await seedPendingReport();
+
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(Array.isArray(body.needsYou.items));
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportId));
+  assert.ok(body.needsYou.items.some((row: { id: string; awaitingVerdictId: string | null }) => row.awaitingVerdictId !== null));
+  assert.ok(Array.isArray(body.earlier.items));
+
+  // Seed a DELIVERED report for the earlier section.
+  seq += 1;
+  const [deliveredRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:delivered-${seq}`,
+      title: `Delivered report ${seq}`,
+      body: "body",
+      state: "DELIVERED",
+    })
+    .returning({ id: dbm.report.id });
+
+  const full = await (await inbox.GET(get())).json();
+  assert.ok(full.earlier.items.some((row: { id: string }) => row.id === deliveredRow.id));
+  // Phase filter narrows to one section.
+  const needsOnly = await (await inbox.GET(get("?phase=needs"))).json();
+  assert.equal(needsOnly.earlier, null);
+  assert.ok(needsOnly.needsYou.items.length > 0);
+  const earlierOnly = await (await inbox.GET(get("?phase=earlier"))).json();
+  assert.equal(earlierOnly.needsYou, null);
+  assert.ok(earlierOnly.earlier.items.length > 0);
+  assert.equal((await inbox.GET(get("?phase=bogus"))).status, 400);
+  assert.equal((await inbox.GET(get("?limit=0"))).status, 400);
+});
+
+test("inbox 400s on a bad phase or page", async () => {
+  assert.equal((await inbox.GET(get("?phase=bad"))).status, 400);
+  assert.equal((await inbox.GET(get("?limit=abc"))).status, 400);
+});
+
+test("an awaiting report survives the INDEX_LIMIT cap on the earlier list", async () => {
+  const { reportId } = await seedPendingReport();
+
+  // Seed 210 delivered reports newer than the awaiting one, to exceed INDEX_LIMIT (200).
+  const future = new Date("2030-01-01T00:00:00Z");
+  for (let i = 0; i < 210; i++) {
+    seq += 1;
+    await dbm.db.insert(dbm.report).values({
+      channel: "email",
+      sourceRef: `email:cap-${seq}`,
+      title: `Cap report ${seq}`,
+      body: "body",
+      state: "DELIVERED",
+      updatedAt: future,
+    });
+  }
+
+  // The awaiting report is older than all of them, but needsYou is uncapped.
+  const needsOnly = await (await inbox.GET(get("?phase=needs"))).json();
+  assert.ok(needsOnly.needsYou.items.some((row: { id: string }) => row.id === reportId));
+
+  // The earlier section is capped at INDEX_LIMIT and reports that fact.
+  const earlierOnly = await (await inbox.GET(get("?phase=earlier"))).json();
+  assert.equal(earlierOnly.earlier.truncated, true);
+  assert.equal(earlierOnly.earlier.total, 200, "earlier is capped at INDEX_LIMIT");
+});
+
+test("a report in needs-you never also appears in earlier", async () => {
+  const { reportId } = await seedPendingReport();
+
+  // Both sections come from one snapshot, so the awaiting report must not be in earlier.
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportId));
+  assert.ok(!body.earlier.items.some((row: { id: string }) => row.id === reportId));
+});
+
+test("a NEEDS_DECISION report appears in needs-you, not earlier", async () => {
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:needs-decision-${seq}`,
+      title: `Needs decision ${seq}`,
+      body: "body",
+      state: "NEEDS_DECISION",
+    })
+    .returning({ id: dbm.report.id });
+
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportRow.id));
+  assert.ok(!body.earlier.items.some((row: { id: string }) => row.id === reportRow.id));
+});
+
+test("an image-sourced target reports its provisioning buildMarker", async () => {
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+  const [profileRow] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: "image-target",
+      imageName: "ghcr.io/example/image-target",
+      imageDigest: DIGEST,
+      // No resolvedCommitSha — image-sourced, not git.
+      config: {
+        baseUrl: "http://localhost:3000",
+        provisioning: {
+          readinessPath: "/ready",
+          startCommand: "npm start",
+          expectedBuildMarker: "built",
+        },
+      },
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "manual",
+      sourceRef: `manual:mobile-${seq}`,
+      title: `Image target report ${seq}`,
+      body: "body",
+      state: "AWAITING_APPROVAL",
+      targetProfileId: profileRow.id,
+    })
+    .returning({ id: dbm.report.id });
+
+  const verdictId = randomUUID();
+  const payload = `drafted comment ${seq}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+  const contentHash = computeContentHash(payload);
+  await dbm.db.insert(dbm.verdict).values({
+    id: verdictId,
+    reportId: reportRow.id,
+    outcome: "ANALYSIS_ONLY",
+    summary: "summary",
+    payload,
+    contentHash,
+  });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: reportRow.id,
+    capabilityToken: `cap-mobile-${seq}`,
+    sessionId: `sess-mobile-${seq}`,
+    pendingThreadId: `thread-${seq}`,
+    pendingToolCallId: `call-${seq}`,
+    pendingVerdictId: verdictId,
+    pendingApprovedContentHash: contentHash,
+  });
+
+  const file = await (await reportCase.GET(get(), ctx(reportRow.id))).json();
+  assert.equal(file.targetScope?.buildMarker, "built");
+});
+
+test("email access lists reviewers for any reviewer", async () => {
+  const rows = await (await emailAccess.GET()).json();
+  assert.deepEqual(rows.map((r: { email: string }) => r.email), [
+    "alice@bountydesk.test",
+    "bob@example.com",
+    "carol@example.com",
+  ]);
+  // The pending member is not verified, and shows a code outstanding.
+  const carol = rows.find((r: { email: string }) => r.email === "carol@example.com");
+  assert.equal(carol.verified, false);
+  assert.equal(carol.codeOutstanding, true);
+});
+
+test("an owner can add a reviewer, the code is mailed, and verify confirms it", async () => {
+  const added = await (await emailAccess.POST(post({ email: "dave@example.com" }))).json();
+  assert.equal(added.ok, true);
+  assert.equal(added.codeSent, true);
+
+  // A non-owner reviewer cannot add. bob is a member, not an owner.
+  caller = { userId: "user_1", session: { login: "bob", email: "bob@example.com", avatarUrl: null, role: "member" } };
+  assert.equal((await emailAccess.POST(post({ email: "eve@example.com" }))).status, 403);
+
+  // Back to alice (an owner) to verify.
+  asReviewer();
+  // Verify the code for the address the owner added.
+  assert.equal((await emailVerify.POST(post({ email: "dave@example.com", code: "123456" }))).status, 200);
+
+  // A bad code is refused.
+  assert.equal(
+    (await emailVerify.POST(post({ email: "dave@example.com", code: "000000" }))).status,
+    400,
+  );
+
+  // A non-owner cannot verify either.
+  caller = { userId: "user_1", session: { login: "bob", email: "bob@example.com", avatarUrl: null, role: "member" } };
+  assert.equal((await emailVerify.POST(post({ email: "dave@example.com", code: "123456" }))).status, 403);
+  asReviewer();
+
+  // Bad email shape is a 400, not a 500.
+  assert.equal((await emailAccess.POST(post({ email: "not-an-email" }))).status, 400);
+});
+
+test("a reviewer upload with valid material is accepted and queued for build", async () => {
+  // The intake validates the image ref against PREBUILT_IMAGE_REGISTRIES; pin it to ghcr.io
+  // so the test never depends on ambient env from the CI runner.
+  const savedRegistries = process.env.PREBUILT_IMAGE_REGISTRIES;
+  process.env.PREBUILT_IMAGE_REGISTRIES = "ghcr.io";
+  try {
+    const form = new FormData();
+    form.set("title", "Broken auth in admin API");
+    form.set("body", "Steps to reproduce...");
+    form.set("imageRef", "ghcr.io/vendor/app:1.2");
+    form.set("imageDigest", `sha256:${"a".repeat(64)}`);
+    form.set("port", "3000");
+    form.set("readinessPath", "/health");
+    const serialized = new Response(form);
+    const body = await serialized.arrayBuffer();
+    const request = new Request("http://app.test/api/mobile/v1/x", {
+      method: "POST",
+      headers: { "content-type": serialized.headers.get("content-type") ?? "" },
+      body,
+    });
+
+    const uploadResponse = await upload.POST(request);
+    assert.equal(uploadResponse.status, 202);
+    assert.ok("reportId" in (await uploadResponse.json()));
+  } finally {
+    if (savedRegistries === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    else process.env.PREBUILT_IMAGE_REGISTRIES = savedRegistries;
+  }
+});
+
+test("a reviewer upload that fails intake validation is rejected with 400", async () => {
+  // An image from a registry outside the allowlist is refused at the real parseUploadForm.
+  const savedRegistries = process.env.PREBUILT_IMAGE_REGISTRIES;
+  process.env.PREBUILT_IMAGE_REGISTRIES = "ghcr.io";
+  try {
+    const form = new FormData();
+    form.set("title", "Bad upload");
+    form.set("body", "repro");
+    form.set("imageRef", "quay.io/vendor/app:1.2");
+    form.set("imageDigest", `sha256:${"a".repeat(64)}`);
+    const serialized = new Response(form);
+    const body = await serialized.arrayBuffer();
+    const request = new Request("http://app.test/api/mobile/v1/x", {
+      method: "POST",
+      headers: { "content-type": serialized.headers.get("content-type") ?? "" },
+      body,
+    });
+
+    const uploadResponse = await upload.POST(request);
+    assert.equal(uploadResponse.status, 400);
+    const text = await uploadResponse.text();
+    assert.match(text, /not accepted|image/, "the intake reason is surfaced");
+  } finally {
+    if (savedRegistries === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    else process.env.PREBUILT_IMAGE_REGISTRIES = savedRegistries;
+  }
+});
+
+test("transportReceiptFor labels issue, advisory, and email delivery targets", async () => {
+  const { transportReceiptFor } = await import("@/lib/mobile/views");
+
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:issue:42" }), "issue comment 2xx");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "github:123:issue:42" }), "issue comment SENT");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory 2xx");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory SENT");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:create" }), "advisory 2xx");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "researcher@example.com" }), "email delivered");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "researcher@example.com" }), "email sent");
+  assert.equal(transportReceiptFor({ state: "SENT", target: null }), null);
 });

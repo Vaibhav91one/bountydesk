@@ -122,6 +122,10 @@ export async function readCase(
           targetProfileId: targetProfile.id,
           targetName: targetProfile.name,
           targetDigest: targetProfile.imageDigest,
+          targetSnapshotId: targetProfile.snapshotId,
+          targetConfig: targetProfile.config,
+          targetScopeRules: targetProfile.scopeRules,
+          targetBuildMarker: targetProfile.resolvedCommitSha,
         })
         .from(report)
         .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
@@ -431,6 +435,34 @@ export async function readCase(
               id: row.targetProfileId,
               name: row.targetName ?? "",
               imageDigest: row.targetDigest ?? "",
+            }
+          : null,
+        /**
+         * Scope and provisioning for the M22 target-and-scope screen. Built here from the same
+         * profile row the target pointer comes from, so the phone does not need a second query.
+         * Egress is "none" for the sandboxed run; a non-null config.egress would mean the profile
+         * is misconfigured for the offline model, which is treated as "none" since the sandbox
+         * always blocks all egress at the network layer regardless.
+         */
+        targetScope: row.targetProfileId
+          ? {
+              imageDigest: row.targetDigest ?? "",
+              snapshotId: row.targetSnapshotId ?? null,
+              // expectedBuildMarker is always stored in config.provisioning by targetProfileConfig
+              // (lib/targets/registry.ts), while targetBuildMarker (resolvedCommitSha) is only set
+              // for git-sourced targets. Read the provisioning field so image-only targets report
+              // their build marker too.
+              buildMarker:
+                (row.targetConfig as { provisioning?: { expectedBuildMarker?: string } } | null)?.provisioning?.expectedBuildMarker ?? row.targetBuildMarker ?? null,
+              scopeRules: (row.targetScopeRules as unknown[] | null) ?? [],
+              // The provisioning config nests readinessPath, expectedBuildMarker, and startCommand
+              // under config.provisioning (see targetProfileConfig in lib/targets/registry.ts).
+              // Reading them flat from config would always fall back to the defaults.
+              readinessPath: (row.targetConfig as { provisioning?: { readinessPath?: string } } | null)?.provisioning?.readinessPath ?? "/",
+              startCommand: (row.targetConfig as { provisioning?: { startCommand?: string } } | null)?.provisioning?.startCommand ?? null,
+              // Every reproduction sandbox enforces networkBlockAll at the network layer;
+              // the profile's egress config cannot widen that, so the phone always reads "none".
+              egress: "none" as const,
             }
           : null,
         verdict: latest ?? null,

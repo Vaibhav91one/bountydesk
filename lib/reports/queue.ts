@@ -372,15 +372,16 @@ export type IndexRow = QueueCard & {
   createdAt: Date;
 };
 
-/**
+/*
  * Every report, newest change first, terminal ones included.
  *
  * The board deliberately hides closed work, which leaves a delivered report reachable only by
  * its URL. This is the list that does not hide anything, which is why it is a separate read
  * rather than a flag on listQueue: the two screens want opposite things.
+ * Accepts an optional tx executor so callers sharing a transaction get one snapshot.
  */
-export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
-  const rows = await db
+export async function listAllReports(limit = INDEX_LIMIT, tx: Executor = db): Promise<IndexRow[]> {
+  const rows = await tx
     .select({
       id: report.id,
       title: report.title,
@@ -510,6 +511,98 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
         ? row.awaitingVerdictId
         : null,
     investigating: isAgentInvestigating(row.turnStatus, row.outcome !== null, row.hasToolCallEvents),
+    origin: row.repositoryFullName ?? row.channel,
+    createdAt: row.createdAt,
+  }));
+}
+
+/**
+ * Reports a reviewer still owes a decision on, with no cap: the "needs you" set must be complete
+ * even when it is older than the last 200 updated reports that listAllReports truncates to.
+ *
+ * Matches the same awaitingReviewSql predicate the board and the home summary rank on, plus
+ * NEEDS_DECISION: an outside email, advisory, or upload report waiting at the intake gate for
+ * a reviewer to triage or deny. That state has no pending verdict row, so awaitingVerdictId
+ * stays null and it is excluded from earlier by the same null check, but it must appear here.
+ *
+ * Accepts an optional tx executor so the inbox can read needs-you and earlier from one snapshot.
+ */
+export async function listAwaitingReview(tx: Executor = db): Promise<IndexRow[]> {
+  const rows = await tx
+    .select({
+      id: report.id,
+      title: report.title,
+      sourceRef: report.sourceRef,
+      state: report.state,
+      channel: report.channel,
+      repositoryFullName: connectedRepository.fullName,
+      targetName: targetProfile.name,
+      createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
+      outcome: sql<VerdictOutcome | null>`(
+        select v.outcome from verdict v
+        where v.report_id = ${report.id}
+        order by v.revision desc
+        limit 1
+      )`,
+      verdictSuperseded: sql<boolean>`exists (
+        select 1 from verdict_supersession s where s.old_verdict_id = (
+          select v.id from verdict v
+          where v.report_id = ${report.id}
+          order by v.revision desc
+          limit 1
+        )
+      )`,
+      awaitingVerdictId: sql<string | null>`(
+        select s.pending_verdict_id from agent_session s
+        where s.report_id = ${report.id}
+          and s.pending_verdict_id is not null
+          and s.pending_approved_content_hash is not null
+          and not exists (
+            select 1 from approval_decision a
+            where a.verdict_id = s.pending_verdict_id
+          )
+        limit 1
+      )`,
+      hasToolCallEvents: sql<boolean>`exists (
+        select 1 from session_event e
+        where e.report_id = ${report.id} and e.type like 'agent.tool_call:%'
+      )`,
+      turnStatus: sql<string | null>`(
+        select s.turn_status from agent_session s where s.report_id = ${report.id} limit 1
+      )`,
+    })
+    .from(report)
+    .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
+    .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
+    .where(and(isNull(report.hiddenAt), sql<boolean>`(
+      ${awaitingReviewSql}
+      or ${report.state} = 'NEEDS_DECISION'
+    )`))
+    .orderBy(desc(report.updatedAt));
+
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    sourceLabel: sourceLabel(row.sourceRef, row.id),
+    channel: row.channel,
+    targetName: row.targetName,
+    state: row.state,
+    outcome: row.verdictSuperseded ? null : row.outcome,
+    verdictSuperseded: row.verdictSuperseded,
+    jobDeadLettered: false,
+    sessionErrored: false,
+    runStatus: null,
+    deliveryState: null,
+    handoffFailed: false,
+    eventCount: 0,
+    updatedAt: row.updatedAt,
+    awaitingVerdictId:
+      row.state === "AWAITING_APPROVAL" ||
+      (row.state === "ANALYSIS_ONLY" && row.outcome === "ANALYSIS_ONLY")
+        ? row.awaitingVerdictId
+        : null,
+    investigating: false,
     origin: row.repositoryFullName ?? row.channel,
     createdAt: row.createdAt,
   }));
