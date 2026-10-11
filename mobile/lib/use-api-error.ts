@@ -3,11 +3,13 @@ import { useAuth } from "@clerk/expo"
 import { useCallback } from "react"
 
 import { ApiError } from "./api"
+import { signOutAndClear } from "./session"
 
 /**
  * Returns a stable callback that turns an api() failure into a UI action.
  *
- * - 401: the Clerk token is good but the session is stale, so sign the user out.
+ * - 401: the Clerk token is good but the session is stale, so sign the user out
+ *   and clear the persisted query cache (see lib/session.ts).
  * - 403: the signed-in reviewer is valid but not allowlisted, so send them to the
  *   not-authorized screen. Any other caller decides what to do with the error.
  *
@@ -23,7 +25,12 @@ export function useHandleApiError(): (e: unknown) => void {
     if (!(e instanceof ApiError)) return
 
     if (e.status === 401) {
-      signOut()
+      // Clear the reviewer's cached reports, then end the Clerk session.
+      // Fire-and-forget: the navigation reset to /auth/splash happens via the
+      // Clerk session change, not here. Guard the promise so a sync mock in a
+      // test can't crash the effect.
+      const p = signOutAndClear(() => signOut())
+      if (p && typeof p.catch === "function") p.catch(() => {})
       return
     }
 

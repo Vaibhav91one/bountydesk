@@ -12,6 +12,7 @@ import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 
 import { SvgImage } from "@/components/SvgImage"
+import { signOutAndClear } from "@/lib/session"
 import { darkTheme, lightTheme } from "@/theme"
 
 export default function NotAuthorizedScreen() {
@@ -26,7 +27,7 @@ export default function NotAuthorizedScreen() {
   }
 
   const handleSignOut = async () => {
-    await signOut()
+    await signOutAndClear(() => signOut())
     router.replace("/auth/sign-in")
   }
 
