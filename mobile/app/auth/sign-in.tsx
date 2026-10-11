@@ -12,7 +12,7 @@ import { useSSO } from "@clerk/expo"
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } from "react-native"
 import Svg, { Path } from "react-native-svg"
 
-import { SvgAsset } from "@/components/SvgImage"
+import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"
 
 WebBrowser.maybeCompleteAuthSession()
@@ -79,7 +79,7 @@ export default function SignInScreen() {
       <View style={styles.hero}>
         {/* m2-hero img: 72x72, border-radius 18, background #121213, padding 10 */}
         <View style={styles.heroImg}>
-          <SvgAsset name="logo-mark" width={52} height={52} />
+          <SvgImage name="logo-mark" width={52} height={52} />
         </View>
         {/* h1 style="padding:0;font-size:2rem" -> 32px */}
         <Text style={[styles.title, { color: t.colors.foreground }]}>Sign in to BountyDesk</Text>

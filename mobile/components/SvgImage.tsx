@@ -1,55 +1,81 @@
 /**
  * Renders SVG assets from mobile/assets/brand/ using react-native-svg.
  *
- * SVG files are bundled with the app as static assets and loaded via SvgUri
- * from the bundle resource URI. This avoids needing inline XML for large files.
+ * SVG files are imported as React components via react-native-svg-transformer
+ * (configured in metro.config.js), so the real docs/site/assets source files
+ * render directly through react-native-svg with no manual path copying.
+ *
+ * The `name` prop selects a known asset. For mascots use "mascot/<name>"
+ * (mascot/greeting, mascot/out-of-scope, etc.), and for logos "logo-mark",
+ * "logo-lockup", "logo-tick", "logo-small" and "trix".
  */
-import { StyleSheet, ViewStyle, Platform, Image } from "react-native"
-import { SvgUri } from "react-native-svg"
+import React from "react"
+import { ViewStyle } from "react-native"
 
-// Static asset requires - resolved at bundler time on native.
+// React component SVGs, resolved by the bundler via react-native-svg-transformer.
+// Each file becomes a default-exported React component.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const LOGO_MARK = require("../assets/brand/logo/logo-mark.svg")
+const LogoMark = require("../assets/brand/logo/logo-mark.svg").default as React.ComponentType<any>
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const LOGO_LOCKUP = require("../assets/brand/logo/logo-lockup.svg")
+const LogoLockup = require("../assets/brand/logo/logo-lockup.svg").default as React.ComponentType<any>
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const LOGO_TICK = require("../assets/brand/logo/logo-tick.svg")
+const LogoTick = require("../assets/brand/logo/logo-tick.svg").default as React.ComponentType<any>
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const MASCOT_GREETING = require("../assets/brand/mascot/greeting.svg")
+const LogoSmall = require("../assets/brand/logo-small.svg").default as React.ComponentType<any>
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const MASCOT_OUT_OF_SCOPE = require("../assets/brand/mascot/out-of-scope.svg")
+const Trix = require("../assets/brand/trix.svg").default as React.ComponentType<any>
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const AppIcon = require("../assets/brand/app-icon.svg").default as React.ComponentType<any>
 
-const ASSETS: Record<string, any> = {
-  "logo-mark": LOGO_MARK,
-  "logo-lockup": LOGO_LOCKUP,
-  "logo-tick": LOGO_TICK,
-  "mascot/greeting": MASCOT_GREETING,
-  "mascot/out-of-scope": MASCOT_OUT_OF_SCOPE,
+// Mascot assets share a directory, so they are lazy require'd by name.
+const MASCOT_MODULES: Record<string, React.ComponentType<any>> = {
+  "mascot/awaiting-approval": require("../assets/brand/mascot/awaiting-approval.svg").default,
+  "mascot/canary-found": require("../assets/brand/mascot/canary-found.svg").default,
+  "mascot/celebrating": require("../assets/brand/mascot/celebrating.svg").default,
+  "mascot/chilling": require("../assets/brand/mascot/chilling.svg").default,
+  "mascot/cowboy": require("../assets/brand/mascot/cowboy.svg").default,
+  "mascot/delivered": require("../assets/brand/mascot/delivered.svg").default,
+  "mascot/denied": require("../assets/brand/mascot/denied.svg").default,
+  "mascot/greeting": require("../assets/brand/mascot/greeting.svg").default,
+  "mascot/idle": require("../assets/brand/mascot/idle.svg").default,
+  "mascot/infra-hiccup": require("../assets/brand/mascot/infra-hiccup.svg").default,
+  "mascot/ingest": require("../assets/brand/mascot/ingest.svg").default,
+  "mascot/out-of-scope": require("../assets/brand/mascot/out-of-scope.svg").default,
+  "mascot/reproducing": require("../assets/brand/mascot/reproducing.svg").default,
+  "mascot/scanning": require("../assets/brand/mascot/scanning.svg").default,
 }
 
-export function SvgAsset({
-  name,
-  width,
-  height,
-  style,
-}: {
-  name: string
+// Static component map for the logos and icon.
+const ASSETS: Record<string, React.ComponentType<any>> = {
+  "logo-mark": LogoMark,
+  "logo-lockup": LogoLockup,
+  "logo-tick": LogoTick,
+  "logo-small": LogoSmall,
+  trix: Trix,
+  "app-icon": AppIcon,
+  ...MASCOT_MODULES,
+}
+
+export type SvgName = keyof typeof ASSETS
+
+export interface SvgImageProps {
+  /** Asset name, e.g. "logo-lockup", "mascot/greeting", "trix". */
+  name: SvgName
   width: number
   height: number
   style?: ViewStyle
-}) {
-  const asset = ASSETS[name]
-  if (!asset) {
-    return null
-  }
-
-  if (Platform.OS === "web") {
-    // On web, SvgUri can use the require directly.
-    return <SvgUri width={width} height={height} uri={asset} style={style} />
-  }
-
-  const source = Image.resolveAssetSource(asset)
-  return <SvgUri width={width} height={height} uri={source.uri} style={style} />
+  /** accessibilityLabel for screen readers. */
+  accessibilityLabel?: string
 }
 
-const styles = StyleSheet.create({})
+/**
+ * Renders a named SVG asset. Logo and mascot files carry their own fills,
+ * so pass a `style` with `tintColor` to re-color when needed.
+ */
+export function SvgImage({ name, width, height, style, accessibilityLabel }: SvgImageProps) {
+  const Asset = ASSETS[name]
+  if (!Asset) {
+    return null
+  }
+  return <Asset width={width} height={height} style={style} accessibilityLabel={accessibilityLabel} />
+}

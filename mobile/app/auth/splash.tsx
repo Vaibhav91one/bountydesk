@@ -9,7 +9,7 @@ import { View, Text, StyleSheet, Animated, Easing, useColorScheme } from "react-
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 
-import { SvgAsset } from "@/components/SvgImage"
+import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"
 
 export default function SplashScreen() {
@@ -55,10 +55,10 @@ export default function SplashScreen() {
     <View style={[styles.container, { backgroundColor: t.colors.background }]}>
       <View style={styles.wrap}>
         <Animated.View style={{ transform: [{ translateY: floatAnim }] }}>
-          <SvgAsset name="mascot/greeting" width={220} height={220} />
+          <SvgImage name="mascot/greeting" width={220} height={220} />
         </Animated.View>
         {/* m1-lockup: invert on light theme (filter:invert(1) hue-rotate(180deg)) */}
-        <SvgAsset name="logo-lockup" width={230} height={59} />
+        <SvgImage name="logo-lockup" width={230} height={59} />
         <Text style={[styles.tagline, { color: t.colors.muted }]}>
           Triage you can trust, one approval at a time.
         </Text>

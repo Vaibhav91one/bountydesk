@@ -11,7 +11,7 @@ import { View, Text, TouchableOpacity, StyleSheet, useColorScheme } from "react-
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 
-import { SvgAsset } from "@/components/SvgImage"
+import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"
 
 export default function NotAuthorizedScreen() {
@@ -33,7 +33,7 @@ export default function NotAuthorizedScreen() {
   return (
     <View style={[styles.container, { backgroundColor: t.colors.background }]}>
       <View style={styles.empty}>
-        <SvgAsset name="mascot/out-of-scope" width={200} height={200} />
+        <SvgImage name="mascot/out-of-scope" width={200} height={200} />
         <Text style={[styles.title, { color: t.colors.foreground }]}>
           You are not on the reviewer allowlist
         </Text>
