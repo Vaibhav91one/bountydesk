@@ -146,4 +146,17 @@ describe("M8 Timeline", () => {
     const { getByText } = await render(<TimelineScreen />)
     expect(getByText("No events")).toBeTruthy()
   })
+
+  it("renders a scope_tool_denied event as Denied: <toolName>", async () => {
+    const reportWithDenial: MobileCaseFile = {
+      ...SAMPLE_REPORT,
+      events: [
+        { seq: 0, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:41Z", toolName: "probe_target", argsPreview: "GET /rest/products?q=canary" },
+        { seq: 5, type: "agent.scope_tool_denied", channel: "agent", at: "2026-01-01T09:14:45Z", toolName: "probe_target", argsPreview: null },
+      ],
+    }
+    mockQueryData["/reports/report-1"] = { data: reportWithDenial }
+    const { getByText } = await render(<TimelineScreen />)
+    expect(getByText("Denied: probe_target")).toBeTruthy()
+  })
 })

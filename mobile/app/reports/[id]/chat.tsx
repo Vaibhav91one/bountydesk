@@ -128,12 +128,15 @@ export default function ChatScreen() {
   }, [])
 
   const startPolling = useCallback((lastSentRequestId: string) => {
+    // Clear any existing interval before creating a new one.
+    if (pollTimerRef.current) clearInterval(pollTimerRef.current)
     setIsPolling(true)
     pollStartRef.current = Date.now()
-    pollTimerRef.current = setInterval(async () => {
+    const timerId = setInterval(async () => {
       const elapsed = Date.now() - pollStartRef.current
       if (elapsed > 90000) {
-        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+        clearInterval(timerId)
+        pollTimerRef.current = null
         setIsPolling(false)
         return
       }
@@ -141,14 +144,16 @@ export default function ChatScreen() {
       const currentThread = useActiveThread(result.data)
       if (currentThread) {
         const hasReply = currentThread.messages.some(
-          (m) => m.sender === "AGENT" && m.clientRequestId === lastSentRequestId,
+          (m) => m.sender === "AGENT" && m.clientRequestId === `${lastSentRequestId}:agent`,
         )
         if (hasReply) {
-          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+          clearInterval(timerId)
+          pollTimerRef.current = null
           setIsPolling(false)
         }
       }
     }, 2000)
+    pollTimerRef.current = timerId
   }, [refetch])
 
   const thread = useActiveThread(status)

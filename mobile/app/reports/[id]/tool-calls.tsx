@@ -103,7 +103,8 @@ export default function ToolCallsScreen() {
 
   const toolCalls = report?.toolCalls ?? []
   const { investigation, humanGate } = splitSections(toolCalls)
-  const meta = `${report?.id ?? ""} · ${toolCalls.length} calls`
+  const renderedCount = investigation.length + humanGate.length
+  const meta = `${report?.id ?? ""} · ${renderedCount} calls`
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>

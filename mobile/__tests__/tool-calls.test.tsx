@@ -156,6 +156,29 @@ describe("M9 Tool calls", () => {
     expect(getByText(/server-held profile/)).toBeTruthy()
   })
 
+  it("header count excludes scope_tool_denied events and shows per-call status", async () => {
+    const reportWithDenial: MobileCaseFile = {
+      ...SAMPLE_REPORT,
+      events: [
+        { seq: 0, type: "agent.tool_call:scope_check", channel: "agent", at: "2026-01-01T09:14:12Z", toolName: "scope_check", argsPreview: "target=juice-shop" },
+        { seq: 1, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:41Z", toolName: "probe_target", argsPreview: "GET /q=canary" },
+        { seq: 2, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:50Z", toolName: "probe_target", argsPreview: "GET /q=second" },
+        { seq: 10, type: "agent.scope_tool_denied", channel: "agent", at: "2026-01-01T09:14:55Z", toolName: "probe_target", argsPreview: null },
+      ],
+      toolCalls: [
+        { seq: 0, type: "agent.tool_call:scope_check", channel: "agent", at: "2026-01-01T09:14:12Z", toolName: "scope_check", argsPreview: "target=juice-shop" },
+        { seq: 1, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:41Z", toolName: "probe_target", argsPreview: "GET /q=canary" },
+        { seq: 2, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:50Z", toolName: "probe_target", argsPreview: "GET /q=second" },
+        { seq: 5, type: "agent.tool_call:publish_verdict", channel: "agent", at: "2026-01-01T09:16:20Z", toolName: "publish_verdict", argsPreview: null },
+      ],
+    }
+    mockQueryData["/reports/report-1"] = { data: reportWithDenial }
+    const { getByText, getAllByText } = await render(<ToolCallsScreen />)
+    // 4 actual calls (scope_check + 2 probe_target + publish_verdict), denial excluded
+    expect(getByText(/report-1 · 4 calls/)).toBeTruthy()
+    expect(getByText("Denied")).toBeTruthy()
+  })
+
   it("renders an empty state when there are no tool calls", async () => {
     const emptyReport: MobileCaseFile = { ...SAMPLE_REPORT, toolCalls: [] }
     mockQueryData["/reports/report-1"] = { data: emptyReport }

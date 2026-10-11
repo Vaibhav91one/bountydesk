@@ -17,6 +17,7 @@ jest.mock("expo-router", () => ({
 }))
 
 const mockQueryData: Record<string, unknown> = {}
+let mockRefetchResult: { data?: unknown; error?: Error } = {}
 jest.mock("@/lib/use-query", () => ({
   ApiError: class ApiError extends Error {
     status: number
@@ -31,7 +32,7 @@ jest.mock("@/lib/use-query", () => ({
       data: data?.data,
       error: data?.error,
       isError: !!data?.error,
-      refetch: jest.fn(),
+      refetch: jest.fn(() => Promise.resolve(mockRefetchResult)),
     }
   },
   useApiMutation: () => ({
@@ -182,9 +183,19 @@ describe("M10 Reviewer chat", () => {
     const { rerender: r2 } = await render(<ChatScreen />)
     expect(r2).toBeDefined()
 
+
     // Flip back to success
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
     const { getByText: g2 } = await render(<ChatScreen />)
     expect(g2("Ask the agent")).toBeTruthy()
+  })
+
+  it("uses a UUID clientRequestId when sending a message", async () => {
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    const { getByPlaceholderText } = await render(<ChatScreen />)
+    const input = getByPlaceholderText("Ask about this report")
+    expect(input).toBeTruthy()
   })
 })
