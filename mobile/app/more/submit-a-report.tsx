@@ -36,6 +36,25 @@ export default function SubmitReportScreen() {
   const [material, setMaterial] = useState("none")
   const [sheetVisible, setSheetVisible] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [pickedFile, setPickedFile] = useState<{ uri: string; name: string; mimeType: string } | null>(null)
+  const [imageRef, setImageRef] = useState("")
+  const [imageDigest, setImageDigest] = useState("")
+
+  const handlePickFile = () => {
+    // Lazy-load expo-document-picker so this module does not import a native
+    // dependency at module-evaluation time (keeps route-scanning tests green).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const DocumentPicker = require("expo-document-picker")
+    DocumentPicker.getDocumentAsync({
+      type: "*/*",
+      multiple: false,
+    }).then((result: { canceled: boolean; assets?: { uri: string; name: string; mimeType?: string }[] }) => {
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const asset = result.assets[0]
+        setPickedFile({ uri: asset.uri, name: asset.name, mimeType: asset.mimeType ?? "application/octet-stream" })
+      }
+    })
+  }
 
   const handleSubmit = async () => {
     try {
@@ -45,7 +64,25 @@ export default function SubmitReportScreen() {
       formData.append("title", title)
       formData.append("body", report)
       formData.append("contact", email)
-      formData.append("material", material)
+
+      if (material === "tarball" && pickedFile) {
+        // @ts-expect-error — FormData on React Native accepts { uri, name, type }
+        formData.append("archive", {
+          uri: pickedFile.uri,
+          name: pickedFile.name,
+          type: pickedFile.mimeType,
+        })
+      } else if (material === "dockerfile" && pickedFile) {
+        // @ts-expect-error — FormData on React Native accepts { uri, name, type }
+        formData.append("dockerfile", {
+          uri: pickedFile.uri,
+          name: pickedFile.name,
+          type: pickedFile.mimeType,
+        })
+      } else if (material === "prebuilt") {
+        formData.append("imageRef", imageRef)
+        formData.append("imageDigest", imageDigest)
+      }
 
       const baseURL = process.env.EXPO_PUBLIC_API_BASE
       const response = await fetch(`${baseURL}/api/intake/upload`, {
@@ -54,9 +91,15 @@ export default function SubmitReportScreen() {
       })
 
       if (!response.ok) {
-        const code = response.headers.get("X-Error-Code") ?? undefined
-        const body = await response.text().catch(() => "")
-        throw new ApiError(response.status, code, body)
+        let msg: string
+        try {
+          const data = await response.json()
+          msg = data.error || `Upload failed (${response.status})`
+        } catch {
+          const text = await response.text().catch(() => "")
+          msg = text || `Upload failed (${response.status})`
+        }
+        throw new Error(msg)
       }
 
       const result = await response.json().catch(() => ({}))
@@ -80,7 +123,29 @@ export default function SubmitReportScreen() {
     }
   }
 
+  const materialComplete = () => {
+    if (material === "none") return true
+    if (material === "tarball" || material === "dockerfile") return pickedFile !== null
+    if (material === "prebuilt") return imageRef.trim() !== "" && imageDigest.trim() !== ""
+    return true
+  }
+
   const selectedMaterial = TARGET_MATERIALS.find((m) => m.value === material) || TARGET_MATERIALS[0]
+
+  // Subtitle for the main "Add target material" card row.
+  // Shows the file name (tarball/dockerfile), the image ref (prebuilt), or "None selected".
+  const materialSubtitle = (() => {
+    if (material === "tarball" || material === "dockerfile") {
+      return pickedFile ? pickedFile.name : "None selected"
+    }
+    if (material === "prebuilt") {
+      if (imageRef.trim()) {
+        return imageRef
+      }
+      return "None selected"
+    }
+    return "None selected"
+  })()
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -138,7 +203,7 @@ export default function SubmitReportScreen() {
             <Text style={[styles.lbl, { color: colors.muted }]}>Target material</Text>
             <Card style={styles.list}>
               <Pressable
-                onPress={() => setSheetVisible(true)}
+                onPress={material === "prebuilt" ? undefined : () => setSheetVisible(true)}
                 style={({ pressed }) => [styles.item, { backgroundColor: colors.card }, pressed && { opacity: 0.92 }]}
               >
                 <View style={styles.rowLeading}>
@@ -147,15 +212,65 @@ export default function SubmitReportScreen() {
                 <View style={styles.main}>
                   <Text style={[styles.itemT, { color: colors.foreground }]}>Add target material</Text>
                   <Text style={[styles.itemS, { color: colors.muted }]}>
-                    {selectedMaterial.value === "none" ? "None selected" : selectedMaterial.label}
+                    {materialSubtitle}
                   </Text>
                 </View>
                 <View style={styles.rowTrailing}>
-                  <Icon name="chev" size={18} stroke={colors.faint} />
+                  {material !== "prebuilt" ? (
+                    <Icon name="chev" size={18} stroke={colors.faint} />
+                  ) : null}
                 </View>
               </Pressable>
             </Card>
           </View>
+
+          {(material === "tarball" || material === "dockerfile") && (
+            <View style={styles.pickerRow}>
+              <Pressable
+                onPress={handlePickFile}
+                style={({ pressed }) => [styles.item, { backgroundColor: colors.card }, pressed && { opacity: 0.92 }]}
+              >
+                <View style={styles.rowLeading}>
+                  <Icon name="upload" size={20} stroke={colors["brand-soft"]} />
+                </View>
+                <View style={styles.main}>
+                  <Text style={[styles.itemT, { color: colors.foreground }]}>
+                    {material === "tarball" ? "Choose archive" : "Choose Dockerfile"}
+                  </Text>
+                  <Text style={[styles.itemS, { color: colors.muted }]}>
+                    {pickedFile ? pickedFile.name : "Tap to choose"}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
+          )}
+
+          {material === "prebuilt" && (
+            <View style={styles.prebuiltInputs}>
+              <View>
+                <Text style={[styles.lbl, { color: colors.muted }]}>Image reference</Text>
+                <TextInput
+                  style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground }]}
+                  placeholder="ghcr.io/owner/image:tag"
+                  placeholderTextColor={colors.faint}
+                  value={imageRef}
+                  onChangeText={setImageRef}
+                  autoCapitalize="none"
+                />
+              </View>
+              <View>
+                <Text style={[styles.lbl, { color: colors.muted }]}>Digest</Text>
+                <TextInput
+                  style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground }]}
+                  placeholder="sha256:"
+                  placeholderTextColor={colors.faint}
+                  value={imageDigest}
+                  onChangeText={setImageDigest}
+                  autoCapitalize="none"
+                />
+              </View>
+            </View>
+          )}
         </View>
 
         <Text style={[styles.note, { color: colors.muted }]}>
@@ -174,7 +289,11 @@ export default function SubmitReportScreen() {
             {TARGET_MATERIALS.map((m) => (
               <Pressable
                 key={m.value}
-                onPress={() => setMaterial(m.value)}
+                onPress={() => {
+                  setMaterial(m.value)
+                  setPickedFile(null)
+                  setSheetVisible(false)
+                }}
                 style={[styles.sheetItem, { backgroundColor: colors.card }]}
               >
                 <View style={styles.main}>
@@ -201,11 +320,11 @@ export default function SubmitReportScreen() {
       <View style={[styles.fbar, { backgroundColor: colors.background }]}>
         <Pressable
           onPress={handleSubmit}
-          disabled={submitting || !title || !report || !email}
+          disabled={submitting || !title || !report || !email || !materialComplete()}
           style={({ pressed }) => [
             styles.fbarBtn,
             { backgroundColor: colors.brand },
-            (submitting || !title || !report || !email) && { opacity: 0.4 },
+            (submitting || !title || !report || !email || !materialComplete()) && { opacity: 0.4 },
             pressed && !submitting && { opacity: 0.92 },
           ]}
         >
@@ -298,6 +417,12 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
     paddingRight: 0,
   },
+  pickerRow: {
+    marginHorizontal: 16,
+    borderRadius: 24,
+    overflow: "hidden",
+    marginBottom: 4,
+  },
   sheetContent: {
     paddingBottom: 8,
   },
@@ -352,5 +477,9 @@ const styles = StyleSheet.create({
   fbarBtnText: {
     fontSize: 17,
     fontWeight: "600",
+  },
+  prebuiltInputs: {
+    gap: 16,
+    paddingHorizontal: 16,
   },
 })

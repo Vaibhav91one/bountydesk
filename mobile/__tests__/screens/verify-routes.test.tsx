@@ -266,7 +266,7 @@ describe("M20 Submit a report", () => {
     expect(body.get("title")).toBe("XSS in search")
     expect(body.get("body")).toBe("The q parameter is stored and rendered without encoding.")
     expect(body.get("contact")).toBe("user@example.com")
-    expect(body.get("material")).toBe("none")
+    expect(body.get("material")).toBeNull()
 
     expect(mockPush).toHaveBeenCalledWith({
       pathname: "/more/submit-a-report/contact-verify",
