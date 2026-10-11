@@ -12,6 +12,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } 
 import Svg, { Path } from "react-native-svg"
 
 import { SvgImage } from "@/components/SvgImage"
+import { Icon } from "@/components/icons"
 import { darkTheme, lightTheme } from "@/theme"
 
 // maybeCompleteAuthSession() is called once in app/_layout.tsx at the top
@@ -95,7 +96,7 @@ export default function SignInScreen() {
           onPress={() => handleSSO("github")}
           activeOpacity={0.9}
         >
-          <GoogleIcon />
+          <Icon name="github" size={20} stroke="#202022" />
           <Text style={[styles.btnTextDark, { color: t.colors.background }]}>Continue with GitHub</Text>
         </TouchableOpacity>
 
