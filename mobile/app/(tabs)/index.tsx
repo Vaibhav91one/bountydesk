@@ -1,10 +1,10 @@
 /** M4 Home. Needs you carousel, active and delivered report lists.
  * Matches docs/site/screens/m4.html exactly.
  *
- * The tab dock, top bar, and Review FAB are provided by the parent _layout.tsx
- * (the "Variant C" floating tab shell). This screen renders the scrollable content.
- *
- * The section header and phase pills come from the shared primitives so M5 and
+ * The native tab bar (Home/Queue/Reports) is provided by the parent
+ * (tabs)/_layout.tsx via expo-router/unstable-native-tabs. The Review FAB and
+ * the bell/more chrome are overlay components rendered on this screen. The
+ * section header and phase pills come from the shared primitives so M5 and
  * later screens render the same chrome.
  */
 import { View, Text, ScrollView, StyleSheet, Dimensions } from "react-native"
@@ -12,7 +12,9 @@ import { View, Text, ScrollView, StyleSheet, Dimensions } from "react-native"
 import { useApiQuery } from "@/lib/use-query"
 import type { HomeSummary } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { Icon } from "@/components/ui/IconButton"
+import { Icon } from "@/components/icons"
+import { TopBarPill } from "@/components/TopBarPill"
+import { ReviewFab } from "@/components/ReviewFab"
 import { PhasePill, SectionHeader, Card } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
 
@@ -76,11 +78,12 @@ export default function HomeScreen() {
   }
 
   return (
-    <ScrollView
-      style={[styles.scroll, { backgroundColor: colors.background }]}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={[styles.h1, { color: colors.foreground }]}>Home</Text>
       <Text style={[styles.hmeta, { color: colors.muted }]}>
         {summary?.reports ?? 10} total reports · {summary?.open ?? 8} open
@@ -129,7 +132,11 @@ export default function HomeScreen() {
       <Text style={[styles.note, { color: colors.muted }]}>
         Verdicts are only sent after you approve the exact drafted comment.
       </Text>
-    </ScrollView>
+      </ScrollView>
+
+      <TopBarPill />
+      <ReviewFab />
+    </View>
   )
 }
 

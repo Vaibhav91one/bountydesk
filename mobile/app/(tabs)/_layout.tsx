@@ -1,21 +1,24 @@
 /**
- * Signed-in reviewer shell. Variant C floating tab dock.
+ * Signed-in reviewer shell using the installed Expo native tabs.
+ *
+ * Per docs/site/native-ui.html the tab bar holds only Home, Queue, Reports.
+ * Review next (m11) and the bell/more chrome are NOT tabs — they are overlaid
+ * on the three tab screens by <TopBarPill> and <ReviewFab> in components/.
  *
  * Auth gate: Clerk says "signed in", then GET /home checks the reviewer
- * allowlist. 403 -> not-authorized. The chrome (glass top bar with bell +
- * more, floating tab pill, 64pt Review FAB with badge) is shared chrome
- * rendered by NativeTabsShell in components/NativeTabs.tsx, matching
- * docs/site/screens/m4.html and c.js's TABS constant.
+ * allowlist. 403 -> not-authorized.
  */
 import { useAuth } from "@clerk/expo"
 import { Redirect } from "expo-router"
+import { NativeTabs } from "expo-router/unstable-native-tabs"
 import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"
 
-import { NativeTabsShell } from "@/components/NativeTabs"
 import { api, ApiError } from "@/lib/api"
 import { useHandleApiError } from "@/lib/use-api-error"
 import type { HomeSummary } from "@/lib/types"
+import { Icon } from "@/components/icons"
+import { useTheme } from "@/theme"
 
 export default function TabsLayout() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -40,31 +43,43 @@ export default function TabsLayout() {
       })
   }, [isSignedIn, handleApiError])
 
-  if (!isLoaded) {
-    return null
-  }
+  if (!isLoaded) return null
+  if (!isSignedIn) return <Redirect href="/auth/splash" />
+  if (allowlisted === false) return <Redirect href="/auth/not-authorized" />
+  if (checkError) return <View style={styles.centered}><Text style={styles.error}>{checkError}</Text></View>
+  if (allowlisted === null) return null
 
-  if (!isSignedIn) {
-    return <Redirect href="/auth/splash" />
-  }
+  return <TabsShell />
+}
 
-  if (allowlisted === false) {
-    return <Redirect href="/auth/not-authorized" />
-  }
+function TabsShell() {
+  const { colors } = useTheme()
+  return (
+    <NativeTabs
+      backgroundColor={colors.glass}
+      iconColor={{ default: colors.muted, selected: colors.brand }}
+      tintColor={colors.brand}
+      labelStyle={{ fontSize: 12, fontWeight: "500" }}
+      screenListeners={{
+        focus: () => {},
+      }}
+    >
+      <NativeTabs.Trigger name="index">
+        <NativeTabs.Trigger.Icon src={<Icon name="home" size={24} />} />
+        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
 
-  if (checkError) {
-    return (
-      <View style={styles.centered}>
-        <Text style={styles.error}>{checkError}</Text>
-      </View>
-    )
-  }
+      <NativeTabs.Trigger name="queue">
+        <NativeTabs.Trigger.Icon src={<Icon name="queue" size={24} />} />
+        <NativeTabs.Trigger.Label>Queue</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
 
-  if (isSignedIn && allowlisted === null) {
-    return null
-  }
-
-  return <NativeTabsShell reviewCount={3} />
+      <NativeTabs.Trigger name="reports">
+        <NativeTabs.Trigger.Icon src={<Icon name="reports" size={24} />} />
+        <NativeTabs.Trigger.Label>Reports</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+    </NativeTabs>
+  )
 }
 
 const styles = StyleSheet.create({
