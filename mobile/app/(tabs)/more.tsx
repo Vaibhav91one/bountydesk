@@ -1,4 +1,4 @@
-/** M19 Settings (More tab). Links to Connections, Integrations, Target and scope, Privacy, Terms, Submit a report. Stub. */
+/** M19 Settings (More tab). Account, workspace, notifications and legal links. Stub. */
 import { StubScreen } from "@/components/stub-screen"
 
 export default function MoreScreen() {
