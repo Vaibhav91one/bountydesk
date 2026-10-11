@@ -101,6 +101,65 @@ export type CaseEvent = {
   argsPreview: string | null
 }
 
+/**
+ * One integration row from GET /integrations.
+ * Matches the API response documented in docs/mobile-api.md.
+ */
+export type IntegrationRow = {
+  id: string
+  name: string
+  type: string
+  configured: boolean
+}
+
+/**
+ * A reviewer on the email allowlist (M17).
+ * Copied from listReviewers() in lib/auth/reviewers.ts.
+ */
+export type EmailReviewer = {
+  email: string
+  role: "owner" | "member" | "read_only"
+  verified: boolean
+  codeOutstanding: boolean
+  addedByEmail: string | null
+  createdAt: string
+}
+
+/**
+ * Inbox card shape (M23). Copied from InboxCard in lib/mobile/views.ts.
+ */
+export type InboxCard = {
+  id: string
+  title: string
+  sourceLabel: string
+  channel: string
+  targetName: string | null
+  outcome: string | null
+  verdictSuperseded: boolean
+  deliveryState: string | null
+  state: string
+  awaitingVerdictId: string | null
+  updatedAt: string
+}
+
+/**
+ * Inbox section returned by GET /inbox.
+ */
+export type InboxSection = {
+  items: InboxCard[]
+  total: number
+  nextOffset: number | null
+  truncated?: boolean
+}
+
+/**
+ * The inbox response: needsYou and earlier sections.
+ */
+export type InboxResponse = {
+  needsYou: InboxSection | null
+  earlier: InboxSection | null
+}
+
 export type MobileCaseFile = {
   id: string
   title: string
