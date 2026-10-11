@@ -70,11 +70,13 @@ jest.mock("@/lib/use-query", () => ({
 
 jest.mock("@/lib/push", () => ({
   registerForPush: jest.fn(),
+  unregisterPush: jest.fn(async () => {}),
 }))
 // Reference the mocked function through require so the factory stays free of
 // out-of-scope variables.
 const pushModule = require("@/lib/push")
 const registerForPush = (pushModule.registerForPush as jest.Mock) || jest.fn()
+const unregisterPush = pushModule.unregisterPush as jest.Mock
 
 jest.mock("@/lib/session", () => ({
   signOutAndClear: jest.fn(),
@@ -115,14 +117,11 @@ describe("M19 Settings notification switches", () => {
     registerForPush.mockResolvedValue({ ok: true })
   })
 
-  // The three toggles render in order: Approvals needed, Delivery receipts,
-  // Reproduction failures. Defaults are true, true, false.
+  // The three switches render in order: Approvals needed, Delivery receipts, Reproduction
+  // failures. All start off: nothing is registered until the reviewer opts in.
   it("turns on Approvals needed and registers for push on success", async () => {
     const { getByText, getAllByRole } = await renderScreen()
-
     await waitFor(() => expect(getAllByRole("switch")).toHaveLength(3))
-    // starts checked (default true), flip it off then on to hit the register path
-    await pressSwitchByText(getByText, "Approvals needed")
     await pressSwitchByText(getByText, "Approvals needed")
     await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(1))
     expect(mockShow).not.toHaveBeenCalled()
@@ -130,20 +129,35 @@ describe("M19 Settings notification switches", () => {
 
   it("turns the switch back off and shows the reason on failure", async () => {
     const { getByText, getAllByRole } = await renderScreen()
-
     await waitFor(() => expect(getAllByRole("switch")).toHaveLength(3))
     registerForPush.mockResolvedValueOnce({
       ok: false,
       reason: "Notifications are turned off for BountyDesk in Settings",
     })
-
-    // flip off then on to trigger register
     await pressSwitchByText(getByText, "Approvals needed")
-    await pressSwitchByText(getByText, "Approvals needed")
-    expect(registerForPush).toHaveBeenCalled()
     await waitFor(() =>
       expect(mockShow).toHaveBeenCalledWith("Notifications are turned off for BountyDesk in Settings"),
     )
+  })
+
+  it("shows the error and turns the switch off when registering throws", async () => {
+    const { getByText, getAllByRole } = await renderScreen()
+    await waitFor(() => expect(getAllByRole("switch")).toHaveLength(3))
+    registerForPush.mockRejectedValueOnce(new Error("Network request failed"))
+    await pressSwitchByText(getByText, "Approvals needed")
+    await waitFor(() => expect(mockShow).toHaveBeenCalledWith("Network request failed"))
+  })
+
+  it("unregisters the device only once both push switches are off", async () => {
+    const { getByText, getAllByRole } = await renderScreen()
+    await waitFor(() => expect(getAllByRole("switch")).toHaveLength(3))
+    await pressSwitchByText(getByText, "Approvals needed")
+    await pressSwitchByText(getByText, "Delivery receipts")
+    await waitFor(() => expect(registerForPush).toHaveBeenCalledTimes(2))
+    await pressSwitchByText(getByText, "Approvals needed")
+    expect(unregisterPush).not.toHaveBeenCalled()
+    await pressSwitchByText(getByText, "Delivery receipts")
+    await waitFor(() => expect(unregisterPush).toHaveBeenCalledTimes(1))
   })
 
   it("shows the not-wired note under the switches", async () => {

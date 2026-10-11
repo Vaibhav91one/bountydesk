@@ -38,6 +38,8 @@ export default function RootLayout() {
   // while the app is foregrounded. Placed above the font/loading early return so
   // a notification opened while the app is still bootstrapping is not lost.
   useEffect(() => {
+    // The Stack only mounts once fonts are ready; navigating before that throws.
+    if (showLoading) return
     const handleResponse = (response: Notifications.NotificationResponse | null) => {
       if (!response) return
       const route = routeForNotification(response.notification.request.content.data)
@@ -48,7 +50,7 @@ export default function RootLayout() {
     return () => {
       subscription.remove()
     }
-  }, [router])
+  }, [router, showLoading])
 
   // Apply the reviewer's saved Light/Dark choice before the first screen renders.
   useEffect(() => {
