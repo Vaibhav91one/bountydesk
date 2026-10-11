@@ -10,53 +10,49 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { InboxResponse, InboxCard } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card } from "@/components/primitives"
+import { ScreenHeader, Card, EmptyState } from "@/components/primitives"
 
 type PhaseColor = "approval" | "delivered" | "closed" | "analysis"
 
-// Determines the phase key for a card.
+// card.state is the report_lifecycle_state enum, upper case. DELIVERED is only set once the
+// transport receipt arrives; DELIVERING is approved and still in flight.
+const CLOSED_STATES = new Set(["DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"])
+
 function phaseForCard(card: InboxCard): PhaseColor {
-  if (card.awaitingVerdictId) return "approval"
-  if (card.deliveryState === "delivered") return "delivered"
-  if (card.verdictSuperseded) return "closed"
+  if (card.awaitingVerdictId || card.state === "AWAITING_APPROVAL") return "approval"
+  if (card.state === "DELIVERED" || card.state === "DELIVERING") return "delivered"
+  if (CLOSED_STATES.has(card.state)) return "closed"
   return "analysis"
 }
 
-// Resolves a phase key to its theme color.
 function phaseColor(theme: ReturnType<typeof useTheme>, phase: PhaseColor): string {
   switch (phase) {
     case "approval": return theme.phase.approval
     case "delivered": return theme.phase.delivered
     case "closed": return theme.phase.closed
-    case "analysis": return theme.colors.red
+    case "analysis": return theme.phase.analysis
   }
 }
 
-// Label text for the phase pill.
 function phaseLabelFor(phase: PhaseColor, card: InboxCard): string {
   switch (phase) {
     case "approval": return "Approval"
-    case "delivered": return "Delivered"
+    case "delivered": return card.state === "DELIVERING" ? "Delivering" : "Delivered"
     case "closed": return "Closed"
-    case "analysis": return card.state === "analysis_only" ? "Failed" : "Analysis"
+    case "analysis": return card.state === "ANALYSIS_ONLY" ? "Analysis only" : "Analysis"
   }
 }
 
-// Determines the subtitle text based on card state/outcome, matching m23.html.
+// Subtitle: the report's short id and where it stands.
 function inboxSubtitle(card: InboxCard): string {
-  if (card.awaitingVerdictId) {
-    return `${card.id} · Approval needed`
+  const id = card.sourceLabel
+  if (card.awaitingVerdictId || card.state === "AWAITING_APPROVAL") return `${id} · Approval needed`
+  if (card.state === "DELIVERED") return `${id} · Delivered`
+  if (card.state === "DELIVERING") {
+    return card.deliveryState === "FAILED" ? `${id} · Delivery failed, retrying` : `${id} · Waiting for the receipt`
   }
-  if (card.deliveryState === "delivered") {
-    return `${card.id} · Delivered`
-  }
-  if (card.state === "analysis_only" || card.state === "analyzing") {
-    return `${card.id} · Target did not start`
-  }
-  if (card.outcome) {
-    return `${card.id} · ${card.outcome}`
-  }
-  return `${card.id} · ${card.state}`
+  if (card.state === "ANALYSIS_ONLY") return `${id} · Analysis only`
+  return `${id} · ${card.state.replace(/_/g, " ").toLowerCase()}`
 }
 
 // Formats the updatedAt timestamp into a relative time string.
@@ -71,78 +67,6 @@ function formatTime(updatedAt: string): string {
   if (diffHours < 24) return `${diffHours} h`
   return `${diffDays} d`
 }
-
-// Mock data matching m23.html when API returns empty/loading.
-const mockNeedsYou: InboxCard[] = [
-  {
-    id: "BD-1042",
-    title: "Stored XSS in search results",
-    sourceLabel: "GitHub",
-    channel: "github",
-    targetName: "juice-shop",
-    outcome: null,
-    verdictSuperseded: false,
-    deliveryState: null,
-    state: "awaiting_approval",
-    awaitingVerdictId: "v-1042",
-    updatedAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "BD-1041",
-    title: "SQL injection in login",
-    sourceLabel: "GitHub",
-    channel: "github",
-    targetName: "juice-shop",
-    outcome: null,
-    verdictSuperseded: false,
-    deliveryState: null,
-    state: "awaiting_approval",
-    awaitingVerdictId: "v-1041",
-    updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-  },
-]
-
-const mockEarlier: InboxCard[] = [
-  {
-    id: "BD-1033",
-    title: "Reflected XSS in /search",
-    sourceLabel: "GitHub",
-    channel: "github",
-    targetName: "juice-shop",
-    outcome: "delivered",
-    verdictSuperseded: false,
-    deliveryState: "delivered",
-    state: "delivered",
-    awaitingVerdictId: null,
-    updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "BD-1030",
-    title: "CSRF on profile update",
-    sourceLabel: "Email",
-    channel: "email",
-    targetName: null,
-    outcome: "delivered",
-    verdictSuperseded: false,
-    deliveryState: "delivered",
-    state: "delivered",
-    awaitingVerdictId: null,
-    updatedAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-  },
-  {
-    id: "BD-1042",
-    title: "Open redirect on /redirect",
-    sourceLabel: "Upload",
-    channel: "upload",
-    targetName: "juice-shop",
-    outcome: null,
-    verdictSuperseded: false,
-    deliveryState: null,
-    state: "analysis_only",
-    awaitingVerdictId: null,
-    updatedAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-  },
-]
 
 function InboxRow({ card, theme }: { card: InboxCard; theme: ReturnType<typeof useTheme> }) {
   const router = useRouter()
@@ -184,13 +108,18 @@ export default function InboxScreen() {
 
   const isAuthError = inbox.error instanceof ApiError && (inbox.error.status === 401 || inbox.error.status === 403)
   if (isAuthError) return null
+  if (inbox.error) {
+    return (
+      <View style={{ flex: 1, backgroundColor: theme.colors.background, alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <Text style={{ color: theme.colors.red, fontSize: 16, textAlign: "center" }}>{inbox.error.message}</Text>
+      </View>
+    )
+  }
 
   const needsYou = inbox.data?.needsYou?.items ?? []
   const earlier = inbox.data?.earlier?.items ?? []
 
-  const needsYouItems = needsYou.length > 0 ? needsYou : mockNeedsYou
-  const earlierItems = earlier.length > 0 ? earlier : mockEarlier
-  const needsYouCount = inbox.data?.needsYou?.total ?? 2
+  const needsYouCount = inbox.data?.needsYou?.total ?? needsYou.length
 
   const { colors } = theme
 
@@ -207,11 +136,15 @@ export default function InboxScreen() {
           <View style={styles.sh}>
             <Text style={[styles.shText, { color: colors.foreground }]}>Needs you</Text>
           </View>
-          <Card style={styles.list}>
-            {needsYouItems.map((card) => (
-              <InboxRow key={card.id} card={card} theme={theme} />
-            ))}
-          </Card>
+          {needsYou.length > 0 ? (
+            <Card style={styles.list}>
+              {needsYou.map((card) => (
+                <InboxRow key={card.id} card={card} theme={theme} />
+              ))}
+            </Card>
+          ) : (
+            <EmptyState heading="Nothing needs you" body="Verdicts waiting for your approval show up here." inline />
+          )}
         </View>
 
         {/* Earlier section */}
@@ -219,11 +152,13 @@ export default function InboxScreen() {
           <View style={styles.sh}>
             <Text style={[styles.shText, { color: colors.foreground }]}>Earlier</Text>
           </View>
-          <Card style={styles.list}>
-            {earlierItems.map((card) => (
-              <InboxRow key={card.id} card={card} theme={theme} />
-            ))}
-          </Card>
+          {earlier.length > 0 ? (
+            <Card style={styles.list}>
+              {earlier.map((card) => (
+                <InboxRow key={card.id} card={card} theme={theme} />
+              ))}
+            </Card>
+          ) : null}
           <Text style={[styles.note, { color: colors.muted }]}>
             Delivery is confirmed by a transport receipt, not by the provider accepting a send.
           </Text>

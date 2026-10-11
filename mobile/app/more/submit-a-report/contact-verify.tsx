@@ -6,6 +6,7 @@
  * delivered mascot. On failure the server's error is shown and the boxes are cleared.
  * Resend uses the verify route's resend form (action=resend, reportId).
  */
+import { applyOtpInput } from "@/lib/otp"
 import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
@@ -35,20 +36,16 @@ export default function ContactVerifyScreen() {
 
   const onChangeText = (index: number, value: string) => {
     if (verified) return
-    const digit = value.replace(/\D/g, "").slice(-1)
-    if (!digit) return
-
-    const newCode = code.slice(0, index) + digit + code.slice(index + 1)
-    setCode(newCode)
-
-    if (index < OTP_LENGTH - 1) {
-      inputs.current[index + 1]?.focus()
-    } else {
-      // Sixth digit: POST the public verify route.
+    const result = applyOtpInput(code, index, value, OTP_LENGTH)
+    setCode(result.code)
+    if (result.focus === null) {
       Keyboard.dismiss()
-      verifyCode(newCode)
+      verifyCode(result.code)
+    } else {
+      inputs.current[result.focus]?.focus()
     }
   }
+
 
   const onKeyPress = (index: number, key: string) => {
     if (key === "Backspace" && !code[index] && index > 0) {
@@ -148,7 +145,7 @@ export default function ContactVerifyScreen() {
                   keyboardType="number-pad"
                   inputMode="numeric"
                   textContentType="oneTimeCode"
-                  maxLength={1}
+                  maxLength={OTP_LENGTH}
                   textAlign="center"
                   selectTextOnFocus
                   autoComplete="one-time-code"

@@ -326,21 +326,24 @@ describe("M23 Inbox", () => {
     expect(getAllByText("Inbox").length).toBeGreaterThan(0)
   })
 
-  it("renders data state with needs you and earlier", async () => {
+  it("renders real inbox rows with upper-case states and the short report id", async () => {
+    // Shape copied from InboxCard in lib/mobile/views.ts: state is the report enum, deliveryState is
+    // PENDING | SENT | FAILED, and id is the report uuid.
     mockQueryResult["/inbox"] = {
       data: {
         needsYou: {
           items: [
-            { id: "BD-1042", title: "Stored XSS", sourceLabel: "GitHub", channel: "github", targetName: "juice-shop", outcome: null, verdictSuperseded: false, deliveryState: null, state: "awaiting_approval", awaitingVerdictId: "v-1", updatedAt: new Date().toISOString() },
+            { id: "11111111-aaaa-bbbb-cccc-000000000001", title: "Stored XSS", sourceLabel: "#482", channel: "github", targetName: "t", outcome: "REPRODUCED", verdictSuperseded: false, deliveryState: null, state: "AWAITING_APPROVAL", awaitingVerdictId: "v-1", updatedAt: new Date().toISOString() },
           ],
           total: 1,
           nextOffset: null,
         },
         earlier: {
           items: [
-            { id: "BD-1033", title: "Reflected XSS", sourceLabel: "GitHub", channel: "github", targetName: "juice-shop", outcome: "delivered", verdictSuperseded: false, deliveryState: "delivered", state: "delivered", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
+            { id: "11111111-aaaa-bbbb-cccc-000000000002", title: "Reflected XSS", sourceLabel: "#470", channel: "github", targetName: "t", outcome: "REPRODUCED", verdictSuperseded: false, deliveryState: "SENT", state: "DELIVERED", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
+            { id: "11111111-aaaa-bbbb-cccc-000000000003", title: "Open redirect", sourceLabel: "#465", channel: "email", targetName: null, outcome: null, verdictSuperseded: false, deliveryState: "SENT", state: "DELIVERING", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
           ],
-          total: 1,
+          total: 2,
           nextOffset: null,
           truncated: false,
         },
@@ -348,30 +351,33 @@ describe("M23 Inbox", () => {
       error: undefined,
       isPending: false,
     }
-    const { getByText } = await renderWithClient(<InboxScreen />)
-    expect(getByText("Needs you")).toBeTruthy()
-    expect(getByText("Earlier")).toBeTruthy()
-    expect(getByText("Stored XSS")).toBeTruthy()
-    expect(getByText("Reflected XSS")).toBeTruthy()
+    const { getByText, getAllByText } = await renderWithClient(<InboxScreen />)
+    expect(getByText("1 need you")).toBeTruthy()
+    expect(getByText("#482 · Approval needed")).toBeTruthy()
+    expect(getByText("#470 · Delivered")).toBeTruthy()
+    expect(getByText("#465 · Waiting for the receipt")).toBeTruthy()
+    expect(getAllByText("Delivered").length).toBeGreaterThan(0)
+    expect(getByText("Delivering")).toBeTruthy()
   })
 
-  it("renders with mock data when empty", async () => {
-    mockQueryResult["/inbox"] = { data: { needsYou: null, earlier: null }, error: undefined, isPending: false }
-    const { getAllByText } = await renderWithClient(<InboxScreen />)
-    expect(getAllByText("Needs you").length).toBeGreaterThan(0)
-    expect(getAllByText("Earlier").length).toBeGreaterThan(0)
+  it("shows an empty state and no sample cards when nothing needs you", async () => {
+    mockQueryResult["/inbox"] = { data: { needsYou: { items: [], total: 0, nextOffset: null }, earlier: null }, error: undefined, isPending: false }
+    const { getByText, queryByText } = await renderWithClient(<InboxScreen />)
+    expect(getByText("0 need you")).toBeTruthy()
+    expect(getByText("Nothing needs you")).toBeTruthy()
+    expect(queryByText("Stored XSS in search results")).toBeNull()
   })
 
-  it("renders with mock data on non-auth error", async () => {
+  it("shows the error on a non-auth failure", async () => {
     const { ApiError } = require("@/lib/use-query")
     mockQueryResult["/inbox"] = {
       data: undefined,
       error: new ApiError(500, "err-server", "upstream timeout"),
       isPending: false,
     }
-    const { getAllByText } = await renderWithClient(<InboxScreen />)
-    // Falls back to mock data for non-auth errors
-    expect(getAllByText("Needs you").length).toBeGreaterThan(0)
+    const { getByText, queryByText } = await renderWithClient(<InboxScreen />)
+    expect(getByText("upstream timeout")).toBeTruthy()
+    expect(queryByText("Needs you")).toBeNull()
   })
 
   it("returns null for auth error", async () => {

@@ -7,6 +7,7 @@
  * "Verified" on success, and pops back to M17. On failure it shows the
  * server's error and clears the boxes. Resend re-POSTs the add route.
  */
+import { applyOtpInput } from "@/lib/otp"
 import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
@@ -56,22 +57,16 @@ export default function OtpVerifyScreen() {
 
   const onChangeText = (index: number, value: string) => {
     if (verifyMutation.isPending) return
-    // Keep only digits, take the last one.
-    const digit = value.replace(/\D/g, "").slice(-1)
-    if (!digit) return
-
-    const newCode = code.slice(0, index) + digit + code.slice(index + 1)
-    setCode(newCode)
-
-    // Auto-advance to the next box.
-    if (index < OTP_LENGTH - 1) {
-      inputs.current[index + 1]?.focus()
-    } else {
-      // Sixth digit: POST the verify route.
+    const result = applyOtpInput(code, index, value, OTP_LENGTH)
+    setCode(result.code)
+    if (result.focus === null) {
       Keyboard.dismiss()
-      verifyMutation.mutate({ email, code: newCode })
+      verifyMutation.mutate({ email, code: result.code })
+    } else {
+      inputs.current[result.focus]?.focus()
     }
   }
+
 
   const onKeyPress = (index: number, key: string) => {
     // Backspace on an empty box: go to the previous box.
@@ -143,7 +138,7 @@ export default function OtpVerifyScreen() {
               keyboardType="number-pad"
               inputMode="numeric"
               textContentType={i === 0 ? "oneTimeCode" : "none"}
-              maxLength={1}
+              maxLength={OTP_LENGTH}
               textAlign="center"
               selectTextOnFocus
               autoComplete="one-time-code"
