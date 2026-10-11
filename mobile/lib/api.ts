@@ -25,6 +25,23 @@ export function setTokenGetter(getToken: () => Promise<string | null>) {
 }
 
 /**
+ * Reads a failed response's body once. The app's routes, mobile and public, answer errors as
+ * JSON { error, code }; anything else is kept as raw text so the reason is never lost.
+ */
+export async function readError(response: Response): Promise<{ code?: string; message?: string }> {
+  const text = await response.text().catch(() => "")
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown; code?: unknown }
+    return {
+      code: typeof parsed.code === "string" ? parsed.code : undefined,
+      message: typeof parsed.error === "string" ? parsed.error : text.slice(0, 200) || undefined,
+    }
+  } catch {
+    return { message: text ? text.slice(0, 200) : undefined }
+  }
+}
+
+/**
  * Call the mobile API. The path is relative to /api/mobile/v1 and is automatically
  * prefixed. On 401 the caller is expected to have triggered a sign-out already;
  * on 403 the UI navigates to the not-authorized route.
@@ -42,18 +59,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    // The mobile routes answer errors as JSON { error, code } (lib/mobile/auth.ts json/jsonError),
-    // so the code that tells a 409 hash mismatch apart comes from the body, not a header.
-    const text = await response.text().catch(() => "")
-    let code: string | undefined
-    let message: string | undefined = text ? text.slice(0, 200) : undefined
-    try {
-      const parsed = JSON.parse(text) as { error?: unknown; code?: unknown }
-      if (typeof parsed.code === "string") code = parsed.code
-      if (typeof parsed.error === "string") message = parsed.error
-    } catch {
-      // Not JSON: keep the raw text as the message.
-    }
+    const { code, message } = await readError(response)
     // 401 means the caller signs out; 403 routes to the not-authorized screen.
     throw new ApiError(response.status, code, message)
   }

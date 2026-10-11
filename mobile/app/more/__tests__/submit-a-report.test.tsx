@@ -318,6 +318,7 @@ describe("M20 Submit a report", () => {
       ok: false,
       status: 400,
       json: async () => ({ error: "Title is too short" }),
+      text: async () => JSON.stringify({ error: "Title is too short" }),
     })
 
     const { getByText, getByPlaceholderText } = await renderWithClient(<SubmitReportScreen />)

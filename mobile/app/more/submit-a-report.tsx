@@ -10,6 +10,7 @@
  * than useApiMutation, which prefixes the mobile API base path. The route returns
  * { reportId, codeSent } with status 202.
  */
+import { readError } from "@/lib/api"
 import { useState } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
@@ -92,13 +93,7 @@ export default function SubmitReportScreen() {
 
       if (!response.ok) {
         let msg: string
-        try {
-          const data = await response.json()
-          msg = data.error || `Upload failed (${response.status})`
-        } catch {
-          const text = await response.text().catch(() => "")
-          msg = text || `Upload failed (${response.status})`
-        }
+        msg = (await readError(response)).message ?? `Upload failed (${response.status})`
         throw new Error(msg)
       }
 

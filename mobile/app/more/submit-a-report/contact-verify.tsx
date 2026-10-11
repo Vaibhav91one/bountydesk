@@ -6,6 +6,7 @@
  * delivered mascot. On failure the server's error is shown and the boxes are cleared.
  * Resend uses the verify route's resend form (action=resend, reportId).
  */
+import { readError } from "@/lib/api"
 import { applyOtpInput } from "@/lib/otp"
 import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
@@ -63,9 +64,8 @@ export default function ContactVerifyScreen() {
       })
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "")
-        const msg = body || `Verification failed (${response.status})`
-        show(msg.slice(0, 200))
+        const { message } = await readError(response)
+        show(message ?? `Verification failed (${response.status})`)
         setCode("")
         inputs.current[0]?.focus()
         return
@@ -97,8 +97,8 @@ export default function ContactVerifyScreen() {
       })
 
       if (!response.ok) {
-        const body = await response.text().catch(() => "")
-        show((body || "Could not resend code").slice(0, 200))
+        const { message } = await readError(response)
+        show(message ?? "Could not resend code")
         return
       }
 

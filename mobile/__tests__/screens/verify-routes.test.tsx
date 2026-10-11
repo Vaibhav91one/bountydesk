@@ -31,6 +31,7 @@ jest.mock("@/lib/use-query", () => {
 jest.mock("@/lib/api", () => ({
   __esModule: true,
   ApiError: jest.requireActual("@/lib/api").ApiError,
+  readError: jest.requireActual("@/lib/api").readError,
   api: (...args: unknown[]) => mockApi(...args),
   setTokenGetter: jest.fn(),
 }))
@@ -363,6 +364,24 @@ describe("M21 Contact verify", () => {
     await waitFor(() => {
       expect(result.getByText("invalid code")).toBeTruthy()
     })
+  })
+
+  it("shows the reason, not raw JSON, when the verify route answers { error }", async () => {
+    paramOverrides.email = "user@example.com"
+    paramOverrides.reportId = "BD-1045"
+    // app/api/intake/upload/verify/route.ts answers errors as Response.json({ error }).
+    ;(global.fetch as jest.Mock).mockResolvedValue({
+      ok: false,
+      status: 404,
+      headers: { get: () => "application/json" },
+      text: async () => JSON.stringify({ error: "no such upload" }),
+    })
+    const result = await renderWithClient(<ContactVerifyScreen />)
+    await typeOtp(result.getAllByTestId(/^otp-box-\d+$/), "123456")
+    await waitFor(() => {
+      expect(result.getByText("no such upload")).toBeTruthy()
+    })
+    expect(result.queryByText(/\{"error"/)).toBeNull()
   })
 
   it("resend uses the verify route with action=resend and reportId", async () => {
