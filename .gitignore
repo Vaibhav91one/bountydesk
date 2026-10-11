@@ -32,6 +32,14 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!**/.env.example
+
+# Expo React Native mobile app
+mobile/node_modules/
+mobile/.env
+mobile/.expo/
+mobile/dist/
 
 # vercel
 .vercel
