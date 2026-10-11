@@ -38,7 +38,10 @@ export async function GET(request: Request): Promise<Response> {
     async (tx) => {
       const awaiting = await listAwaitingReview(tx);
       const allRows = await listAllReports(INDEX_LIMIT, tx);
-      const earlierRows = allRows.filter((row) => row.awaitingVerdictId === null);
+      // NEEDS_DECISION reports also have a null awaitingVerdictId, so filtering by that field alone
+      // would put them in both sections. Exclude by id instead: a report is either awaiting or earlier.
+      const needsIds = new Set(awaiting.map((row) => row.id));
+      const earlierRows = allRows.filter((row) => !needsIds.has(row.id));
 
       const needsCards: InboxCard[] = awaiting.map((row) => ({
         id: row.id,

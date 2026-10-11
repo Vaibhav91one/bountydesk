@@ -34,9 +34,13 @@ export function transportReceiptFor(delivery: {
   }
   // An advisory delivery target is github:<repoId>:advisory:<ghsaId> (or ...:advisory:create).
   // GitHub accepted the edit or creation, which is the receipt for that channel.
-  if (GITHUB_ADVISORY_TARGET.test(delivery.target)) return "advisory updated";
-  // An email address: Resend accepted the send and the delivered webhook confirmed it.
-  if (delivery.target.includes("@")) return "email delivered";
+  if (GITHUB_ADVISORY_TARGET.test(delivery.target)) {
+    return `advisory ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  }
+  // An email address: Resend accepted the send (SENT) or the delivered webhook confirmed it
+  // (DELIVERED). Anything else, mirror the raw state.
+  if (delivery.target.includes("@")) return delivery.state === "DELIVERED" ? "email delivered" : `email ${delivery.state.toLowerCase()}`;
+  return delivery.state;
   return delivery.state;
 }
 

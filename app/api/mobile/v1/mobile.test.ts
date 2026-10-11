@@ -677,8 +677,10 @@ test("transportReceiptFor labels issue, advisory, and email delivery targets", a
 
   assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:issue:42" }), "issue comment 2xx");
   assert.equal(transportReceiptFor({ state: "SENT", target: "github:123:issue:42" }), "issue comment SENT");
-  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory updated");
-  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:create" }), "advisory updated");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory 2xx");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory SENT");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:create" }), "advisory 2xx");
   assert.equal(transportReceiptFor({ state: "DELIVERED", target: "researcher@example.com" }), "email delivered");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "researcher@example.com" }), "email sent");
   assert.equal(transportReceiptFor({ state: "SENT", target: null }), null);
 });
