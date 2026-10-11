@@ -25,11 +25,43 @@ mock.module("@/lib/auth/dal", {
     clerkProfile: async () => ({ login: "outsider", email: "outsider@example.test", avatarUrl: null }),
   },
 });
+const reviewerState = {
+  // alice is an owner, bob is a verified member, carol is pending.
+  canAdd: (email: string) => email.toLowerCase() === "alice@bountydesk.test",
+  list: () => [
+    { email: "alice@bountydesk.test", role: "owner" as const, verified: true, codeOutstanding: false, addedByEmail: null, createdAt: null },
+    { email: "bob@example.com", role: "member" as const, verified: true, codeOutstanding: false, addedByEmail: "alice@bountydesk.test", createdAt: new Date() },
+    { email: "carol@example.com", role: "member" as const, verified: false, codeOutstanding: true, addedByEmail: "alice@bountydesk.test", createdAt: new Date() },
+  ],
+  startCode: null as string | null,
+  verifyOk: true,
+  verifyError: null as string | null,
+};
 mock.module("@/lib/auth/reviewers", {
-  namedExports: { isReviewerWriter: async () => caller.session !== null && caller.session.role !== "read_only" },
+  namedExports: {
+    isReviewerWriter: async () => caller.session !== null && caller.session.role !== "read_only",
+    isReviewerEmail: async () => caller.session !== null,
+    canManageReviewers: (email: string | null | undefined) => reviewerState.canAdd(email ?? ""),
+    listReviewers: async () => reviewerState.list(),
+    startVerification: async () => {
+      reviewerState.startCode = "123456";
+      return { status: "code_sent" as const, code: "123456" };
+    },
+    verifyCode: async (email: string, code: string) => {
+      if (!reviewerState.verifyOk) return { ok: false as const, error: reviewerState.verifyError ?? "bad code" };
+      // The mock code is always "123456"; anything else fails.
+      if (code.trim() !== "123456" || !/^\d{6}$/.test(code.trim())) {
+        return { ok: false as const, error: "that code is not correct." };
+      }
+      return { ok: true as const };
+    },
+  },
 });
 mock.module("next/cache", { namedExports: { revalidatePath: () => undefined } });
 mock.module("@/lib/delivery/worker", { namedExports: { deliverById: async (id: string) => id } });
+mock.module("@/lib/email/resend", {
+  namedExports: { sendVerificationEmail: async () => undefined },
+});
 
 const reviewer = { login: "alice", email: "alice@bountydesk.test", avatarUrl: null, role: "member" as const };
 const asReviewer = () => (caller = { userId: "user_1", session: reviewer });
@@ -49,6 +81,9 @@ let deny: typeof import("./reports/[id]/deny/route");
 let chat: typeof import("./reports/[id]/chat/route");
 let connections: typeof import("./connections/route");
 let integrations: typeof import("./integrations/route");
+let emailAccess: typeof import("./integrations/email/route");
+let emailVerify: typeof import("./integrations/email/verify/route");
+let inbox: typeof import("./inbox/route");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -64,6 +99,9 @@ before(async () => {
   chat = await import("./reports/[id]/chat/route");
   connections = await import("./connections/route");
   integrations = await import("./integrations/route");
+  emailAccess = await import("./integrations/email/route");
+  emailVerify = await import("./integrations/email/verify/route");
+  inbox = await import("./inbox/route");
 });
 
 after(async () => {
@@ -153,6 +191,8 @@ test("every route answers 401 without a token", async () => {
     await deny.POST(post(body), ctx(reportId)),
     await connections.GET(),
     await integrations.GET(),
+    await emailAccess.GET(),
+    await inbox.GET(get()),
   ];
   for (const response of responses) assert.equal(response.status, 401);
 });
@@ -171,6 +211,10 @@ test("a signed-in account that is not allowlisted gets 403 everywhere but /me", 
     await approve.POST(post(body), ctx(reportId)),
     await connections.GET(),
     await integrations.GET(),
+    await emailAccess.GET(),
+    await emailAccess.POST(post({ email: "new@example.com" })),
+    await emailVerify.POST(post({ email: "new@example.com", code: "123456" })),
+    await inbox.GET(get()),
   ]) {
     assert.equal(response.status, 403);
   }
@@ -199,6 +243,16 @@ test("a read-only reviewer can read but is refused approve, deny and chat", asyn
   assert.equal((await deny.POST(post(body), ctx(reportId))).status, 403);
   assert.equal((await chat.POST(post({ clientRequestId: "c1", body: "hi" }), ctx(reportId))).status, 403);
   assert.equal((await decisions(verdictId)).length, 0);
+});
+
+test("a read-only reviewer can read the inbox and email access but not add reviewers", async () => {
+  asReadOnly();
+  await seedPendingReport();
+
+  assert.equal((await inbox.GET(get())).status, 200);
+  assert.equal((await emailAccess.GET()).status, 200);
+  assert.equal((await emailAccess.POST(post({ email: "new@example.com" }))).status, 403);
+  assert.equal((await emailVerify.POST(post({ email: "new@example.com", code: "123456" }))).status, 403);
 });
 
 test("approve refuses a content hash that is not the verdict's, and records nothing", async () => {
@@ -302,4 +356,86 @@ test("list routes return the web read models, paged", async () => {
   const rows = await (await integrations.GET()).json();
   assert.deepEqual(rows.map((row: { id: string }) => row.id), ["github", "email", "upload"]);
   assert.ok(Array.isArray(await (await connections.GET()).json()));
+});
+
+test("inbox splits reports into needs-you and earlier", async () => {
+  const { reportId } = await seedPendingReport();
+
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(Array.isArray(body.needsYou.items));
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportId));
+  assert.ok(body.needsYou.items.some((row: { id: string; awaitingVerdictId: string | null }) => row.awaitingVerdictId !== null));
+  assert.ok(Array.isArray(body.earlier.items));
+
+  // Seed a DELIVERED report for the earlier section.
+  seq += 1;
+  const [deliveredRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:delivered-${seq}`,
+      title: `Delivered report ${seq}`,
+      body: "body",
+      state: "DELIVERED",
+    })
+    .returning({ id: dbm.report.id });
+
+  const full = await (await inbox.GET(get())).json();
+  assert.ok(full.earlier.items.some((row: { id: string }) => row.id === deliveredRow.id));
+  // Phase filter narrows to one section.
+  const needsOnly = await (await inbox.GET(get("?phase=needs"))).json();
+  assert.equal(needsOnly.earlier, null);
+  assert.ok(needsOnly.needsYou.items.length > 0);
+  const earlierOnly = await (await inbox.GET(get("?phase=earlier"))).json();
+  assert.equal(earlierOnly.needsYou, null);
+  assert.ok(earlierOnly.earlier.items.length > 0);
+  assert.equal((await inbox.GET(get("?phase=bogus"))).status, 400);
+  assert.equal((await inbox.GET(get("?limit=0"))).status, 400);
+});
+
+test("inbox 400s on a bad phase or page", async () => {
+  assert.equal((await inbox.GET(get("?phase=bad"))).status, 400);
+  assert.equal((await inbox.GET(get("?limit=abc"))).status, 400);
+});
+
+test("email access lists reviewers for any reviewer", async () => {
+  const rows = await (await emailAccess.GET()).json();
+  assert.deepEqual(rows.map((r: { email: string }) => r.email), [
+    "alice@bountydesk.test",
+    "bob@example.com",
+    "carol@example.com",
+  ]);
+  // The pending member is not verified, and shows a code outstanding.
+  const carol = rows.find((r: { email: string }) => r.email === "carol@example.com");
+  assert.equal(carol.verified, false);
+  assert.equal(carol.codeOutstanding, true);
+});
+
+test("an owner can add a reviewer, the code is mailed, and verify confirms it", async () => {
+  const added = await (await emailAccess.POST(post({ email: "dave@example.com" }))).json();
+  assert.equal(added.ok, true);
+  assert.equal(added.codeSent, true);
+
+  // A non-owner reviewer cannot add. bob is a member, not an owner.
+  caller = { userId: "user_1", session: { login: "bob", email: "bob@example.com", avatarUrl: null, role: "member" } };
+  assert.equal((await emailAccess.POST(post({ email: "eve@example.com" }))).status, 403);
+
+  // Back to alice (an owner) to verify.
+  asReviewer();
+  // Verify the code for the address the owner added.
+  assert.equal((await emailVerify.POST(post({ email: "dave@example.com", code: "123456" }))).status, 200);
+
+  // A bad code is refused.
+  assert.equal(
+    (await emailVerify.POST(post({ email: "dave@example.com", code: "000000" }))).status,
+    400,
+  );
+
+  // A non-owner cannot verify either.
+  caller = { userId: "user_1", session: { login: "bob", email: "bob@example.com", avatarUrl: null, role: "member" } };
+  assert.equal((await emailVerify.POST(post({ email: "dave@example.com", code: "123456" }))).status, 403);
+  asReviewer();
+
+  // Bad email shape is a 400, not a 500.
+  assert.equal((await emailAccess.POST(post({ email: "not-an-email" }))).status, 400);
 });

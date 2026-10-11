@@ -122,6 +122,10 @@ export async function readCase(
           targetProfileId: targetProfile.id,
           targetName: targetProfile.name,
           targetDigest: targetProfile.imageDigest,
+          targetSnapshotId: targetProfile.snapshotId,
+          targetConfig: targetProfile.config,
+          targetScopeRules: targetProfile.scopeRules,
+          targetBuildMarker: targetProfile.resolvedCommitSha,
         })
         .from(report)
         .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
@@ -431,6 +435,26 @@ export async function readCase(
               id: row.targetProfileId,
               name: row.targetName ?? "",
               imageDigest: row.targetDigest ?? "",
+            }
+          : null,
+        /**
+         * Scope and provisioning for the M22 target-and-scope screen. Built here from the same
+         * profile row the target pointer comes from, so the phone does not need a second query.
+         * Egress is "none" for the sandboxed run; a non-null config.egress would mean the profile
+         * is misconfigured for the offline model, which is treated as "none" since the sandbox
+         * always blocks all egress at the network layer regardless.
+         */
+        targetScope: row.targetProfileId
+          ? {
+              imageDigest: row.targetDigest ?? "",
+              snapshotId: row.targetSnapshotId ?? null,
+              buildMarker: row.targetBuildMarker ?? null,
+              scopeRules: (row.targetScopeRules as unknown[] | null) ?? [],
+              readinessPath: (row.targetConfig as { readinessPath?: string } | null)?.readinessPath ?? "/",
+              startCommand: (row.targetConfig as { startCommand?: string } | null)?.startCommand ?? null,
+              // The sandbox always runs with networkBlockAll; the config only says what the
+              // profile allows, not what the sandbox enforces, so egress is always "none" here.
+              egress: "none" as const,
             }
           : null,
         verdict: latest ?? null,

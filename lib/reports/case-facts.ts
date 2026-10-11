@@ -78,6 +78,20 @@ export type CaseFile = {
   finalSummary: string | null;
   /** The bound reproduction target. `id` is what the picker matches its current selection on. */
   target: { id: string; name: string; imageDigest: string } | null;
+  /**
+   * Scope and provisioning data for the bound target profile, for the M22 target-and-scope screen.
+   * Null when no target is bound. Optional on the type so existing test fixtures that do not set it
+   * still typecheck; readCase populates it when a target profile is bound.
+   */
+  targetScope?: {
+    imageDigest: string;
+    snapshotId: string | null;
+    buildMarker: string | null;
+    scopeRules: unknown[];
+    readinessPath: string;
+    startCommand: string | null;
+    egress: "none" | "narrow";
+  } | null;
   /** The Daytona sandbox this session's investigation actually ran against, if one was
    * provisioned. Null when no target was bound or provisioning never happened, which is most
    * reports today. Read from agent_session, where the driver records it. */

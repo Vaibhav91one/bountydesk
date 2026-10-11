@@ -20,6 +20,38 @@ export function parsePage(params: URLSearchParams): PageParams | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** The transport receipt label for M12, derived from the delivery target the worker recorded. */
+const GITHUB_TARGET = /^github:\d+:issue:(\d+)$/;
+
+export function transportReceiptFor(delivery: {
+  state: string;
+  target: string | null;
+}): string | null {
+  if (!delivery.target) return null;
+  const match = delivery.target.match(GITHUB_TARGET);
+  if (match) return `issue comment ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  // An email address: Resend accepted the send and the delivered webhook confirmed it.
+  if (delivery.target.includes("@")) return "email delivered";
+  // An advisory GHSA id: GitHub accepted the edit.
+  if (/^GHSA[A-Z0-9-]+$/.test(delivery.target)) return "advisory updated";
+  return delivery.state;
+}
+
+/** The type of a row as the inbox renders it, built from listAllReports. */
+export type InboxCard = {
+  id: string;
+  title: string;
+  sourceLabel: string;
+  channel: string;
+  targetName: string | null;
+  outcome: string | null;
+  verdictSuperseded: boolean;
+  deliveryState: string | null;
+  state: string;
+  awaitingVerdictId: string | null;
+  updatedAt: Date;
+};
+
 /** One page of `items`, with the offset of the next page or null at the end. */
 export function paginate<T>(items: T[], { limit, offset }: PageParams) {
   const slice = items.slice(offset, offset + limit);
@@ -80,6 +112,8 @@ export function mobileCaseView(
     failed: live.failed,
 
     target: live.target,
+    /** Target profile scope and provisioning for M22, read alongside the case file. */
+    targetScope: file.targetScope ?? null,
     summary: live.finalSummary,
     destination: live.destination,
 
@@ -99,6 +133,8 @@ export function mobileCaseView(
     approval: live.approval,
     delivery: live.delivery && {
       state: live.delivery.state,
+      target: live.delivery.target,
+      transportReceipt: transportReceiptFor(live.delivery),
       deliveredAt: live.delivery.deliveredAt,
       requiresHumanReview: live.delivery.requiresHumanReview,
     },
