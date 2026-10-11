@@ -140,6 +140,7 @@ function DenyVerdictInner() {
         freshCf?.verdict?.id !== recordedVerdictId ||
         freshCf?.verdict?.contentHash !== recordedContentHash
       ) {
+        setDenySheetOpen(false)
         setHashMismatch(true)
         return
       }
