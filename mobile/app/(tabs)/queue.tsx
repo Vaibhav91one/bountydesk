@@ -30,12 +30,11 @@ interface QueueColumnView {
 
 interface QueueCardView extends QueueCard {
   ageLabel: string
-  issueNumber: number | null
 }
 
-/** Display a report id as "BD-<issueNumber>" per the mockup. */
+/** Display a report id using sourceLabel per the mockup. */
 function idLabel(card: QueueCardView): string {
-  return card.issueNumber != null ? `BD-${card.issueNumber}` : card.id
+  return card.sourceLabel ?? card.id
 }
 
 /** Map internal channel names to the labels shown in the mockups. */
@@ -179,7 +178,7 @@ function QueueScreenContent() {
 
       {lpReportId && (() => {
         const card = cols.flatMap((c) => c.cards).find((c) => c.id === lpReportId)
-        const copyLabel = idLabel(card ?? { id: lpReportId, issueNumber: null } as QueueCardView)
+        const copyLabel = idLabel(card ?? { id: lpReportId, sourceLabel: lpReportId } as QueueCardView)
         return (
           <LongPressMenu
             reportId={copyLabel}

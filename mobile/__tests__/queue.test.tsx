@@ -112,9 +112,9 @@ const mockQueueData = {
       label: "Awaiting approval",
       total: 3,
       cards: [
-        { id: "BD-1042", issueNumber: 482, title: "Stored XSS in search results", sourceLabel: "#482", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 5, updatedAt: "2025-01-01T10:00:00Z", ageLabel: "12 min", awaitingVerdictId: "v1", investigating: false },
-        { id: "BD-1044", issueNumber: 484, title: "Missing rate limit on login", sourceLabel: "#484", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 3, updatedAt: "2025-01-01T09:46:00Z", ageLabel: "34 min", awaitingVerdictId: "v2", investigating: false },
-        { id: "BD-1043", issueNumber: 483, title: "Directory listing exposes /ftp", sourceLabel: "#483", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 2, updatedAt: "2025-01-01T09:32:00Z", ageLabel: "48 min", awaitingVerdictId: "v3", investigating: false },
+        { id: "BD-1042",  title: "Stored XSS in search results", sourceLabel: "#482", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 5, updatedAt: "2025-01-01T10:00:00Z", ageLabel: "12 min", awaitingVerdictId: "v1", investigating: false },
+        { id: "BD-1044",  title: "Missing rate limit on login", sourceLabel: "#484", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 3, updatedAt: "2025-01-01T09:46:00Z", ageLabel: "34 min", awaitingVerdictId: "v2", investigating: false },
+        { id: "BD-1043",  title: "Directory listing exposes /ftp", sourceLabel: "#483", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 2, updatedAt: "2025-01-01T09:32:00Z", ageLabel: "48 min", awaitingVerdictId: "v3", investigating: false },
       ],
       nextOffset: null,
     },
@@ -123,9 +123,9 @@ const mockQueueData = {
       label: "Analysis only",
       total: 3,
       cards: [
-        { id: "BD-1045", issueNumber: 485, title: "SQL injection in search", sourceLabel: "#485", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: "RUNNING", deliveryState: null, handoffFailed: false, eventCount: 4, updatedAt: "2025-01-01T10:00:00Z", ageLabel: "12 min", awaitingVerdictId: null, investigating: true },
-        { id: "BD-1041", issueNumber: 481, title: "SQL injection in login", sourceLabel: "#481", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T09:00:00Z", ageLabel: "1 h", awaitingVerdictId: null, investigating: false },
-        { id: "BD-1039", issueNumber: 479, title: "Open redirect on /redirect", sourceLabel: "#479", targetName: "juice-shop", channel: "advisory", state: "ANALYSIS_ONLY", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T07:00:00Z", ageLabel: "3 h", awaitingVerdictId: null, investigating: false },
+        { id: "BD-1045",  title: "SQL injection in search", sourceLabel: "#485", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: "RUNNING", deliveryState: null, handoffFailed: false, eventCount: 4, updatedAt: "2025-01-01T10:00:00Z", ageLabel: "12 min", awaitingVerdictId: null, investigating: true },
+        { id: "BD-1041",  title: "SQL injection in login", sourceLabel: "#481", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T09:00:00Z", ageLabel: "1 h", awaitingVerdictId: null, investigating: false },
+        { id: "BD-1039",  title: "Open redirect on /redirect", sourceLabel: "#479", targetName: "juice-shop", channel: "advisory", state: "ANALYSIS_ONLY", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T07:00:00Z", ageLabel: "3 h", awaitingVerdictId: null, investigating: false },
       ],
       nextOffset: null,
     },
@@ -134,8 +134,8 @@ const mockQueueData = {
       label: "Triaging",
       total: 2,
       cards: [
-        { id: "BD-1047", issueNumber: 487, title: "Open redirect on /login", sourceLabel: null, targetName: null, channel: "email", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T10:06:00Z", ageLabel: "4 min", awaitingVerdictId: null, investigating: false },
-        { id: "BD-1037", issueNumber: 477, title: "Weak JWT secret", sourceLabel: "#477", targetName: "juice-shop", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T00:00:00Z", ageLabel: "Yesterday", awaitingVerdictId: null, investigating: false },
+        { id: "BD-1047",  title: "Open redirect on /login", sourceLabel: null, targetName: null, channel: "email", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T10:06:00Z", ageLabel: "4 min", awaitingVerdictId: null, investigating: false },
+        { id: "BD-1037",  title: "Weak JWT secret", sourceLabel: "#477", targetName: "juice-shop", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T00:00:00Z", ageLabel: "Yesterday", awaitingVerdictId: null, investigating: false },
       ],
       nextOffset: null,
     },
@@ -201,7 +201,7 @@ describe("M5 Queue", () => {
     const { getByText } = await render(<QueueScreen />)
 
     expect(getByText("Stored XSS in search results")).toBeTruthy()
-    expect(getByText("BD-482 · juice-shop")).toBeTruthy()
+    expect(getByText("#482 · juice-shop")).toBeTruthy()
   })
 
   it("shows Running for investigating reports", async () => {
@@ -268,8 +268,8 @@ describe("M5 Queue", () => {
 
     const { getByText } = await render(<QueueScreen />)
 
-    expect(getByText("BD-487 · Email")).toBeTruthy()
-    expect(getByText("BD-479 · juice-shop")).toBeTruthy()
+    expect(getByText("BD-1047 · Email")).toBeTruthy()
+    expect(getByText("#479 · juice-shop")).toBeTruthy()
   })
 
   it("renders data without a hook-order warning", async () => {

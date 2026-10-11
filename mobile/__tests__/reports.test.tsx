@@ -79,8 +79,17 @@ jest.mock("@clerk/expo", () => ({
   useAuth: () => ({ signOut: jest.fn(), isLoaded: true, isSignedIn: true }),
 }))
 
-jest.mock("@/components/TopBarPill", () => ({
-  TopBarPill: () => null,
+jest.mock("@/lib/api", () => ({
+  api: jest.fn(),
+  ApiError: class ApiError extends Error {
+    status: number
+    constructor(status: number, _code?: string, message?: string) {
+      super(message ?? `API error: ${status}`)
+      this.status = status
+      this.name = "ApiError"
+    }
+  },
+  setTokenGetter: jest.fn(),
 }))
 
 jest.mock("@/components/ReviewFab", () => ({
@@ -108,12 +117,12 @@ const mockUseApiQuery = require("@/lib/use-query").useApiQuery as jest.Mock
 // Mock data matching m6.html
 const mockReportsData = {
   reports: [
-    { id: "BD-1042", issueNumber: 482, title: "Stored XSS in search results", sourceLabel: "#482", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 5, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: "v1", investigating: false, origin: "juice-shop" },
-    { id: "BD-1044", issueNumber: 484, title: "Missing rate limit on login", sourceLabel: "#484", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 3, updatedAt: "2025-01-01T09:46:00Z", awaitingVerdictId: "v2", investigating: false, origin: "juice-shop" },
-    { id: "BD-1047", issueNumber: 487, title: "Open redirect on /login", sourceLabel: null, targetName: null, channel: "email", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T10:06:00Z", awaitingVerdictId: null, investigating: false, origin: "email" },
-    { id: "BD-1045", issueNumber: 485, title: "SQL injection in search", sourceLabel: "#485", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: "RUNNING", deliveryState: null, handoffFailed: false, eventCount: 4, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: true, origin: "juice-shop" },
-    { id: "BD-1033", issueNumber: 473, title: "Reflected XSS in /search", sourceLabel: "#473", targetName: "juice-shop", channel: "github", state: "DELIVERED", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: "DELIVERED", handoffFailed: false, eventCount: 8, updatedAt: "2025-01-01T08:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" },
-    { id: "BD-1030", issueNumber: 470, title: "CSRF on profile update", sourceLabel: "#470", targetName: "juice-shop", channel: "github", state: "DENIED", outcome: "NOT_REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 2, updatedAt: "2025-01-01T06:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" },
+    { id: "BD-1042",  title: "Stored XSS in search results", sourceLabel: "#482", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 5, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: "v1", investigating: false, origin: "juice-shop" },
+    { id: "BD-1044",  title: "Missing rate limit on login", sourceLabel: "#484", targetName: "juice-shop", channel: "github", state: "AWAITING_APPROVAL", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 3, updatedAt: "2025-01-01T09:46:00Z", awaitingVerdictId: "v2", investigating: false, origin: "juice-shop" },
+    { id: "BD-1047",  title: "Open redirect on /login", sourceLabel: null, targetName: null, channel: "email", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 0, updatedAt: "2025-01-01T10:06:00Z", awaitingVerdictId: null, investigating: false, origin: "email" },
+    { id: "BD-1045",  title: "SQL injection in search", sourceLabel: "#485", targetName: "juice-shop", channel: "github", state: "REPRODUCING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: "RUNNING", deliveryState: null, handoffFailed: false, eventCount: 4, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: true, origin: "juice-shop" },
+    { id: "BD-1033",  title: "Reflected XSS in /search", sourceLabel: "#473", targetName: "juice-shop", channel: "github", state: "DELIVERED", outcome: "REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: "DELIVERED", handoffFailed: false, eventCount: 8, updatedAt: "2025-01-01T08:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" },
+    { id: "BD-1030",  title: "CSRF on profile update", sourceLabel: "#470", targetName: "juice-shop", channel: "github", state: "DENIED", outcome: "NOT_REPRODUCED", verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 2, updatedAt: "2025-01-01T06:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" },
   ],
   total: 6,
   nextOffset: null,
@@ -171,7 +180,7 @@ describe("M6 Reports", () => {
     const { getByText } = await render(<ReportsScreen />)
 
     expect(getByText("Stored XSS in search results")).toBeTruthy()
-    expect(getByText("BD-482 · juice-shop")).toBeTruthy()
+    expect(getByText("#482 · juice-shop")).toBeTruthy()
   })
 
   it("filters by search term", async () => {
@@ -301,5 +310,45 @@ describe("M6 Reports", () => {
 
     const { getByText } = await render(<ReportsScreen />)
     expect(getByText("Running")).toBeTruthy()
+  })
+
+  it("requests reports with limit=50", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: mockReportsData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    await render(<ReportsScreen />)
+
+    expect(mockUseApiQuery).toHaveBeenCalledWith("/reports?limit=50")
+  })
+
+  it("renders after query flips error to success with no hook-order warning", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {})
+    mockUseApiQuery.mockReturnValue({
+      data: undefined,
+      error: undefined,
+      isError: false,
+      isFetching: true,
+    })
+
+    const { rerender } = await render(<ReportsScreen />)
+
+    mockUseApiQuery.mockReturnValue({
+      data: mockReportsData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    await rerender(<ReportsScreen />)
+
+    const hookWarnings = warnSpy.mock.calls.filter(
+      (c) => typeof c[0] === "string" && c[0].includes("hooks")
+    )
+    expect(hookWarnings.length).toBe(0)
+    warnSpy.mockRestore()
   })
 })

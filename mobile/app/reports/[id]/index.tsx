@@ -137,7 +137,11 @@ export default function CaseFileScreen() {
   const { colors, phase: phaseColors } = useTheme()
   const router = useRouter()
   const { data: file, error, isFetching } = useApiQuery<CaseFileView>(`/reports/${id}`)
-  const reportIdLabel = file ? `BD-${file.issueNumber ?? file.id}` : ""
+  const reportIdLabel = file
+    ? file.issueNumber != null
+      ? `BD-${file.issueNumber}`
+      : file.id.slice(0, 8)
+    : ""
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {

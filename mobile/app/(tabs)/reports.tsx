@@ -5,11 +5,12 @@
  * list client-side. A no-results state with a Clear search button appears when
  * nothing matches. Data: GET /api/mobile/v1/reports.
  */
-import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, ActivityIndicator, Share } from "react-native"
+import React, { useState, useEffect } from "react"
+import { View, Text, ScrollView, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Share } from "react-native"
 import { useRouter } from "expo-router"
 import * as Clipboard from "expo-clipboard"
 import { useApiQuery, ApiError } from "@/lib/use-query"
+import { api } from "@/lib/api"
 import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
@@ -28,12 +29,11 @@ interface ReportsResponse {
 
 interface ReportRow extends QueueCard {
   origin: string
-  issueNumber: number | null
 }
 
-/** Display a report id as "BD-<issueNumber>" per the mockup. */
+/** Display a report id using sourceLabel per the mockup. */
 function idLabel(row: ReportRow): string {
-  return row.issueNumber != null ? `BD-${row.issueNumber}` : row.id
+  return row.sourceLabel ?? row.id
 }
 
 /** Map internal channel names to the labels shown in the mockups. */
@@ -95,21 +95,59 @@ function ReportsScreenContent() {
   const { colors } = useTheme()
   const router = useRouter()
   const toast = useToast()
-  const { data, error, isError, isFetching } = useApiQuery<ReportsResponse>("/reports?limit=200")
+  const [search, setSearch] = useState("")
+  const [activeChip, setActiveChip] = useState<PhaseKey | "all">("all")
+  const [lpReportId, setLpReportId] = useState<string | null>(null)
+  const [pages, setPages] = useState<ReportRow[][]>([])
+  const [nextOffset, setNextOffset] = useState<number | null>(null)
+  const [hasMore, setHasMore] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  const { data: firstPage, error, isError, isFetching } = useApiQuery<ReportsResponse>("/reports?limit=50")
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
+
+  // Prime the first page when it arrives
+  React.useEffect(() => {
+    if (firstPage) {
+      setPages([firstPage.reports])
+      setNextOffset(firstPage.nextOffset)
+      setHasMore(firstPage.nextOffset != null)
+    }
+  }, [firstPage])
+
+  const loadMore = async () => {
+    if (!hasMore || isFetching) return
+    try {
+      const more: ReportsResponse = await api<ReportsResponse>(`/reports?limit=50&offset=${nextOffset}`)
+      setPages((prev) => [...prev, more.reports])
+      setNextOffset(more.nextOffset)
+      setHasMore(more.nextOffset != null)
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Failed to load more")
+    }
+  }
+
+  const allReports = pages.flat()
+  const totalReports = firstPage?.total ?? allReports.length
+
   if (error && !isAuthError) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <Text style={[styles.error, { color: colors.red }]}>{error.message}</Text>
+        <Text style={[styles.error, { color: colors.red }]}>{(error as Error).message}</Text>
       </View>
     )
   }
 
-  const allReports = data?.reports ?? []
-  const totalReports = data?.total ?? allReports.length
-  const [search, setSearch] = useState("")
-  const [activeChip, setActiveChip] = useState<PhaseKey | "all">("all")
+  if (!firstPage && !isError && isFetching) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
+        <ActivityIndicator color={colors.brand} size="large" />
+        <TopBarPill />
+        <ReviewFab />
+      </View>
+    )
+  }
 
   // Filter by search term (title, source, origin) and phase chip, in place.
   const needle = search.trim().toLowerCase()
@@ -122,17 +160,6 @@ function ReportsScreenContent() {
   })
 
   const hasFilter = needle.length > 0 || activeChip !== "all"
-  const [lpReportId, setLpReportId] = useState<string | null>(null)
-
-  if (!data && !isError && isFetching) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.brand} size="large" />
-        <TopBarPill />
-        <ReviewFab />
-      </View>
-    )
-  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -208,7 +235,7 @@ function ReportsScreenContent() {
               No reports match {needle ? `"${search.trim()}"` : ""}
             </Text>
             <Text style={[styles.noResultP, { color: colors.muted }]}>
-              Check the spelling, try a report id such as BD-1042, or remove a filter.
+              Check the spelling, try a report id such as {firstPage?.reports[0]?.sourceLabel ?? "BD-1042"}, or remove a filter.
             </Text>
             {hasFilter ? (
               <Pressable
@@ -227,17 +254,22 @@ function ReportsScreenContent() {
             ) : null}
           </View>
         ) : (
-          <View style={[styles.list, { backgroundColor: colors.card, borderRadius: 24, overflow: "hidden" }]}>
-            {filtered.map((r, i) => (
+          <FlatList
+            data={filtered}
+            keyExtractor={(r) => r.id}
+            renderItem={({ item, index }) => (
               <ReportRow
-                key={r.id}
-                row={r}
-                onPress={() => router.push(`/reports/${r.id}`)}
-                onLongPress={() => setLpReportId(r.id)}
-                showDivider={i < filtered.length - 1}
+                row={item}
+                onPress={() => router.push(`/reports/${item.id}`)}
+                onLongPress={() => setLpReportId(item.id)}
+                showDivider={index < filtered.length - 1}
               />
-            ))}
-          </View>
+            )}
+            onEndReached={loadMore}
+            onEndReachedThreshold={0.5}
+            contentContainerStyle={styles.scrollContent}
+            ListFooterComponent={hasMore && !hasFilter ? <ActivityIndicator color={colors.brand} /> : null}
+          />
         )}
 
         <Text style={[styles.note, { color: colors.muted }]}>
@@ -250,7 +282,7 @@ function ReportsScreenContent() {
 
       {lpReportId && (() => {
         const card = allReports.find((r) => r.id === lpReportId)
-        const copyLabel = idLabel(card ?? { id: lpReportId, issueNumber: null } as ReportRow)
+        const copyLabel = idLabel(card ?? { id: lpReportId, sourceLabel: lpReportId } as ReportRow)
         return (
           <LongPressMenu
             reportId={copyLabel}
