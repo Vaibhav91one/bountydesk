@@ -338,4 +338,23 @@ describe("M20 Submit a report", () => {
       expect(getByText("Title is too short")).toBeTruthy()
     })
   })
+  it("reopens the material sheet after Prebuilt image is chosen", async () => {
+    const { getByText, queryByText } = await renderWithClient(<SubmitReportScreen />)
+    await act(async () => {
+      fireEvent.press(getByText("Add target material"))
+    })
+    await act(async () => {
+      fireEvent.press(getByText("Prebuilt image"))
+    })
+    // Choosing closes the sheet; its other options are gone.
+    await waitFor(() => {
+      expect(queryByText("Tarball")).toBeNull()
+    })
+    await act(async () => {
+      fireEvent.press(getByText("Add target material"))
+    })
+    await waitFor(() => {
+      expect(getByText("Tarball")).toBeTruthy()
+    })
+  })
 })

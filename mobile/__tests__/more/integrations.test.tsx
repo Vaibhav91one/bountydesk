@@ -2,7 +2,7 @@
  * Render tests for the M16-M25 screen group.
  */
 import React from "react"
-import { render } from "@testing-library/react-native"
+import { render, fireEvent } from "@testing-library/react-native"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 const mockShow = jest.fn()
@@ -42,8 +42,9 @@ jest.mock("@/components/SvgImage", () => ({
   },
 }))
 
+const mockRouterPush = jest.fn()
 jest.mock("expo-router", () => ({
-  useRouter: () => ({ push: jest.fn(), replace: jest.fn(), back: jest.fn() }),
+  useRouter: () => ({ push: mockRouterPush, replace: jest.fn(), back: jest.fn() }),
   useLocalSearchParams: () => ({}),
   Redirect: ({ href }: { href: string }) => {
     const React = require("react")
@@ -166,6 +167,29 @@ describe("M17 Email access", () => {
     expect(getAllByText("Pending").length).toBeGreaterThan(0)
     expect(getByText("Add reviewer")).toBeTruthy()
     expect(getByText("Verify with a code")).toBeTruthy()
+  })
+
+  it("opens the code screen with the pending reviewer's address", async () => {
+    mockQueryResult["/integrations/email"] = {
+      data: [
+        { email: "priya@example.com", role: "member", verified: false, codeOutstanding: true, addedByEmail: null, createdAt: null },
+      ],
+      error: undefined,
+      isPending: false,
+    }
+    const { getByText } = await renderWithClient(<EmailAccessScreen />)
+    await fireEvent.press(getByText("Verify with a code"))
+    expect(mockRouterPush).toHaveBeenCalledWith({ pathname: "/more/integrations/otp-verify", params: { email: "priya@example.com" } })
+  })
+
+  it("hides Verify with a code when no reviewer has a code outstanding", async () => {
+    mockQueryResult["/integrations/email"] = {
+      data: [{ email: "alex@example.com", role: "owner", verified: true, codeOutstanding: false, addedByEmail: null, createdAt: null }],
+      error: undefined,
+      isPending: false,
+    }
+    const { queryByText } = await renderWithClient(<EmailAccessScreen />)
+    expect(queryByText("Verify with a code")).toBeNull()
   })
 
   it("renders empty state when no reviewers", async () => {

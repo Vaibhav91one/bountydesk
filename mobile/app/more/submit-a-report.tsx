@@ -203,7 +203,7 @@ export default function SubmitReportScreen() {
             <Text style={[styles.lbl, { color: colors.muted }]}>Target material</Text>
             <Card style={styles.list}>
               <Pressable
-                onPress={material === "prebuilt" ? undefined : () => setSheetVisible(true)}
+                onPress={() => setSheetVisible(true)}
                 style={({ pressed }) => [styles.item, { backgroundColor: colors.card }, pressed && { opacity: 0.92 }]}
               >
                 <View style={styles.rowLeading}>
@@ -216,9 +216,7 @@ export default function SubmitReportScreen() {
                   </Text>
                 </View>
                 <View style={styles.rowTrailing}>
-                  {material !== "prebuilt" ? (
-                    <Icon name="chev" size={18} stroke={colors.faint} />
-                  ) : null}
+                  <Icon name="chev" size={18} stroke={colors.faint} />
                 </View>
               </Pressable>
             </Card>

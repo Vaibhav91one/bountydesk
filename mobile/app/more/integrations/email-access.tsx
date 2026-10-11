@@ -87,6 +87,8 @@ export default function EmailAccessScreen() {
     addMutation.mutate({ email })
   }
 
+  const awaitingCode = reviewers.data?.find((r) => !r.verified && r.codeOutstanding) ?? null
+
   const handlePendingTap = (reviewer: EmailReviewer) => {
     router.push({ pathname: "/more/integrations/otp-verify", params: { email: reviewer.email } })
   }
@@ -172,22 +174,25 @@ export default function EmailAccessScreen() {
           </Text>
         </View>
 
-        {/* Verify with a code section */}
+        {/* Verify with a code: opens the code screen for the first reviewer with a code
+            outstanding. The code screen needs an address, so the row is hidden when none waits. */}
         <View style={styles.section}>
+          {awaitingCode ? (
           <Card style={styles.list}>
             <Pressable
-              onPress={() => router.push("/more/integrations/otp-verify")}
+              onPress={() => handlePendingTap(awaitingCode)}
               style={[styles.item, { backgroundColor: colors.card }]}
             >
               <View style={styles.main}>
                 <Text style={[styles.itemT, { color: colors.foreground }]}>Verify with a code</Text>
-                <Text style={[styles.itemS, { color: colors.muted }]}>Open the verification step</Text>
+                <Text style={[styles.itemS, { color: colors.muted }]}>{awaitingCode.email}</Text>
               </View>
               <View style={styles.rowTrailing}>
                 <Icon name="chev" size={18} stroke={colors.faint} />
               </View>
             </Pressable>
           </Card>
+          ) : null}
           <Text style={[styles.note, { color: colors.muted }]}>Only the owner can add or remove reviewers.</Text>
         </View>
       </ScrollView>
