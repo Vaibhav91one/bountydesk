@@ -188,15 +188,17 @@ export type ConnectionRow = {
  */
 export type TargetScope = {
   imageDigest: string
-  snapshotId: string
-  buildMarker: string
-  scopeRules: { allow: string[]; egress: string }
+  snapshotId: string | null
+  buildMarker: string | null
+  scopeRules: unknown[]
   readinessPath: string
-  startCommand: string
+  startCommand: string | null
+  egress: "none"
 }
 
 // Extend MobileCaseFile to include targetScope when present (not in the
 // existing type but returned by the server for M22).
 export interface MobileCaseFileWithScope extends MobileCaseFile {
+  target: { id: string; name: string; imageDigest: string } | null
   targetScope: TargetScope | null
 }

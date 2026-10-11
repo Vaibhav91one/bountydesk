@@ -1,14 +1,15 @@
 /**
  * Render tests for M15 Connection detail (app/more/connections/[id].tsx).
  *
- * Covers loading, data, and error states. Verifies the screen renders the
- * repository name, visibility, clone type, permissions list, bound target row
- * with digest, and the private repository policy section.
+ * Covers loading, data, not-found, and error states. Verifies the screen reads
+ * its id from the route param, fetches /connections, finds the matching row,
+ * and shows "Connection not found" when no row matches.
  */
 import React from "react"
 import { render, waitFor } from "@testing-library/react-native"
 
 const mockUseApiQuery = jest.fn()
+const mockLocalSearchParams = jest.fn<{ id: string }, []>()
 
 jest.mock("@/lib/use-query", () => ({
   useApiQuery: (...args: unknown[]) => mockUseApiQuery(...args),
@@ -24,7 +25,7 @@ jest.mock("@/lib/use-query", () => ({
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ push: jest.fn() }),
-  useLocalSearchParams: () => ({ id: "12345" }),
+  useLocalSearchParams: (...args: unknown[]) => mockLocalSearchParams(...args as []),
 }))
 
 jest.mock("@/theme", () => ({
@@ -94,6 +95,7 @@ beforeAll(() => {
 describe("M15 Connection detail", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockLocalSearchParams.mockReturnValue({ id: "12345" })
   })
 
   it("renders loading state without crashing", async () => {
@@ -102,7 +104,7 @@ describe("M15 Connection detail", () => {
     expect(toJSON()).not.toBeNull()
   })
 
-  it("renders repo name, visibility, clone, permissions and bound target from mockup", async () => {
+  it("renders repo name, visibility, clone, permissions and bound target from the row", async () => {
     mockUseApiQuery.mockReturnValue({ data: mockData, error: null })
     const { getByText, getAllByText } = await render(<ConnectionDetailScreen />)
 
@@ -124,12 +126,9 @@ describe("M15 Connection detail", () => {
     expect(getByText("Security advisories")).toBeTruthy()
     expect(getByText("Contents")).toBeTruthy()
     expect(getByText("Not granted")).toBeTruthy()
-    // Bound target — renders the real target profile name from row.target
+    // Bound target shown inline as a plain KvRow
+    expect(getByText("Target")).toBeTruthy()
     expect(getByText("v17.3.0")).toBeTruthy()
-    expect(getByText("Verified")).toBeTruthy()
-    // Private repository policy
-    expect(getByText("Private repository policy")).toBeTruthy()
-    expect(getByText(/POLICY_REFUSED/)).toBeTruthy()
   })
 
   it("renders Private visibility and installation-token clone for a private repo", async () => {
@@ -145,17 +144,25 @@ describe("M15 Connection detail", () => {
     expect(getByText("Installation token (Contents read)")).toBeTruthy()
   })
 
-  it("shows no Verified pill when the repo has no bound target", async () => {
+  it("shows 'Not set' target when configured is false", async () => {
     mockUseApiQuery.mockReturnValue({
-      data: [{ ...mockData[0], target: null, configured: false, isPrivate: true }],
+      data: [{ ...mockData[0], configured: false, target: null }],
       error: null,
     })
-    const { getByText, queryByText } = await render(<ConnectionDetailScreen />)
+    const { getByText } = await render(<ConnectionDetailScreen />)
     await waitFor(() => {
       expect(getByText("Bound target")).toBeTruthy()
     })
-    expect(getByText("No target bound")).toBeTruthy()
-    expect(queryByText("Verified")).toBeNull()
+    expect(getByText("Not set")).toBeTruthy()
+  })
+
+  it("shows 'Connection not found' for an unknown id", async () => {
+    mockLocalSearchParams.mockReturnValue({ id: "99999" })
+    mockUseApiQuery.mockReturnValue({ data: mockData, error: null })
+    const { getByText } = await render(<ConnectionDetailScreen />)
+    await waitFor(() => {
+      expect(getByText("Connection not found")).toBeTruthy()
+    })
   })
 
   it("renders an error message inline on non-auth errors", async () => {

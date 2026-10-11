@@ -1,28 +1,34 @@
 /** M22 Target and scope. Show the bound reproduction target and its scope rules.
  *
- * Matches docs/site/screens/m22.html exactly:
- * - Top bar with a round glass back button (back to Case file / M7).
- * - H1 "Target and scope", meta "juice-shop · v17.3.0 · 1867b92".
- * - Section "Pinned image": KvRows for Image digest (mono), Snapshot id (mono),
- *   Build (mono).
- * - Section "Scope rules": KvRows for Allow (localhost) and Egress (None).
- * - Section "Readiness": a row with "Health check", "Answered on port 3000",
- *   and a Ready pill.
- *
- * Data comes from GET /api/mobile/v1/reports/[id] which returns targetScope
- * fields on the case file view. The screen falls back to the m22.html mockup
- * values when no target is bound or the API has not returned yet.
+ * The screen reads its report id from the route param and fetches the case file
+ * from GET /api/mobile/v1/reports/[id]. The meta line is built from the target
+ * name and the short digest. When targetScope is null there is no bound target,
+ * so the screen shows an empty state instead of demo data.
  */
 import { View, Text, ScrollView, StyleSheet } from "react-native"
-
+import { useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFileWithScope } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { Card, KvRow, SectionHeader, ScreenHeader, Mono } from "@/components/primitives"
+import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState } from "@/components/primitives"
+
+// Keep the digest readable in the header meta.
+function shortDigest(digest: string): string {
+  if (digest.startsWith("sha256:")) return digest.slice("sha256:".length, "sha256:".length + 12)
+  return digest.slice(0, 12)
+}
+
+function ruleValue(entry: unknown): string {
+  if (entry && typeof entry === "object" && "allow" in entry && typeof (entry as any).allow === "string") {
+    return (entry as any).allow
+  }
+  return JSON.stringify(entry)
+}
 
 export default function TargetAndScopeScreen() {
   const { colors, phase: phaseColors } = useTheme()
-  const { data: caseFile, error } = useApiQuery<MobileCaseFileWithScope>("/reports/BD-1042")
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const { data: caseFile, error } = useApiQuery<MobileCaseFileWithScope>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {
@@ -35,15 +41,31 @@ export default function TargetAndScopeScreen() {
 
   if (error) return null
 
-  // Fall back to the m22.html mockup values for the demo target.
+  const target = caseFile?.target ?? null
   const scope = caseFile?.targetScope
-  const imageDigest = scope?.imageDigest ?? "sha256:9f2c4e0a7b1d6c83e5a24f90b7d1c3e86a5f0b2d94c71e8a3b6d05f2c8e1a947"
-  const snapshotId = scope?.snapshotId ?? "snap-7c41e9d2"
-  const buildMarker = scope?.buildMarker ?? "bd-build-1867b92-ok"
-  const allow = scope?.scopeRules?.allow ?? ["localhost"]
-  const egress = scope?.scopeRules?.egress ?? "None"
-  const readinessPath = scope?.readinessPath ?? "/"
-  const startCommand = scope?.startCommand ?? "npm start"
+
+  if (!scope) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader title="Target and scope" back backLabel="Case file" />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={[styles.h1, { color: colors.foreground }]}>Target and scope</Text>
+          <EmptyState
+            heading="No bound target"
+            body="This report has no authorised target, so nothing was reproduced."
+            inline
+          />
+        </ScrollView>
+      </View>
+    )
+  }
+
+  const digest = target?.imageDigest ?? scope.imageDigest
+  const meta = target ? `${target.name} · ${shortDigest(digest)}` : shortDigest(digest)
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -54,7 +76,7 @@ export default function TargetAndScopeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <Text style={[styles.h1, { color: colors.foreground }]}>Target and scope</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>juice-shop · v17.3.0 · 1867b92</Text>
+        <Text style={[styles.hmeta, { color: colors.muted }]}>{meta}</Text>
 
         {/* Pinned image */}
         <SectionHeader title="Pinned image" chevron={false} />
@@ -63,33 +85,39 @@ export default function TargetAndScopeScreen() {
             label="Image digest"
             value={
               <Mono style={{ color: colors.foreground }}>
-                {imageDigest}
+                {scope.imageDigest}
               </Mono>
             }
           />
-          <KvRow
-            label="Snapshot id"
-            value={
-              <Mono style={{ color: colors.foreground }}>
-                {snapshotId}
-              </Mono>
-            }
-          />
-          <KvRow
-            label="Build"
-            value={
-              <Mono style={{ color: colors.foreground }}>
-                {buildMarker}
-              </Mono>
-            }
-          />
+          {scope.snapshotId ? (
+            <KvRow
+              label="Snapshot id"
+              value={
+                <Mono style={{ color: colors.foreground }}>
+                  {scope.snapshotId}
+                </Mono>
+              }
+            />
+          ) : null}
+          {scope.buildMarker ? (
+            <KvRow
+              label="Build"
+              value={
+                <Mono style={{ color: colors.foreground }}>
+                  {scope.buildMarker}
+                </Mono>
+              }
+            />
+          ) : null}
         </Card>
 
         {/* Scope rules */}
         <SectionHeader title="Scope rules" chevron={false} />
         <Card style={styles.card}>
-          <KvRow label="Allow" value={allow.join(", ")} />
-          <KvRow label="Egress" value={egress} />
+          {(scope.scopeRules ?? []).map((entry, i) => (
+            <KvRow key={i} label="Allow" value={ruleValue(entry)} />
+          ))}
+          <KvRow label="Egress" value={scope.egress === "none" ? "None" : scope.egress} />
         </Card>
         <Text style={[styles.note, { color: colors.muted }]}>
           Reproduction runs offline in a sandbox. The only network the agent can reach is the target.
@@ -102,8 +130,13 @@ export default function TargetAndScopeScreen() {
             <View style={styles.readinessMain}>
               <Text style={[styles.readinessTitle, { color: colors.foreground }]}>Health check</Text>
               <Text style={[styles.readinessSubtitle, { color: colors.muted }]}>
-                Answered on port 3000, readiness {readinessPath}
+                Answered on port 3000, readiness {scope.readinessPath}
               </Text>
+              {scope.startCommand ? (
+                <Text style={[styles.readinessStart, { color: colors.muted }]}>
+                  Start: {scope.startCommand}
+                </Text>
+              ) : null}
             </View>
             <View style={[styles.readyPill, { backgroundColor: phaseColors.delivered + "29" }]}>
               <Text style={[styles.readyPillText, { color: phaseColors.delivered }]}>Ready</Text>
@@ -136,6 +169,7 @@ const styles = StyleSheet.create({
   readinessMain: { flex: 1, minWidth: 0 },
   readinessTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
   readinessSubtitle: { fontSize: 13, marginTop: 3 },
+  readinessStart: { fontSize: 13, marginTop: 3 },
   readyPill: {
     flexDirection: "row",
     alignItems: "center",

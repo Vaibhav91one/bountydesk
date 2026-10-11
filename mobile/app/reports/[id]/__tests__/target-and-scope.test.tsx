@@ -1,9 +1,9 @@
 /**
- * Render tests for M22 Target and scope (app/more/target-and-scope.tsx).
+ * Render tests for M22 Target and scope (app/reports/[id]/target-and-scope.tsx).
  *
- * Covers loading, data, and error states. Verifies the screen renders the
- * pinned image digest, snapshot id, build marker, scope rules, and readiness
- * check row with a Ready pill.
+ * Covers loading, data, and error states. Verifies the screen reads its report
+ * id from the route param, fetches /reports/<id>, renders scope rules as KvRows,
+ * and shows an empty state when targetScope is null.
  */
 import React from "react"
 import { render, waitFor } from "@testing-library/react-native"
@@ -20,6 +20,11 @@ jest.mock("@/lib/use-query", () => ({
       this.name = "ApiError"
     }
   },
+}))
+
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ push: jest.fn() }),
+  useLocalSearchParams: () => ({ id: "BD-1042" }),
 }))
 
 jest.mock("@/theme", () => ({
@@ -54,13 +59,15 @@ jest.mock("@/theme", () => ({
 
 const mockCaseFile = {
   id: "BD-1042",
+  target: { id: "t1", name: "juice-shop", imageDigest: "sha256:abc123def456" },
   targetScope: {
-    imageDigest: "sha256:9f2c4e0a7b1d6c83e5a24f90b7d1c3e86a5f0b2d94c71e8a3b6d05f2c8e1a947",
-    snapshotId: "snap-7c41e9d2",
-    buildMarker: "bd-build-1867b92-ok",
-    scopeRules: { allow: ["localhost"], egress: "None" },
+    imageDigest: "sha256:abc123def456",
+    snapshotId: null,
+    buildMarker: null,
+    scopeRules: [{ allow: "localhost" }],
     readinessPath: "/",
-    startCommand: "npm start",
+    startCommand: null,
+    egress: "none",
   },
 }
 
@@ -82,44 +89,41 @@ describe("M22 Target and scope", () => {
     expect(toJSON()).not.toBeNull()
   })
 
-  it("renders pinned image, scope rules, and readiness from the case file", async () => {
+  it("fetches /reports/<id> using the route param", async () => {
+    mockUseApiQuery.mockReturnValue({ data: mockCaseFile, error: null })
+    await render(<TargetAndScopeScreen />)
+    await waitFor(() => {
+      expect(mockUseApiQuery).toHaveBeenCalledWith("/reports/BD-1042")
+    })
+  })
+
+  it("renders the allow rule 'localhost' from [{allow:'localhost'}] and None egress", async () => {
     mockUseApiQuery.mockReturnValue({ data: mockCaseFile, error: null })
     const { getByText, getAllByText } = await render(<TargetAndScopeScreen />)
 
     await waitFor(() => {
       expect(getAllByText("Target and scope").length).toBeGreaterThan(0)
     })
-    // Meta
-    expect(getByText("juice-shop · v17.3.0 · 1867b92")).toBeTruthy()
-    // Pinned image section
-    expect(getByText("Image digest")).toBeTruthy()
-    expect(getByText(/sha256:9f2c4e0a7b/)).toBeTruthy()
-    expect(getByText("Snapshot id")).toBeTruthy()
-    expect(getByText("snap-7c41e9d2")).toBeTruthy()
-    expect(getByText("Build")).toBeTruthy()
-    expect(getByText("bd-build-1867b92-ok")).toBeTruthy()
-    // Scope rules
     expect(getByText("Allow")).toBeTruthy()
     expect(getByText("localhost")).toBeTruthy()
     expect(getByText("Egress")).toBeTruthy()
     expect(getByText("None")).toBeTruthy()
-    // Readiness
-    expect(getByText("Health check")).toBeTruthy()
-    expect(getByText(/port 3000/)).toBeTruthy()
-    expect(getByText("Ready")).toBeTruthy()
+    // Meta from the case file target
+    expect(getByText("juice-shop · abc123def456")).toBeTruthy()
   })
 
-  it("renders mockup fallback values when targetScope is null", async () => {
-    mockUseApiQuery.mockReturnValue({ data: { id: "BD-1042", targetScope: null }, error: null })
-    const { getByText, getAllByText } = await render(<TargetAndScopeScreen />)
-
-    await waitFor(() => {
-      expect(getAllByText("Target and scope").length).toBeGreaterThan(0)
+  it("shows 'No bound target' when targetScope is null", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: { id: "BD-1042", target: null, targetScope: null },
+      error: null,
     })
-    expect(getByText("Image digest")).toBeTruthy()
-    expect(getByText(/sha256:9f2c4e0a7b/)).toBeTruthy()
-    expect(getByText("snap-7c41e9d2")).toBeTruthy()
-    expect(getByText("bd-build-1867b92-ok")).toBeTruthy()
+    const { getByText } = await render(<TargetAndScopeScreen />)
+    await waitFor(() => {
+      expect(getByText("No bound target")).toBeTruthy()
+    })
+    expect(
+      getByText("This report has no authorised target, so nothing was reproduced."),
+    ).toBeTruthy()
   })
 
   it("renders an error message inline on non-auth errors", async () => {

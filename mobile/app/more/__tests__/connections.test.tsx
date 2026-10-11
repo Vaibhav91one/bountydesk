@@ -130,6 +130,54 @@ const mockData = [
     onboardingProgress: null,
     onboardingDetail: null,
   },
+  {
+    id: "repo-4",
+    account: "Vaibhav91one",
+    status: "archived",
+    fullName: "Vaibhav91one/archive-repo",
+    owner: "Vaibhav91one",
+    name: "archive-repo",
+    label: "Archived",
+    hint: "Archived installation.",
+    target: null,
+    repoId: 12348,
+    configured: false,
+    connected: false,
+    isPrivate: false,
+    reportCount: 0,
+    awaitingReview: 0,
+    delivered: 0,
+    lastReportAt: null,
+    lastSyncedAt: "2025-01-15T09:00:00.000Z",
+    manageUrl: "https://github.com/settings/installations/123",
+    onboarding: null,
+    onboardingProgress: null,
+    onboardingDetail: null,
+  },
+  {
+    id: "repo-5",
+    account: "Vaibhav91one",
+    status: "disconnected",
+    fullName: "Vaibhav91one/disconnected-repo",
+    owner: "Vaibhav91one",
+    name: "disconnected-repo",
+    label: "Disconnected",
+    hint: "Disconnected installation.",
+    target: null,
+    repoId: 12349,
+    configured: false,
+    connected: false,
+    isPrivate: true,
+    reportCount: 0,
+    awaitingReview: 0,
+    delivered: 0,
+    lastReportAt: null,
+    lastSyncedAt: "2025-01-15T09:00:00.000Z",
+    manageUrl: "https://github.com/settings/installations/123",
+    onboarding: null,
+    onboardingProgress: null,
+    onboardingDetail: null,
+  },
 ]
 
 let ConnectionsScreen: React.ComponentType
@@ -164,11 +212,13 @@ describe("M14 Connections", () => {
     expect(getByText("billing-core")).toBeTruthy()
     expect(getByText("Target bound")).toBeTruthy()
     expect(getByText("No target")).toBeTruthy()
-    expect(getByText("Policy refused")).toBeTruthy()
-    // Mockup subtitles
+    expect(getAllByText("Policy refused").length).toBe(3)
+    // Hints
     expect(getByText("Public · v17.3.0")).toBeTruthy()
-    expect(getByText("Public · main")).toBeTruthy()
-    expect(getByText("Private")).toBeTruthy()
+    expect(getByText("Public · No target")).toBeTruthy()
+    expect(getByText("Private · Suspended")).toBeTruthy()
+    expect(getByText("Public · Archived")).toBeTruthy()
+    expect(getByText("Private · Disconnected")).toBeTruthy()
     // Target links
     expect(getByText("View onboarding")).toBeTruthy()
     expect(getByText("Upload a target")).toBeTruthy()

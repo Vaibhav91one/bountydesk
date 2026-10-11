@@ -180,14 +180,20 @@ function repoStatusPill(
 }
 
 function repoStatusHint(row: ConnectionRow): string {
-  if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected")
-    return row.isPrivate ? "Private" : "Suspended"
-  if (row.configured && row.target) {
-    // Mockup shows "Public · <target>" for bound repos.
-    return (row.isPrivate ? "Private" : "Public") + " · " + row.target
+  const visibility = row.isPrivate ? "Private" : "Public"
+  switch (row.status) {
+    case "suspended":
+      return `${visibility} · Suspended`
+    case "archived":
+      return `${visibility} · Archived`
+    case "disconnected":
+      return `${visibility} · Disconnected`
+    default:
+      if (row.configured && row.target) {
+        return `${visibility} · ${row.target}`
+      }
+      return `${visibility} · No target`
   }
-  // Not configured, not bound: mockup shows "Public · main"
-  return (row.isPrivate ? "Private" : "Public") + " · main"
 }
 
 function StatusPill({ label, color }: { label: string; color: string }) {
