@@ -299,4 +299,16 @@ describe("M5 Queue", () => {
     expect(getByText("25")).toBeTruthy()
     expect(mockUseApiQuery).toHaveBeenCalledWith("/queue?limit=50")
   })
+  it("notes a short shared column once instead of marking each split section", async () => {
+    const paged = {
+      ...mockQueueData,
+      columns: mockQueueData.columns.map((c: { key: string; cards: unknown[] }) =>
+        c.key === "analysis-only" ? { ...c, total: c.cards.length + 30 } : c,
+      ),
+    }
+    mockUseApiQuery.mockReturnValue({ data: paged, error: undefined, isError: false, isFetching: false })
+    const { getByText, queryAllByText } = await render(<QueueScreen />)
+    expect(getByText(/^Showing the newest \d+ of \d+ reproducing and analysis-only reports\.$/)).toBeTruthy()
+    expect(queryAllByText(/\+$/)).toHaveLength(0)
+  })
 })

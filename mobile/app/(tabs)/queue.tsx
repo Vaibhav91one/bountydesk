@@ -110,17 +110,21 @@ function QueueScreenContent() {
   const cols = data?.columns ?? []
   const colByKey = new Map(cols.map((c) => [c.key, c]))
   // count is the server's total, not cards.length: a column is paged, so cards can be short of it.
-  // Reproducing and Analysis only share one server column, so their split counts are the loaded
-  // cards, marked "+" when that column holds more than was loaded.
-  const sections: { key: string; phase: PhaseKey; label: string; cards: QueueCardView[]; count: string }[] = []
+  // Reproducing and Analysis only share one server column with no per-state total, so their counts
+  // are the loaded cards, and a short column gets one note under the pair instead of guessing
+  // which of the two states lost rows.
+  const sections: { key: string; phase: PhaseKey; label: string; cards: QueueCardView[]; count: string; note?: string }[] = []
+  const shared = colByKey.get("analysis-only")
 
   for (const { key, phase, label } of SHOWN_PHASES) {
     if (key === "reproducing" || key === "analysis") {
-      const col = colByKey.get("analysis-only")
       const state = key === "reproducing" ? "REPRODUCING" : "ANALYSIS_ONLY"
-      const cards = col ? col.cards.filter((c) => c.state === state) : []
-      const more = col ? col.total > col.cards.length : false
-      sections.push({ key, phase, label, cards, count: `${cards.length}${more ? "+" : ""}` })
+      const cards = shared ? shared.cards.filter((c) => c.state === state) : []
+      const note =
+        key === "analysis" && shared && shared.total > shared.cards.length
+          ? `Showing the newest ${shared.cards.length} of ${shared.total} reproducing and analysis-only reports.`
+          : undefined
+      sections.push({ key, phase, label, cards, count: String(cards.length), note })
     } else {
       const col = colByKey.get(key)
       sections.push({ key, phase, label, cards: col ? col.cards : [], count: String(col?.total ?? 0) })
@@ -168,6 +172,7 @@ function QueueScreenContent() {
                 />
               ))}
             </View>
+            {s.note ? <Text style={[styles.sectionNote, { color: colors.muted }]}>{s.note}</Text> : null}
           </View>
         ))}
 
@@ -288,4 +293,5 @@ const styles = StyleSheet.create({
   itemB: { fontSize: 13 },
   shimmer: { fontSize: 13 },
   note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  sectionNote: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 8 },
 })
