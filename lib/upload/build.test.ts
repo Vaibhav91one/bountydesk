@@ -195,7 +195,7 @@ test("an uploaded Dockerfile builds from its one-file archive on the archive dig
   assert.equal(profile.sourceArchiveDigest, upload.sourceArchiveDigest);
 });
 
-test("a build that keeps failing leaves the report unbound and still queues its analysis-only run", async () => {
+test("a normal upload that keeps failing retries once before failing (unchanged retry behaviour)", async () => {
   const reportId = await heldUpload({ imageRef: "nginx:1.27", imageDigest: IMAGE_DIGEST });
   await gate.approveUploadTarget(reportId, "reviewer", TARGET);
   const driver = fakeDriver("fail");
@@ -209,6 +209,25 @@ test("a build that keeps failing leaves the report unbound and still queues its 
   assert.equal(upload.buildState, "FAILED");
   assert.match(upload.buildError ?? "", /docker build exited 1/);
   assert.equal((await reportRow(reportId)).targetProfileId, null);
+  assert.ok(await analysisJob(reportId));
+});
+
+test("a retest child build fails fast: one attempt, then FAILED with no retry", async () => {
+  const reportId = await heldUpload({ gitUrl: "https://github.com/example/app", gitCommit: "c".repeat(40) });
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  // Mark the intake row as a retest child, as startRetest does.
+  await dbm.db.update(dbm.uploadIntake).set({ isRetest: true }).where(dbm.eq(dbm.uploadIntake.reportId, reportId));
+
+  const driver = fakeDriver("fail");
+  assert.ok(await build.buildUploadOnce({ driver }));
+
+  const upload = await uploadRow(reportId);
+  assert.equal(upload.buildState, "FAILED");
+  assert.equal(upload.buildAttempts, 1, "the retest build was attempted once");
+  assert.match(upload.buildError ?? "", /docker build exited 1/);
+  // No lease remains to wait out: the row lands directly on FAILED.
+  assert.equal(upload.buildLeaseExpiresAt, null);
+  // The analysis-only run is still queued so the panel can show Inconclusive.
   assert.ok(await analysisJob(reportId));
 });
 

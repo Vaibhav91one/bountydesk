@@ -1410,6 +1410,9 @@ export const uploadIntake = pgTable(
     buildLeaseExpiresAt: timestamp("build_lease_expires_at", { withTimezone: true }),
     buildAttempts: integer("build_attempts").notNull().default(0),
     buildError: text("build_error"),
+    /** True for a retest child (lib/retests/retest.ts), which builds once and fails fast instead of
+     *  retrying, so an inconclusive child surfaces in minutes rather than after a lease wait. */
+    isRetest: boolean("is_retest").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
