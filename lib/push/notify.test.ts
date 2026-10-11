@@ -146,7 +146,7 @@ test("a second sweep sends nothing", async () => {
 });
 
 test("a token whose email is not a reviewer gets nothing", async () => {
-  const { reportId: _ } = await seedReport("AWAITING_APPROVAL");
+  await seedReport("AWAITING_APPROVAL");
 
   // carol is not in the allowlist.
   await registerToken("carol@example.com");
@@ -167,7 +167,7 @@ test("a token whose email is not a reviewer gets nothing", async () => {
 });
 
 test("DeviceNotRegistered revokes the token", async () => {
-  const { reportId: _ } = await seedReport("AWAITING_APPROVAL");
+  await seedReport("AWAITING_APPROVAL");
   await registerToken("alice@bountydesk.test");
 
   const fakeSend = async () => [
@@ -245,7 +245,7 @@ test("a DELIVERED report sends with the outbound delivery id as ref_id", async (
 });
 
 test("a second token for the same reviewer both get notified", async () => {
-  const { reportId: _ } = await seedReport("AWAITING_APPROVAL");
+  await seedReport("AWAITING_APPROVAL");
   await registerToken("alice@bountydesk.test", "ExponentPushToken[token-one]");
   await registerToken("alice@bountydesk.test", "ExponentPushToken[token-two]");
 

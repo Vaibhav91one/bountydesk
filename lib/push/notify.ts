@@ -13,6 +13,7 @@ import {
   verdict,
 } from "@/lib/db";
 import { isReviewerEmail } from "@/lib/auth/reviewers";
+import { sourceLabel } from "@/lib/reports/queue";
 
 /** A single push message handed to the Expo push service. */
 export type PushMessage = {
@@ -44,18 +45,6 @@ export type SendFn = (messages: PushMessage[]) => Promise<ExpoTicket[]>;
 /** The candidate query is capped to reports updated in the last 24 hours. */
 const RECENT_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Inline the sourceLabel computation as SQL so we don't pull a TS helper into a query.
- * "github:123456:issue:482" -> #482; everything else -> #first8ofid.
- */
-function sourceLabelSql(sourceRef: unknown, id: unknown) {
-  return sql<string>`case
-    when ${sourceRef} ~ '^github:\d+:issue:(\d+)$'
-      then '#' || substring(${sourceRef} from '^github:\d+:issue:(\d+)$')
-    else '#' || left(${id}::text, 8)
-  end`;
-}
-
 type Candidate = {
   reportId: string;
   sourceRef: string;
@@ -65,38 +54,42 @@ type Candidate = {
 };
 
 /**
+ * Leaves out a (report, kind, ref) that already has a notification_event, so a sweep that runs
+ * every minute reads the 24-hour window without attempting an insert for every row in it.
+ */
+function notNotified(kind: "AWAITING_APPROVAL" | "DELIVERED", refId: ReturnType<typeof sql>) {
+  return sql`not exists (
+    select 1 from ${notificationEvent}
+    where ${notificationEvent.reportId} = ${report.id}
+      and ${notificationEvent.kind} = ${kind}
+      and ${notificationEvent.refId} = ${refId}
+  )`;
+}
+
+/**
  * Find reports that reached AWAITING_APPROVAL or DELIVERED in the last 24 hours, with the
  * verdict id (for AWAITING_APPROVAL) or outbound delivery id (for DELIVERED) as ref_id.
- * sourceLabel is computed the same way lib/reports/queue.ts does it: a github issue ref
- * yields "#<number>", anything else yields "#<first-8-of-id>".
+ * sourceLabel comes from lib/reports/queue.ts so the push names a report the way the lists do.
  */
 async function selectCandidates(now: Date): Promise<Candidate[]> {
   const since = new Date(now.getTime() - RECENT_MS);
 
   const awaiting = await db
-    .select({
-      reportId: report.id,
-      sourceRef: report.sourceRef,
-      sourceLabel: sourceLabelSql(report.sourceRef, report.id),
-      refId: verdict.id,
-    })
+    .select({ reportId: report.id, sourceRef: report.sourceRef, refId: verdict.id })
     .from(report)
     .innerJoin(verdict, eq(verdict.reportId, report.id))
     .where(
       and(
         eq(report.state, "AWAITING_APPROVAL"),
         gt(report.updatedAt, since),
+        notNotified("AWAITING_APPROVAL", sql`${verdict.id}::text`),
       ),
     )
-    .orderBy(report.id, desc(verdict.createdAt));
+    // revision is the verdict's order; the newest one is what the reviewer is asked to sign.
+    .orderBy(report.id, desc(verdict.revision));
 
   const delivered = await db
-    .select({
-      reportId: report.id,
-      sourceRef: report.sourceRef,
-      sourceLabel: sourceLabelSql(report.sourceRef, report.id),
-      refId: outboundDelivery.id,
-    })
+    .select({ reportId: report.id, sourceRef: report.sourceRef, refId: outboundDelivery.id })
     .from(report)
     .innerJoin(outboundDelivery, eq(outboundDelivery.reportId, report.id))
     .where(
@@ -104,6 +97,7 @@ async function selectCandidates(now: Date): Promise<Candidate[]> {
         eq(report.state, "DELIVERED"),
         gt(report.updatedAt, since),
         eq(outboundDelivery.state, "SENT"),
+        notNotified("DELIVERED", sql`${outboundDelivery.id}::text`),
       ),
     )
     .orderBy(report.id, desc(outboundDelivery.createdAt));
@@ -115,13 +109,13 @@ async function selectCandidates(now: Date): Promise<Candidate[]> {
   for (const row of awaiting) {
     if (seen.has(row.reportId)) continue;
     seen.add(row.reportId);
-    candidates.push({ ...row, kind: "AWAITING_APPROVAL" });
+    candidates.push({ ...row, refId: String(row.refId), sourceLabel: sourceLabel(row.sourceRef, row.reportId), kind: "AWAITING_APPROVAL" });
   }
 
   for (const row of delivered) {
     if (seen.has(row.reportId)) continue;
     seen.add(row.reportId);
-    candidates.push({ ...row, kind: "DELIVERED" });
+    candidates.push({ ...row, refId: String(row.refId), sourceLabel: sourceLabel(row.sourceRef, row.reportId), kind: "DELIVERED" });
   }
 
   return candidates;
