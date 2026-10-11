@@ -452,8 +452,8 @@ export async function readCase(
               scopeRules: (row.targetScopeRules as unknown[] | null) ?? [],
               readinessPath: (row.targetConfig as { readinessPath?: string } | null)?.readinessPath ?? "/",
               startCommand: (row.targetConfig as { startCommand?: string } | null)?.startCommand ?? null,
-              // The sandbox always runs with networkBlockAll; the config only says what the
-              // profile allows, not what the sandbox enforces, so egress is always "none" here.
+              // Every reproduction sandbox enforces networkBlockAll at the network layer;
+              // the profile's egress config cannot widen that, so the phone always reads "none".
               egress: "none" as const,
             }
           : null,

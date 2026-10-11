@@ -62,6 +62,22 @@ mock.module("@/lib/delivery/worker", { namedExports: { deliverById: async (id: s
 mock.module("@/lib/email/resend", {
   namedExports: { sendVerificationEmail: async () => undefined },
 });
+mock.module("@/lib/email/outside-config", { namedExports: { readOutsideConfig: async () => ({ maxBytes: 1024 * 1024 }) } });
+const uploadMock = {
+  parseUploadForm: async () => ({ ok: false as const, reason: "not configured" }),
+  admitReviewerUpload: async () => ({ ok: false as const, reason: "not configured" }),
+} as {
+  parseUploadForm: (form: FormData, config: unknown) => Promise<unknown>;
+  admitReviewerUpload: (submission: unknown, reviewer: unknown, target: unknown) => Promise<unknown>;
+};
+mock.module("@/lib/upload/intake", {
+  namedExports: {
+    parseUploadForm: (form: FormData, config: unknown) => uploadMock.parseUploadForm(form, config),
+    admitReviewerUpload: (submission: unknown, reviewer: unknown, target: unknown) =>
+      uploadMock.admitReviewerUpload(submission, reviewer, target),
+    UPLOAD_LIMITS: { maxRequestBytes: 1024 * 1024, maxDockerfileBytes: 65536 },
+  },
+});
 
 const reviewer = { login: "alice", email: "alice@bountydesk.test", avatarUrl: null, role: "member" as const };
 const asReviewer = () => (caller = { userId: "user_1", session: reviewer });
@@ -84,6 +100,7 @@ let integrations: typeof import("./integrations/route");
 let emailAccess: typeof import("./integrations/email/route");
 let emailVerify: typeof import("./integrations/email/verify/route");
 let inbox: typeof import("./inbox/route");
+let upload: typeof import("./integrations/upload/route");
 
 before(async () => {
   const { createSchema } = await import("@/lib/db/testing");
@@ -102,6 +119,7 @@ before(async () => {
   emailAccess = await import("./integrations/email/route");
   emailVerify = await import("./integrations/email/verify/route");
   inbox = await import("./inbox/route");
+  upload = await import("./integrations/upload/route");
 });
 
 after(async () => {
@@ -193,6 +211,7 @@ test("every route answers 401 without a token", async () => {
     await integrations.GET(),
     await emailAccess.GET(),
     await inbox.GET(get()),
+    await upload.POST(post({})),
   ];
   for (const response of responses) assert.equal(response.status, 401);
 });
@@ -253,6 +272,7 @@ test("a read-only reviewer can read the inbox and email access but not add revie
   assert.equal((await emailAccess.GET()).status, 200);
   assert.equal((await emailAccess.POST(post({ email: "new@example.com" }))).status, 403);
   assert.equal((await emailVerify.POST(post({ email: "new@example.com", code: "123456" }))).status, 403);
+  assert.equal((await upload.POST(post({}))).status, 403);
 });
 
 test("approve refuses a content hash that is not the verdict's, and records nothing", async () => {
@@ -438,4 +458,47 @@ test("an owner can add a reviewer, the code is mailed, and verify confirms it", 
 
   // Bad email shape is a 400, not a 500.
   assert.equal((await emailAccess.POST(post({ email: "not-an-email" }))).status, 400);
+});
+
+test("a reviewer upload with valid material is accepted and queued for build", async () => {
+  uploadMock.parseUploadForm = async () => ({
+    ok: true as const,
+    submission: { title: "Broken auth", body: "repro", contact: "alice@bountydesk.test", material: null },
+  });
+  uploadMock.admitReviewerUpload = async () => ({ ok: true as const, reportId: randomUUID() });
+
+  const form = new FormData();
+  form.set("title", "Broken auth");
+  form.set("body", "repro");
+  form.set("port", "3000");
+  form.set("readinessPath", "/health");
+  // Serialize the FormData so we can build a Request with the correct content-type header,
+  // including the boundary the runtime generated.
+  const response = new Response(form);
+  const body = await response.arrayBuffer();
+  const request = new Request("http://app.test/api/mobile/v1/x", {
+    method: "POST",
+    headers: { "content-type": response.headers.get("content-type") ?? "" },
+    body,
+  });
+
+  const uploadResponse = await upload.POST(request);
+  assert.equal(uploadResponse.status, 202);
+  assert.ok("reportId" in (await uploadResponse.json()));
+});
+
+test("a reviewer upload that fails intake validation is rejected with 400", async () => {
+  uploadMock.parseUploadForm = async () => ({ ok: false as const, reason: "the Dockerfile must be a text file with a FROM instruction" });
+
+  const form = new FormData();
+  form.set("title", "Bad upload");
+  const serialized = new Response(form);
+  const body = await serialized.arrayBuffer();
+  const request = new Request("http://app.test/api/mobile/v1/x", {
+    method: "POST",
+    headers: { "content-type": serialized.headers.get("content-type") ?? "" },
+    body,
+  });
+
+  assert.equal((await upload.POST(request)).status, 400);
 });

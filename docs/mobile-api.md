@@ -18,7 +18,7 @@ email is refused before anything reads the database.
 | Token state | Response | Why |
 |---|---|---|
 | Missing or invalid | `401` | No authenticated session. |
-| Present, but the email is not on the reviewer allowlist | `403` | Not an reviewer. |
+| Present, but the email is not on the reviewer allowlist | `403` | Not a reviewer. |
 | Present, email is allowlisted but read-only | `403` on write routes, `200` on read routes | Read-only reviewers can browse, not approve or add reviewers. |
 
 The `write` flag matters for routes that mutate state: approve, deny, chat, reviewer management,
