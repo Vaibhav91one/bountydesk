@@ -243,7 +243,7 @@ export default function CaseFileScreen() {
           <Card style={styles.cardList}>
             {file.target ? (
               <Pressable
-                onPress={() => router.push(`/more/target-and-scope`)}
+                onPress={() => router.push(`/reports/${file.id}/target-and-scope`)}
                 style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
               >
                 <View style={styles.targetRow}>
