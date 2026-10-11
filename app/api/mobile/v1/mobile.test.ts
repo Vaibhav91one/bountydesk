@@ -496,6 +496,82 @@ test("a report in needs-you never also appears in earlier", async () => {
   assert.ok(!body.earlier.items.some((row: { id: string }) => row.id === reportId));
 });
 
+test("a NEEDS_DECISION report appears in needs-you, not earlier", async () => {
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "email",
+      sourceRef: `email:needs-decision-${seq}`,
+      title: `Needs decision ${seq}`,
+      body: "body",
+      state: "NEEDS_DECISION",
+    })
+    .returning({ id: dbm.report.id });
+
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportRow.id));
+  assert.ok(!body.earlier.items.some((row: { id: string }) => row.id === reportRow.id));
+});
+
+test("an image-sourced target reports its provisioning buildMarker", async () => {
+  const DIGEST = `sha256:${"a".repeat(64)}`;
+  const [profileRow] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: "image-target",
+      imageName: "ghcr.io/example/image-target",
+      imageDigest: DIGEST,
+      // No resolvedCommitSha — image-sourced, not git.
+      config: {
+        baseUrl: "http://localhost:3000",
+        provisioning: {
+          readinessPath: "/ready",
+          startCommand: "npm start",
+          expectedBuildMarker: "built",
+        },
+      },
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "manual",
+      sourceRef: `manual:mobile-${seq}`,
+      title: `Image target report ${seq}`,
+      body: "body",
+      state: "AWAITING_APPROVAL",
+      targetProfileId: profileRow.id,
+    })
+    .returning({ id: dbm.report.id });
+
+  const verdictId = randomUUID();
+  const payload = `drafted comment ${seq}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+  const contentHash = computeContentHash(payload);
+  await dbm.db.insert(dbm.verdict).values({
+    id: verdictId,
+    reportId: reportRow.id,
+    outcome: "ANALYSIS_ONLY",
+    summary: "summary",
+    payload,
+    contentHash,
+  });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: reportRow.id,
+    capabilityToken: `cap-mobile-${seq}`,
+    sessionId: `sess-mobile-${seq}`,
+    pendingThreadId: `thread-${seq}`,
+    pendingToolCallId: `call-${seq}`,
+    pendingVerdictId: verdictId,
+    pendingApprovedContentHash: contentHash,
+  });
+
+  const file = await (await reportCase.GET(get(), ctx(reportRow.id))).json();
+  assert.equal(file.targetScope?.buildMarker, "built");
+});
+
 test("email access lists reviewers for any reviewer", async () => {
   const rows = await (await emailAccess.GET()).json();
   assert.deepEqual(rows.map((r: { email: string }) => r.email), [

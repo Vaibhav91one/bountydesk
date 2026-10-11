@@ -448,7 +448,12 @@ export async function readCase(
           ? {
               imageDigest: row.targetDigest ?? "",
               snapshotId: row.targetSnapshotId ?? null,
-                buildMarker: row.targetBuildMarker ?? null,
+              // expectedBuildMarker is always stored in config.provisioning by targetProfileConfig
+              // (lib/targets/registry.ts), while targetBuildMarker (resolvedCommitSha) is only set
+              // for git-sourced targets. Read the provisioning field so image-only targets report
+              // their build marker too.
+              buildMarker:
+                (row.targetConfig as { provisioning?: { expectedBuildMarker?: string } } | null)?.provisioning?.expectedBuildMarker ?? row.targetBuildMarker ?? null,
               scopeRules: (row.targetScopeRules as unknown[] | null) ?? [],
               // The provisioning config nests readinessPath, expectedBuildMarker, and startCommand
               // under config.provisioning (see targetProfileConfig in lib/targets/registry.ts).

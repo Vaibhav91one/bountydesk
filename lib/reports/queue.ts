@@ -520,8 +520,11 @@ export async function listAllReports(limit = INDEX_LIMIT, tx: Executor = db): Pr
  * Reports a reviewer still owes a decision on, with no cap: the "needs you" set must be complete
  * even when it is older than the last 200 updated reports that listAllReports truncates to.
  *
- * Uses the same awaitingReviewSql predicate the board and the home summary rank on, so a report
- * can carry an awaiting-verdict verdict in the queue summary and not appear here.
+ * Matches the same awaitingReviewSql predicate the board and the home summary rank on, plus
+ * NEEDS_DECISION: an outside email, advisory, or upload report waiting at the intake gate for
+ * a reviewer to triage or deny. That state has no pending verdict row, so awaitingVerdictId
+ * stays null and it is excluded from earlier by the same null check, but it must appear here.
+ *
  * Accepts an optional tx executor so the inbox can read needs-you and earlier from one snapshot.
  */
 export async function listAwaitingReview(tx: Executor = db): Promise<IndexRow[]> {
@@ -572,7 +575,10 @@ export async function listAwaitingReview(tx: Executor = db): Promise<IndexRow[]>
     .from(report)
     .leftJoin(connectedRepository, eq(report.connectedRepositoryId, connectedRepository.id))
     .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
-    .where(and(isNull(report.hiddenAt), sql<boolean>`(${awaitingReviewSql})`))
+    .where(and(isNull(report.hiddenAt), sql<boolean>`(
+      ${awaitingReviewSql}
+      or ${report.state} = 'NEEDS_DECISION'
+    )`))
     .orderBy(desc(report.updatedAt));
 
   return rows.map((row) => ({
