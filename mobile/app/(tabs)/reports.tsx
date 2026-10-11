@@ -189,7 +189,7 @@ function ReportsScreenContent() {
         onEndReachedThreshold={0.5}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={() => (
+        ListHeaderComponent={(
           <>
             <Text style={[styles.h1, { color: colors.foreground }]}>Reports</Text>
             <Text style={[styles.hmeta, { color: colors.muted }]}>
@@ -251,7 +251,7 @@ function ReportsScreenContent() {
             </ScrollView>
           </>
         )}
-        ListFooterComponent={() => (
+        ListFooterComponent={(
           <>
             {loadError ? (
               <Pressable onPress={() => { setLoadError(null); loadMore() }} style={styles.loadError}>
@@ -266,7 +266,7 @@ function ReportsScreenContent() {
             </Text>
           </>
         )}
-        ListEmptyComponent={() => (
+        ListEmptyComponent={(
           <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
             <SvgImage name="mascot/scanning" width={150} height={150} />
             <Text style={[styles.noResultH, { color: colors.foreground }]}>

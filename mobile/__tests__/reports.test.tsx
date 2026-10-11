@@ -183,6 +183,20 @@ describe("M6 Reports", () => {
     expect(getByText("#482 · juice-shop")).toBeTruthy()
   })
 
+  it("keeps the same search input mounted while typing", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: mockReportsData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+    const { getByPlaceholderText } = await render(<ReportsScreen />)
+    const before = getByPlaceholderText("Search reports")
+    await fireEvent.changeText(before, "X")
+    // A header passed as an inline component would remount the input and drop the keyboard.
+    expect(getByPlaceholderText("Search reports")).toBe(before)
+  })
+
   it("filters by search term", async () => {
     mockUseApiQuery.mockReturnValue({
       data: mockReportsData,
