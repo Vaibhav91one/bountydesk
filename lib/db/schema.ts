@@ -707,10 +707,14 @@ export const verdictSupersession = pgTable(
 
 /**
  * A fix-verification retest of a confirmed report (docs/decisions.md Q34). The retest runs as a
- * separate child report built through the upload path at the fixed commit, so the original report,
+ * separate child report built through the upload path at the fixed material, so the original report,
  * its verdict and its target are never touched; this row only links the two. The result is not
  * stored: it is derived from the child's latest verdict when read (lib/retests/retest.ts), so there
  * is nothing to keep in sync.
+ *
+ * material_kind distinguishes a git commit retest from an upload material retest (tarball, Dockerfile,
+ * git URL or prebuilt image). A git retest pins on commit_sha; an upload retest pins on the material's
+ * own identity (archive digest, image digest, or git commit).
  */
 export const retest = pgTable(
   "retest",
@@ -725,7 +729,10 @@ export const retest = pgTable(
     childReportId: uuid("child_report_id")
       .notNull()
       .references(() => report.id, { onDelete: "restrict" }),
-    commitSha: text("commit_sha").notNull(),
+    /** 'git' for a commit on a connected repository, 'upload' for reviewer-supplied material. */
+    materialKind: text("material_kind").notNull().default("git"),
+    /** The fixed commit SHA. Null for an upload-material retest, which pins on the material's digest. */
+    commitSha: text("commit_sha"),
     actor: text("actor").notNull(),
     createdAt: createdAt(),
   },
@@ -737,6 +744,8 @@ export const retest = pgTable(
     }),
     uniqueIndex("retest_child_report_id_key").on(t.childReportId),
     // One retest per verdict and commit; the insert races on this, not on a prior read.
+    // child_report_id is already uniquely constrained, so the (original_verdict_id, material_kind,
+    // child_report_id) triple is redundant.
     uniqueIndex("retest_verdict_commit_key").on(t.originalVerdictId, t.commitSha),
     index("retest_original_report_idx").on(t.originalReportId),
   ],
@@ -1401,6 +1410,11 @@ export const uploadIntake = pgTable(
     /** A public https clone URL and its full commit SHA, for material_kind git. */
     gitUrl: text("git_url"),
     gitCommitSha: text("git_commit_sha"),
+    /** The connected repository a git retest clones (private repo needs Contents read). Null for
+    *  upload material and connectionless targets. */
+    connectedRepositoryId: uuid("connected_repository_id").references(() => connectedRepository.id, {
+      onDelete: "restrict",
+    }),
     materialBytes: integer("material_bytes"),
     /** The reviewer-approved target definition and build plan. Null until a reviewer approves one. */
     reviewedTarget: jsonb("reviewed_target"),
