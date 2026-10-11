@@ -63,21 +63,6 @@ mock.module("@/lib/email/resend", {
   namedExports: { sendVerificationEmail: async () => undefined },
 });
 mock.module("@/lib/email/outside-config", { namedExports: { readOutsideConfig: async () => ({ maxBytes: 1024 * 1024 }) } });
-const uploadMock = {
-  parseUploadForm: async () => ({ ok: false as const, reason: "not configured" }),
-  admitReviewerUpload: async () => ({ ok: false as const, reason: "not configured" }),
-} as {
-  parseUploadForm: (form: FormData, config: unknown) => Promise<unknown>;
-  admitReviewerUpload: (submission: unknown, reviewer: unknown, target: unknown) => Promise<unknown>;
-};
-mock.module("@/lib/upload/intake", {
-  namedExports: {
-    parseUploadForm: (form: FormData, config: unknown) => uploadMock.parseUploadForm(form, config),
-    admitReviewerUpload: (submission: unknown, reviewer: unknown, target: unknown) =>
-      uploadMock.admitReviewerUpload(submission, reviewer, target),
-    UPLOAD_LIMITS: { maxRequestBytes: 1024 * 1024, maxDockerfileBytes: 65536 },
-  },
-});
 
 const reviewer = { login: "alice", email: "alice@bountydesk.test", avatarUrl: null, role: "member" as const };
 const asReviewer = () => (caller = { userId: "user_1", session: reviewer });
@@ -461,44 +446,59 @@ test("an owner can add a reviewer, the code is mailed, and verify confirms it", 
 });
 
 test("a reviewer upload with valid material is accepted and queued for build", async () => {
-  uploadMock.parseUploadForm = async () => ({
-    ok: true as const,
-    submission: { title: "Broken auth", body: "repro", contact: "alice@bountydesk.test", material: null },
-  });
-  uploadMock.admitReviewerUpload = async () => ({ ok: true as const, reportId: randomUUID() });
+  // The intake validates the image ref against PREBUILT_IMAGE_REGISTRIES; pin it to ghcr.io
+  // so the test never depends on ambient env from the CI runner.
+  const savedRegistries = process.env.PREBUILT_IMAGE_REGISTRIES;
+  process.env.PREBUILT_IMAGE_REGISTRIES = "ghcr.io";
+  try {
+    const form = new FormData();
+    form.set("title", "Broken auth in admin API");
+    form.set("body", "Steps to reproduce...");
+    form.set("imageRef", "ghcr.io/vendor/app:1.2");
+    form.set("imageDigest", `sha256:${"a".repeat(64)}`);
+    form.set("port", "3000");
+    form.set("readinessPath", "/health");
+    const serialized = new Response(form);
+    const body = await serialized.arrayBuffer();
+    const request = new Request("http://app.test/api/mobile/v1/x", {
+      method: "POST",
+      headers: { "content-type": serialized.headers.get("content-type") ?? "" },
+      body,
+    });
 
-  const form = new FormData();
-  form.set("title", "Broken auth");
-  form.set("body", "repro");
-  form.set("port", "3000");
-  form.set("readinessPath", "/health");
-  // Serialize the FormData so we can build a Request with the correct content-type header,
-  // including the boundary the runtime generated.
-  const response = new Response(form);
-  const body = await response.arrayBuffer();
-  const request = new Request("http://app.test/api/mobile/v1/x", {
-    method: "POST",
-    headers: { "content-type": response.headers.get("content-type") ?? "" },
-    body,
-  });
-
-  const uploadResponse = await upload.POST(request);
-  assert.equal(uploadResponse.status, 202);
-  assert.ok("reportId" in (await uploadResponse.json()));
+    const uploadResponse = await upload.POST(request);
+    assert.equal(uploadResponse.status, 202);
+    assert.ok("reportId" in (await uploadResponse.json()));
+  } finally {
+    if (savedRegistries === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    else process.env.PREBUILT_IMAGE_REGISTRIES = savedRegistries;
+  }
 });
 
 test("a reviewer upload that fails intake validation is rejected with 400", async () => {
-  uploadMock.parseUploadForm = async () => ({ ok: false as const, reason: "the Dockerfile must be a text file with a FROM instruction" });
+  // An image from a registry outside the allowlist is refused at the real parseUploadForm.
+  const savedRegistries = process.env.PREBUILT_IMAGE_REGISTRIES;
+  process.env.PREBUILT_IMAGE_REGISTRIES = "ghcr.io";
+  try {
+    const form = new FormData();
+    form.set("title", "Bad upload");
+    form.set("body", "repro");
+    form.set("imageRef", "quay.io/vendor/app:1.2");
+    form.set("imageDigest", `sha256:${"a".repeat(64)}`);
+    const serialized = new Response(form);
+    const body = await serialized.arrayBuffer();
+    const request = new Request("http://app.test/api/mobile/v1/x", {
+      method: "POST",
+      headers: { "content-type": serialized.headers.get("content-type") ?? "" },
+      body,
+    });
 
-  const form = new FormData();
-  form.set("title", "Bad upload");
-  const serialized = new Response(form);
-  const body = await serialized.arrayBuffer();
-  const request = new Request("http://app.test/api/mobile/v1/x", {
-    method: "POST",
-    headers: { "content-type": serialized.headers.get("content-type") ?? "" },
-    body,
-  });
-
-  assert.equal((await upload.POST(request)).status, 400);
+    const uploadResponse = await upload.POST(request);
+    assert.equal(uploadResponse.status, 400);
+    const text = await uploadResponse.text();
+    assert.match(text, /not accepted|image/, "the intake reason is surfaced");
+  } finally {
+    if (savedRegistries === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
+    else process.env.PREBUILT_IMAGE_REGISTRIES = savedRegistries;
+  }
 });
