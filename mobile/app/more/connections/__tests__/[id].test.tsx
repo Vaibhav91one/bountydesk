@@ -175,4 +175,15 @@ describe("M15 Connection detail", () => {
     const { getByText } = await render(<ConnectionDetailScreen />)
     expect(getByText("Network failed")).toBeTruthy()
   })
+  it("shows the clone as blocked for a private repo without Contents read", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [{ ...mockData[0], isPrivate: true, contentsPermission: null }],
+      error: null,
+    })
+    const { getByText, queryByText } = await render(<ConnectionDetailScreen />)
+    await waitFor(() => {
+      expect(getByText("Blocked: Contents not granted")).toBeTruthy()
+    })
+    expect(queryByText("Installation token (Contents read)")).toBeNull()
+  })
 })

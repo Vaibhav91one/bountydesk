@@ -70,7 +70,12 @@ export default function ConnectionDetailScreen() {
   }
 
   const visibility = row.isPrivate ? "Private" : "Public"
-  const clone = row.isPrivate ? "Installation token (Contents read)" : "Anonymous"
+  // A private repo clones only with Contents read accepted; without it reproduction is POLICY_REFUSED.
+  const clone = !row.isPrivate
+    ? "Anonymous"
+    : row.contentsPermission
+      ? "Installation token (Contents read)"
+      : "Blocked: Contents not granted"
   const bound = row.configured
   const digest = row.target
 
