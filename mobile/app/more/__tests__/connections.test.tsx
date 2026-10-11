@@ -242,4 +242,13 @@ describe("M14 Connections", () => {
     await fireEvent.press(getByText("View onboarding"))
     expect(mockPush).toHaveBeenCalledWith(`/more/connections/${withOnboarding[1].repoId}/onboarding`)
   })
+  it("counts repositories per GitHub account", async () => {
+    const two = mockData.map((r: Record<string, unknown>, i: number) => (i === 0 ? { ...r, account: "second-org" } : r))
+    mockUseApiQuery.mockReturnValue({ data: two, error: null })
+    const { getByText } = await render(<ConnectionsScreen />)
+    const rest = two.length - 1
+    expect(getByText("second-org")).toBeTruthy()
+    expect(getByText("GitHub App installed · 1 repository")).toBeTruthy()
+    expect(getByText(`GitHub App installed · ${rest} ${rest === 1 ? "repository" : "repositories"}`)).toBeTruthy()
+  })
 })

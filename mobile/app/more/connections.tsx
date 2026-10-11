@@ -28,6 +28,28 @@ import { Card, SectionHeader, ScreenHeader, ToastProvider } from "@/components/p
 // client never hardcodes an installation slug.
 const CONNECTIONS_URL = `${process.env.EXPO_PUBLIC_API_BASE}/connections`
 
+function InstallRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
+  const { colors } = useTheme()
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+      accessibilityLabel={title}
+    >
+      <View style={styles.installRow}>
+        <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
+          <Icon name="github" size={20} stroke={colors.foreground} />
+        </View>
+        <View style={styles.installMain}>
+          <Text style={[styles.installTitle, { color: colors.foreground }]}>{title}</Text>
+          <Text style={[styles.installSubtitle, { color: colors.muted }]}>{subtitle}</Text>
+        </View>
+        <Icon name="chev" size={18} stroke={colors.faint} />
+      </View>
+    </Pressable>
+  )
+}
+
 export default function ConnectionsScreen() {
   const { colors } = useTheme()
   const { data: rows, error } = useApiQuery<ConnectionRow[]>("/connections")
@@ -46,10 +68,14 @@ export default function ConnectionsScreen() {
 
   if (error) return null
 
-  // Group rows by account for the Installation header.
-  // The mockup shows one installation, so we take the first account group.
-  const firstAccount = rows && rows.length > 0 ? rows[0].account : null
-  const repoCount = rows ? rows.length : 0
+  // One installation row per GitHub account, each with its own repository count, so a second
+  // account's repositories are never counted under the first.
+  const accounts: { account: string; count: number }[] = []
+  for (const row of rows ?? []) {
+    const entry = accounts.find((a) => a.account === row.account)
+    if (entry) entry.count += 1
+    else accounts.push({ account: row.account, count: 1 })
+  }
 
   const handleInstall = () => {
     Linking.openURL(CONNECTIONS_URL)
@@ -72,26 +98,18 @@ export default function ConnectionsScreen() {
           {/* Installation header */}
           <SectionHeader title="Installation" chevron={false} />
           <Card style={styles.card}>
-            <Pressable
-              onPress={handleInstall}
-              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-              accessibilityLabel={`GitHub App installed by ${firstAccount}`}
-            >
-              <View style={styles.installRow}>
-                <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
-                  <Icon name="github" size={20} stroke={colors.foreground} />
-                </View>
-                <View style={styles.installMain}>
-                  <Text style={[styles.installTitle, { color: colors.foreground }]}>
-                    {firstAccount ?? "GitHub App not installed"}
-                  </Text>
-                  <Text style={[styles.installSubtitle, { color: colors.muted }]}>
-                    GitHub App installed · {repoCount} {repoCount === 1 ? "repository" : "repositories"}
-                  </Text>
-                </View>
-                <Icon name="chev" size={18} stroke={colors.faint} />
-              </View>
-            </Pressable>
+            {accounts.length === 0 ? (
+              <InstallRow title="GitHub App not installed" subtitle="Install it to connect repositories" onPress={handleInstall} />
+            ) : (
+              accounts.map(({ account, count }) => (
+                <InstallRow
+                  key={account}
+                  title={account}
+                  subtitle={`GitHub App installed · ${count} ${count === 1 ? "repository" : "repositories"}`}
+                  onPress={handleInstall}
+                />
+              ))
+            )}
           </Card>
 
           {/* Repositories */}
