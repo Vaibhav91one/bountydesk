@@ -1,16 +1,28 @@
 /** M2 Sign in. Google and GitHub buttons via Clerk useSSO. */
+import * as WebBrowser from "expo-web-browser"
+import * as AuthSession from "expo-auth-session"
 import { useSSO } from "@clerk/expo"
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native"
+
+WebBrowser.maybeCompleteAuthSession()
+
+const redirectUrl = AuthSession.makeRedirectUri({
+  scheme: "bountydesk",
+  path: "sso-callback",
+})
 
 export default function SignInScreen() {
   const { startSSOFlow } = useSSO()
 
   const handleSSO = async (strategy: "google" | "github") => {
     try {
-      await startSSOFlow({
+      const { createdSessionId, setActive } = await startSSOFlow({
         strategy: `oauth_${strategy}`,
-        redirectUrl: "bountydesk://auth/callback",
+        redirectUrl,
       })
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId })
+      }
     } catch (err: any) {
       Alert.alert("Sign in failed", err.message)
     }
