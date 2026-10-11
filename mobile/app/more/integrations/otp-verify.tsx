@@ -24,8 +24,11 @@ export default function OtpVerifyScreen() {
   const { show } = useToast()
 
   const email = params.email
+  // A verify flips the reviewer to verified in GET /integrations/email, which the email-access
+  // list and the Integrations count read.
   const verifyMutation = useApiMutation<{ ok: boolean } & Record<string, unknown>>(
-    "/integrations/email/verify"
+    "/integrations/email/verify",
+    { invalidate: ["/integrations/email"] },
   )
   const resendMutation = useApiMutation<{ ok: boolean; codeSent?: boolean } & Record<string, unknown>>(
     "/integrations/email"

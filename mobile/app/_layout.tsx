@@ -18,6 +18,7 @@ import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
 import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { darkTheme } from "@/theme"
+import { restoreThemeMode } from "@/lib/theme-mode"
 
 /**
  * Resolve the auth session as soon as the root layout mounts, so the SSO
@@ -29,6 +30,11 @@ WebBrowser.maybeCompleteAuthSession()
 export default function RootLayout() {
   const fontsReady = useFonts()
   const [showLoading, setShowLoading] = useState(true)
+
+  // Apply the reviewer's saved Light/Dark choice before the first screen renders.
+  useEffect(() => {
+    restoreThemeMode()
+  }, [])
 
   useEffect(() => {
     if (fontsReady) {

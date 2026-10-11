@@ -41,6 +41,8 @@ export function useApiMutation<TData = unknown, TVariables = unknown>(
   options?: {
     onSuccess?: (data: TData) => void
     onError?: (error: ApiError) => void
+    /** Other query paths this write changes, refreshed alongside the mutation's own path. */
+    invalidate?: string[]
   },
 ) {
   const queryClient = useQueryClient()
@@ -48,7 +50,9 @@ export function useApiMutation<TData = unknown, TVariables = unknown>(
     mutationFn: (vars: TVariables) =>
       api<TData>(path, { method: "POST", body: JSON.stringify(vars) }),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: queryKey(path) })
+      for (const p of [path, ...(options?.invalidate ?? [])]) {
+        queryClient.invalidateQueries({ queryKey: queryKey(p) })
+      }
       options?.onSuccess?.(data)
     },
     onError: options?.onError,

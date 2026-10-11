@@ -10,6 +10,7 @@ import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 import AsyncStorage from "@react-native-async-storage/async-storage"
+import { restoreThemeMode, saveThemeMode, type ThemeMode } from "@/lib/theme-mode"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
@@ -46,8 +47,13 @@ export default function SettingsScreen() {
   const { signOut } = useAuth()
   const me = useApiQuery<MobileMe>("/me")
 
-  const [themeMode, setThemeMode] = useState<"system" | "light" | "dark">("system")
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system")
   const [notifToggles, setNotifToggles] = useState<Record<string, boolean>>({})
+
+  // Show the saved theme choice (the root layout already applied it at launch).
+  useEffect(() => {
+    restoreThemeMode().then(setThemeMode)
+  }, [])
 
   // Load persisted notification toggles on mount.
   useEffect(() => {
@@ -81,7 +87,7 @@ export default function SettingsScreen() {
   const cycleTheme = () => {
     const next = THEME_ORDER[(THEME_ORDER.indexOf(themeMode) + 1) % THEME_ORDER.length]
     setThemeMode(next)
-    show("Theme")
+    saveThemeMode(next)
   }
 
   const toggleNotif = (key: string) => {
