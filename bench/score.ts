@@ -98,7 +98,7 @@ export function score(results: readonly CaseResult[]): Scorecard {
     total: results.length,
     matrix,
     falsePositiveRate: negatives === 0 ? 0 : falsePositives / negatives,
-    invalidRecall: negatives === 0 ? 0 : 1 - falsePositives / negatives,
+    invalidRecall: negatives === 0 ? 1 : 1 - falsePositives / negatives,
     falseNegativeRate: positives === 0 ? 0 : falseNegatives / positives,
     abstentionRate: abstentions / results.length,
     accuracyOnNonAbstained: nonAbstainedTotal === 0 ? 0 : nonAbstainedCorrect / nonAbstainedTotal,
