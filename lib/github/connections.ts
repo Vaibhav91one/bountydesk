@@ -37,6 +37,7 @@ export type ConnectionRepo = {
   fullName: string;
   targetProfileName: string | null;
   status: RepoStatus;
+  isPrivate: boolean;
   /** What this repository has actually sent, which is the question an operator opens a
    *  repository to ask. Hidden reports are left out, the same as everywhere else. */
   reports: RepoReports;
@@ -281,6 +282,9 @@ export type Connection = {
   accountLogin: string;
   accountType: string | null;
   suspendedAt: Date | null;
+  /** The installation's accepted Contents and Repository security advisories permissions, null when not granted. */
+  contentsPermission: string | null;
+  advisoriesPermission: string | null;
   /**
    * The most recent write across the installation row and its repositories. A rename,
    * transfer, archive or removal touches only connected_repository, so reading the
@@ -332,6 +336,8 @@ export async function listConnections(): Promise<Connection[]> {
       accountLogin: githubInstallation.accountLogin,
       accountType: githubInstallation.accountType,
       suspendedAt: githubInstallation.suspendedAt,
+      contentsPermission: githubInstallation.contentsPermission,
+      advisoriesPermission: githubInstallation.repositoryAdvisoriesPermission,
       updatedAt: githubInstallation.updatedAt,
       repositoryUpdatedAt: connectedRepository.updatedAt,
       connectedRepositoryId: connectedRepository.id,
@@ -341,6 +347,7 @@ export async function listConnections(): Promise<Connection[]> {
       archivedAt: connectedRepository.archivedAt,
       targetProfileId: connectedRepository.targetProfileId,
       targetProfileName: targetProfile.name,
+      isPrivate: connectedRepository.isPrivate,
     })
     .from(githubInstallation)
     .leftJoin(
@@ -362,6 +369,8 @@ export async function listConnections(): Promise<Connection[]> {
         accountLogin: row.accountLogin,
         accountType: row.accountType,
         suspendedAt: row.suspendedAt,
+        contentsPermission: row.contentsPermission,
+        advisoriesPermission: row.advisoriesPermission,
         lastSyncedAt: row.updatedAt,
         grantedRepositoryCount: 0,
         repositories: [],
@@ -385,6 +394,7 @@ export async function listConnections(): Promise<Connection[]> {
       repoId: row.repoId,
       fullName: row.fullName,
       targetProfileName: row.targetProfileName,
+      isPrivate: row.isPrivate ?? false,
       reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
       onboarding: onboardings.get(row.repoId) ?? null,
       onboardingProgress: onboardingProgress.get(row.repoId) ?? null,

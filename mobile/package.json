@@ -12,6 +12,7 @@
     "expo": "~57.0.27",
     "expo-auth-session": "~57.0.14",
     "expo-constants": "~57.0.21",
+    "expo-document-picker": "~57.0.3",
     "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
     "expo-linear-gradient": "~57.0.2",
