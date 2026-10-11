@@ -1,8 +1,8 @@
 # Verdict-quality benchmark
 
 Issue #346 asks for a measurement of the reproduction oracle's accuracy, not a self-reported
-feeling that it's accurate. This is the starter corpus and scorer: 30 cases today, built to grow,
-not a finished number to quote.
+feeling that it's accurate. This is the starter corpus and scorer: 120 cases today (20 positive,
+100 negative), built to grow, not a finished number to quote.
 
 ## Why invalid recall, not just a false-positive rate
 
@@ -19,7 +19,7 @@ many didn't.
 ## Target
 
 The already-pinned BountyDesk demo target: the connected fork `Vaibhav91one/juice-shop` at commit
-`1867b926c5f50e4e692dc9c8f61821413cebe0cd` (`v17.3.0`). Ground truth for the ten positive cases
+`1867b926c5f50e4e692dc9c8f61821413cebe0cd` (`v17.3.0`). Ground truth for the twenty positive cases
 comes from the project's own published solutions
 (<https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html>), cited per case
 in `bench/corpus.json`.
@@ -33,14 +33,14 @@ widening to a second app is future work, not this corpus.
 
 ## The corpus
 
-`bench/corpus.json`: 30 cases, 10 positive and 20 negative, split `dev` (10, roughly a third) and
-`test` (20), fixed so the split never silently shifts between runs. Report bodies are written the
+`bench/corpus.json`: 120 cases, 20 positive and 100 negative, split `dev` (45, roughly a third) and
+`test` (75), fixed so the split never silently shifts between runs. Report bodies are written the
 way a real reporter writes one: a title, a plain description of what they tried and what happened,
 sometimes a curl command or a payload string. Nothing in a case's body hints at its expected
 outcome; that only lives in `expected`, `negativeType` and `rationale`, which the scorer and this
 document read, not the pipeline under test.
 
-Positives (`expected: "REPRODUCED"`) are ten real, distinct bugs in the pinned build: SQL
+Positives (`expected: "REPRODUCED"`) are twenty real, distinct bugs in the pinned build: SQL
 injection login bypass, an IDOR on the basket endpoint, an exposed FTP directory, SQLi-based
 schema exfiltration, a weak default admin credential, a guessable password-reset security
 question, verbose error disclosure, a broken-access-control review-author spoof, a DOM XSS, and a
@@ -49,8 +49,8 @@ included because it is a known-hard case for an HTTP-only probe (see
 `dom-xss-http-probe-blind.md` in project memory): a corpus that only contains bugs the probe can
 already see would not tell us anything about that gap.
 
-Negatives (`expected: "NOT_REPRODUCED"` or, for `unbound`, `"ANALYSIS_ONLY"`) are twenty cases
-across five labelled types, four of each:
+Negatives (`expected: "NOT_REPRODUCED"` or, for `unbound`, `"ANALYSIS_ONLY"`) are one hundred cases
+across five labelled types, twenty of each:
 
 - **nonexistent**: the report describes an endpoint or behavior that does not exist in the pinned build (an invented route, or a real bug class described through behavior, credentials, or codes that do not actually trigger it).
 - **wrong-payload**: a real endpoint and a real bug class, but the payload targets the wrong
@@ -58,7 +58,7 @@ across five labelled types, four of each:
 - **informative**: real, reproducible behavior with no security boundary crossed: self-XSS
   against the reporter's own content, a client route name visible in a bundled SPA, ordinary 404
   behavior described as if it were a leak.
-- **duplicate**: the same root cause and the same endpoint as one of the ten positives, described
+- **duplicate**: the same root cause and the same endpoint as one of the twenty positives, described
   with a different payload or from a different angle.
 - **unbound**: a plausible-sounding report against a host with no connected repository and no
   `TargetProfile`, by design: per the architecture invariants, no bound target means the only
@@ -97,19 +97,18 @@ Metrics:
 - **Accuracy on non-abstained cases** — exact match rate over the cases that were not abstentions,
   so a pipeline cannot inflate its score by abstaining on everything hard.
 
-`npm test` runs `bench/score.test.ts`, which exercises the metrics and the aggregation against
-hand-built result sets; it does not touch the database or the corpus file.
+`npm test` runs `bench/score.test.ts` (metrics and aggregation against hand-built result sets)
+and `bench/corpus.test.ts` (unique ids, required fields, and structural invariants for the 120-case
+corpus); neither touches the database or the corpus file at runtime.
 
 ## The sample-size caveat
 
 Read any FPR or invalid-recall number from this corpus as a rough signal, not a certified rate.
-With 20 negatives and zero observed false positives, the one-sided 95% Clopper-Pearson upper bound
-on the true false-positive rate is still **about 14%**; at the roughly 30 negatives this starter
-set edges toward with future additions, that upper bound is still around **10%**. A clean run does
-not mean the oracle's real FPR is near zero, it means the sample is too small to rule out a FPR as
-high as one in ten. Getting a bound tight enough to actually quote (say, under 2-3%) needs on the
-order of **100+ negatives**, not 20 or 30. This starter set is sized to be buildable and to prove
-the harness and scorer end to end; a number worth publishing externally waits for a bigger corpus.
+With 100 negatives and zero observed false positives, the one-sided 95% Clopper-Pearson upper bound
+on the true false-positive rate is still **about 3%**; at zero false positives in 100 trials, the
+rule of three gives a 95% confidence upper bound of 3/n which is 3%. This starter set is sized to be
+buildable and to prove the harness and scorer end to end; a number worth publishing externally
+waits for a bigger corpus with 200+ negatives to push the upper bound under 2%.
 
 ## Running it
 

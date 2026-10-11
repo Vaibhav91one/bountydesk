@@ -106,7 +106,6 @@
       "rationale": "Missing CSRF defenses on a state-changing, cookie-authenticated endpoint; a standard CSRF finding.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_change_the_name_of_a_user_by_performing_cross-site_request_forgery_from_another_origin"
     },
-
     {
       "id": "n-nonexistent-1",
       "split": "dev",
@@ -151,7 +150,6 @@
       "rationale": "That specific coupon code is expired and rejected by the pinned build's coupon validation; there is a real expired-coupon class of bug in Juice Shop, but not through this particular code, so a report naming it does not reproduce.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_successfully_redeem_an_expired_campaign_coupon_code (different code family; the one named here is not live)"
     },
-
     {
       "id": "n-wrong-1",
       "split": "dev",
@@ -196,7 +194,6 @@
       "rationale": "That endpoint resolves orders by their random order token and does not leak other orders by incrementing an id (the real IDOR in this app is on the basket endpoint, see p-idor-basket); track-order for an id I don't own returns a not-found result, not another user's order.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket (real IDOR is on /rest/basket/:id)"
     },
-
     {
       "id": "n-info-1",
       "split": "dev",
@@ -241,7 +238,6 @@
       "rationale": "This is how a CAPTCHA endpoint is supposed to work: it has to be reachable by a logged-out visitor filling in a public form, and handing out the challenge image and its id is the whole point, not a leak. No security boundary is crossed.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_submit_10_or_more_customer_feedbacks_within_10_seconds (names the /rest/captcha/ endpoint as part of the normal, intended flow)"
     },
-
     {
       "id": "n-dup-1",
       "split": "dev",
@@ -286,7 +282,6 @@
       "rationale": "Identical finding to p-default-admin-creds, same credential pair and same endpoint, worded almost exactly like the already-filed original.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_credentials_without_previously_changing_them_or_applying_sql_injection"
     },
-
     {
       "id": "n-unbound-1",
       "split": "dev",
@@ -296,7 +291,7 @@
       "title": "Our internal billing portal leaks customer invoices to any logged-in employee",
       "body": "At billing.acme-internal.example/invoices, any employee account (not just finance) can list and open every customer's invoice PDF by changing the invoiceId query parameter, with no check that the invoice belongs to a customer the employee's account is allowed to see.",
       "rationale": "Names a host that is not Vaibhav91one/juice-shop and has no connected repository or target profile; there is nothing to bind reproduction to, so the report cannot clear the authorization gate regardless of whether the described bug is real.",
-      "source": "n/a — fabricated target outside the authorized scope, by design"
+      "source": "n/a \u2014 fabricated target outside the authorized scope, by design"
     },
     {
       "id": "n-unbound-2",
@@ -307,7 +302,7 @@
       "title": "SQL injection in the login endpoint of our staging deployment at staging.acme-shop.example",
       "body": "POST https://staging.acme-shop.example/rest/user/login with email ' or 1=1-- and any password authenticates as the admin account, the same bug class as other Juice Shop forks I've tested.",
       "rationale": "References a live host with no TargetProfile and no re-verified ownership proof bound to it in this system, even though the bug it describes mirrors p-sqli-login; an unauthorized host cannot produce REPRODUCED or NOT_REPRODUCED however plausible the report reads.",
-      "source": "n/a — fabricated live host with no ownership proof, by design"
+      "source": "n/a \u2014 fabricated live host with no ownership proof, by design"
     },
     {
       "id": "n-unbound-3",
@@ -318,7 +313,7 @@
       "title": "Exposed .git directory on our marketing site leaks source and commit history",
       "body": "GET https://www.acme-marketing-site.example/.git/config returns the repository's git config file, and the rest of the .git directory is similarly browsable, exposing the full commit history and any secrets that were ever committed.",
       "rationale": "This report never names a repository or installation this system has a GitHub App grant for; it reads like a real, common bug class, but with no connected repository and no TargetProfile there is no authorized target to reproduce against.",
-      "source": "n/a — fabricated host outside any connected repository, by design"
+      "source": "n/a \u2014 fabricated host outside any connected repository, by design"
     },
     {
       "id": "n-unbound-4",
@@ -329,7 +324,987 @@
       "title": "Our password reset API at api.acme-corp.example rate-limits by IP only, so a botnet can brute force it",
       "body": "POST https://api.acme-corp.example/v2/auth/reset has no per-account rate limit, only a per-source-IP limit, so distributing the brute-force attempts for one target account's security question across many IPs bypasses the throttle entirely.",
       "rationale": "Describes a plausible real-world bug against a host this installation has no connected repository or target binding for; a report with no bound target stays ANALYSIS_ONLY no matter how the investigation reads the described behavior.",
-      "source": "n/a — fabricated host with no bound target, by design"
+      "source": "n/a \u2014 fabricated host with no bound target, by design"
+    },
+    {
+      "id": "p-score-board",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Score board page reachable via hidden client-side route discovered in main.js",
+      "body": "The storefront's compiled main.js bundle contains a route mapping for path: 'score-board'. Navigating to /#/score-board renders a full score board listing every challenge and its solved state.",
+      "rationale": "Hidden route in client-side bundle discloses the full challenge list to any visitor.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_find_the_carefully_hidden_score_board_page"
+    },
+    {
+      "id": "p-metrics-exposed",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Prometheus metrics endpoint accessible without authentication",
+      "body": "GET /metrics returns a Prometheus-format text body with counters and gauges for request counts, challenge solves, and application internals to any anonymous visitor.",
+      "rationale": "A metrics endpoint serving internal telemetry to unauthenticated callers is a real information-disclosure finding.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_find_the_endpoint_that_serves_usage_data_to_be_scraped_by_a_popular_monitoring_system"
+    },
+    {
+      "id": "p-reflected-xss",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Reflected XSS escapes the order tracking endpoint",
+      "body": "After placing an order, editing the id parameter in the order tracking URL to an iframe payload causes it to render and execute in the browser.",
+      "rationale": "Reflected XSS on a public, link-reachable endpoint with a documented payload.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_perform_a_reflected_xss_attack"
+    },
+    {
+      "id": "p-nosql-reviews",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "NoSQL injection in product review lookup via MongoDB $where",
+      "body": "GET /rest/products/:id/reviews builds a MongoDB query using a string-concatenated $where clause from the URL id parameter. A crafted id breaks out and returns all reviews.",
+      "rationale": "Server-side string interpolation of user input into a MongoDB $where query is a real NoSQL injection vector.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/showProductReviews.ts ($where string concatenation from req.params.id)"
+    },
+    {
+      "id": "p-poison-nullbyte",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Poison null byte bypasses the file-type filter on the FTP download endpoint",
+      "body": "GET /ftp/coupons_2013.md.bak%2500.adoc returns the contents of coupons_2013.md.bak, bypassing the endpoint's allowlist.",
+      "rationale": "A classic poison-null-byte bypass that lets an attacker download files the allowlist was meant to block.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_bypass_a_security_control_with_a_poison_null_byte"
+    },
+    {
+      "id": "p-ftp-backup-package",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Developer backup file accessible via FTP null-byte bypass",
+      "body": "GET /ftp/package.json.bak%2500.adoc returns the contents of package.json.bak, exposing build configuration.",
+      "rationale": "A real forgotten-backup-file disclosure reachable through the /ftp/:file handler.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_developers_forgotten_backup_file"
+    },
+    {
+      "id": "p-register-admin-role",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Registration endpoint lets a self-signup request set role to admin",
+      "body": "POST /api/Users with body {\"email\":\"attacker@example.com\",\"password\":\"x\",\"role\":\"admin\"} creates an account whose JWT claims role is admin.",
+      "rationale": "Mass-assignment of a privileged role through a public registration endpoint.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_register_as_a_user_with_administrator_privileges"
+    },
+    {
+      "id": "p-negative-order",
+      "split": "test",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Negative basket-item quantity produces a negative order total",
+      "body": "PUT /api/BasketItems/{id} with body {\"quantity\": -100} updates an item to a negative quantity, and checkout gives a negative total treated as a credit.",
+      "rationale": "No server-side validation that quantity stays positive.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_place_an_order_that_makes_you_rich"
+    },
+    {
+      "id": "p-empty-user-registration",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Registration accepts an empty email and empty password",
+      "body": "Submitting the registration form with both fields blank creates a user account with empty fields.",
+      "rationale": "Empty-field registration is a real improper-input-validation issue in this build.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_register_a_user_with_an_empty_email_and_password"
+    },
+    {
+      "id": "p-bjoern-cat-photo",
+      "split": "dev",
+      "kind": "positive",
+      "expected": "REPRODUCED",
+      "title": "Bjoern's cat photo is reachable via a URL with encoded hash fragments",
+      "body": "The photo wall entry references an image whose filename contains hash characters. URL-encoding them yields the actual image file.",
+      "rationale": "A real file-disclosure-by-URL-encoding finding on the user-photo upload path.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_retrieve_the_photo_of_bjoerns_cat_in_melee_combat_mode"
+    },
+    {
+      "id": "n-nonexistent-5",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "A public /rest/admin/dump endpoint returns the full user table",
+      "body": "GET /rest/admin/dump returns every user's email, password hash, and role as JSON.",
+      "rationale": "No such endpoint exists in this build.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-6",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The JWT signing secret is returned by /rest/auth/secret",
+      "body": "GET /rest/auth/secret returns the HS256 secret key used to sign JWTs.",
+      "rationale": "No such endpoint exists; the JWT secret is never exposed.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching endpoint)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-7",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "API docs at /api-docs expose every route",
+      "body": "The Swagger UI at /api-docs lists all internal REST routes.",
+      "rationale": "Swagger documentation is not served from this build.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /api-docs route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-8",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/user/list endpoint returns all users",
+      "body": "GET /rest/user/list returns the full user inventory.",
+      "rationale": "The only user-related routes are login, reset-password, and security-question.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /rest/user/list route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-9",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Password reset by security answer returns the phone number",
+      "body": "POST /rest/user/reset-password with correct answer includes the phone number.",
+      "rationale": "The reset endpoint does not expose a phone number field.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no phone-number disclosure)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-10",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/cart endpoint exposes baskets for arbitrary user IDs",
+      "body": "GET /rest/cart?userId=2 returns another user's basket.",
+      "rationale": "Shopping baskets live under /rest/basket/:id with authorization.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /rest/cart route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-11",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/products/featured endpoint leaks the deluxe token",
+      "body": "GET /rest/products/featured returns the deluxe membership secret token.",
+      "rationale": "The products API has no /featured sub-route.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /rest/products/featured route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-12",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/basket/:id/clear endpoint empties any basket",
+      "body": "POST /rest/basket/:id/clear removes all items.",
+      "rationale": "There is no clear sub-route on baskets.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /clear sub-route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-13",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /encryptionkeys endpoint serves private TLS keys",
+      "body": "GET /encryptionkeys returns the server's private key.",
+      "rationale": "The path serves challenge keys, not private TLS certs.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no private key disclosure)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-14",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/orders/export endpoint returns all orders as CSV",
+      "body": "GET /rest/orders/export returns every order as CSV.",
+      "rationale": "There is no /rest/orders/export route.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /rest/orders/export route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-15",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/payment/methods endpoint lists all credit cards",
+      "body": "GET /rest/payment/methods returns all saved cards.",
+      "rationale": "Payment methods are scoped per-user under /api/Cards.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /rest/payment/methods route)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-16",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "PUT /rest/basket/:id/coupons accepts an arbitrary discount",
+      "body": "PUT /rest/basket/:id/coupons with a discount field sets discount to 100%.",
+      "rationale": "The only coupon endpoint validates against the database.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no discount field accepted)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-17",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/user/permissions endpoint returns all role permissions",
+      "body": "GET /rest/user/permissions returns a JSON matrix of all roles.",
+      "rationale": "No such endpoint exists; roles are internal only.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/lib/insecurity.ts (no permissions endpoint)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-18",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Search debug mode disables pagination",
+      "body": "GET /rest/products/search?debug=true returns all products.",
+      "rationale": "The search endpoint always paginates; no debug parameter.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (no debug param)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-19",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in /api/Feedbacks via the rating parameter",
+      "body": "POST /api/Feedbacks with a crafted rating extracts data via SQL injection.",
+      "rationale": "The Feedbacks model is backed by MongoDB.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (NoSQL, not SQL)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-nonexistent-20",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/challenges endpoint returns solution codes",
+      "body": "GET /rest/challenges returns solution strings for every challenge.",
+      "rationale": "The challenge endpoint only returns metadata.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no solution codes in API)",
+      "negativeType": "nonexistent"
+    },
+    {
+      "id": "n-wrong-5",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection via the sort parameter",
+      "body": "GET /rest/products/search?q=apple&sort=price;-- returns schema.",
+      "rationale": "The search query interpolates only q; sort is not in the SQL.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (only q is interpolated, never sort)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-6",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "XSS in search via a script tag in q",
+      "body": "GET /rest/products/search?q=<script>alert(1)</script> returns the payload in JSON.",
+      "rationale": "The search endpoint returns JSON data, not executable HTML.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (JSON data, not HTML)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-7",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in login via the bid parameter",
+      "body": "POST /rest/user/login with a crafted bid authenticates via injection.",
+      "rationale": "The login query interpolates only email and the hashed password.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/login.ts (only email and password in the SELECT)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-8",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in GET /rest/basket/:id via id",
+      "body": "GET /rest/basket/' or 1=1-- returns all baskets.",
+      "rationale": "The basket endpoint uses id as a parameterized Sequelize WHERE clause.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/basket.ts (parameterized where clause)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-9",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "IDOR on the review creation endpoint",
+      "body": "POST /rest/products/:id/reviews with an author field edits another user review.",
+      "rationale": "The review creation endpoint only appends new reviews.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/createProductReviews.ts (POST appends, does not edit)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-10",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in GET /rest/captcha via id",
+      "body": "GET /rest/captcha?id=' or 1=1-- returns all captcha entries.",
+      "rationale": "The captcha endpoint takes no id parameter.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/captcha.ts (captchas() ignores req.query)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-11",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "CSRF on the login form",
+      "body": "A cross-origin form POST to /rest/user/login logs the victim in.",
+      "rationale": "Login is not a CSRF-relevant state-changing action.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account (login is not CSRF-relevant)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-12",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in /api/Feedbacks via userId",
+      "body": "POST /api/Feedbacks with a crafted userId extracts password hashes.",
+      "rationale": "The Feedbacks model is backed by MongoDB.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (NoSQL, not SQL)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-13",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Directory listing on search when no query",
+      "body": "GET /rest/products/search with no q returns a directory listing.",
+      "rationale": "The search endpoint with no q returns all products as JSON.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (res.json of all Products)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-14",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in deluxe upgrade via UserId",
+      "body": "POST /rest/deluxe-membership with crafted UserId extracts all users.",
+      "rationale": "The deluxe route uses UserId as a parameterized query.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/deluxe.ts (parameterized)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-15",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "IDOR on security question endpoint",
+      "body": "GET /rest/user/security-question?email=victim returns the question.",
+      "rationale": "The endpoint takes no email parameter.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/securityQuestion.ts (no email param)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-16",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in order placement via paymentId",
+      "body": "POST /rest/basket/:id/checkout with crafted paymentId returns all payments.",
+      "rationale": "The order route uses paymentId as a parameterized query.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/order.ts (paymentId parameterized)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-17",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in login via passwordResetToken",
+      "body": "POST /rest/user/login with crafted passwordResetToken authenticates.",
+      "rationale": "The login query only interpolates email and the hashed password.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account (passwordResetToken not in query)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-18",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in login via totp",
+      "body": "POST /rest/user/login with crafted totp authenticates as admin.",
+      "rationale": "The login query only interpolates email and the hashed password; totp is separate.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account (totp not in SQL query)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-19",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "XSS in product details via the id parameter",
+      "body": "GET /rest/products/1<script>alert(1) renders the script tag in the product page.",
+      "rationale": "Product IDs are parameterized; the product page sanitizes content.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_perform_a_reflected_xss_attack (product details sanitizes)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-wrong-20",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "SQL injection in reset-password via the email parameter",
+      "body": "POST /rest/user/reset-password with crafted email returns all users reset tokens.",
+      "rationale": "The endpoint uses the email as a parameterized query; no SQL involved.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (reset is parameterized)",
+      "negativeType": "wrong-payload"
+    },
+    {
+      "id": "n-info-5",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /metrics endpoint reveals version string",
+      "body": "GET /metrics exposes the exact build version.",
+      "rationale": "Exposing a version metric is standard Prometheus practice.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_find_the_endpoint_that_serves_usage_data (metrics is public by design)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-6",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Search endpoint reflects the search term in JSON",
+      "body": "GET /rest/products/search?q=test echoes the query in the JSON response.",
+      "rationale": "Echoing a search term in JSON is expected behavior.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (JSON echo is data, not a vulnerability)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-7",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Security question endpoint reveals email registration",
+      "body": "GET /rest/user/security-question?email=victim returns a different response for existing emails.",
+      "rationale": "The security-question endpoint returns the same shared question.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/securityQuestion.ts (no email param, no enumeration)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-8",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Product listing API returns internal database IDs",
+      "body": "GET /api/Products returns numeric internal IDs for every product.",
+      "rationale": "Sequential internal IDs are standard REST API practice.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (IDs are structural, not sensitive)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-9",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Application sets a cookie with a predictable name",
+      "body": "GET / sets a cookie named token before login.",
+      "rationale": "The pre-login token cookie is a placeholder, not a session.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/lib/insecurity.ts (placeholder cookie, not a session)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-10",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Contact form hidden userId field visible in DOM",
+      "body": "The Contact Us form contains a hidden userId input in the DOM.",
+      "rationale": "The server ignores a client-supplied userId on feedback submission.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (hidden field is cosmetic)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-11",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The application upper-cases the email in the user profile response",
+      "body": "GET /rest/user/me returns the logged-in user email with the local part uppercased, e.g. ADMIN@juice-sh.op instead of admin@juice-sh.op.",
+      "rationale": "The API normalizes the email to uppercase for display; this is a cosmetic data-formatting choice that does not affect authentication or authorization.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (email is returned in uppercase by the profile endpoint, no security boundary crossed)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-12",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Application responds to OPTIONS on every route",
+      "body": "The server responds to OPTIONS with a permissive CORS allowlist.",
+      "rationale": "CORS is configured intentionally; credentials still require a Bearer token.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (CORS preflight is intentional)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-13",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /we/may/also path leaks an image path in 404",
+      "body": "Visiting /we/may/also/... returns a 404 mentioning an asset path.",
+      "rationale": "The 404 is a standard file-not-found error; the path is not sensitive.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_prove_that_you_actually_read_our_privacy_policy (intentional easter-egg dead end)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-14",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The application exposes a robots.txt file listing internal paths",
+      "body": "GET /robots.txt returns a robots.txt file that disallows crawling of /ftp and /api paths.",
+      "rationale": "A robots.txt file is a standard sitemap-discouragement mechanism; it does not hide routes from authenticated or determined users and is not a vulnerability.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document (robots.txt is standard, not a security control)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-15",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The uploads directory lists all user photos",
+      "body": "Browsing to /assets/public/images/uploads returns a directory listing.",
+      "rationale": "Express static serving does not produce directory listings by default.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no directory listing)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-16",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /redirect endpoint returns a 302 to the attacker URL",
+      "body": "GET /redirect?to=https://evil.com redirects to the attacker's URL.",
+      "rationale": "The redirect handler checks the URL against an allowlist.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/redirect.ts (redirect is allowlist-checked, not open)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-17",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /api/Products endpoint returns a count of total products in the response header",
+      "body": "GET /api/Products includes an X-Total-Count header revealing the total number of products in the database.",
+      "rationale": "The X-Total-Count header is a standard pagination metadata header; it reveals aggregate counts that are already visible through browsing the product list and carries no sensitive data.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (finale-rest exposes total count in header, standard, not sensitive)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-18",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The API response includes server timing metadata in the X-Response-Time header",
+      "body": "GET /api/Users includes an X-Response-Time header showing how long the database query took.",
+      "rationale": "The X-Response-Time header is a standard Express middleware diagnostic; it reveals query latency but not data.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (X-Response-Time is standard Express, not exploitable)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-19",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The contact form page reveals the reCAPTCHA site key in its HTML",
+      "body": "The GET /contact form page includes the public reCAPTCHA site key in the page source.",
+      "rationale": "The reCAPTCHA site key is a public key by design; it cannot be used to bypass the CAPTCHA.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_submit_10_or_more_customer_feedbacks_within_10_seconds (site key is public by design)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-info-20",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "The /rest/addresses endpoint returns the total count of address records",
+      "body": "GET /rest/addresses returns a JSON array whose X-Total-Count header reveals the total number of saved addresses.",
+      "rationale": "The count is standard pagination metadata from the underlying REST framework and is already inferable from browsing the UI; it reveals no individual address or PII.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (finale-rest exposes total count, standard, not sensitive)",
+      "negativeType": "informative"
+    },
+    {
+      "id": "n-dup-5",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login bypass using UNION SELECT in email",
+      "body": "POST /rest/user/login with ' UNION SELECT in email authenticates as admin.",
+      "rationale": "Same SQLi in email field as p-sqli-login; UNION variant.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-6",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as admin with a SQL comment in email",
+      "body": "POST /rest/user/login with admin@juice-sh.op'-- and any password.",
+      "rationale": "Same root cause as p-sqli-login; comment truncates the password clause.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-7",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as bender via SQL injection",
+      "body": "POST /rest/user/login with bender@juice-sh.op'-- and any password.",
+      "rationale": "Same SQL injection in email field as p-sqli-login.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-8",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as Jim via SQL injection",
+      "body": "POST /rest/user/login with jim@juice-sh.op'-- and any password.",
+      "rationale": "Same SQL injection in email field as p-sqli-login.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-9",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as Support via SQL injection",
+      "body": "POST /rest/user/login with support@juice-sh.op'-- and any password.",
+      "rationale": "Same SQL injection in email field as p-sqli-login.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-10",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Login as MC SafeSearch via SQL injection",
+      "body": "POST /rest/user/login with mc.safesearch@juice-sh.op'-- and any password.",
+      "rationale": "Same SQL injection in email field as p-sqli-login.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-11",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Basket IDOR by directly requesting /rest/basket/2",
+      "body": "GET /rest/basket/2 returns another user's basket.",
+      "rationale": "Same IDOR as p-idor-basket; basket route trusts the numeric id.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-12",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Viewing basket via the bid in session storage",
+      "body": "Editing the bid in session storage to 2 shows another user's basket.",
+      "rationale": "Same IDOR as p-idor-basket; client-side bid manipulation is the delivery path.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-13",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Product search SQLi returning Users email and password columns",
+      "body": "GET /rest/products/search?q=zzz')) UNION SELECT email,password FROM Users--.",
+      "rationale": "Same SQL injection as p-sqli-exfil; variant selects from Users.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-14",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Admin login via UNION SELECT targeting Users table columns",
+      "body": "POST /rest/user/login with ' UNION SELECT id,email,password FROM Users--.",
+      "rationale": "Same SQL injection in email as p-sqli-login; UNION variant.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-15",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Basket IDOR via sequential id guessing",
+      "body": "GET /rest/basket/5 while logged in returns basket 5's contents.",
+      "rationale": "Same IDOR as p-idor-basket; sequential ids are trivially guessable.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-16",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Product search SQLi returning sqlite_master table names",
+      "body": "GET /rest/products/search?q=zzz')) UNION SELECT name FROM sqlite_master--.",
+      "rationale": "Same SQL injection as p-sqli-exfil; variant selects name.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-17",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Product search SQLi with the identical UNION payload",
+      "body": "GET /rest/products/search?q=zzz')) UNION SELECT sql FROM sqlite_master--.",
+      "rationale": "Exact same payload and root cause as p-sqli-exfil; reworded title.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_exfiltrate_the_entire_db_schema_definition_via_sql_injection",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-18",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Admin login by commenting out the rest of the query",
+      "body": "POST /rest/user/login with admin@juice-sh.op'/* and any password.",
+      "rationale": "Same unparameterized email injection as p-sqli-login; block-comment variant.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-19",
+      "split": "test",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Basket IDOR returning items from an older session",
+      "body": "GET /rest/basket/1 after relogin still returns basket 1's contents.",
+      "rationale": "Same IDOR as p-idor-basket; baskets are not scoped to the requesting user.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_view_another_users_shopping_basket",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-dup-20",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "NOT_REPRODUCED",
+      "title": "Admin login via SQL injection described as a form bypass",
+      "body": "POST /rest/user/login with a payload that comments out the password verification.",
+      "rationale": "Identical root cause to p-sqli-login, described as a generic form bypass.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_log_in_with_the_administrators_user_account",
+      "negativeType": "duplicate"
+    },
+    {
+      "id": "n-unbound-5",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Login SQL injection on staging API",
+      "body": "POST https://api.staging-internal.example/rest/user/login with ' or 1=1-- authenticates as admin.",
+      "rationale": "References a live host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-6",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Exposed S3 bucket on marketing assets",
+      "body": "GET https://cdn.acme-marketing.example/ lists an S3 bucket with customer assets.",
+      "rationale": "Names a host not in Vaibhav91one/juice-shop with no target profile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-7",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Password spray on the HR portal",
+      "body": "POST https://hr.acme-internal.example/login with common passwords.",
+      "rationale": "Names an internal host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-8",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "IDOR on the billing portal",
+      "body": "GET https://billing.acme-internal.example/invoices?invoiceId=42 returns another customer invoice.",
+      "rationale": "Names a host not in the scope.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-9",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "SQL injection in the loyalty program API",
+      "body": "POST https://api.rewards.example/v1/members with crafted memberId.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-10",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Broken access control on admin console",
+      "body": "GET https://admin.console.example/users returns all users.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-11",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Open redirect in the SSO login flow",
+      "body": "GET https://sso.portal.example/login?redirect=https://evil.com redirects.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-12",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Insecure deserialization in file conversion",
+      "body": "POST https://convert.acme-internal.example/convert with crafted payload.",
+      "rationale": "Names an internal host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-13",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Exposed Elasticsearch",
+      "body": "GET https://search.acme-internal.example:9200/_search returns all documents.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-14",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Weak JWT secret on mobile API",
+      "body": "JWT tokens from https://api.mobile.acme.example use a guessable secret.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-15",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "GraphQL introspection enabled",
+      "body": "POST https://graphql.acme-public.example/ with introspection returns the full schema.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-16",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Directory traversal in document viewer",
+      "body": "GET https://docs.acme-internal.example/view?file=../../etc/passwd returns passwd.",
+      "rationale": "Names an internal host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-17",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "API key exposed in JavaScript",
+      "body": "GET https://app.acme-public.example/main.js contains a hardcoded API key.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-18",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Password hash in user profile response",
+      "body": "GET https://api.acme-corp.example/v2/users/me returns the bcrypt hash.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-19",
+      "split": "test",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Insecure CORS on payments API",
+      "body": "The payments API responds with Access-Control-Allow-Origin: * allowing any origin.",
+      "rationale": "Names an internal host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
+    },
+    {
+      "id": "n-unbound-20",
+      "split": "dev",
+      "kind": "negative",
+      "expected": "ANALYSIS_ONLY",
+      "title": "Missing security headers on customer portal",
+      "body": "GET https://portal.acme-public.example/ returns responses without CSP.",
+      "rationale": "Names a host with no TargetProfile.",
+      "source": "n/a, fabricated target outside the authorized scope, by design",
+      "negativeType": "unbound"
     }
   ]
 }
