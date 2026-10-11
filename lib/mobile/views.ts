@@ -22,18 +22,21 @@ export function parsePage(params: URLSearchParams): PageParams | null {
 
 /** The transport receipt label for M12, derived from the delivery target the worker recorded. */
 const GITHUB_TARGET = /^github:\d+:issue:(\d+)$/;
+const GITHUB_ADVISORY_TARGET = /^github:\d+:advisory:(.+)$/;
 
 export function transportReceiptFor(delivery: {
   state: string;
   target: string | null;
 }): string | null {
   if (!delivery.target) return null;
-  const match = delivery.target.match(GITHUB_TARGET);
-  if (match) return `issue comment ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  if (GITHUB_TARGET.test(delivery.target)) {
+    return `issue comment ${delivery.state === "DELIVERED" ? "2xx" : delivery.state}`;
+  }
+  // An advisory delivery target is github:<repoId>:advisory:<ghsaId> (or ...:advisory:create).
+  // GitHub accepted the edit or creation, which is the receipt for that channel.
+  if (GITHUB_ADVISORY_TARGET.test(delivery.target)) return "advisory updated";
   // An email address: Resend accepted the send and the delivered webhook confirmed it.
   if (delivery.target.includes("@")) return "email delivered";
-  // An advisory GHSA id: GitHub accepted the edit.
-  if (/^GHSA[A-Z0-9-]+$/.test(delivery.target)) return "advisory updated";
   return delivery.state;
 }
 
@@ -50,6 +53,15 @@ export type InboxCard = {
   state: string;
   awaitingVerdictId: string | null;
   updatedAt: Date;
+};
+
+/** A paged inbox section. `truncated` is only set on "earlier": it means listAllReports hit
+ * its INDEX_LIMIT cap and the full set may be larger. "needs you" is uncapped and never truncated. */
+export type InboxSection = {
+  items: InboxCard[];
+  total: number;
+  nextOffset: number | null;
+  truncated?: boolean;
 };
 
 /** One page of `items`, with the offset of the next page or null at the end. */

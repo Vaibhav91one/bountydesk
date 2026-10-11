@@ -403,6 +403,33 @@ test("inbox 400s on a bad phase or page", async () => {
   assert.equal((await inbox.GET(get("?limit=abc"))).status, 400);
 });
 
+test("an awaiting report survives the INDEX_LIMIT cap on the earlier list", async () => {
+  const { reportId } = await seedPendingReport();
+
+  // Seed 210 delivered reports newer than the awaiting one, to exceed INDEX_LIMIT (200).
+  const future = new Date("2030-01-01T00:00:00Z");
+  for (let i = 0; i < 210; i++) {
+    seq += 1;
+    await dbm.db.insert(dbm.report).values({
+      channel: "email",
+      sourceRef: `email:cap-${seq}`,
+      title: `Cap report ${seq}`,
+      body: "body",
+      state: "DELIVERED",
+      updatedAt: future,
+    });
+  }
+
+  // The awaiting report is older than all of them, but needsYou is uncapped.
+  const needsOnly = await (await inbox.GET(get("?phase=needs"))).json();
+  assert.ok(needsOnly.needsYou.items.some((row: { id: string }) => row.id === reportId));
+
+  // The earlier section is capped at INDEX_LIMIT and reports that fact.
+  const earlierOnly = await (await inbox.GET(get("?phase=earlier"))).json();
+  assert.equal(earlierOnly.earlier.truncated, true);
+  assert.equal(earlierOnly.earlier.total, 200, "earlier is capped at INDEX_LIMIT");
+});
+
 test("email access lists reviewers for any reviewer", async () => {
   const rows = await (await emailAccess.GET()).json();
   assert.deepEqual(rows.map((r: { email: string }) => r.email), [
@@ -501,4 +528,15 @@ test("a reviewer upload that fails intake validation is rejected with 400", asyn
     if (savedRegistries === undefined) delete process.env.PREBUILT_IMAGE_REGISTRIES;
     else process.env.PREBUILT_IMAGE_REGISTRIES = savedRegistries;
   }
+});
+
+test("transportReceiptFor labels issue, advisory, and email delivery targets", async () => {
+  const { transportReceiptFor } = await import("@/lib/mobile/views");
+
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:issue:42" }), "issue comment 2xx");
+  assert.equal(transportReceiptFor({ state: "SENT", target: "github:123:issue:42" }), "issue comment SENT");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:GHSA-aaab-bbbb-cccc" }), "advisory updated");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "github:123:advisory:create" }), "advisory updated");
+  assert.equal(transportReceiptFor({ state: "DELIVERED", target: "researcher@example.com" }), "email delivered");
+  assert.equal(transportReceiptFor({ state: "SENT", target: null }), null);
 });

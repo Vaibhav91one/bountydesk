@@ -73,8 +73,12 @@ keep paging coherent across its cards.
 ### `GET /inbox`
 
 The inbox for M23: "needs you" (reports awaiting a verdict decision) and "earlier" (delivered,
-denied, expired, etc.), newest first. Both come from `listAllReports` in `lib/reports/queue.ts`,
-so the inbox and the reports index cannot disagree.
+denied, expired, etc.), newest first.
+
+"needs you" comes from `listAwaitingReview` in `lib/reports/queue.ts`, which scans the full table
+with no cap, so an old awaiting report never vanishes from the phone even when 200 newer rows exist.
+"earlier" comes from `listAllReports`, which is capped at `INDEX_LIMIT` (200) for the reports index;
+the section sets `truncated: true` when that cap was hit.
 
 ```
 ?query
@@ -83,12 +87,13 @@ so the inbox and the reports index cannot disagree.
 
 200  {
   needsYou:   { items: [...], total, nextOffset } | null,
-  earlier:     { items: [...], total, nextOffset } | null
+  earlier:     { items: [...], total, nextOffset, truncated } | null
 }
 ```
 
 When `phase` is omitted, both sections are paged from offset 0. When `phase` is set, the
-requested section is paged and the other is `null`.
+requested section is paged and the other is `null`. `truncated` is only present on `earlier`
+and is `true` when `listAllReports` hit its `INDEX_LIMIT` cap.
 
 ### `GET /reports`
 
