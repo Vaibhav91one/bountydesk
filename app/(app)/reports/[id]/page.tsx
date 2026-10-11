@@ -21,6 +21,7 @@ import { TriageGate } from "./triage-gate";
 import { UploadGate } from "./upload-gate";
 import { RetestPanel } from "./retest-panel";
 import { canOfferRetest, listRetests, readRetestOf } from "@/lib/retests/retest";
+import { readPushSuggestion } from "@/lib/retests/push-suggestion";
 import { isReviewerWriter } from "@/lib/auth/reviewers";
 
 export const metadata = { title: "Case file · BountyDesk" };
@@ -135,7 +136,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
   // The target suggestion is a third read that stays off this path: it walks the github.com
   // links in the body and asks GitHub about each, seconds of network on a cold cache, so it is
   // loaded client-side after paint through /api/reports/[id]/targets (TargetControl).
-  const [targetProfiles, gate, upload, appeals, retests, retestOf, offerRetest] = await Promise.all([
+  const [targetProfiles, gate, upload, appeals, retests, retestOf, offerRetest, pushSuggestion] = await Promise.all([
     file.target ? Promise.resolve([]) : listTargetProfiles(),
     file.channel === "email" ? readGate(file.id) : Promise.resolve(null),
     // Both channels can carry target material: an upload always, an email only when an attachment
@@ -148,6 +149,8 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
     readRetestOf(file.id),
     // The control is for writers only; startRetest re-checks the report and the writer on submit.
     isReviewerWriter(session.email).then((writer) => (writer ? canOfferRetest(file.id) : false)),
+    // The push suggestion is also for writers only; startRetest re-checks everything before acting.
+    isReviewerWriter(session.email).then((writer) => (writer ? readPushSuggestion(file.id) : null)),
   ]);
 
   // Where the report came from, which is not always the repository on the row. A GitHub report
@@ -280,7 +283,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         />
       ) : null}
 
-      {offerRetest || retests.length > 0 ? (
+      {offerRetest || retests.length > 0 || pushSuggestion ? (
         <RetestPanel
           reportId={file.id}
           canStart={offerRetest}
@@ -295,6 +298,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
             createdAt: item.createdAt.toISOString(),
             result: item.result,
           }))}
+          pushSuggestion={pushSuggestion ?? undefined}
         />
       ) : null}
 

@@ -6,6 +6,8 @@ import {
   githubInstallation,
   inArray,
   isNull,
+  report,
+  verdict,
 } from "@/lib/db";
 
 import {
@@ -39,6 +41,18 @@ import {
  */
 
 const GITHUB_API = "https://api.github.com";
+
+// Minimum elapsed between polls of the same repository. The unauthenticated GitHub API
+// rate limit is 60 requests/hour per IP; at the reconcile cadence this keeps us well under
+// it even with many public repos.
+const PUSH_POLL_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Tracks per-repo last-poll time in the worker process. Reset between reconcile
+ * ticks is not needed: the worker process restarts fresh, and the 15-minute window
+ * naturally ages out stale entries. Exported for test visibility.
+ */
+const lastPolledAt = new Map<number, number>();
 const PER_PAGE = 100;
 // GitHub caps App installations far below this; the guard only stops a malformed Link-less
 // response (a server always returning a full page) from looping forever.
@@ -63,6 +77,8 @@ export type ReconcileSummary = {
   repositoriesRevoked: number;
   /** Non-fatal read failures. A non-empty list means some grants were left unchecked on purpose. */
   errors: string[];
+  /** How many default-branch SHAs were checked against GitHub. */
+  pushSuggestionsChecked: number;
 };
 
 export type ReconcileDeps = {
@@ -284,6 +300,7 @@ export async function reconcileGitHubAccess(
     installationsRevoked: 0,
     repositoriesRevoked: 0,
     errors: [],
+    pushSuggestionsChecked: 0,
   };
 
   // The authoritative truth. If this read fails, do nothing: an absent installation here would
@@ -362,3 +379,149 @@ export async function reconcileGitHubAccess(
 
   return summary;
 }
+
+/**
+ * Fetch the SHA at the head of a repository's default branch from the public GitHub REST
+ * API, unauthenticated.
+ *
+ * Uses a single call: GET /repos/{owner}/{repo}/commits/HEAD with the "application/vnd.github.sha"
+ * accept header, which returns the default-branch head SHA for any public repository without
+ * Contents read. The branch name is taken from the stored `latestPushedBranch` column when
+ * present; otherwise we also fetch it from GET /repos/{owner}/{repo}.
+ *
+ * Returns null on any error, including 404 (private repo) or network failure. The caller
+ * preserves the old value on null. `rateLimited` is set to true when the response indicates
+ * the GitHub rate limit is exhausted, so the caller can stop polling for the rest of this tick.
+ */
+async function fetchDefaultBranchHead(
+  fetchImpl: typeof fetch,
+  owner: string,
+  repo: string,
+  knownBranch: string | null | undefined,
+  signal?: AbortSignal,
+): Promise<{ branch: string; sha: string; rateLimited: boolean } | null> {
+  const encodedOwner = encodeURIComponent(owner);
+  const encodedRepo = encodeURIComponent(repo);
+  let rateLimited = false;
+
+  // If we don't know the default branch yet, fetch it from the repo endpoint.
+  let branch = knownBranch;
+  if (!branch) {
+    const repoUrl = `${GITHUB_API}/repos/${encodedOwner}/${encodedRepo}`;
+    try {
+      const repoResponse = await fetchImpl(repoUrl, {
+        headers: { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28" },
+        signal,
+      });
+      rateLimited = checkRateLimit(repoResponse);
+      if (!repoResponse.ok) {
+        // If rate-limited, report it so the caller stops polling for this tick.
+        if (rateLimited) return { branch: "", sha: "", rateLimited };
+        return null;
+      }
+      const repo = await repoResponse.json() as { default_branch?: string };
+      branch = repo.default_branch;
+      if (!branch) return null;
+    } catch {
+      return null;
+    }
+  }
+
+  const shaUrl = `${GITHUB_API}/repos/${encodedOwner}/${encodedRepo}/commits/${encodeURIComponent(branch)}`;
+  try {
+    const shaResponse = await fetchImpl(shaUrl, {
+      headers: { accept: "application/vnd.github.sha", "x-github-api-version": "2022-11-28" },
+      signal,
+    });
+    rateLimited = checkRateLimit(shaResponse);
+    if (!shaResponse.ok) return rateLimited ? { branch, sha: "", rateLimited } : null;
+    const sha = (await shaResponse.text()).trim();
+    return sha ? { branch, sha, rateLimited } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns true when the response indicates the unauthenticated GitHub rate limit is exhausted. */
+function checkRateLimit(response: Response): boolean {
+  if (response.status !== 403 && response.status !== 429) return false;
+  return response.headers.get("x-ratelimit-remaining") === "0";
+}
+
+/**
+ * Poll the default branch head for every public connected repository that has at least one
+ * REPRODUCED report, and store the latest commit SHA and branch name on connected_repository.
+ *
+ * SUGGEST ONLY: this never starts a retest. It just keeps `latest_pushed_commit_sha` fresh so
+ * `readPushSuggestion` can surface a one-click suggestion when a pushed commit is ahead of the
+ * pinned commit. Private repositories are skipped: an unauthenticated public SHA fetch is all
+ * this needs, and private repos have no grant-free path. Rate-limit friendly: each repo is
+ * fetched at most once per tick, and only if its last poll is older than PUSH_POLL_INTERVAL_MS.
+ * On any fetch error the old value is kept. If GitHub returns 403/429 with rate-limit
+ * remaining: 0, polling stops for the rest of this tick.
+ */
+export async function reconcilePushSuggestions(
+  deps: ReconcileDeps = {},
+): Promise<number> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const now = Date.now();
+
+  // Only public repositories with a live grant and at least one REPRODUCED verdict.
+  // DISTINCT so a repo with multiple REPRODUCED verdicts is polled once.
+  const candidates = await db
+    .selectDistinct({
+      repoId: connectedRepository.repoId,
+      fullName: connectedRepository.fullName,
+      knownBranch: connectedRepository.latestPushedBranch,
+    })
+    .from(connectedRepository)
+    .innerJoin(githubInstallation, eq(githubInstallation.id, connectedRepository.installationId))
+    .innerJoin(report, eq(report.connectedRepositoryId, connectedRepository.id))
+    .innerJoin(verdict, eq(verdict.reportId, report.id))
+    .where(
+      and(
+        eq(connectedRepository.isPrivate, false),
+        eq(connectedRepository.active, true),
+        isNull(githubInstallation.deletedAt),
+        eq(verdict.outcome, "REPRODUCED"),
+      ),
+    );
+
+  let checked = 0;
+  for (const repo of candidates) {
+    if (deps.signal?.aborted) break;
+    if (!repo.fullName) continue;
+
+    // Skip if this repo was polled recently. The in-memory map is process-scoped;
+    // it resets on worker restart, which is safe (worst case: one extra poll).
+    const lastPoll = lastPolledAt.get(repo.repoId);
+    if (lastPoll !== undefined && now - lastPoll < PUSH_POLL_INTERVAL_MS) continue;
+    lastPolledAt.set(repo.repoId, now);
+
+    const [owner, ...rest] = repo.fullName.split("/");
+    const repoName = rest.join("/");
+    const result = await fetchDefaultBranchHead(fetchImpl, owner, repoName, repo.knownBranch, deps.signal);
+    if (result?.rateLimited) {
+      console.warn(`github reconcile: rate limit exhausted, stopping push suggestion polling`);
+      break;
+    }
+    if (!result) continue;
+
+    await db
+      .update(connectedRepository)
+      .set({
+        latestPushedCommitSha: result.sha.toLowerCase(),
+        latestPushedBranch: result.branch,
+        updatedAt: new Date(),
+      })
+      .where(eq(connectedRepository.repoId, repo.repoId));
+    checked += 1;
+  }
+  return checked;
+}
+
+/** Exposed for tests to reset the in-process poll cache between tests. */
+export function __clearPollCache(): void {
+  lastPolledAt.clear();
+}
+

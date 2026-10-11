@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { type PushSuggestion } from "@/lib/retests/push-suggestion";
 
 export type PanelRetest = {
   id: string;
@@ -40,6 +41,7 @@ export function RetestPanel({
   canStart,
   canGit = true,
   canUpload = false,
+  pushSuggestion,
 }: {
   reportId: string;
   retests: PanelRetest[];
@@ -49,6 +51,8 @@ export function RetestPanel({
   canGit?: boolean;
   /** Whether an upload-material retest is available (connectionless target). */
   canUpload?: boolean;
+  /** A commit pushed to the default branch that the reviewer can retest with one click. */
+  pushSuggestion?: PushSuggestion;
 }) {
   const router = useRouter();
   const [commit, setCommit] = useState("");
@@ -64,14 +68,17 @@ export function RetestPanel({
 
   const eitherModeAvailable = canGit || canUpload;
 
-  async function start() {
+  async function start(suggestedSha?: string) {
     setPending(true);
     setError(null);
     try {
       const form = new FormData();
-      form.set("mode", mode);
-      if (mode === "git") {
-        form.set("commitSha", commit.trim());
+      // If a suggested SHA was supplied (one-click retest from push suggestion), force git mode.
+      const effectiveMode = suggestedSha ? "git" : mode;
+      form.set("mode", effectiveMode);
+      if (effectiveMode === "git") {
+        const sha = suggestedSha ?? commit.trim();
+        form.set("commitSha", sha);
       } else {
         if (materialType === "archive" || materialType === "dockerfile") {
           if (archiveFile) form.set(materialType, archiveFile);
@@ -117,6 +124,21 @@ export function RetestPanel({
       <h2 className="text-heading text-foreground">Retest after a fix</h2>
       {canStart && eitherModeAvailable ? (
         <>
+          {pushSuggestion && mode === "git" ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 bg-muted/30 px-4 py-3">
+              <span className="text-meta text-muted-foreground">
+                New commit {pushSuggestion.shortSha} on {pushSuggestion.branch}. Retest at this commit?
+              </span>
+              <Button
+                size="sm"
+                onClick={() => start(pushSuggestion.commitSha)}
+                loading={pending}
+                disabled={pending}
+              >
+                Start retest
+              </Button>
+            </div>
+          ) : null}
           <p className="text-meta text-muted-foreground">
             The agent builds the fixed material in a sandbox and checks whether the reported issue
             still reproduces. The result is for you; nothing is sent to the reporter.
@@ -236,7 +258,7 @@ export function RetestPanel({
           </Tabs>
           <Button
             size="sm"
-            onClick={start}
+            onClick={() => start()}
             loading={pending}
             disabled={pending || (mode === "git" ? !hasGitMaterial : !hasUploadMaterial)}
           >

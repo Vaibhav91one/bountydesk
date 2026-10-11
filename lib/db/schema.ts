@@ -216,6 +216,16 @@ export const connectedRepository = pgTable(
     isPrivate: boolean("is_private"),
     parentFullName: text("parent_full_name"),
     sourceFullName: text("source_full_name"),
+    /**
+     * The latest commit pushed to the repository's default branch, updated by the GitHub push
+     * webhook. SUGGEST ONLY: a push never starts a retest automatically, and the case file
+     * shows a retest suggestion only when this differs from the report's pinned commit and no
+     * retest exists yet for it. Null when no push has been seen, which surfaces nothing.
+     */
+    latestPushedCommitSha: text("latest_pushed_commit_sha"),
+    /** The default branch name the latest push landed on, stored alongside latestPushedCommitSha
+     *  so the case file can say "New commit <sha> on <branch>" without reading GitHub again. */
+    latestPushedBranch: text("latest_pushed_branch"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

@@ -474,7 +474,7 @@ Some of what is built needs a person to switch it on. None of it can be stubbed.
   then email reports get the email reply rather than an advisory, advisory writes are refused and
   held (a reviewer retries them from the case file once the permission is accepted), and private
   repositories stop at `POLICY_REFUSED`.
-- GitHub App events: `issues`, `repository_advisory`, `installation`, `installation_repositories`
+- GitHub App events: `issues`, `repository_advisory`, `installation`, `installation_repositories`,
   and `repository`.
 - Private vulnerability reporting turned on in each repository that should take advisory reports.
   That is a repository setting, and the repository must also be connected with a bound target.

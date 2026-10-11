@@ -63,6 +63,7 @@ type LifecyclePayload = {
   repositories_removed?: RepositoryPayload[] | null;
 };
 
+
 export const LIFECYCLE_EVENTS = new Set([
   "installation",
   "installation_repositories",
@@ -385,6 +386,7 @@ async function handleRepository(tx: Executor, payload: LifecyclePayload): Promis
       return;
   }
 }
+
 
 export async function applyLifecycle(
   tx: Executor,

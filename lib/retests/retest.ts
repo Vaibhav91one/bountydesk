@@ -50,7 +50,7 @@ export type RetestResult = "FIXED" | "NOT_FIXED" | "PARTIALLY_FIXED" | "INCONCLU
 type VerdictOutcome = (typeof verdict.outcome.enumValues)[number];
 
 /** Report states from which a REPRODUCED verdict has been approved and is on its way out or out. */
-const RETESTABLE_STATES = ["DELIVERING", "DELIVERED"];
+export const RETESTABLE_STATES = ["DELIVERING", "DELIVERED"];
 
 /** A child that ended without a verdict will never produce one. */
 const DEAD_STATES = ["DENIED", "OUT_OF_SCOPE", "CANCELLED", "EXPIRED"];
