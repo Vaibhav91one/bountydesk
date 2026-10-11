@@ -351,4 +351,111 @@ describe("M6 Reports", () => {
     expect(hookWarnings.length).toBe(0)
     warnSpy.mockRestore()
   })
+
+  it("renders a single FlatList with the header inside it (no outer ScrollView ancestor)", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: mockReportsData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    const { getByTestId, getByText } = await render(<ReportsScreen />)
+    // FlatList is the only scroller (no outer ScrollView), with the header
+    // (search field, chips, count) and footer (footnote, spinner) inside it.
+    expect(getByTestId("reports-list")).toBeTruthy()
+    expect(getByText("Reports")).toBeTruthy()
+    expect(getByText("6 reports")).toBeTruthy()
+    expect(getByText(/Every report keeps its full history/i)).toBeTruthy()
+  })
+
+  it("does not drop loaded pages when firstPage refetches in background", async () => {
+    const firstPageData = {
+      reports: [{ id: "BD-1", title: "First page report", sourceLabel: "#1", targetName: "juice-shop", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" }],
+      total: 2,
+      nextOffset: 1,
+    }
+    const secondPageData = {
+      reports: [{ id: "BD-2", title: "Second page report", sourceLabel: "#2", targetName: "juice-shop", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" }],
+      total: 2,
+      nextOffset: null,
+    }
+
+    const mockApi = require("@/lib/api").api as jest.Mock
+    mockApi.mockResolvedValueOnce(secondPageData)
+
+    mockUseApiQuery.mockReturnValue({
+      data: firstPageData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    const { getByTestId, getByText, rerender } = await render(<ReportsScreen />)
+    const flatList = getByTestId("reports-list")
+
+    // Trigger loadMore to load page 2 by firing onEndReached
+    await fireEvent(flatList, "onEndReached")
+    await waitFor(() => {
+      expect(getByText("Second page report")).toBeTruthy()
+    })
+
+    // Refetch firstPage (same data). pages.length > 0, so guard prevents reset.
+    mockUseApiQuery.mockReturnValue({
+      data: firstPageData,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    await rerender(<ReportsScreen />)
+
+    expect(getByText("First page report")).toBeTruthy()
+    expect(getByText("Second page report")).toBeTruthy()
+  })
+
+  it("shows retry text when loadMore fails and stops the spinner", async () => {
+    const firstPageWithMore = {
+      reports: [{ id: "BD-1", title: "Report one", sourceLabel: "#1", targetName: "juice-shop", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: false, origin: "juice-shop" }],
+      total: 2,
+      nextOffset: 1,
+    }
+
+    const mockApi = require("@/lib/api").api as jest.Mock
+    mockApi.mockRejectedValueOnce(new Error("network error"))
+
+    mockUseApiQuery.mockReturnValue({
+      data: firstPageWithMore,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    const { getByTestId, getByText } = await render(<ReportsScreen />)
+    const flatList = getByTestId("reports-list")
+
+    await fireEvent(flatList, "onEndReached")
+
+    await waitFor(() => {
+      expect(getByText("Could not load more. Tap to retry")).toBeTruthy()
+    })
+  })
+
+  it("LongPressMenu without onAssignToMe has no Assign to me row", async () => {
+    const { LongPressMenu } = require("@/components/primitives")
+    const mockOnClose = jest.fn()
+    const mockOpenCase = jest.fn()
+
+    const { queryByText } = await render(
+      <LongPressMenu
+        reportId="BD-1"
+        visible={true}
+        onClose={mockOnClose}
+        onOpenCaseFile={mockOpenCase}
+      />
+    )
+
+    expect(queryByText("Open case file")).toBeTruthy()
+    expect(queryByText("Assign to me")).toBeNull()
+  })
 })

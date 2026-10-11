@@ -107,14 +107,24 @@ function ReportsScreenContent() {
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
 
-  // Prime the first page when it arrives
+  // Prime the first page when it arrives, but only once: a background refetch
+  // of firstPage must not drop pages already loaded by loadMore.
+  React.useEffect(() => {
+    if (firstPage && pages.length === 0) {
+      setPages([firstPage.reports])
+      setNextOffset(firstPage.nextOffset)
+      setHasMore(firstPage.nextOffset != null)
+    }
+  }, [firstPage, pages.length])
+
+  // Reset paging when the search term or phase chip changes.
   React.useEffect(() => {
     if (firstPage) {
       setPages([firstPage.reports])
       setNextOffset(firstPage.nextOffset)
       setHasMore(firstPage.nextOffset != null)
     }
-  }, [firstPage])
+  }, [search, activeChip, firstPage])
 
   const loadMore = async () => {
     if (!hasMore || isFetching) return
@@ -163,72 +173,100 @@ function ReportsScreenContent() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScrollView
-        style={styles.scroll}
+      <FlatList
+        testID="reports-list"
+        data={filtered}
+        keyExtractor={(r) => r.id}
+        renderItem={({ item, index }) => (
+          <ReportRow
+            row={item}
+            onPress={() => router.push(`/reports/${item.id}`)}
+            onLongPress={() => setLpReportId(item.id)}
+            showDivider={index < filtered.length - 1}
+          />
+        )}
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-      >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Reports</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>
-          {totalReports} reports
-        </Text>
-
-        {/* Search field (.search in c.css) */}
-        <View style={[styles.searchContainer, { backgroundColor: colors.card, borderColor: colors["glass-edge"] }]}>
-          <Icon name="search" size={20} stroke={colors.muted} />
-          <TextInput
-            style={[styles.searchField, { color: colors.foreground }]}
-            placeholder="Search reports"
-            placeholderTextColor={colors.faint}
-            value={search}
-            onChangeText={setSearch}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-        </View>
-
-        {/* Filter chips (.fchips in c.css) */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipsContent}
-        >
-          <Pressable
-            onPress={() => setActiveChip("all")}
-            style={({ pressed }) => [
-              styles.fchip,
-              { backgroundColor: activeChip === "all" ? colors.foreground : colors.card },
-              pressed && { opacity: 0.7 },
-            ]}
-          >
-            <Text style={[styles.fchipText, { color: activeChip === "all" ? colors.background : colors.foreground }]}>
-              All
+        ListHeaderComponent={() => (
+          <>
+            <Text style={[styles.h1, { color: colors.foreground }]}>Reports</Text>
+            <Text style={[styles.hmeta, { color: colors.muted }]}>
+              {totalReports} reports
             </Text>
-          </Pressable>
-          {PHASE_CHIPS.map((chip) => {
-            const selected = activeChip === chip.value
-            return (
+
+            {/* Search field (.search in c.css) */}
+            <View style={[styles.searchContainer, { backgroundColor: colors.card, borderColor: colors["glass-edge"] }]}>
+              <Icon name="search" size={20} stroke={colors.muted} />
+              <TextInput
+                style={[styles.searchField, { color: colors.foreground }]}
+                placeholder="Search reports"
+                placeholderTextColor={colors.faint}
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+            </View>
+
+            {/* Filter chips (.fchips in c.css) */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipsContent}
+            >
               <Pressable
-                key={chip.value}
-                testID={`chip-${chip.value}`}
-                onPress={() => setActiveChip(selected ? "all" : chip.value)}
+                onPress={() => setActiveChip("all")}
                 style={({ pressed }) => [
                   styles.fchip,
-                  { backgroundColor: selected ? colors.foreground : colors.card },
+                  { backgroundColor: activeChip === "all" ? colors.foreground : colors.card },
                   pressed && { opacity: 0.7 },
                 ]}
               >
-                <Text style={[styles.fchipText, { color: selected ? colors.background : colors.foreground }]}>
-                  {chip.label}
+                <Text style={[styles.fchipText, { color: activeChip === "all" ? colors.background : colors.foreground }]}>
+                  All
                 </Text>
               </Pressable>
-            )
-          })}
-        </ScrollView>
-
-        {/* Report list or no-results state */}
-        {filtered.length === 0 ? (
+              {PHASE_CHIPS.map((chip) => {
+                const selected = activeChip === chip.value
+                return (
+                  <Pressable
+                    key={chip.value}
+                    testID={`chip-${chip.value}`}
+                    onPress={() => setActiveChip(selected ? "all" : chip.value)}
+                    style={({ pressed }) => [
+                      styles.fchip,
+                      { backgroundColor: selected ? colors.foreground : colors.card },
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <Text style={[styles.fchipText, { color: selected ? colors.background : colors.foreground }]}>
+                      {chip.label}
+                    </Text>
+                  </Pressable>
+                )
+              })}
+            </ScrollView>
+          </>
+        )}
+        ListFooterComponent={() => (
+          <>
+            {loadError ? (
+              <Pressable onPress={() => { setLoadError(null); loadMore() }} style={styles.loadError}>
+                <Text style={[styles.loadErrorText, { color: colors.red }]}>Could not load more. Tap to retry</Text>
+              </Pressable>
+            ) : null}
+            {!loadError && hasMore && !hasFilter ? (
+              <ActivityIndicator color={colors.brand} />
+            ) : null}
+            <Text style={[styles.note, { color: colors.muted }]}>
+              Every report keeps its full history, including closed and denied ones.
+            </Text>
+          </>
+        )}
+        ListEmptyComponent={() => (
           <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
             <SvgImage name="mascot/scanning" width={150} height={150} />
             <Text style={[styles.noResultH, { color: colors.foreground }]}>
@@ -253,29 +291,8 @@ function ReportsScreenContent() {
               </Pressable>
             ) : null}
           </View>
-        ) : (
-          <FlatList
-            data={filtered}
-            keyExtractor={(r) => r.id}
-            renderItem={({ item, index }) => (
-              <ReportRow
-                row={item}
-                onPress={() => router.push(`/reports/${item.id}`)}
-                onLongPress={() => setLpReportId(item.id)}
-                showDivider={index < filtered.length - 1}
-              />
-            )}
-            onEndReached={loadMore}
-            onEndReachedThreshold={0.5}
-            contentContainerStyle={styles.scrollContent}
-            ListFooterComponent={hasMore && !hasFilter ? <ActivityIndicator color={colors.brand} /> : null}
-          />
         )}
-
-        <Text style={[styles.note, { color: colors.muted }]}>
-          Every report keeps its full history, including closed and denied ones.
-        </Text>
-      </ScrollView>
+      />
 
       <TopBarPill />
       <ReviewFab />
@@ -429,4 +446,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   clearBtnText: { fontSize: 17, fontWeight: "600" },
+  loadError: {
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  loadErrorText: {
+    fontSize: 15,
+    fontWeight: "500",
+  },
 })
