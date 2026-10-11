@@ -372,15 +372,16 @@ export type IndexRow = QueueCard & {
   createdAt: Date;
 };
 
-/**
+/*
  * Every report, newest change first, terminal ones included.
  *
  * The board deliberately hides closed work, which leaves a delivered report reachable only by
  * its URL. This is the list that does not hide anything, which is why it is a separate read
  * rather than a flag on listQueue: the two screens want opposite things.
+ * Accepts an optional tx executor so callers sharing a transaction get one snapshot.
  */
-export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
-  const rows = await db
+export async function listAllReports(limit = INDEX_LIMIT, tx: Executor = db): Promise<IndexRow[]> {
+  const rows = await tx
     .select({
       id: report.id,
       title: report.title,
@@ -521,9 +522,10 @@ export async function listAllReports(limit = INDEX_LIMIT): Promise<IndexRow[]> {
  *
  * Uses the same awaitingReviewSql predicate the board and the home summary rank on, so a report
  * can carry an awaiting-verdict verdict in the queue summary and not appear here.
+ * Accepts an optional tx executor so the inbox can read needs-you and earlier from one snapshot.
  */
-export async function listAwaitingReview(): Promise<IndexRow[]> {
-  const rows = await db
+export async function listAwaitingReview(tx: Executor = db): Promise<IndexRow[]> {
+  const rows = await tx
     .select({
       id: report.id,
       title: report.title,

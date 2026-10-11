@@ -448,10 +448,13 @@ export async function readCase(
           ? {
               imageDigest: row.targetDigest ?? "",
               snapshotId: row.targetSnapshotId ?? null,
-              buildMarker: row.targetBuildMarker ?? null,
+                buildMarker: row.targetBuildMarker ?? null,
               scopeRules: (row.targetScopeRules as unknown[] | null) ?? [],
-              readinessPath: (row.targetConfig as { readinessPath?: string } | null)?.readinessPath ?? "/",
-              startCommand: (row.targetConfig as { startCommand?: string } | null)?.startCommand ?? null,
+              // The provisioning config nests readinessPath, expectedBuildMarker, and startCommand
+              // under config.provisioning (see targetProfileConfig in lib/targets/registry.ts).
+              // Reading them flat from config would always fall back to the defaults.
+              readinessPath: (row.targetConfig as { provisioning?: { readinessPath?: string } } | null)?.provisioning?.readinessPath ?? "/",
+              startCommand: (row.targetConfig as { provisioning?: { startCommand?: string } } | null)?.provisioning?.startCommand ?? null,
               // Every reproduction sandbox enforces networkBlockAll at the network layer;
               // the profile's egress config cannot widen that, so the phone always reads "none".
               egress: "none" as const,

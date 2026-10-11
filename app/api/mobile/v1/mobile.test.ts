@@ -338,6 +338,63 @@ test("the case file carries the exact drafted text and the hash the app must sen
   assert.equal((await reportCase.GET(get(), ctx(randomUUID()))).status, 404);
 });
 
+test("the case file reads readinessPath and startCommand from the provisioning config", async () => {
+  const [profileRow] = await dbm.db
+    .insert(dbm.targetProfile)
+    .values({
+      name: "test-target",
+      imageName: "ghcr.io/example/test",
+      imageDigest: `sha256:${"a".repeat(64)}`,
+      config: {
+        baseUrl: "http://localhost:3000",
+        provisioning: {
+          readinessPath: "/ready",
+          startCommand: "npm start",
+          expectedBuildMarker: "built",
+        },
+      },
+    })
+    .returning({ id: dbm.targetProfile.id });
+
+  seq += 1;
+  const [reportRow] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "manual",
+      sourceRef: `manual:mobile-${seq}`,
+      title: `Target report ${seq}`,
+      body: "body",
+      state: "AWAITING_APPROVAL",
+      targetProfileId: profileRow.id,
+    })
+    .returning({ id: dbm.report.id });
+
+  const verdictId = randomUUID();
+  const payload = `drafted comment ${seq}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+  const contentHash = computeContentHash(payload);
+  await dbm.db.insert(dbm.verdict).values({
+    id: verdictId,
+    reportId: reportRow.id,
+    outcome: "ANALYSIS_ONLY",
+    summary: "summary",
+    payload,
+    contentHash,
+  });
+  await dbm.db.insert(dbm.agentSession).values({
+    reportId: reportRow.id,
+    capabilityToken: `cap-mobile-${seq}`,
+    sessionId: `sess-mobile-${seq}`,
+    pendingThreadId: `thread-${seq}`,
+    pendingToolCallId: `call-${seq}`,
+    pendingVerdictId: verdictId,
+    pendingApprovedContentHash: contentHash,
+  });
+
+  const file = await (await reportCase.GET(get(), ctx(reportRow.id))).json();
+  assert.equal(file.targetScope?.readinessPath, "/ready");
+  assert.equal(file.targetScope?.startCommand, "npm start");
+});
+
 test("list routes return the web read models, paged", async () => {
   const { reportId } = await seedPendingReport();
 
@@ -428,6 +485,15 @@ test("an awaiting report survives the INDEX_LIMIT cap on the earlier list", asyn
   const earlierOnly = await (await inbox.GET(get("?phase=earlier"))).json();
   assert.equal(earlierOnly.earlier.truncated, true);
   assert.equal(earlierOnly.earlier.total, 200, "earlier is capped at INDEX_LIMIT");
+});
+
+test("a report in needs-you never also appears in earlier", async () => {
+  const { reportId } = await seedPendingReport();
+
+  // Both sections come from one snapshot, so the awaiting report must not be in earlier.
+  const body = await (await inbox.GET(get())).json();
+  assert.ok(body.needsYou.items.some((row: { id: string }) => row.id === reportId));
+  assert.ok(!body.earlier.items.some((row: { id: string }) => row.id === reportId));
 });
 
 test("email access lists reviewers for any reviewer", async () => {
