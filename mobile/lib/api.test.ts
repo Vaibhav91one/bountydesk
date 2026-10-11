@@ -105,6 +105,38 @@ describe("api client", () => {
       expect(thrown).toMatchObject({ status: 500, code: "err-server" })
     })
 
+    it("includes the awaited response body text in the error message on 401", async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockResponse(false, 401, {}, undefined, "token expired for user bob"),
+      )
+
+      let thrown: unknown
+      try {
+        await api("/protected")
+      } catch (e) {
+        thrown = e
+      }
+      expect(thrown).toBeInstanceOf(ApiError)
+      expect((thrown as ApiError).message).toContain("token expired for user bob")
+      expect((thrown as ApiError).message).not.toContain("[object Promise]")
+    })
+
+    it("includes the awaited response body text in the error message on 500", async () => {
+      mockFetch.mockResolvedValueOnce(
+        mockResponse(false, 500, {}, undefined, "upstream timeout after 30s"),
+      )
+
+      let thrown: unknown
+      try {
+        await api("/boom")
+      } catch (e) {
+        thrown = e
+      }
+      expect(thrown).toBeInstanceOf(ApiError)
+      expect((thrown as ApiError).message).toContain("upstream timeout after 30s")
+      expect((thrown as ApiError).message).not.toContain("[object Promise]")
+    })
+
     it("returns parsed JSON on a successful response", async () => {
       const payload = { id: "123", title: "Stored XSS" }
       mockFetch.mockResolvedValueOnce(

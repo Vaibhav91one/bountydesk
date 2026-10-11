@@ -5,6 +5,7 @@ import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"
 
 import { api, ApiError } from "@/lib/api"
+import { useHandleApiError } from "@/lib/use-api-error"
 import type { MobileMe } from "@/lib/types"
 
 /**
@@ -14,13 +15,29 @@ import type { MobileMe } from "@/lib/types"
 export default function TabsLayout() {
   const { isLoaded, isSignedIn } = useAuth()
   const [allowlisted, setAllowlisted] = useState<boolean | null>(null)
+  const [checkError, setCheckError] = useState<string | null>(null)
+  const handleApiError = useHandleApiError()
 
   useEffect(() => {
     if (!isSignedIn) return
     api<MobileMe>("/me")
       .then((me) => setAllowlisted(me.allowlisted))
-      .catch((_e: ApiError) => setAllowlisted(false))
-  }, [isSignedIn])
+      .catch((e: unknown) => {
+        if (e instanceof ApiError && e.status === 403) {
+          // allowlisted:false or a read-only reviewer on /me -> not-authorized screen.
+          setAllowlisted(false)
+          return
+        }
+        // 401 signs the user out via the shared handler.
+        if (e instanceof ApiError && e.status === 401) {
+          handleApiError(e)
+          return
+        }
+        // Anything else (network error, 5xx): surface it and stay put so the
+        // user can retry instead of landing on the not-authorized screen.
+        setCheckError(e instanceof Error ? e.message : String(e))
+      })
+  }, [isSignedIn, handleApiError])
 
   if (!isLoaded) {
     return null
@@ -32,6 +49,15 @@ export default function TabsLayout() {
 
   if (allowlisted === false) {
     return <Redirect href="/auth/not-authorized" />
+  }
+
+  // A network or 5xx error from /me: show the error so the user can retry.
+  if (checkError) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.error}>{checkError}</Text>
+      </View>
+    )
   }
 
   // While the /me check is in flight with a valid session, pause rendering.
@@ -66,6 +92,8 @@ export default function TabsLayout() {
 }
 
 const styles = StyleSheet.create({
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  error: { fontSize: 16, color: "#ff5b5b" },
   tabBar: {
     flexDirection: "row",
     height: 88,

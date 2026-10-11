@@ -43,22 +43,22 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const code = response.headers.get("X-Error-Code") ?? undefined
-    const body = response.text().catch(() => "")
+    const body = await response.text().catch(() => "")
 
     if (response.status === 401) {
       // The caller (e.g. the auth flow) should sign out.
-      throw new ApiError(401, code, body ? String(body).slice(0, 200) : undefined)
+      throw new ApiError(401, code, body ? body.slice(0, 200) : undefined)
     }
 
     if (response.status === 403) {
       // Route to the not-authorized screen.
-      throw new ApiError(403, code, body ? String(body).slice(0, 200) : undefined)
+      throw new ApiError(403, code, body ? body.slice(0, 200) : undefined)
     }
 
     throw new ApiError(
       response.status,
       code,
-      body ? String(body).slice(0, 200) : undefined,
+      body ? body.slice(0, 200) : undefined,
     )
   }
 

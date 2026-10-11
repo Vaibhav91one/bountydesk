@@ -4,6 +4,7 @@ import { View, Text, Dimensions, StyleSheet, ScrollView } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
 
 import { api, ApiError } from "@/lib/api"
+import { useHandleApiError } from "@/lib/use-api-error"
 import type { HomeSummary } from "@/lib/types"
 
 const CARD_WIDTH = Dimensions.get("window").width / 2 - 28
@@ -11,12 +12,18 @@ const CARD_WIDTH = Dimensions.get("window").width / 2 - 28
 export default function HomeScreen() {
   const [summary, setSummary] = useState<HomeSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const handleApiError = useHandleApiError()
 
   useEffect(() => {
     api<HomeSummary>("/home")
       .then(setSummary)
-      .catch((e: ApiError) => setError(e.message))
-  }, [])
+      .catch((e: unknown) => {
+        handleApiError(e)
+        if (e instanceof ApiError) {
+          setError(e.message)
+        }
+      })
+  }, [handleApiError])
 
   if (error) {
     return (

@@ -118,19 +118,19 @@ export type MobileCaseFile = {
   investigating: boolean
   failed: boolean
   target: {
+    id: string
     name: string
-    version: string
-    commit: string
+    imageDigest: string
   } | null
   summary: string | null
-  destination: string | null
+  destination: string
   verdict: {
     id: string
     revision: number
     outcome: string
     outcomeLabel: string
-    summary: string | null
-    payload: string | null
+    summary: string
+    payload: string
     contentHash: string
     superseded: boolean
     findings: unknown[]
