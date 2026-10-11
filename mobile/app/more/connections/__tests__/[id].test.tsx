@@ -71,6 +71,7 @@ const mockData = [
     repoId: 12345,
     configured: true,
     connected: true,
+    isPrivate: false,
     reportCount: 5,
     awaitingReview: 3,
     delivered: 2,
@@ -123,12 +124,38 @@ describe("M15 Connection detail", () => {
     expect(getByText("Security advisories")).toBeTruthy()
     expect(getByText("Contents")).toBeTruthy()
     expect(getByText("Not granted")).toBeTruthy()
-    // Bound target
-    expect(getByText("v17.3.0 · 1867b92")).toBeTruthy()
+    // Bound target — renders the real target profile name from row.target
+    expect(getByText("v17.3.0")).toBeTruthy()
     expect(getByText("Verified")).toBeTruthy()
     // Private repository policy
     expect(getByText("Private repository policy")).toBeTruthy()
     expect(getByText(/POLICY_REFUSED/)).toBeTruthy()
+  })
+
+  it("renders Private visibility and installation-token clone for a private repo", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [{ ...mockData[0], isPrivate: true }],
+      error: null,
+    })
+    const { getByText } = await render(<ConnectionDetailScreen />)
+    await waitFor(() => {
+      expect(getByText("Visibility")).toBeTruthy()
+    })
+    expect(getByText("Private")).toBeTruthy()
+    expect(getByText("Installation token (Contents read)")).toBeTruthy()
+  })
+
+  it("shows no Verified pill when the repo has no bound target", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [{ ...mockData[0], target: null, configured: false, isPrivate: true }],
+      error: null,
+    })
+    const { getByText, queryByText } = await render(<ConnectionDetailScreen />)
+    await waitFor(() => {
+      expect(getByText("Bound target")).toBeTruthy()
+    })
+    expect(getByText("No target bound")).toBeTruthy()
+    expect(queryByText("Verified")).toBeNull()
   })
 
   it("renders an error message inline on non-auth errors", async () => {

@@ -173,22 +173,21 @@ function repoStatusPill(
   colors: { red: string },
   phase: { delivered: string; closed: string },
 ): { label: string; color: string } {
-  if (row.configured) return { label: "Target bound", color: phase.delivered }
   if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected")
     return { label: "Policy refused", color: colors.red }
+  if (row.configured) return { label: "Target bound", color: phase.delivered }
   return { label: "No target", color: phase.closed }
 }
 
 function repoStatusHint(row: ConnectionRow): string {
   if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected")
-    return "Private"
+    return row.isPrivate ? "Private" : "Suspended"
   if (row.configured && row.target) {
     // Mockup shows "Public · <target>" for bound repos.
-    if (row.name === "juice-shop") return "Public · " + row.target
-    return "Public · " + row.target
+    return (row.isPrivate ? "Private" : "Public") + " · " + row.target
   }
   // Not configured, not bound: mockup shows "Public · main"
-  return "Public · main"
+  return (row.isPrivate ? "Private" : "Public") + " · main"
 }
 
 function StatusPill({ label, color }: { label: string; color: string }) {

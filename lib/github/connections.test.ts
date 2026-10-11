@@ -54,7 +54,7 @@ async function installation(
 
 async function repo(
   installationRowId: string,
-  opts: { active?: boolean; archived?: boolean; configured?: boolean } = {},
+  opts: { active?: boolean; archived?: boolean; configured?: boolean; isPrivate?: boolean } = {},
 ): Promise<string> {
   ids += 1;
   const [row] = await dbm.db
@@ -66,6 +66,7 @@ async function repo(
       active: opts.active ?? true,
       archivedAt: opts.archived ? new Date() : null,
       targetProfileId: opts.configured === false ? null : targetProfileId,
+      isPrivate: opts.isPrivate ?? false,
     })
     .returning({ id: dbm.connectedRepository.id });
 
@@ -182,6 +183,7 @@ test("every status is derived from the real rows", async () => {
   await repo(live.id, { configured: false });
   await repo(live.id, { archived: true });
   await repo(live.id, { active: false });
+  await repo(live.id, { isPrivate: true });
 
   const suspended = await installation({ suspended: true });
   await repo(suspended.id);
@@ -191,7 +193,7 @@ test("every status is derived from the real rows", async () => {
   const liveRow = all.find((c) => c.installationRowId === live.id);
   assert.deepEqual(
     liveRow?.repositories.map((r) => r.status).sort(),
-    ["admissible", "archived", "disconnected", "not-configured"],
+    ["admissible", "admissible", "archived", "disconnected", "not-configured"],
   );
   assert.equal(
     liveRow?.repositories.find((r) => r.status === "admissible")?.targetProfileName,
@@ -200,6 +202,15 @@ test("every status is derived from the real rows", async () => {
   assert.equal(
     liveRow?.repositories.find((r) => r.status === "not-configured")?.targetProfileName,
     null,
+  );
+  // isPrivate is carried through from the connected repository.
+  assert.equal(
+    liveRow?.repositories.find((r) => r.status === "admissible")?.isPrivate,
+    false,
+  );
+  assert.equal(
+    liveRow?.repositories.find((r) => r.isPrivate === true)?.isPrivate,
+    true,
   );
 
   // Otherwise fine, but the installation is suspended, so nothing under it is admissible.

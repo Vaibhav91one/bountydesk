@@ -37,6 +37,7 @@ export type ConnectionRepo = {
   fullName: string;
   targetProfileName: string | null;
   status: RepoStatus;
+  isPrivate: boolean;
   /** What this repository has actually sent, which is the question an operator opens a
    *  repository to ask. Hidden reports are left out, the same as everywhere else. */
   reports: RepoReports;
@@ -341,6 +342,7 @@ export async function listConnections(): Promise<Connection[]> {
       archivedAt: connectedRepository.archivedAt,
       targetProfileId: connectedRepository.targetProfileId,
       targetProfileName: targetProfile.name,
+      isPrivate: connectedRepository.isPrivate,
     })
     .from(githubInstallation)
     .leftJoin(
@@ -385,6 +387,7 @@ export async function listConnections(): Promise<Connection[]> {
       repoId: row.repoId,
       fullName: row.fullName,
       targetProfileName: row.targetProfileName,
+      isPrivate: row.isPrivate ?? false,
       reports: reports.get(row.connectedRepositoryId) ?? NO_REPORTS,
       onboarding: onboardings.get(row.repoId) ?? null,
       onboardingProgress: onboardingProgress.get(row.repoId) ?? null,

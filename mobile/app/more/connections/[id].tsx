@@ -20,7 +20,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, KvRow, SectionHeader, ScreenHeader, Mono } from "@/components/primitives"
+import { Card, KvRow, SectionHeader, ScreenHeader } from "@/components/primitives"
 
 // Mockup m15.html shows a fixed set of values for the juice-shop demo target.
 // The connections API returns the same rows the web page renders; the permission
@@ -59,10 +59,11 @@ export default function ConnectionDetailScreen() {
   // Render the mockup's fixed values, which match the demo target exactly.
   const repoName = row?.name ?? "juice-shop"
   const fullName = row?.fullName ?? "Vaibhav91one/juice-shop"
-  const visibility = row?.status === "suspended" ? "Private" : "Public"
-  const clone = visibility === "Private" ? "Token" : "Anonymous"
+  const isPrivate = row?.isPrivate ?? false
+  const visibility = isPrivate ? "Private" : "Public"
+  const clone = isPrivate ? "Installation token (Contents read)" : "Anonymous"
   const bound = row?.configured ?? true
-  const digest = row?.target ?? "v17.3.0 · 1867b92"
+  const digest = row?.target ?? null
 
   // The target detail opens M22 (target-and-scope).
   const handleTargetPress = () => {
@@ -99,17 +100,14 @@ export default function ConnectionDetailScreen() {
         {/* Bound target */}
         <SectionHeader title="Bound target" chevron={false} />
         <Card style={styles.card}>
-          {bound ? (
+          {bound && digest ? (
             <Pressable
               onPress={handleTargetPress}
               style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
             >
               <View style={styles.targetRow}>
                 <View style={styles.targetMain}>
-                  <Text style={[styles.targetTitle, { color: colors.foreground }]}>v17.3.0 · 1867b92</Text>
-                  <Mono style={{ fontSize: 12, color: colors.muted }}>
-                    sha256:9f2c4e0a7b1d6c83e5a24f90b7d1c3e86a5f0b2d94c71e8a3b6d05f2c8e1a947
-                  </Mono>
+                  <Text style={[styles.targetTitle, { color: colors.foreground }]}>{digest}</Text>
                 </View>
                 <View style={[styles.targetPill, { backgroundColor: phaseColors.delivered + "29" }]}>
                   <Text style={[styles.targetPillText, { color: phaseColors.delivered }]}>Verified</Text>

@@ -170,6 +170,7 @@ export type ConnectionRow = {
   repoId: number
   configured: boolean
   connected: boolean
+  isPrivate: boolean
   reportCount: number
   awaitingReview: number
   delivered: number
