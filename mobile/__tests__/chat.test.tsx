@@ -315,4 +315,16 @@ describe("M10 Reviewer chat", () => {
     unmount()
     jest.useRealTimers()
   })
+  it("shows messages from earlier threads, not only the latest", async () => {
+    const earlier = {
+      ...CHAT_STATUS.threads[0],
+      id: "thread-0",
+      status: "DONE",
+      messages: [{ ...CHAT_STATUS.threads[0].messages[0], id: "m-old", body: "An earlier question" }],
+    }
+    mockQueryData["/reports/report-1/chat"] = { data: { ...CHAT_STATUS, threads: [earlier, ...CHAT_STATUS.threads] } }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    const { getByText } = await render(<ChatScreen />)
+    expect(getByText("An earlier question")).toBeTruthy()
+  })
 })

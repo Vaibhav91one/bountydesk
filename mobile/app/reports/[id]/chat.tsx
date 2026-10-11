@@ -171,7 +171,9 @@ export default function ChatScreen() {
   }, [refetch])
 
   const thread = activeThread(status)
-  const messages = thread?.messages ?? []
+  // A finished turn closes its thread and the next message opens a new one, so the
+  // conversation is every thread's messages in order, not just the latest thread's.
+  const messages = status?.threads.flatMap((t) => t.messages) ?? []
   const isAgentWorking = thread && (thread.status === "OPEN" || thread.status === "RUNNING")
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
 
