@@ -8,7 +8,6 @@ import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
 import { startRetest, type RetestMaterial } from "@/lib/retests/retest";
-import { isCommitSha } from "@/lib/build-onboarding/source-identity";
 import {
   cancelRecheck,
   requestRecheck,
@@ -114,11 +113,13 @@ export async function requestRetestAction(
     return { ok: false, error: "That report is not valid." };
   }
 
-  // A git retest is named by a commitSha field; an upload retest carries file fields.
-  const commitSha = formData.get("commitSha");
+  // The form sends which mode the reviewer selected. Route by that, not by whether a SHA parses,
+  // so a non-SHA in the Commit SHA tab is refused with a clear message instead of silently
+  // falling through to the upload branch.
+  const mode = formData.get("mode");
   const material: RetestMaterial =
-    typeof commitSha === "string" && isCommitSha(commitSha.trim())
-      ? { kind: "git", commitSha: commitSha.trim() }
+    mode === "git"
+      ? { kind: "git", commitSha: typeof formData.get("commitSha") === "string" ? (formData.get("commitSha") as string).trim() : "" }
       : {
           kind: "upload",
           archive: formData.get("archive") instanceof File ? (formData.get("archive") as File) : undefined,

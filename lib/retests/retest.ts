@@ -318,12 +318,19 @@ async function startUploadRetest(
   original: {
     title: string;
     body: string;
+    repoId: number | null;
+    connectedRepositoryId: string | null;
     targetConfig: unknown;
   },
   latest: { id: string; outcome: string },
   material: UploadRetestMaterial,
   reviewer: { login: string },
 ): Promise<StartRetestResult> {
+  // Upload material is for a connectionless target. A report bound to a connected repository
+  // must use the git path so the clone goes through the private-repo policy and Contents token.
+  if (original.repoId || original.connectedRepositoryId) {
+    return { ok: false, reason: "a connectionless upload retest must target a report with no connected repository" };
+  }
   if (!original.targetConfig) {
     return { ok: false, reason: "this report has no bound target to copy run settings from" };
   }

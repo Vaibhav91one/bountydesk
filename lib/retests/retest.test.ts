@@ -352,6 +352,26 @@ test("an upload retest with no material is refused", async () => {
   assert.equal(await reportCount(), before, "a refusal creates no report");
 });
 
+test("an upload retest on a report with a connected repository is refused", async () => {
+  const seeded = await seedOriginal();
+  const before = await reportCount();
+
+  const result = await retests.startRetest(seeded.original.id, { kind: "upload" }, REVIEWER);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /no connected repository/);
+  assert.equal(await reportCount(), before, "a refusal creates no report");
+});
+
+test("a git retest on a connectionless report is refused", async () => {
+  const seeded = await seedConnectionless();
+  const before = await reportCount();
+
+  const result = await retests.startRetest(seeded.original.id, { kind: "git", commitSha: SHA }, REVIEWER);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /connected GitHub repository/);
+  assert.equal(await reportCount(), before, "a refusal creates no report");
+});
+
 test("the result is derived from the child's verdict: REPRODUCED is NOT_FIXED, NOT_REPRODUCED is FIXED", () => {
   const derive = retests.deriveRetestResult;
   const base = { buildState: "BUILT", childState: "AWAITING_APPROVAL" };

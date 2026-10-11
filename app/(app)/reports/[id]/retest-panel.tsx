@@ -57,18 +57,19 @@ export function RetestPanel({
   const [gitUrl, setGitUrl] = useState("");
   const [gitCommitSha, setGitCommitSha] = useState("");
   const [archiveFile, setArchiveFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<"git" | "upload">("git");
+  const [mode, setMode] = useState<"git" | "upload">(canGit ? "git" : "upload");
   const [materialType, setMaterialType] = useState<"archive" | "dockerfile" | "image" | "git">("archive");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const modeAvailable = mode === "git" ? canGit : canUpload;
+  const eitherModeAvailable = canGit || canUpload;
 
   async function start() {
     setPending(true);
     setError(null);
     try {
       const form = new FormData();
+      form.set("mode", mode);
       if (mode === "git") {
         form.set("commitSha", commit.trim());
       } else {
@@ -114,7 +115,7 @@ export function RetestPanel({
   return (
     <section className="flex flex-col gap-3 border-b border-border/50 px-8 py-5">
       <h2 className="text-heading text-foreground">Retest after a fix</h2>
-      {canStart && modeAvailable ? (
+      {canStart && eitherModeAvailable ? (
         <>
           <p className="text-meta text-muted-foreground">
             The agent builds the fixed material in a sandbox and checks whether the reported issue
