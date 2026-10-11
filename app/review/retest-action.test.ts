@@ -25,7 +25,9 @@ mock.module("@/lib/retests/retest", {
 
 test("a read-only reviewer cannot start a retest", async () => {
   const { requestRetestAction } = await import("./actions");
-  const result = await requestRetestAction("00000000-0000-4000-8000-000000000000", "a".repeat(40));
+  const form = new FormData();
+  form.set("commitSha", "a".repeat(40));
+  const result = await requestRetestAction("00000000-0000-4000-8000-000000000000", form);
   assert.equal(result.ok, false);
   assert.match(result.error ?? "", /read-only/);
   assert.equal(retestCalls, 0);

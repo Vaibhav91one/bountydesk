@@ -1,6 +1,6 @@
 import type { BuildDriver } from "@/lib/build-onboarding/build-driver";
 import { bindConnectionlessTargetFromBuild } from "@/lib/build-onboarding/connectionless-bind";
-import { and, db, eq, lte, or, report, sql, targetProfile, uploadIntake, type Executor } from "@/lib/db";
+import { and, connectedRepository, db, eq, lte, or, report, sql, targetProfile, uploadIntake, type Executor } from "@/lib/db";
 import { safeErrorText } from "@/lib/errors/safe-error";
 import { enqueue } from "@/lib/jobs/queue";
 import { recordEvent } from "@/lib/reports/lifecycle";
@@ -52,13 +52,15 @@ type ClaimedUpload = {
   approvedBy: string;
   buildAttempts: number;
   isRetest: boolean;
+  /** The connected repository a git retest clones (private needs Contents read). Null for uploads. */
+  connectedRepositoryId: string | null;
 };
 
 /** Exported so the lease tests can drive the real claim and fence. */
 export async function claim(): Promise<ClaimedUpload | null> {
   return db.transaction(async (tx) => {
     const [row] = await tx
-      .select({ id: uploadIntake.id })
+      .select({ id: uploadIntake.id, connectedRepositoryId: uploadIntake.connectedRepositoryId })
       .from(uploadIntake)
       .where(
         or(
@@ -212,9 +214,21 @@ async function buildAndBind(
         plan = authored;
       }
     }
+    // For a git retest of a connected repository, clone and image-name from that repository's
+    // full name (not the upload placeholder) so the build driver can mint a Contents:read token
+    // for a private repository. See lib/github/repo-access.ts for the token-scoped, revoked clone.
+    let repoFullName = definition.repoFullName;
+    if (upload.connectedRepositoryId) {
+      const [conn] = await db
+        .select({ fullName: connectedRepository.fullName })
+        .from(connectedRepository)
+        .where(eq(connectedRepository.id, upload.connectedRepositoryId))
+        .limit(1);
+      if (conn) repoFullName = conn.fullName;
+    }
     const result = await driver.build(
       {
-        repoFullName: definition.repoFullName,
+        repoFullName,
         sourceRef: `upload:${upload.reportId}`,
         source,
         plan,

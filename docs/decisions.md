@@ -1110,34 +1110,42 @@ webhook trigger, the re-pin path) can be built and tested against the one oracle
 (SQLi); the comparison logic deciding `FIXED` vs. `PARTIALLY_FIXED` vs. `NOT_FIXED` for a class
 with no oracle yet waits on that class having one.
 
-**As built (first slice), and where it departs from the design above.** The first slice does not
-wait for #343's class oracles and does not re-pin the original target. The retest is the agent's
-own investigation, run on a child report:
+**As built (first slice).** The first slice does not wait for #343's class oracles and does not
+re-pin the original target. The retest is the agent's own investigation, run on a child report:
 
-- A reviewer with write access gives a full 40-character commit SHA on the case file of a report
-  whose latest verdict is `REPRODUCED` and approved (`DELIVERING` or `DELIVERED`). The target must
-  be bound through a connected, public GitHub repository whose grant is live (`lib/retests/retest.ts`).
-  Private repositories are refused: a private clone needs an installation token inside the build
-  sandbox, which the upload path does not have.
-- The platform creates an internal child report on the upload channel with `git` material
-  (`https://github.com/<repo>` at that SHA, through `parseGitSource`) and approves it as the
-  triggering reviewer, so it goes straight into the existing upload build, the onboarding agent and
-  the normal investigation. The child's run settings (port, readiness path, start command,
+- A reviewer with write access gives the fix material on the case file of a report whose latest
+  verdict is `REPRODUCED` and approved (`DELIVERING` or `DELIVERED`). The target must be bound
+  through a connected GitHub repository whose grant is live (`lib/retests/retest.ts`). Private
+  repositories are now accepted: the private-clone path in `lib/github/repo-access.ts` is reused,
+  with a scoped, revoked installation token minted per clone, and the retest is refused with
+  `POLICY_REFUSED` only when the installation lacks Contents read.
+- A connectionless target (a report with no bound repository, e.g. a non-GitHub or upload target)
+  accepts upload material instead: an archive, a Dockerfile, a git URL at a commit, or a prebuilt
+  image pinned by digest. The material runs through the existing upload intake validator
+  (`parseUploadForm` in `lib/upload/intake.ts`), so the same bounds, tarball check, image-registry
+  allowlist and git URL rules apply.
+- The platform creates an internal child report on the upload channel. A git retest pins `git`
+  material (`https://github.com/<repo>` at that SHA, through `parseGitSource`); an upload retest
+  stores the validated material on the `upload_intake` row. In both cases the child is approved as
+  the triggering reviewer, so it goes straight into the existing upload build, the onboarding agent
+  and the normal investigation. The child's run settings (port, readiness path, start command,
   ecosystem) are copied from the original target. The original report, its verdict, its
   `TargetProfile` and `connected_repository.target_profile_id` are never written.
 - The child has no reporter contact, so `enqueueApprovedVerdictDelivery` refuses it
   ("no verified reporter contact") and no outbound row can exist. Its verdict is evidence for a
   human, never sent.
-- The `retest` table links original report, original verdict, child report, commit and actor. The
-  result is not stored: it is derived when read from the child's latest verdict. `REPRODUCED` is
-  `NOT_FIXED`, `NOT_REPRODUCED` is `FIXED`, `ANALYSIS_ONLY`, `INCONCLUSIVE`, a failed build or a
-  child that ended without a verdict is `INCONCLUSIVE`, and no verdict yet is "running".
-  `PARTIALLY_FIXED` is reserved and never assigned automatically, because one agent run cannot
-  tell a partial fix from an incomplete retest.
+- The `retest` table links original report, original verdict, child report, material kind, commit
+  (nullable, null for upload material) and actor. The result is not stored: it is derived when read
+  from the child's latest verdict. `REPRODUCED` is `NOT_FIXED`, `NOT_REPRODUCED` is `FIXED`,
+  `ANALYSIS_ONLY`, `INCONCLUSIVE`, a failed build or a child that ended without a verdict is
+  `INCONCLUSIVE`, and no verdict yet is "running". `PARTIALLY_FIXED` is reserved and never assigned
+  automatically, because one agent run cannot tell a partial fix from an incomplete retest.
+  Deduplication runs on the material's identity anchor: a git commit SHA, an image digest, or the
+  archive digest, so the same fix is not retested twice for one verdict.
 
-Still open: the `push`/`release` webhook trigger, upload and non-GitHub targets, private
-repositories, and oracle-backed comparison once #343 exists. The migration (`0054_retest`) is run
-by hand on production after merge.
+Still open: the `push`/`release` webhook trigger and oracle-backed comparison once #343 exists.
+Private repositories and upload/non-GitHub targets are now built. The migration
+(`0055_retest_material_kind`) is run by hand on production after merge.
 
 ### Q35: Researcher appeal path (built)
 
