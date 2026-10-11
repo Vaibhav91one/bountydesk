@@ -17,16 +17,22 @@ import type { PhaseKey } from "@/lib/phases"
 type ToolCallStatus = "Pass" | "Allowed" | "Denied" | "Gated"
 
 /**
- * The mockup shows Pass, Allowed, Denied and Gated pills. The API's toolCalls
- * array does not carry a result/status field, so the status is derived from
- * the tool name. scope_check always passes, publish_verdict is always gated,
- * and the probes are Allowed. A Denied probe requires a matching
- * agent.scope_tool_denied event, which the mobile CaseEvent type does not
- * surface — that is an OPEN QUESTION for the API to add a `result` field.
+ * The mockup shows Pass, Allowed, Denied and Gated pills. The mobile API's
+ * toolCalls array does not carry a per-call result field, so the status is
+ * derived from the tool name cross-referenced with agent.scope_tool_denied
+ * events in the event stream. scope_check always passes, publish_verdict is
+ * always gated, and probes are Allowed unless a matching denial event exists.
+ *
+ * OPEN QUESTION: the mobile CaseEvent type lacks a `data` field, so the denial
+ * reason is not accessible. The presence of a scope_tool_denied event with the
+ * same toolName is the only signal available.
  */
-function deriveStatus(toolName: string | null): ToolCallStatus {
+function deriveStatus(toolName: string | null, events: CaseEvent[]): ToolCallStatus {
   if (toolName === "publish_verdict") return "Gated"
   if (toolName === "scope_check") return "Pass"
+  if (toolName && events.some((e) => e.type === "agent.scope_tool_denied" && e.toolName === toolName)) {
+    return "Denied"
+  }
   return "Allowed"
 }
 
@@ -94,6 +100,7 @@ export default function ToolCallsScreen() {
             <Section
               title={item.title}
               calls={item.calls}
+              events={report?.events ?? []}
               colors={colors}
               phase={phase}
               mono={typography.fontMono}
@@ -113,19 +120,20 @@ export default function ToolCallsScreen() {
 interface SectionProps {
   title: string
   calls: CaseEvent[]
+  events: CaseEvent[]
   colors: ReturnType<typeof useTheme>["colors"]
   phase: ReturnType<typeof useTheme>["phase"]
   mono: string
 }
 
-function Section({ title, calls, colors, phase, mono }: SectionProps) {
+function Section({ title, calls, events, colors, phase, mono }: SectionProps) {
   if (calls.length === 0) return null
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionHeader, { color: colors.foreground }]}>{title}</Text>
       <View style={[styles.card, { backgroundColor: colors.card }]}>
         {calls.map((call) => {
-          const status = deriveStatus(call.toolName)
+          const status = deriveStatus(call.toolName, events)
           const statusPhase = statusPhaseKey(status)
           return (
             <ToolCallRow

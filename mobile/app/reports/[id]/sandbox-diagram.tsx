@@ -92,7 +92,9 @@ export default function SandboxDiagramScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScreenHeader
         title="Reproduction sandbox"
-        meta={report?.title ?? ""}
+        meta={
+          report ? `${report.id} · ${report.title}` : ""
+        }
         back
         backLabel="Case file"
         onBack={() => router.back()}

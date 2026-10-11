@@ -110,7 +110,9 @@ const SAMPLE_REPORT: MobileCaseFile = {
   awaitingVerdictId: null,
   approval: null,
   delivery: null,
-  events: [],
+  events: [
+    { seq: 10, type: "agent.scope_tool_denied", channel: "agent", at: "2026-01-01T09:14:35Z", toolName: "probe_browser", argsPreview: null },
+  ],
   toolCalls: [
     { seq: 0, type: "agent.tool_call:scope_check", channel: "agent", at: "2026-01-01T09:14:12Z", toolName: "scope_check", argsPreview: "target=juice-shop@1867b92" },
     { seq: 1, type: "agent.tool_call:probe_target", channel: "agent", at: "2026-01-01T09:14:41Z", toolName: "probe_target", argsPreview: "GET /rest/products/search?q=canary" },
@@ -148,6 +150,7 @@ describe("M9 Tool calls", () => {
     expect(getByText("Pass")).toBeTruthy()
     expect(getAllByText("Allowed").length).toBeGreaterThanOrEqual(1)
     expect(getByText("Gated")).toBeTruthy()
+    expect(getByText("Denied")).toBeTruthy()
     // Note
     expect(getByText(/server-held profile/)).toBeTruthy()
   })

@@ -22,16 +22,19 @@ import {
   Platform,
   Alert,
   Pressable,
+  ListRenderItemInfo,
 } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
 import { ScreenHeader, EmptyState } from "@/components/primitives"
 import { useTheme } from "@/theme"
-import { useRef, useState } from "react"
+import { useRef, useState, useEffect, useCallback } from "react"
+import type { MobileCaseFile } from "@/lib/types"
 
 /** Chat response shapes. Not in lib/types.ts (which only holds case-file types),
  *  so declared here to avoid editing shared files. */
 type ChatSender = "REVIEWER" | "AGENT" | "SYSTEM"
+type ChatThreadStatus = "OPEN" | "RUNNING" | "DONE" | "ERROR" | "CANCELLED"
 
 interface ChatMessage {
   id: string
@@ -49,7 +52,7 @@ interface ChatThread {
   verdictId: string | null
   verdictRevision: number | null
   verdictContentHash: string | null
-  status: string
+  status: ChatThreadStatus
   createdAt: string
   updatedAt: string
   messages: ChatMessage[]
@@ -58,6 +61,37 @@ interface ChatThread {
 interface ChatStatus {
   reportId: string
   threads: ChatThread[]
+}
+
+/** RFC 4122 v4 UUID generator. expo-crypto is not installed, and this module
+ *  must not add deps, so a small stdlib-backed generator is used instead. */
+function uuidv4(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID()
+  }
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0"))
+  return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10, 16).join("")}`
+}
+
+/** Format a date as "Today HH:MM" or "Yesterday HH:MM" or a full date. */
+function formatDayStamp(date: Date): string {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const hh = String(date.getHours()).padStart(2, "0")
+  const mm = String(date.getMinutes()).padStart(2, "0")
+  if (d.getTime() === today.getTime()) return `Today ${hh}:${mm}`
+  if (d.getTime() === yesterday.getTime()) return `Yesterday ${hh}:${mm}`
+  return `${date.toLocaleDateString([], { month: "short", day: "numeric" })} ${hh}:${mm}`
 }
 
 /** The single active thread — newest messages last. */
@@ -69,17 +103,21 @@ function useActiveThread(status: ChatStatus | undefined): ChatThread | undefined
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { colors, typography } = useTheme()
+  const { colors, typography, round } = useTheme()
   const [input, setInput] = useState("")
   const flatListRef = useRef<FlatList>(null)
 
-  const { data: status, error, isError, refetch } = useApiQuery<ChatStatus>(`/reports/${id}/chat`)
-  const mutation = useApiMutation<{ clientRequestId: string }, { clientRequestId: string; body: string }>(
+  const { data: status, error, isError, refetch, isFetching } = useApiQuery<ChatStatus>(
+    `/reports/${id}/chat`,
+  )
+  const { data: report } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
+  const mutation = useApiMutation<{ clientRequestId: string; disposition: string }, { clientRequestId: string; body: string }>(
     `/reports/${id}/chat`,
   )
 
   const thread = useActiveThread(status)
   const messages = thread?.messages ?? []
+  const isAgentWorking = thread && (thread.status === "OPEN" || thread.status === "RUNNING")
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
 
   if (isAuthError) return null
@@ -91,25 +129,82 @@ export default function ChatScreen() {
     )
   }
 
-  const reportIdLabel = status?.reportId ?? ""
-  const meta = `${reportIdLabel}`
+  // Meta line: report id · report title
+  const reportTitle = report?.title ?? ""
+  const reportId = status?.reportId ?? id ?? ""
+  const meta = `${reportId} · ${reportTitle}`
+
+  // Polling: after a POST, refetch every 2s until the agent replies or 90s pass.
+  const [isPolling, setIsPolling] = useState(false)
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollStartRef = useRef<number>(0)
+
+  useEffect(() => {
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+  }, [])
+
+  const startPolling = useCallback((lastSentRequestId: string) => {
+    setIsPolling(true)
+    pollStartRef.current = Date.now()
+    pollTimerRef.current = setInterval(async () => {
+      const elapsed = Date.now() - pollStartRef.current
+      if (elapsed > 90000) {
+        // 90s timeout
+        if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+        setIsPolling(false)
+        return
+      }
+      const result = await refetch()
+      const currentThread = useActiveThread(result.data)
+      if (currentThread) {
+        // Check if an agent message with matching clientRequestId has arrived
+        const hasReply = currentThread.messages.some(
+          (m) => m.sender === "AGENT" && m.clientRequestId === lastSentRequestId,
+        )
+        if (hasReply) {
+          if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+          setIsPolling(false)
+        }
+      }
+    }, 2000)
+  }, [refetch])
 
   const handleSend = () => {
     const body = input.trim()
     if (!body) return
-    const clientRequestId = `req-${Date.now()}`
+    const clientRequestId = uuidv4()
     mutation.mutate(
       { clientRequestId, body },
       {
         onSuccess: () => {
-          // Optimistically clear the input. Poll for the agent reply.
           setInput("")
-          refetch()
+          startPolling(clientRequestId)
         },
         onError: () => {
           Alert.alert("Send failed", "Try again")
         },
       },
+    )
+  }
+
+  const renderBubble = ({ item }: ListRenderItemInfo<ChatMessage>) => (
+    <ChatBubble
+      message={item}
+      colors={colors}
+      mono={typography.fontMono}
+    />
+  )
+
+  const renderSeparator = () => {
+    if (messages.length === 0) return null
+    const lastDate = new Date(messages[messages.length - 1].createdAt)
+    const dayStamp = formatDayStamp(lastDate)
+    return (
+      <View style={styles.dayStamp}>
+        <Text style={[styles.dayText, { color: colors.muted }]}>{dayStamp}</Text>
+      </View>
     )
   }
 
@@ -125,31 +220,32 @@ export default function ChatScreen() {
           ref={flatListRef}
           data={messages}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ChatBubble
-              message={item}
-              isLast={item.id === messages[messages.length - 1]?.id}
-              colors={colors}
-              mono={typography.fontMono}
-            />
-          )}
+          renderItem={renderBubble}
           contentContainerStyle={styles.chatList}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          ListHeaderComponent={renderSeparator}
           ListEmptyComponent={
             <View style={styles.empty}>
               <EmptyState heading="No messages yet" body="Ask about this report to start." inline />
             </View>
           }
         />
+        {(isPolling || isAgentWorking || mutation.isPending) ? (
+          <View style={styles.typingRow}>
+            <Text style={[styles.typingDots, { color: colors.faint }]}>{"\u2022\u2022\u2022"}</Text>
+            <Text style={[styles.typingText, { color: colors.muted }]}>Agent Bounty is thinking…</Text>
+          </View>
+        ) : null}
         <View style={styles.composerWrap}>
           <SuggestionChips
             onPress={(chip) => setInput(chip)}
             colors={colors}
             hasMessages={messages.length > 0}
+            typography={typography}
           />
           <View style={[styles.composer, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
             <TextInput
-              style={[styles.field, { color: colors.foreground, fontFamily: typography.fontFamily }]}
+              style={[styles.field, { color: colors.foreground, fontFamily: typography.fontMono }]}
               value={input}
               onChangeText={setInput}
               placeholder="Ask about this report"
@@ -161,10 +257,10 @@ export default function ChatScreen() {
             <Pressable
               onPress={handleSend}
               disabled={!input.trim() || mutation.isPending}
-              style={[styles.send, { opacity: !input.trim() || mutation.isPending ? 0.4 : 1 }]}
+              style={[styles.send, { opacity: !input.trim() || mutation.isPending ? 0.4 : 1, backgroundColor: colors.brand }]}
               accessibilityLabel="Send"
             >
-              <Text style={styles.sendIcon}>{"\u2191"}</Text>
+              <Text style={[styles.sendIcon, { color: colors.brand }]}>{"\u2191"}</Text>
             </Pressable>
           </View>
         </View>
@@ -179,10 +275,12 @@ function SuggestionChips({
   onPress,
   colors,
   hasMessages,
+  typography,
 }: {
   onPress: (text: string) => void
   colors: ReturnType<typeof useTheme>["colors"]
   hasMessages: boolean
+  typography: ReturnType<typeof useTheme>["typography"]
 }) {
   if (!hasMessages) return null
   return (
@@ -193,7 +291,7 @@ function SuggestionChips({
           onPress={() => onPress(chip)}
           style={[styles.fchip, { backgroundColor: colors.card }]}
         >
-          <Text style={[styles.fchipText, { color: colors.foreground }]}>{chip}</Text>
+          <Text style={[styles.fchipText, { color: colors.foreground, fontFamily: typography.fontFamily }]}>{chip}</Text>
         </Pressable>
       ))}
     </View>
@@ -202,16 +300,15 @@ function SuggestionChips({
 
 interface ChatBubbleProps {
   message: ChatMessage
-  isLast: boolean
   colors: ReturnType<typeof useTheme>["colors"]
   mono: string
 }
 
-function ChatBubble({ message, isLast, colors, mono }: ChatBubbleProps) {
+function ChatBubble({ message, colors, mono }: ChatBubbleProps) {
   const isMe = message.sender === "REVIEWER"
   const align = isMe ? "flex-end" : "flex-start"
   const bg = isMe ? colors.brand : colors.card
-  const fg = isMe ? "#ffffff" : colors.foreground
+  const fg = isMe ? colors.page : colors.foreground
 
   return (
     <View>
@@ -222,7 +319,7 @@ function ChatBubble({ message, isLast, colors, mono }: ChatBubbleProps) {
             {"\u2022\u2022\u2022"}
           </Text>
         ) : (
-          <Text style={[styles.bubbleText, { color: fg }]}>{message.body}</Text>
+          <Text style={[styles.bubbleText, { color: fg, fontFamily: mono }]}>{message.body}</Text>
         )}
       </View>
     </View>
@@ -231,14 +328,31 @@ function ChatBubble({ message, isLast, colors, mono }: ChatBubbleProps) {
 
 const styles = StyleSheet.create({
   chatList: {
-    padding: 16,
+    paddingTop: 12,
+    paddingBottom: 16,
     gap: 8,
+  },
+  dayStamp: {
+    alignItems: "center",
+    paddingVertical: 8,
+  },
+  dayText: {
+    fontSize: 13,
+    fontWeight: "600",
+    lineHeight: 18,
   },
   empty: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 20,
+  },
+  typingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingBottom: 6,
   },
   who: {
     fontSize: 13,
@@ -254,22 +368,20 @@ const styles = StyleSheet.create({
     paddingVertical: 11,
     borderBottomLeftRadius: 6,
     borderBottomRightRadius: 6,
-  },
-  bubbleMe: {
-    borderBottomRightRadius: 6,
-  },
-  bubbleAg: {
-    borderBottomLeftRadius: 6,
-  },
-  bubbleText: {
-    fontSize: 17,
-    lineHeight: 1.35 * 17,
-    wordWrap: "break-word",
+    borderWidth: StyleSheet.hairlineWidth,
   },
   typingDots: {
     fontSize: 20,
     lineHeight: 20,
     letterSpacing: -2,
+  },
+  typingText: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  bubbleText: {
+    fontSize: 17,
+    lineHeight: 1.35 * 17,
   },
   sugg: {
     flexDirection: "row",
@@ -317,10 +429,8 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#6774F0",
   },
   sendIcon: {
-    color: "#ffffff",
     fontSize: 20,
     fontWeight: "700",
   },

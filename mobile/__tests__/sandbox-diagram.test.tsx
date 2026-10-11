@@ -128,6 +128,7 @@ describe("M26 Sandbox diagram", () => {
   it("renders all four sandbox nodes", async () => {
     mockQueryData["/reports/report-1"] = { data: SAMPLE_REPORT }
     const { getByText, getAllByText } = await render(<SandboxDiagramScreen />)
+    expect(getByText(/report-1 · Stored XSS in search results/)).toBeTruthy()
     expect(getByText("Build sandbox")).toBeTruthy()
     expect(getAllByText("Reproduction sandbox").length).toBeGreaterThanOrEqual(1)
     expect(getByText("Canary oracle")).toBeTruthy()

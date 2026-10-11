@@ -122,13 +122,17 @@ describe("M10 Reviewer chat", () => {
 
   it("renders the screen title in loading state", async () => {
     mockQueryData["/reports/report-1/chat"] = {}
+    mockQueryData["/reports/report-1"] = {}
     const { getByText } = await render(<ChatScreen />)
     expect(getByText("Ask the agent")).toBeTruthy()
     expect(getByText("Back")).toBeTruthy()
   })
 
+  const REPORT_META = { data: { id: "report-1", title: "Stored XSS in search results" } }
+
   it("renders chat bubbles for reviewer and agent messages", async () => {
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
     const { getByText } = await render(<ChatScreen />)
     expect(getByText("Ask the agent")).toBeTruthy()
     expect(getByText("Agent Bounty")).toBeTruthy()
@@ -136,8 +140,16 @@ describe("M10 Reviewer chat", () => {
     expect(getByText(/The payload is stored/)).toBeTruthy()
   })
 
+  it("renders the meta line as report id and title", async () => {
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    const { getByText } = await render(<ChatScreen />)
+    expect(getByText(/report-1 · Stored XSS in search results/)).toBeTruthy()
+  })
+
   it("renders suggestion chips when there are messages", async () => {
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
     const { getByText } = await render(<ChatScreen />)
     expect(getByText("Show the probes")).toBeTruthy()
     expect(getByText("Re-check")).toBeTruthy()
