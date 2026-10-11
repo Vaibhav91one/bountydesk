@@ -14,22 +14,32 @@
  *   POST /api/mobile/v1/integrations/upload.
  *
  * The upload route is documented in docs/mobile-api.md: a multipart form with
- * title, body, contact, material, port, readinessPath, startCommand,
- * ecosystem. The reviewer's session is the contact proof, so no OTP round trip.
+ * title, body, contact, port, readinessPath, startCommand, ecosystem. The
+ * reviewer's session is the contact proof, so no OTP round trip.
  */
 import { useState } from "react"
 import { View, Text, ScrollView, StyleSheet, TextInput, Pressable } from "react-native"
+import { useRouter } from "expo-router"
 import * as DocumentPicker from "expo-document-picker"
 
 import { api, ApiError } from "@/lib/api"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, SectionHeader, ScreenHeader, Mono } from "@/components/primitives"
+import { Card, SectionHeader, ScreenHeader, Mono, ToastProvider, useToast } from "@/components/primitives"
 
 type SourceKind = "tar" | "dockerfile" | "image"
 
 export default function SubmitTargetScreen() {
+  return (
+    <ToastProvider>
+      <SubmitTargetInner />
+    </ToastProvider>
+  )
+}
+
+function SubmitTargetInner() {
   const { colors } = useTheme()
+  const toast = useToast()
   const [source, setSource] = useState<SourceKind>("tar")
   const [imageRef, setImageRef] = useState("")
   const [digest, setDigest] = useState("")
@@ -39,9 +49,10 @@ export default function SubmitTargetScreen() {
   const [port, setPort] = useState("3000")
   const [readinessPath, setReadinessPath] = useState("/")
   const [startCommand, setStartCommand] = useState("npm start")
-  const [fileName, setFileName] = useState<string | null>(null)
+  const [pickedFile, setPickedFile] = useState<{ uri: string; name: string } | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const router = useRouter()
 
   const handlePickFile = async () => {
     const result = await DocumentPicker.getDocumentAsync({
@@ -49,7 +60,7 @@ export default function SubmitTargetScreen() {
       multiple: false,
     })
     if (!result.canceled && result.assets && result.assets[0]) {
-      setFileName(result.assets[0].name)
+      setPickedFile({ uri: result.assets[0].uri, name: result.assets[0].name })
     }
   }
 
@@ -60,30 +71,44 @@ export default function SubmitTargetScreen() {
       const form = new FormData()
       form.append("title", "Reviewer upload")
       form.append("body", report)
-      form.append("material", source === "image" ? "image" : source === "dockerfile" ? "git" : "archive")
       form.append("port", port)
       form.append("readinessPath", readinessPath)
       form.append("startCommand", startCommand)
       form.append("ecosystem", "node")
 
       if (source === "image") {
-        form.append("title", `Image: ${imageRef}`)
+        form.append("imageRef", imageRef)
+        form.append("imageDigest", digest)
+      } else if (source === "tar" || source === "dockerfile") {
+        if (!pickedFile) {
+          setSubmitError("Choose a file first")
+          setIsSubmitting(false)
+          return
+        }
+        // Pass the file uri as-is so we never read the whole file into JS memory.
+        // The field name matches parseUploadForm in lib/upload/intake.ts.
+        const fieldName = source === "tar" ? "archive" : "dockerfile"
+        // @ts-expect-error — FormData on React Native accepts { uri, name, type }
+        form.append(fieldName, {
+          uri: pickedFile.uri,
+          name: pickedFile.name,
+          type: "application/octet-stream",
+        })
       }
 
-      // api() returns JSON for JSON content types. For the upload route the
-      // server returns 202 with a JSON body ({ reportId }), so the default
-      // handling works. We pass headers explicitly so the FormData boundary is
-      // set by fetch, not overwritten by JSON.stringify.
       const result = await api<{ reportId: string }>("/integrations/upload", {
         method: "POST",
         body: form,
       })
-      void result
-      // The mockup toasts then pops back to M14. We clear the submit state.
+      toast.show(`Report submitted: ${result.reportId}`)
       setIsSubmitting(false)
+      router.push("/more/connections")
     } catch (e) {
-      const msg = e instanceof ApiError ? `Upload failed (${e.status})` : "Upload failed"
-      setSubmitError(msg)
+      if (e instanceof ApiError) {
+        setSubmitError(e.message)
+      } else {
+        setSubmitError(e instanceof Error ? e.message : "Upload failed")
+      }
       setIsSubmitting(false)
     }
   }
@@ -139,7 +164,7 @@ export default function SubmitTargetScreen() {
                 </View>
                 <View style={styles.filePickerMain}>
                   <Text style={[styles.filePickerTitle, { color: colors.foreground }]}>
-                    {fileName ?? "Choose a file"}
+                    {pickedFile?.name ?? "Choose a file"}
                   </Text>
                   <Text style={[styles.filePickerSubtitle, { color: colors.muted }]}>
                     .tar or .tgz, Dockerfile at its root
@@ -162,7 +187,7 @@ export default function SubmitTargetScreen() {
                 </View>
                 <View style={styles.filePickerMain}>
                   <Text style={[styles.filePickerTitle, { color: colors.foreground }]}>
-                    {fileName ?? "Choose a Dockerfile"}
+                    {pickedFile?.name ?? "Choose a Dockerfile"}
                   </Text>
                   <Text style={[styles.filePickerSubtitle, { color: colors.muted }]}>
                     A single file, built in the sandbox
@@ -236,10 +261,10 @@ export default function SubmitTargetScreen() {
         <Pressable
           onPress={handleBuild}
           disabled={isSubmitting}
-          style={({ pressed }) => [styles.btn, { opacity: pressed ? 0.92 : 1 }]}
+          style={({ pressed }) => [styles.btn, { backgroundColor: colors.brand, opacity: pressed ? 0.92 : 1 }]}
           accessibilityLabel="Build and bind target"
         >
-          <Text style={[styles.btnText, { color: "#ffffff" }]}>
+          <Text style={[styles.btnText, { color: colors.foreground }]}>
             {isSubmitting ? "Building…" : "Build and bind target"}
           </Text>
         </Pressable>
@@ -273,7 +298,7 @@ function SegButton({
         style={[
           styles.segBtnText,
           {
-            color: selected ? "#ffffff" : colors.muted,
+            color: selected ? colors.foreground : colors.muted,
             fontWeight: selected ? "600" : "500",
           },
         ]}
@@ -414,7 +439,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 22,
-    backgroundColor: "#6774F0",
+    // backgroundColor moved to inline style below (theme token)
   },
   btnText: { fontSize: 17, fontWeight: "600" },
 })

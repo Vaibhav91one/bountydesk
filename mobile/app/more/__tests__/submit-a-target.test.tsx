@@ -2,12 +2,14 @@
  * Render tests for M28 Submit a target (app/more/submit-a-target.tsx).
  *
  * Covers initial render (Tarball selected), the segmented control, the file
- * picker for Dockerfile, the image inputs, and the build button.
+ * picker for Dockerfile, the image inputs, the build button, and the FormData
+ * contents on submit.
  */
 import React from "react"
 import { render, fireEvent, waitFor } from "@testing-library/react-native"
 
 const mockApi = jest.fn()
+const mockPush = jest.fn()
 
 jest.mock("@/lib/api", () => ({
   api: (...args: unknown[]) => mockApi(...args),
@@ -26,11 +28,16 @@ jest.mock("expo-document-picker", () => ({
   getDocumentAsync: jest.fn(),
 }))
 
+jest.mock("expo-router", () => ({
+  useRouter: () => ({ push: mockPush }),
+}))
+
 jest.mock("@/theme", () => ({
   useTheme: () => ({
     colors: {
       background: "#0f0f0f",
       card: "#131314",
+      raised: "#1a1a1b",
       foreground: "#ffffff",
       muted: "#b8b8b8",
       faint: "#8c8c8c",
@@ -59,14 +66,15 @@ jest.mock("@/theme", () => ({
 // Use a dynamic import so the mocks above apply.
 let SubmitTargetScreen: React.ComponentType
 
-beforeAll(async () => {
+beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  SubmitTargetScreen = require("./submit-a-target").default
+  SubmitTargetScreen = require("../submit-a-target").default
 })
 
 describe("M28 Submit a target", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockPush.mockClear()
   })
 
   it("renders with Tarball selected by default and the file picker button", async () => {
@@ -127,5 +135,49 @@ describe("M28 Submit a target", () => {
     expect(getByDisplayValue("3000")).toBeTruthy()
     expect(getByDisplayValue("/")).toBeTruthy()
     expect(getByDisplayValue("npm start")).toBeTruthy()
+  })
+
+  it("appends the picked file as 'archive' in FormData when building a tarball target", async () => {
+    const DocumentPicker = require("expo-document-picker")
+    DocumentPicker.getDocumentAsync.mockResolvedValueOnce({
+      canceled: false,
+      assets: [{ uri: "file:///test/archive.tar.gz", name: "archive.tar.gz", mimeType: "application/gzip" }],
+    })
+    mockApi.mockResolvedValueOnce({ reportId: "BD-1042" })
+
+    const { getByText, getAllByText } = await render(<SubmitTargetScreen />)
+    await waitFor(() => {
+      expect(getAllByText("Submit a target").length).toBeGreaterThan(0)
+    })
+
+    // Pick a file
+    fireEvent.press(getByText("Choose a file"))
+    await waitFor(() => {
+      expect(getByText("archive.tar.gz")).toBeTruthy()
+    })
+
+    // Build
+    fireEvent.press(getByText("Build and bind target"))
+
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledTimes(1)
+    })
+
+    const [, init] = mockApi.mock.calls[0]
+    const form = init.body as FormData
+    // The server expects: title, body, archive, port, readinessPath, startCommand, ecosystem
+    expect(form.get("title")).toBe("Reviewer upload")
+    expect(form.get("body")).toBe("The q parameter on the search page is stored and rendered without encoding.")
+    expect(form.get("port")).toBe("3000")
+    expect(form.get("readinessPath")).toBe("/")
+    expect(form.get("startCommand")).toBe("npm start")
+    expect(form.get("ecosystem")).toBe("node")
+    // The archive field must be present (file appended from picked uri)
+    const archive = form.get("archive")
+    expect(archive).toBeTruthy()
+    // Must NOT send a "material" field
+    expect(form.get("material")).toBeNull()
+    // Should navigate back to Connections on success
+    expect(mockPush).toHaveBeenCalledWith("/more/connections")
   })
 })

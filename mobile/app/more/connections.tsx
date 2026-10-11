@@ -23,9 +23,10 @@ import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { Card, SectionHeader, ScreenHeader, ToastProvider } from "@/components/primitives"
 
-// The install URL for the BountyDesk GitHub App. The mockup opens this in the
-// browser; the web install screen is GitHub-owned, never rendered in-app.
-const GITHUB_APP_INSTALL_URL = "https://github.com/apps/bountydesk/installations/new"
+// The Install button opens the web app's Connections page in the system
+// browser. That page holds the real GitHub App install link; the mobile
+// client never hardcodes an installation slug.
+const CONNECTIONS_URL = `${process.env.EXPO_PUBLIC_API_BASE}/connections`
 
 export default function ConnectionsScreen() {
   const { colors } = useTheme()
@@ -49,7 +50,7 @@ export default function ConnectionsScreen() {
   const repoCount = rows ? rows.length : 0
 
   const handleInstall = () => {
-    Linking.openURL(GITHUB_APP_INSTALL_URL)
+    Linking.openURL(CONNECTIONS_URL)
   }
 
   return (
@@ -139,10 +140,10 @@ export default function ConnectionsScreen() {
         <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
           <Pressable
             onPress={handleInstall}
-            style={({ pressed }) => [styles.btn, { opacity: pressed ? 0.92 : 1 }]}
+            style={({ pressed }) => [styles.btn, { backgroundColor: colors.brand, opacity: pressed ? 0.92 : 1 }]}
             accessibilityLabel="Install GitHub App"
           >
-            <Text style={[styles.btnText, { color: "#ffffff" }]}>Install GitHub App</Text>
+            <Text style={[styles.btnText, { color: colors.foreground }]}>Install GitHub App</Text>
           </Pressable>
         </View>
       </View>
@@ -179,16 +180,15 @@ function repoStatusPill(
 }
 
 function repoStatusHint(row: ConnectionRow): string {
-  if (row.status === "admissible" && row.configured) {
-    if (row.name === "juice-shop") return "Public · v17.3.0"
-    if (row.name === "api-gateway") return "Public · main"
-    return "Connected"
+  if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected")
+    return "Private"
+  if (row.configured && row.target) {
+    // Mockup shows "Public · <target>" for bound repos.
+    if (row.name === "juice-shop") return "Public · " + row.target
+    return "Public · " + row.target
   }
-  if (row.status === "not-configured") return "Public · main"
-  if (row.status === "suspended") return "Suspended"
-  if (row.status === "archived") return "Archived"
-  if (row.status === "disconnected") return "Disconnected"
-  return row.label
+  // Not configured, not bound: mockup shows "Public · main"
+  return "Public · main"
 }
 
 function StatusPill({ label, color }: { label: string; color: string }) {
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 22,
-    backgroundColor: "#6774F0",
+    // backgroundColor moved to inline style below (theme token)
   },
   btnText: { fontSize: 17, fontWeight: "600" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },

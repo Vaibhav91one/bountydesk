@@ -133,7 +133,7 @@ let ConnectionsScreen: React.ComponentType
 
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  ConnectionsScreen = require("./connections").default
+  ConnectionsScreen = require("../connections").default
 })
 
 describe("M14 Connections", () => {
@@ -162,8 +162,15 @@ describe("M14 Connections", () => {
     expect(getByText("Target bound")).toBeTruthy()
     expect(getByText("No target")).toBeTruthy()
     expect(getByText("Policy refused")).toBeTruthy()
+    // Mockup subtitles
+    expect(getByText("Public · v17.3.0")).toBeTruthy()
+    expect(getByText("Public · main")).toBeTruthy()
+    expect(getByText("Private")).toBeTruthy()
+    // Target links
     expect(getByText("View onboarding")).toBeTruthy()
     expect(getByText("Upload a target")).toBeTruthy()
+    // Install button
+    expect(getByText("Install GitHub App")).toBeTruthy()
   })
 
   it("renders an error message inline on non-auth errors", async () => {

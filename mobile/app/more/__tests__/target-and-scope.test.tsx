@@ -68,7 +68,7 @@ let TargetAndScopeScreen: React.ComponentType
 
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  TargetAndScopeScreen = require("./target-and-scope").default
+  TargetAndScopeScreen = require("../target-and-scope").default
 })
 
 describe("M22 Target and scope", () => {

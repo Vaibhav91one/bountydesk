@@ -42,7 +42,7 @@ let OnboardingScreen: React.ComponentType
 
 beforeAll(() => {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
-  OnboardingScreen = require("./onboarding").default
+  OnboardingScreen = require("../onboarding").default
 })
 
 describe("M27 Onboarding", () => {
