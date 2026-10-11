@@ -10,6 +10,7 @@
 import { ClerkProvider } from "@clerk/expo"
 import { tokenCache } from "@clerk/expo/token-cache"
 import { Stack } from "expo-router"
+import * as WebBrowser from "expo-web-browser"
 import { useEffect, useState } from "react"
 import { View, ActivityIndicator } from "react-native"
 
@@ -17,6 +18,13 @@ import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
 import { QueryProvider } from "@/components/QueryProvider"
 import { useFonts } from "@/hooks/useFonts"
 import { darkTheme } from "@/theme"
+
+/**
+ * Resolve the auth session as soon as the root layout mounts, so the SSO
+ * redirect callback (e.g. /sso-callback) is handled regardless of which screen
+ * the app launches to first.
+ */
+WebBrowser.maybeCompleteAuthSession()
 
 export default function RootLayout() {
   const fontsReady = useFonts()

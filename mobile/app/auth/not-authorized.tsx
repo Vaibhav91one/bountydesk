@@ -7,7 +7,7 @@
  *
  * m3-actions has a 22px gap, margin-top 22px, max-width 300px.
  */
-import { View, Text, TouchableOpacity, StyleSheet, useColorScheme } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert } from "react-native"
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 
@@ -22,7 +22,7 @@ export default function NotAuthorizedScreen() {
 
   const handleRequestAccess = () => {
     // In c.js: data-toast="Access requested"
-    alert("Access requested")
+    Alert.alert("Access requested")
   }
 
   const handleSignOut = async () => {

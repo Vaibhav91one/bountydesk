@@ -6,7 +6,6 @@
  * 2. Google  — dark pill (.btn.sec, fill background) with Google colored SVG
  * Footer: "Not on the allowlist?" link, legal text with Terms and Privacy links.
  */
-import * as WebBrowser from "expo-web-browser"
 import * as AuthSession from "expo-auth-session"
 import { useSSO } from "@clerk/expo"
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } from "react-native"
@@ -15,7 +14,8 @@ import Svg, { Path } from "react-native-svg"
 import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"
 
-WebBrowser.maybeCompleteAuthSession()
+// maybeCompleteAuthSession() is called once in app/_layout.tsx at the top
+// level so the SSO redirect is resolved before any screen mounts.
 
 const redirectUrl = AuthSession.makeRedirectUri({
   scheme: "bountydesk",
