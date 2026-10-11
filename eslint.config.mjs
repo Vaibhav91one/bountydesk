@@ -19,6 +19,8 @@ const eslintConfig = defineConfig([
     // A static documentation site opened from disk, not part of the app. Its scripts are plain
     // browser globals with no build step, so the app's lint rules do not apply to them.
     "docs/site/**",
+    // Expo React Native app in its own subfolder with its own toolchain.
+    "mobile/**",
   ]),
 ]);
 
