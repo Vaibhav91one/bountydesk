@@ -8,17 +8,19 @@
  * the background; mutations are online-only and never queued while offline,
  * so a failed write surfaces to the UI instead of silently replaying.
  *
- * The cache is namespaced per Clerk user id: the provider is keyed by
- * `userId ?? "signed-out"` and builds its persister from that id, so it
- * remounts and restores the correct blob on every sign-in/sign-out. Deriving
- * the key here (in render, before any child effect runs) is what lets a
- * signed-in reviewer see their own cached reports and never another
- * reviewer's.
+ * A brand-new QueryClient is created per user id (and for the signed-out
+ * state). This is the in-memory counterpart to the user-scoped storage key in
+ * lib/query-clients.ts: Clerk can end a session on its own (token expiry, server
+ * revoke), and a singleton client would leak the previous reviewer's cached
+ * reports into the next reviewer's session. When the client changes, the
+ * previous one is cleared, and the module-level ref (read by signOutAndClear)
+ * is updated synchronously in render so the storage key it uses is correct.
  */
-import { ReactNode } from "react"
+import { ReactNode, useMemo } from "react"
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client"
 
-import { queryClient, makePersister, setCacheUser } from "@/lib/query"
+import { getClientForUser } from "@/lib/query-clients"
+import { makePersister } from "@/lib/query"
 
 export function QueryProvider({
   children,
@@ -27,19 +29,23 @@ export function QueryProvider({
   children: ReactNode
   userId: string | null | undefined
 }) {
-  // Mirror the active user into the module-level key used by signOutAndClear()
-  // (which runs outside the provider's lifetime). Doing it here, in render,
-  // means the key is current before PersistQueryClientProvider's own restore
-  // effect fires — the child-effect ordering bug is avoided entirely.
-  setCacheUser(userId)
-  const persister = makePersister(userId ?? null)
+  // getClientForUser returns the same client for the same user and clears the
+  // old one when the user changes (incl. sign-out -> null). It also mirrors the
+  // active user into the module-level key in lib/query.ts (read by
+  // signOutAndClear, which runs outside React) and registers the live client,
+  // so teardown always targets the right cache and storage key — and it does
+  // so synchronously in render, before PersistQueryClientProvider's own
+  // restore effect fires, avoiding the child-effect ordering bug entirely.
+  const client = getClientForUser(userId ?? null)
+
+  const persister = useMemo(() => makePersister(userId ?? null), [userId])
 
   return (
     <PersistQueryClientProvider
       // key changes per user so React remounts and re-restores the right cache
       // on sign-in and sign-out, rather than reusing a stale one.
       key={userId ?? "signed-out"}
-      client={queryClient}
+      client={client}
       persistOptions={{
         persister,
         maxAge: 1000 * 60 * 60 * 24, // 24 hours

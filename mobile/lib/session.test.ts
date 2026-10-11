@@ -9,10 +9,10 @@ const mockRemoveClient = jest.fn()
 const mockRemoveItem = jest.fn()
 
 jest.mock("@/lib/query", () => ({
-  queryClient: {
+  getActiveClient: () => ({
     cancelQueries: (...args: unknown[]) => mockCancel(...args),
     clear: () => mockClear(),
-  },
+  }),
   asyncStoragePersister: {
     removeClient: () => mockRemoveClient(),
   },

@@ -12,7 +12,7 @@
  */
 import AsyncStorage from "@react-native-async-storage/async-storage"
 
-import { queryClient, asyncStoragePersister, currentCacheKey } from "./query"
+import { asyncStoragePersister, currentCacheKey, getActiveClient } from "./query"
 
 /**
  * Clears the in-memory and persisted query cache, then signs the Clerk session
@@ -25,10 +25,13 @@ import { queryClient, asyncStoragePersister, currentCacheKey } from "./query"
  * React primitives so it is trivially unit-testable.
  */
 export async function signOutAndClear(signOut: () => Promise<unknown>): Promise<void> {
-  // Stop any in-flight refetches first so they are not persisted after clear().
-  queryClient.cancelQueries({ type: "all" })
-  // Drop the in-memory cache immediately.
-  queryClient.clear()
+  const client = getActiveClient()
+  if (client) {
+    // Stop any in-flight refetches first so they are not persisted after clear().
+    client.cancelQueries({ type: "all" })
+    // Drop the in-memory cache immediately.
+    client.clear()
+  }
   // Remove the persisted blob from AsyncStorage. removeClient is a no-op if
   // the key is already absent.
   await asyncStoragePersister.removeClient?.()

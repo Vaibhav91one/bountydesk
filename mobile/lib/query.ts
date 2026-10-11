@@ -20,11 +20,13 @@ export function cacheKeyForUser(userId: string | null): string {
   return userId ? `${CACHE_KEY_BASE}:${userId}` : CACHE_KEY_BASE
 }
 
-// Kept for signOutAndClear (which runs outside React and outside the provider's
-// lifetime). QueryProvider itself builds its persister via makePersister(userId)
-// so the restore key is derived synchronously from the Clerk user id, before any
-// child effect runs.
+// Kept so signOutAndClear() — which runs outside React and the provider's
+// lifetime — can target the currently-mounted client and its storage key when
+// Clerk ends a session on its own (token expiry, server revoke). QueryProvider
+// owns the real client, created per user; this ref just lets the teardown
+// reach it.
 let currentUserId: string | null = null
+let activeClient: QueryClient | null = null
 export function currentCacheKey(): string {
   return cacheKeyForUser(currentUserId)
 }
@@ -33,21 +35,36 @@ export function setCacheUser(userId: string | null | undefined): string | null {
   currentUserId = userId ?? null
   return prev
 }
+export function setActiveClient(client: QueryClient | null): void {
+  activeClient = client ?? null
+}
+export function getActiveClient(): QueryClient | null {
+  return activeClient
+}
 
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1000 * 60 * 2, // 2 minutes
-      gcTime: 1000 * 60 * 30, // 30 minutes
-      retry: (failureCount, _error) => failureCount < 3,
+/**
+ * Build a QueryClient with the app's defaults. A fresh client per user is what
+ * lets QueryProvider isolate one reviewer's in-memory cache from the next: Clerk
+ * can end a session on its own (token expiry, server revoke), and without a
+ * per-user client that in-memory state would leak to whoever signs in next on
+ * a shared device.
+ */
+export function createQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        staleTime: 1000 * 60 * 2, // 2 minutes
+        gcTime: 1000 * 60 * 30, // 30 minutes
+        retry: (failureCount, _error) => failureCount < 3,
+      },
+      mutations: {
+        // Never queue offline; fail fast so the caller can show an error.
+        retry: false,
+        networkMode: "online",
+      },
     },
-    mutations: {
-      // Never queue offline; fail fast so the caller can show an error.
-      retry: false,
-      networkMode: "online",
-    },
-  },
-})
+  })
+}
 
 /**
  * Build a persister that reads/writes AsyncStorage under a key scoped to the
