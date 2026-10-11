@@ -26,8 +26,16 @@ export default function TabsLayout() {
   const [checkError, setCheckError] = useState<string | null>(null)
   const handleApiError = useHandleApiError()
 
+  // Remember the /me + /home allowlist result for the lifetime of the session
+  // so a signed-in reviewer who failed the allowlist (403 -> not-authorized)
+  // is not re-checked on every mount of the tab shell. Without this, AuthLayout
+  // would redirect back here, /home 403s again, and the loop never resolves.
+  // The state resets to null on sign-out (new mount of the layout), so a
+  // different reviewer starts clean.
   useEffect(() => {
     if (!isSignedIn) return
+    if (allowlisted !== null) return
+
     api<HomeSummary>("/home")
       .then(() => setAllowlisted(true))
       .catch((e: unknown) => {
@@ -41,7 +49,7 @@ export default function TabsLayout() {
         }
         setCheckError(e instanceof Error ? e.message : String(e))
       })
-  }, [isSignedIn, handleApiError])
+  }, [isSignedIn, allowlisted, handleApiError])
 
   if (!isLoaded) return null
   if (!isSignedIn) return <Redirect href="/auth/splash" />
