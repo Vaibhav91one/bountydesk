@@ -80,6 +80,24 @@ export type QueueColumn = {
 }
 
 /**
+ * One report card as it crosses the wire: updatedAt is an ISO string, and
+ * ageLabel is the server-computed relative age (e.g. "3h"). Copied from
+ * QueueCardView in lib/reports/queue-view.ts.
+ */
+export type QueueCardView = Omit<QueueCard, "updatedAt"> & {
+  updatedAt: string
+  ageLabel: string
+}
+
+/**
+ * A queue column as it crosses the wire. Copied from QueueColumnView
+ * in lib/reports/queue-view.ts: same as QueueColumn but cards are QueueCardView.
+ */
+export type QueueColumnView = Omit<QueueColumn, "cards"> & {
+  cards: QueueCardView[]
+}
+
+/**
  * Paginated list response. Copied from paginate() in lib/mobile/views.ts.
  */
 export type PaginatedResponse<T> = {
