@@ -381,8 +381,10 @@ export function LongPressMenu({ reportId, onOpenCaseFile, onCopyId, onShare, onA
     { label: "Open case file", icon: "open", onPress: onOpenCaseFile ?? onClose },
     { label: "Copy report id", icon: "copy", onPress: onCopyId ?? onClose },
     { label: "Share", icon: "share", onPress: onShare ?? onClose },
-    { label: "Assign to me", icon: "userplus", onPress: onAssignToMe ?? onClose },
   ]
+  if (onAssignToMe) {
+    items.push({ label: "Assign to me", icon: "userplus", onPress: onAssignToMe })
+  }
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onClose} hardwareAccelerated>
       <View style={[styles.sheetScrims, { backgroundColor: colors.background }]} onStartShouldSetResponder={() => true} onResponderRelease={onClose}>
