@@ -79,6 +79,10 @@ function stateToStep(state: string | null): number | null {
       return 3
     case "PENDING_MANIFEST":
       return 4
+    case "AWAITING_APPROVAL":
+      return 5
+    case "APPROVED":
+      return 6
     case "CONFIGURED":
       return 7
     default:

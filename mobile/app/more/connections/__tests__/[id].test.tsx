@@ -177,7 +177,7 @@ describe("M15 Connection detail", () => {
   })
   it("shows the clone as blocked for a private repo without Contents read", async () => {
     mockUseApiQuery.mockReturnValue({
-      data: [{ ...mockData[0], isPrivate: true, contentsPermission: null }],
+      data: [{ ...mockData[0], isPrivate: true, contentsPermission: "none" }],
       error: null,
     })
     const { getByText, queryByText } = await render(<ConnectionDetailScreen />)

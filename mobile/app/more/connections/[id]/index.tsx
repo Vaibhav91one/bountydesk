@@ -73,7 +73,7 @@ export default function ConnectionDetailScreen() {
   // A private repo clones only with Contents read accepted; without it reproduction is POLICY_REFUSED.
   const clone = !row.isPrivate
     ? "Anonymous"
-    : row.contentsPermission
+    : row.contentsPermission === "read" || row.contentsPermission === "write"
       ? "Installation token (Contents read)"
       : "Blocked: Contents not granted"
   const bound = row.configured
