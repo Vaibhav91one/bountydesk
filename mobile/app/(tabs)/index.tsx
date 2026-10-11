@@ -7,11 +7,9 @@
  * The section header and phase pills come from the shared primitives so M5 and
  * later screens render the same chrome.
  */
-import { useEffect, useState } from "react"
 import { View, Text, ScrollView, StyleSheet, Dimensions } from "react-native"
 
-import { api, ApiError } from "@/lib/api"
-import { useHandleApiError } from "@/lib/use-api-error"
+import { useApiQuery } from "@/lib/use-query"
 import type { HomeSummary } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/ui/IconButton"
@@ -67,23 +65,12 @@ const SEV_COLORS = { High: "#EF4444", Medium: "#F59E0B", Low: "#9CA3AF" } as con
 
 export default function HomeScreen() {
   const { colors } = useTheme()
-  const [summary, setSummary] = useState<HomeSummary | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const handleApiError = useHandleApiError()
-
-  useEffect(() => {
-    api<HomeSummary>("/home")
-      .then(setSummary)
-      .catch((e: unknown) => {
-        handleApiError(e)
-        if (e instanceof ApiError) setError(e.message)
-      })
-  }, [handleApiError])
+  const { data: summary, error } = useApiQuery<HomeSummary>("/home")
 
   if (error) {
     return (
       <View style={styles.centered}>
-        <Text style={[styles.error, { color: colors.red }]}>{error}</Text>
+        <Text style={[styles.error, { color: colors.red }]}>{error.message}</Text>
       </View>
     )
   }
