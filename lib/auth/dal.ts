@@ -50,6 +50,26 @@ export const currentSession = cache(async (): Promise<Session | null> => {
   return { login, email: reviewerEmail, avatarUrl: user.imageUrl ?? null, role };
 });
 
+/** The Clerk user id behind this request, allowlisted or not. Null when nobody is signed in. */
+export async function signedInUserId(): Promise<string | null> {
+  const { userId } = await auth();
+  return userId;
+}
+
+/** Display fields of the signed-in Clerk user, for answering "who is this" about a non-reviewer. */
+export async function clerkProfile(): Promise<{
+  login: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+}> {
+  const user = await currentUser();
+  return {
+    login: user?.username ?? user?.firstName ?? null,
+    email: user?.primaryEmailAddress?.emailAddress ?? null,
+    avatarUrl: user?.imageUrl ?? null,
+  };
+}
+
 /**
  * For pages that must not render for anyone else. A signed-out visitor goes to sign-in; a signed-in
  * account that is not a reviewer goes to the not-authorized page rather than back to sign-in, which

@@ -6,7 +6,8 @@ import { requireReviewer } from "@/lib/auth/dal";
 import { installUrl } from "@/lib/auth/oauth";
 import { listConnections } from "@/lib/github/connections";
 
-import { IntegrationList, type IntegrationRow } from "./integration-list";
+import { IntegrationList } from "./integration-list";
+import { integrationRows } from "./rows";
 
 export const metadata = { title: "Integrations · BountyDesk" };
 
@@ -24,50 +25,7 @@ export default async function IntegrationsPage() {
   const session = await requireReviewer();
   const connections = await listConnections();
 
-  const live = connections.filter((connection) => !connection.suspendedAt);
-  const repositories = live.flatMap((connection) => connection.repositories);
-  const admissible = repositories.filter((repo) => repo.status === "admissible");
-  const suspended = connections.length > 0 && live.length === 0;
-
-  function githubDetail(): string {
-    if (connections.length === 0) {
-      return "Report intake from GitHub issues. Installing the App is what grants repository access; signing in only says who you are.";
-    }
-    if (suspended) {
-      return "Every installation is suspended, so nothing under them is accepted.";
-    }
-    // Both numbers, because they answer different questions: how much the App can see, and how
-    // much of that is configured well enough to accept a report.
-    return `Connected. ${repositories.length} repositor${repositories.length === 1 ? "y" : "ies"} granted, ${admissible.length} accepting reports.`;
-  }
-
-  const rows: IntegrationRow[] = [
-    {
-      id: "github",
-      name: "GitHub",
-      detail: githubDetail(),
-      icon: "github",
-      installed: connections.length > 0,
-      action: { kind: "link", href: "/integrations/github", label: "View" },
-    },
-    {
-      id: "email",
-      name: "Email",
-      // Intake and delivery are both live: an approved verdict is emailed back to the verified sender.
-      detail: "Report intake by email, and the approved verdict is emailed back.",
-      icon: "gmail",
-      installed: true,
-      action: { kind: "link", href: "/integrations/email", label: "View" },
-    },
-    {
-      id: "upload",
-      name: "File upload",
-      detail: "Report intake by public upload, with optional target material to build.",
-      icon: "folder",
-      installed: true,
-      action: { kind: "link", href: "/integrations/upload", label: "View" },
-    },
-  ];
+  const rows = integrationRows(connections);
 
   return (
     <main className="flex flex-1 flex-col">
