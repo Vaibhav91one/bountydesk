@@ -18,7 +18,8 @@ jest.mock("expo-router", () => ({
 
 const mockQueryData: Record<string, unknown> = {}
 let mockRefetchResult: { data?: unknown; error?: Error } = {}
-let mockSendSucceeds = false
+let mockSendFails = false
+const mutateCalls: Array<{ vars: { clientRequestId: string; body: string }; opts: any }> = []
 jest.mock("@/lib/use-query", () => ({
   ApiError: class ApiError extends Error {
     status: number
@@ -33,12 +34,22 @@ jest.mock("@/lib/use-query", () => ({
       data: data?.data,
       error: data?.error,
       isError: !!data?.error,
-      refetch: jest.fn(() => Promise.resolve(mockRefetchResult)),
+      refetch: jest.fn(() => {
+        if (mockRefetchResult.data) {
+          mockQueryData[path] = { data: mockRefetchResult.data }
+        }
+        return Promise.resolve(mockRefetchResult)
+      }),
     }
   },
   useApiMutation: () => ({
-    mutate: jest.fn((_vars: unknown, opts?: { onSuccess?: () => void }) => {
-      if (mockSendSucceeds) opts?.onSuccess?.()
+    mutate: jest.fn((vars: { clientRequestId: string; body: string }, opts?: any) => {
+      mutateCalls.push({ vars, opts })
+      if (mockSendFails) {
+        opts?.onError?.()
+      } else {
+        opts?.onSuccess?.()
+      }
     }),
     isPending: false,
   }),
@@ -123,6 +134,9 @@ const CHAT_STATUS = {
 describe("M10 Reviewer chat", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    mockSendFails = false
+    mockRefetchResult = {}
+    mutateCalls.length = 0
   })
 
   it("renders the screen title in loading state", async () => {
@@ -203,9 +217,6 @@ describe("M10 Reviewer chat", () => {
   })
   it("stops waiting and shows an error when the agent turn ends in ERROR", async () => {
     jest.useFakeTimers()
-    mockSendSucceeds = true
-    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
-    mockQueryData["/reports/report-1"] = REPORT_META
     mockRefetchResult = {
       data: { ...CHAT_STATUS, threads: [{ ...CHAT_STATUS.threads[0], status: "ERROR" }] },
     }
@@ -221,8 +232,87 @@ describe("M10 Reviewer chat", () => {
       await Promise.resolve()
     })
     expect(getByText("The agent could not answer. Try again.")).toBeTruthy()
-    expect(queryByText("Agent Bounty is thinking\u2026")).toBeNull()
-    mockSendSucceeds = false
+    expect(queryByText("Agent Bounty is thinking…")).toBeNull()
+    jest.useRealTimers()
+  })
+
+  it("retry after a failed send reuses the same clientRequestId", async () => {
+    mockSendFails = true
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    const { getByPlaceholderText, getByLabelText } = await render(<ChatScreen />)
+    await fireEvent.changeText(getByPlaceholderText("Ask about this report"), "why?")
+    await fireEvent.press(getByLabelText("Send"))
+    expect(mutateCalls.length).toBe(1)
+    expect(mutateCalls[0].opts.onError).toBeDefined()
+
+    // Retry: input still has the same body (onError does not clear it), press Send again.
+    mockSendFails = false
+    await fireEvent.press(getByLabelText("Send"))
+    expect(mutateCalls.length).toBe(2)
+    expect(mutateCalls[1].opts.onSuccess).toBeDefined()
+    // Both calls must share the same clientRequestId.
+    expect(mutateCalls[0].vars.clientRequestId).toBe(mutateCalls[1].vars.clientRequestId)
+  })
+
+  it("opening with a RUNNING thread starts polling and stops when the agent reply arrives", async () => {
+    jest.useFakeTimers()
+    // No message sent this run; polling is driven by the resume-on-open effect.
+    mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
+    mockQueryData["/reports/report-1"] = REPORT_META
+    mockRefetchResult = { data: CHAT_STATUS }
+    const { queryByText, unmount } = await render(<ChatScreen />)
+    // Thread status is RUNNING, so the resume-on-open effect should have armed
+    // a poll interval and the typing indicator should show.
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(queryByText("Agent Bounty is thinking…")).toBeTruthy()
+
+    // Advance the poll interval once; still no AGENT reply in mockRefetchResult.
+    await act(async () => {
+      jest.advanceTimersByTime(2000)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(queryByText("Agent Bounty is thinking…")).toBeTruthy()
+
+    // Now the refetch returns a thread with the :agent reply, ending the turn.
+    mockRefetchResult = {
+      data: {
+        ...CHAT_STATUS,
+        threads: [
+          {
+            ...CHAT_STATUS.threads[0],
+            status: "DONE",
+            messages: [
+              ...CHAT_STATUS.threads[0].messages,
+              {
+                id: "msg-3",
+                clientRequestId: "req-1:agent",
+                sender: "AGENT",
+                body: "I found it.",
+                bodyHash: "hash3",
+                modelName: "gpt-4",
+                providerTurnId: "turn-2",
+                createdAt: "2026-01-01T09:38:05Z",
+              },
+            ],
+          },
+        ],
+      },
+    }
+    await act(async () => {
+      jest.advanceTimersByTime(2000)
+    })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(queryByText("Agent Bounty is thinking…")).toBeNull()
+    unmount()
     jest.useRealTimers()
   })
 })

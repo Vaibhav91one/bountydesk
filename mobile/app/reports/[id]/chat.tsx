@@ -106,6 +106,9 @@ export default function ChatScreen() {
   const { colors, typography, round } = useTheme()
   const [input, setInput] = useState("")
   const flatListRef = useRef<FlatList>(null)
+  // Reused across send attempts for the same body so a retry (onError then a
+  // retry send) keeps the same clientRequestId; the server dedupes by it.
+  const pendingSendRef = useRef<{ body: string; clientRequestId: string } | null>(null)
 
   const { data: status, error, isError, refetch, isFetching } = useApiQuery<ChatStatus>(
     `/reports/${id}/chat`,
@@ -172,6 +175,21 @@ export default function ChatScreen() {
   const isAgentWorking = thread && (thread.status === "OPEN" || thread.status === "RUNNING")
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
 
+  // Resume polling when a thread is mid-turn on screen open. Placed above the
+  // early returns so hook order stays stable regardless of auth/error state.
+  // It arms only while the active thread is OPEN or RUNNING and never while a
+  // poll is already running, so it cannot stack intervals.
+  useEffect(() => {
+    if (!thread || !isAgentWorking || pollTimerRef.current) return
+    // The reply this turn owes its requester id: the clientRequestId of the
+    // thread's last REVIEWER message. startPolling matches the AGENT reply by
+    // `${lastSentRequestId}:agent` (lib/reviewer-chat/queue.ts).
+    const lastReviewer = [...thread.messages]
+      .reverse()
+      .find((m) => m.sender === "REVIEWER")
+    if (lastReviewer) startPolling(lastReviewer.clientRequestId)
+  }, [thread, isAgentWorking, startPolling])
+
   if (isAuthError) return null
   if (isError) {
     return (
@@ -189,12 +207,23 @@ export default function ChatScreen() {
   const handleSend = () => {
     const body = input.trim()
     if (!body) return
-    const clientRequestId = uuidv4()
+    // A retry of the same body reuses the last clientRequestId so the server
+    // dedupes it (lib/reviewer-chat/queue.ts findExistingMessage). Only the
+    // body, not the input value, decides equality, so edits that change the
+    // body still mint a fresh id.
+    let clientRequestId: string
+    if (pendingSendRef.current && pendingSendRef.current.body === body) {
+      clientRequestId = pendingSendRef.current.clientRequestId
+    } else {
+      clientRequestId = uuidv4()
+      pendingSendRef.current = { body, clientRequestId }
+    }
     mutation.mutate(
       { clientRequestId, body },
       {
         onSuccess: () => {
           setInput("")
+          pendingSendRef.current = null
           startPolling(clientRequestId)
         },
         onError: () => {
