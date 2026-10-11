@@ -216,6 +216,7 @@ function SignTheVerdictInner() {
         freshCf?.verdict?.id !== recordedVerdictId ||
         freshCf?.verdict?.contentHash !== recordedContentHash
       ) {
+        setDenySheetOpen(false)
         setHashMismatch(true)
         return
       }
@@ -246,6 +247,7 @@ function SignTheVerdictInner() {
     } catch (e) {
       const err = e as ApiError
       if (err.status === 409 && err.code === "content_hash_mismatch") {
+        setDenySheetOpen(false)
         setHashMismatch(true)
       } else {
         toast.show("Denied failed")

@@ -58,7 +58,7 @@ export default function VerdictApprovedScreen() {
   const deliveryState = cf.delivery?.state ?? "PENDING"
   const isDelivered = deliveryState.toUpperCase() === "DELIVERED"
   // M12 receipt rows.
-  const channel = cf.delivery?.transportReceipt ?? cf.delivery?.target ?? deliveryState
+  const channel = cf.delivery?.target ?? deliveryState
   const receipt = cf.delivery?.transportReceipt ?? deliveryState
   // Delivered time — mockup shows a time like "9:41 AM".
   const deliveredAt = cf.delivery?.deliveredAt ? new Date(cf.delivery.deliveredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""

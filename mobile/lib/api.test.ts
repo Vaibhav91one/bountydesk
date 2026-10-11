@@ -90,19 +90,32 @@ describe("api client", () => {
       expect((thrown as ApiError).status).toBe(403)
     })
 
-    it("includes the status code field on the ApiError", async () => {
+    it("reads the code and message from the JSON error body the server sends", async () => {
+      // lib/mobile/decision.ts answers a stale approval as json({ error, code }, 409).
       mockFetch.mockResolvedValueOnce(
-        mockResponse(false, 500, { "X-Error-Code": "err-server" }, undefined, "internal"),
+        mockResponse(false, 409, {}, undefined, JSON.stringify({ error: "verdict changed", code: "content_hash_mismatch" })),
       )
 
+      let thrown: unknown
+      try {
+        await api("/reports/r1/approve")
+      } catch (e) {
+        thrown = e
+      }
+      expect(thrown).toBeInstanceOf(ApiError)
+      expect(thrown).toMatchObject({ status: 409, code: "content_hash_mismatch", message: "verdict changed" })
+    })
+
+    it("keeps a non-JSON error body as the message with no code", async () => {
+      mockFetch.mockResolvedValueOnce(mockResponse(false, 500, {}, undefined, "internal"))
       let thrown: unknown
       try {
         await api("/boom")
       } catch (e) {
         thrown = e
       }
-      expect(thrown).toBeInstanceOf(ApiError)
-      expect(thrown).toMatchObject({ status: 500, code: "err-server" })
+      expect(thrown).toMatchObject({ status: 500, message: "internal" })
+      expect((thrown as ApiError).code).toBeUndefined()
     })
 
     it("includes the awaited response body text in the error message on 401", async () => {
