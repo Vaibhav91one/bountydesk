@@ -15,7 +15,6 @@ import { useEffect, useState } from "react"
 import { View, ActivityIndicator } from "react-native"
 
 import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
-import { QueryProvider } from "@/components/QueryProvider"
 import { useFonts } from "@/hooks/useFonts"
 import { darkTheme } from "@/theme"
 
@@ -50,9 +49,7 @@ export default function RootLayout() {
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
       <ClerkTokenBridge>
-        <QueryProvider>
-          <Stack screenOptions={{ headerShown: false }} />
-        </QueryProvider>
+        <Stack screenOptions={{ headerShown: false }} />
       </ClerkTokenBridge>
     </ClerkProvider>
   )

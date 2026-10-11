@@ -5,6 +5,10 @@
  * offline viewing: a cold launch shows the last-seen report list before any
  * network request. Mutations are NOT queued while offline — they keep
  * networkMode: "online" so a failed mutation surfaces to the UI immediately.
+ *
+ * The cache blob is namespaced per signed-in Clerk user (see makePersister),
+ * so a different reviewer on the same phone never hydrates the previous
+ * reviewer's reports.
  */
 import { QueryClient } from "@tanstack/react-query"
 import { Persister } from "@tanstack/react-query-persist-client"
@@ -12,13 +16,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 
 export const CACHE_KEY_BASE = "tanstack-query:bountydesk"
 
-// The cache blob is namespaced per signed-in Clerk user so a different reviewer
-// on the same phone never hydrates another reviewer's last-seen data. The user
-// id is set by ClerkTokenBridge on mount via setCacheUser().
-let currentUserId: string | null = null
 export function cacheKeyForUser(userId: string | null): string {
   return userId ? `${CACHE_KEY_BASE}:${userId}` : CACHE_KEY_BASE
 }
+
+// Kept for signOutAndClear (which runs outside React and outside the provider's
+// lifetime). QueryProvider itself builds its persister via makePersister(userId)
+// so the restore key is derived synchronously from the Clerk user id, before any
+// child effect runs.
+let currentUserId: string | null = null
 export function currentCacheKey(): string {
   return cacheKeyForUser(currentUserId)
 }
@@ -44,28 +50,40 @@ export const queryClient = new QueryClient({
 })
 
 /**
- * A Persister backed by AsyncStorage. The PersistQueryClientProvider subscribes
- * to cache changes and writes the whole client state as one JSON blob.
+ * Build a persister that reads/writes AsyncStorage under a key scoped to the
+ * given Clerk user id. This is the single source of truth for the on-disk cache
+ * key, used by QueryProvider so the restore happens against the correct user
+ * before any child effect runs.
  *
- * The storage key is user-scoped (see setCacheUser), so signing in as a
- * different reviewer starts from an empty cache instead of hydrating the
- * previous reviewer's reports.
+ * Pass null for a signed-out session: the returned persister is still valid but
+ * will not find a blob (there never is one while signed out), and callers that
+ * render the provider keyed by `userId ?? "signed-out"` remount cleanly on
+ * sign-in/sign-out.
  */
-export const asyncStoragePersister: Persister = {
-  persistClient: async (client) => {
-    const value = JSON.stringify(client)
-    await AsyncStorage.setItem(currentCacheKey(), value)
-  },
-  restoreClient: async () => {
-    const value = await AsyncStorage.getItem(currentCacheKey())
-    if (!value) return undefined
-    try {
-      return JSON.parse(value) as ReturnType<typeof JSON.parse> & { buster: string; clientState: unknown }
-    } catch {
-      return undefined
-    }
-  },
-  removeClient: async () => {
-    await AsyncStorage.removeItem(currentCacheKey())
-  },
+export function makePersister(userId: string | null): Persister {
+  const key = cacheKeyForUser(userId)
+  return {
+    persistClient: async (client) => {
+      const value = JSON.stringify(client)
+      await AsyncStorage.setItem(key, value)
+    },
+    restoreClient: async () => {
+      const value = await AsyncStorage.getItem(key)
+      if (!value) return undefined
+      try {
+        return JSON.parse(value) as ReturnType<typeof JSON.parse> & { buster: string; clientState: unknown }
+      } catch {
+        return undefined
+      }
+    },
+    removeClient: async () => {
+      await AsyncStorage.removeItem(key)
+    },
+  }
 }
+
+/**
+ * Default persister for the signed-out session. Kept for callers that do not have
+ * a user id yet; QueryProvider passes a real one when the user is signed in.
+ */
+export const asyncStoragePersister: Persister = makePersister(null)
