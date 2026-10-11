@@ -102,7 +102,7 @@ function DenyVerdictInner() {
   const displayHash = contentHash ? `sha256:${contentHash}` : ""
   const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? ""
   const severity = useMemo(() => (cf ? maxSeverity(cf) : null), [cf])
-  const delivery = useMemo(() => (cf ? deliveryLabel(cf.channel, cf.delivery?.target) : ""), [cf])
+  const delivery = useMemo(() => (cf ? deliveryLabel(cf.deliveryChannel ?? cf.channel, cf.delivery?.target) : ""), [cf])
 
   const handleDenyConfirm = useCallback(async () => {
     if (!verdict || denying || denyingRef.current || doneRef.current) return
