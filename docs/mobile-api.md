@@ -308,6 +308,69 @@ The case file already returns `target` and `sandbox` (the provisioned sandbox id
 The mobile sandbox screen renders that data plus the static text from
 `docs/sandbox-architecture.md` and the `targetScope` fields above. No separate route is needed.
 
+## Push notifications
+
+The mobile app registers a push token with `POST /push-token`. The token belongs to the reviewer email
+from `mobileAuth().session.email`, so it is scoped to whoever signed in. The sweep that fires pushes
+runs from `sweepPushNotifications` in `lib/push/notify.ts`, called by the `push-notifications` queue
+entry in `scripts/run-worker-daemon.ts` every 60 seconds.
+
+### `POST /push-token`
+
+Register or refresh a push token for the signed-in reviewer.
+
+```
+body
+  { token: string, platform: "ios" | "android" }
+
+200  { ok: true }
+400  invalid token or platform
+401  not authenticated
+403  not a reviewer
+```
+
+The token must match `/^ExponentPushToken\[[A-Za-z0-9_-]+\]$/` and be at most 200 characters. An
+existing token is upserted: `reviewer_email`, `platform`, `last_seen_at`, and `revoked_at` are
+cleared.
+
+### `DELETE /push-token`
+
+Revoke the reviewer's own token.
+
+```
+body
+  { token: string }
+
+204  no content
+400  invalid token
+401  not authenticated
+403  not a reviewer
+404  the token does not belong to the caller
+```
+
+### Payload rules
+
+A push carries ids and a short title only. It never carries report text, verdict titles, findings, or
+emails, since it passes through Apple's and Google's networks:
+
+- `AWAITING_APPROVAL`: title "Verdict awaiting approval", body is the report's source label (for example
+  `#482` or `#abcdef12`), data `{ reportId, screen: "sign" }`.
+- `DELIVERED`: title "Verdict delivered", body is the report's source label, data `{ reportId, screen:
+  "case" }`.
+
+### Once-per-ref
+
+Each notification is recorded as one row in `notification_event`, keyed by `(report_id, kind, ref_id)`.
+A sweep inserts with `ON CONFLICT DO NOTHING`, so a report that stayed in `AWAITING_APPROVAL` through
+multiple sweeps produces exactly one push. The same row also makes a `DELIVERED` report fire once per
+outbound delivery id.
+
+### Allowlist re-check
+
+At send time, every token's `reviewer_email` is re-checked with `isReviewerEmail`. A reviewer removed
+from the allowlist between registration and the sweep receives no pushes. A token that returns
+`DeviceNotRegistered` from Expo is revoked (`revoked_at` set) so it is skipped on later sweeps.
+
 ## Testing
 
 `app/api/mobile/v1/mobile.test.ts` exercises the full gate matrix against a disposable schema:

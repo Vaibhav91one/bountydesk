@@ -41,6 +41,7 @@ import { runOnce as runReviewerChatOnce } from "@/lib/reviewer-chat/worker";
 import { runRecheckOnce, sweepRecheckRuns } from "@/lib/investigation-runs/queue";
 import { reconcileGitHubAccess, reconcilePushSuggestions } from "@/lib/github/reconcile";
 import { sweepExpiredReports } from "@/lib/reports/expiry";
+import { sweepPushNotifications } from "@/lib/push/notify";
 
 import { runCodeReviewOnce, sweepStaleCodeReviews } from "@/lib/analysis/code-review";
 import { createHeartbeat, type Heartbeat } from "@/lib/worker-daemon/health";
@@ -356,6 +357,17 @@ async function main(): Promise<void> {
         const result = await sweepExpiredReports();
         const expired = result.outcomes.filter((o) => o.status === "retired").length;
         if (expired) console.log(`report expiry: expired ${expired} of ${result.candidates} candidates`);
+        return result;
+      }),
+    },
+    {
+      name: "push-notifications",
+      claimOnce: async () => null,
+      sweepOnce: atMostEvery(60_000, async () => {
+        const result = await sweepPushNotifications();
+        if (result.sent > 0) {
+          console.log(`push notifications: notified ${result.sent} devices across ${result.candidates} reports, revoked ${result.revoked} stale tokens`);
+        }
         return result;
       }),
     },
