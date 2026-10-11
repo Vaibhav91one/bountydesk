@@ -154,7 +154,8 @@ function DenyVerdictInner() {
       setDenySheetOpen(false)
       toast.show("Denied. Nothing was sent")
       setTimeout(() => {
-        ;(router as any).popToTop()
+        // dismissAll unwinds the report stack; replace then lands on the tabs.
+        if (router.canDismiss()) router.dismissAll()
         router.replace("/(tabs)")
       }, 1100)
     } catch (e) {

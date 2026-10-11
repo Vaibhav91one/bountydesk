@@ -44,13 +44,15 @@ jest.mock("@/lib/api", () => ({
   api: mockApi,
 }))
 
+const mockRouter = {
+  push: jest.fn(),
+  replace: jest.fn(),
+  back: jest.fn(),
+  dismissAll: jest.fn(),
+  canDismiss: jest.fn(() => true),
+}
 jest.mock("expo-router", () => ({
-  useRouter: () => ({
-    push: jest.fn(),
-    replace: jest.fn(),
-    back: jest.fn(),
-    popToTop: jest.fn(),
-  }),
+  useRouter: () => mockRouter,
   useLocalSearchParams: () => ({ id: "BD-1042" }),
 }))
 
@@ -210,5 +212,14 @@ describe("M13 Deny verdict", () => {
     // refetch is called once (stale check inside handleDenyConfirm), but the
     // 409 handler does NOT trigger an automatic retry.
     expect(mockRefetch).toHaveBeenCalledTimes(1)
+  })
+  it("returns to the tabs after a successful deny", async () => {
+    setMockData(sampleCaseFile)
+    mockApi.mockResolvedValueOnce({ ok: true })
+    const { getByLabelText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByLabelText("Confirm"))
+    await new Promise((r) => setTimeout(r, 1400))
+    expect(mockRouter.dismissAll).toHaveBeenCalled()
+    expect(mockRouter.replace).toHaveBeenCalledWith("/(tabs)")
   })
 })

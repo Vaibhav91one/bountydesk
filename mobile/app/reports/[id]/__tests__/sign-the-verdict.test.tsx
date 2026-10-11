@@ -55,7 +55,8 @@ jest.mock("expo-router", () => ({
     push: jest.fn(),
     replace: jest.fn(),
     back: jest.fn(),
-    popToTop: jest.fn(),
+    dismissAll: jest.fn(),
+    canDismiss: jest.fn(() => true),
   }),
   useLocalSearchParams: () => ({ id: "BD-1042" }),
 }))
