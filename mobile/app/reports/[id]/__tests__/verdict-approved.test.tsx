@@ -54,6 +54,7 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
     data: data,
     error: opts.error ?? undefined,
     isError: opts.isError ?? false,
+    status: opts.isError ? "error" : "success",
     refetch: mockRefetch,
   })
 }
@@ -92,5 +93,24 @@ describe("M12 Verdict approved", () => {
 
     const { getByText } = await render(<VerdictApproved />)
     expect(getByText("Server crashed")).toBeTruthy()
+  })
+
+  it("does not show 'Verdict delivered' when delivery.state is SENT", async () => {
+    setMockData({ ...sampleCaseFile, delivery: { ...sampleCaseFile.delivery, state: "SENT" } })
+    const { queryByText } = await render(<VerdictApproved />)
+
+    expect(queryByText("Verdict delivered")).toBeFalsy()
+    expect(queryByText("Approved. Delivery in progress")).toBeTruthy()
+    expect(queryByText("State")).toBeTruthy()
+    expect(queryByText("SENT")).toBeTruthy()
+  })
+
+  it("shows 'Verdict delivered' only when delivery.state is DELIVERED", async () => {
+    setMockData({ ...sampleCaseFile, delivery: { ...sampleCaseFile.delivery, state: "DELIVERED" } })
+    const { queryByText, getAllByText } = await render(<VerdictApproved />)
+
+    expect(queryByText("Verdict delivered")).toBeTruthy()
+    expect(queryByText("Approved. Delivery in progress")).toBeFalsy()
+    expect(getAllByText("issue comment 2xx").length).toBeGreaterThanOrEqual(1) // receipt value shown
   })
 })

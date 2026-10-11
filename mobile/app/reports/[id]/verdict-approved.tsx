@@ -53,9 +53,13 @@ export default function VerdictApprovedScreen() {
   const verdict = cf.verdict
   const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? "Delivered"
   const hashForDisplay = verdict?.contentHash ? `sha256:${verdict.contentHash}` : ""
+  // Delivery state comes from the case file (lib/mobile/views.ts). A report is
+  // DELIVERED only after the transport receipt; otherwise it is in progress.
+  const deliveryState = cf.delivery?.state ?? "PENDING"
+  const isDelivered = deliveryState.toUpperCase() === "DELIVERED"
   // M12 receipt rows.
-  const channel = cf.delivery?.transportReceipt ?? cf.delivery?.target ?? "Delivered"
-  const receipt = cf.delivery?.transportReceipt ?? "Delivered"
+  const channel = cf.delivery?.transportReceipt ?? cf.delivery?.target ?? deliveryState
+  const receipt = cf.delivery?.transportReceipt ?? deliveryState
   // Delivered time — mockup shows a time like "9:41 AM".
   const deliveredAt = cf.delivery?.deliveredAt ? new Date(cf.delivery.deliveredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""
 
@@ -66,27 +70,48 @@ export default function VerdictApprovedScreen() {
           {/* Mascot */}
           <View style={styles.mascotBox}>
             <SvgImage name="mascot/celebrating" width={180} height={180} />
-            <Text style={[styles.h1, { color: colors.foreground }]}>Verdict delivered</Text>
+            {isDelivered ? (
+              <Text style={[styles.h1, { color: colors.foreground }]}>Verdict delivered</Text>
+            ) : (
+              <Text style={[styles.h1, { color: colors.foreground }]}>Approved. Delivery in progress</Text>
+            )}
             <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.id} · {cf.title}</Text>
           </View>
 
-          {/* Receipt card */}
-          <View style={styles.sect}>
-            <Text style={[styles.shPlain, { color: colors.foreground }]}>Receipt</Text>
-            <Card style={styles.receiptCard}>
-              <Row style={styles.receiptRow}>
-                <Text style={[styles.kvLabel, { color: colors.muted }]}>Outcome</Text>
-                <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
-              </Row>
-              <KvRow label="Channel" value={channel} />
-              <KvRow label="Receipt" value={receipt} mono />
-              {deliveredAt ? <KvRow label="Delivered" value={deliveredAt} /> : null}
-              <Mono style={[styles.hash, { color: colors.foreground }] as any}>{hashForDisplay}</Mono>
-            </Card>
-            <Text style={[styles.note, { color: colors.muted }]}>
-              Marked delivered only after GitHub confirmed the comment. An email report shows the mail provider receipt instead.
-            </Text>
-          </View>
+          {/* Receipt card — only shown once the transport receipt confirms delivery */}
+          {isDelivered ? (
+            <View style={styles.sect}>
+              <Text style={[styles.shPlain, { color: colors.foreground }]}>Receipt</Text>
+              <Card style={styles.receiptCard}>
+                <Row style={styles.receiptRow}>
+                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Outcome</Text>
+                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
+                </Row>
+                <KvRow label="Channel" value={channel} />
+                <KvRow label="Receipt" value={receipt} mono />
+                {deliveredAt ? <KvRow label="Delivered" value={deliveredAt} /> : null}
+                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{hashForDisplay}</Mono>
+              </Card>
+              <Text style={[styles.note, { color: colors.muted }]}>
+                Marked delivered only after the transport confirmed delivery.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.sect}>
+              <Text style={[styles.shPlain, { color: colors.foreground }]}>Delivery</Text>
+              <Card style={styles.receiptCard}>
+                <Row style={styles.receiptRow}>
+                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Outcome</Text>
+                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
+                </Row>
+                <KvRow label="State" value={deliveryState} />
+                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{hashForDisplay}</Mono>
+              </Card>
+              <Text style={[styles.note, { color: colors.muted }]}>
+                Delivery is in progress. The verdict will be marked delivered once the transport confirms it.
+              </Text>
+            </View>
+          )}
         </ScrollView>
 
         {/* Back to queue button (matches .fbar .btn) */}

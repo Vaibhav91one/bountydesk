@@ -106,6 +106,7 @@ function DenyVerdictInner() {
   const [hashMismatch, setHashMismatch] = useState(false)
   const [denying, setDenying] = useState(false)
   const denyingRef = useRef(false)
+  const doneRef = useRef(false)
 
   const verdict = cf?.verdict
   const contentHash = verdict?.contentHash ?? ""
@@ -115,7 +116,7 @@ function DenyVerdictInner() {
   const delivery = useMemo(() => (cf ? deliveryLabel(cf) : ""), [cf])
 
   const handleDenyConfirm = useCallback(async () => {
-    if (!verdict || denying || denyingRef.current) return
+    if (!verdict || denying || denyingRef.current || doneRef.current) return
 
     // Set denying immediately to prevent double-tap (STEP 6).
     setDenying(true)
@@ -125,28 +126,38 @@ function DenyVerdictInner() {
     const recordedVerdictId = verdict.id
     const recordedContentHash = contentHash
 
-    const fresh = await refetch()
-    const freshCf = fresh.data as CaseFileWithDelivery | undefined
-    if (
-      freshCf?.verdict?.id !== recordedVerdictId ||
-      freshCf?.verdict?.contentHash !== recordedContentHash
-    ) {
-      setHashMismatch(true)
-      setDenying(false)
-      denyingRef.current = false
-      setDenySheetOpen(false)
-      return
-    }
-
-    // Build the reason string from reason + optional note (STEP 7).
-    const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
-
+    // The refetch and submit are inside ONE try/catch/finally (STEP 3).
     try {
+      // react-query v5 refetch() does not throw on a network error; it resolves with
+      // isError true. Guard against that so stale data never gets denied.
+      const fresh = await refetch()
+      if (fresh.isError || fresh.status !== "success") {
+        toast.show("Could not confirm the latest verdict. Check your connection and try again.")
+        return
+      }
+      const freshCf = fresh.data as CaseFileWithDelivery | undefined
+      if (
+        freshCf?.verdict?.id !== recordedVerdictId ||
+        freshCf?.verdict?.contentHash !== recordedContentHash
+      ) {
+        setHashMismatch(true)
+        return
+      }
+
+      // Build the reason string from reason + optional note (STEP 7).
+      const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
+
       await api(`/reports/${id}/deny`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ verdictId: recordedVerdictId, contentHash: recordedContentHash, reason }),
       } as any)
+
+      // 2xx: mark done so the buttons and sheet stay disabled through the
+      // navigation delay (STEP 4). finally will not re-enable after success.
+      doneRef.current = true
+      setDenying(false)
+      denyingRef.current = false
 
       // Haptics only after server returns 200 (STEP 8).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
@@ -165,12 +176,15 @@ function DenyVerdictInner() {
         toast.show("Denied failed")
       }
     } finally {
-      setDenying(false)
-      denyingRef.current = false
+      // Only re-enable if we did not reach a 2xx (STEP 4).
+      if (!doneRef.current) {
+        setDenying(false)
+        denyingRef.current = false
+      }
     }
   }, [router, id, verdict, contentHash, denyReason, denyNote, refetch, toast])
 
-  const canSubmit = !!verdict && !isError && !hashMismatch && !denying
+  const canSubmit = !!verdict && !isError && !hashMismatch && !denying && !doneRef.current
 
   // Auth errors are terminal: render nothing rather than a broken shell.
   if (isError && error instanceof ApiError && (error.status === 401 || error.status === 403)) return null

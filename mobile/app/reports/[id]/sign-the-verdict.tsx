@@ -111,6 +111,7 @@ function SignTheVerdictInner() {
   const [submitting, setSubmitting] = useState(false)
   const [hashMismatch, setHashMismatch] = useState(false)
   const submittingRef = useRef(false)
+  const doneRef = useRef(false)
 
   const verdict = cf?.verdict
   const contentHash = verdict?.contentHash ?? ""
@@ -120,7 +121,7 @@ function SignTheVerdictInner() {
   const delivery = useMemo(() => (cf ? deliveryLabel(cf) : ""), [cf])
 
   const handleApprove = useCallback(async () => {
-    if (!verdict || submitting || submittingRef.current) return
+    if (!verdict || submitting || submittingRef.current || doneRef.current) return
 
     // Set submitting immediately to prevent double-tap (STEP 6).
     setSubmitting(true)
@@ -131,38 +132,47 @@ function SignTheVerdictInner() {
     const recordedContentHash = contentHash
 
     // Biometric re-confirm: a speed bump for the weighty action of approving.
-    const hasHardware = await LocalAuthentication.hasHardwareAsync()
-    if (hasHardware) {
-      const enrolled = await LocalAuthentication.isEnrolledAsync()
-      if (enrolled) {
-        const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Approve verdict" })
-        if (!result.success) {
-          setSubmitting(false)
-          submittingRef.current = false
-          return
+    // The refetch and submit are all inside ONE try/catch/finally (STEP 3).
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync()
+      if (hasHardware) {
+        const enrolled = await LocalAuthentication.isEnrolledAsync()
+        if (enrolled) {
+          const result = await LocalAuthentication.authenticateAsync({ promptMessage: "Approve verdict" })
+          if (!result.success) {
+            return
+          }
         }
       }
-    }
 
-    // If the verdict changed during the biometric prompt, do NOT submit (STEP 5).
-    const fresh = await refetch()
-    const freshCf = fresh.data as CaseFileWithDelivery | undefined
-    if (
-      freshCf?.verdict?.id !== recordedVerdictId ||
-      freshCf?.verdict?.contentHash !== recordedContentHash
-    ) {
-      setHashMismatch(true)
-      setSubmitting(false)
-      submittingRef.current = false
-      return
-    }
+      // If the verdict changed during the biometric prompt, do NOT submit (STEP 5).
+      // react-query v5 refetch() does not throw on a network error; it resolves with
+      // isError true. Guard against that so stale data never gets approved.
+      const fresh = await refetch()
+      if (fresh.isError || fresh.status !== "success") {
+        toast.show("Could not confirm the latest verdict. Check your connection and try again.")
+        return
+      }
+      const freshCf = fresh.data as CaseFileWithDelivery | undefined
+      if (
+        freshCf?.verdict?.id !== recordedVerdictId ||
+        freshCf?.verdict?.contentHash !== recordedContentHash
+      ) {
+        setHashMismatch(true)
+        return
+      }
 
-    try {
       await api<{ ok: boolean }>(`/reports/${id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ verdictId: recordedVerdictId, contentHash: recordedContentHash }),
       } as any)
+
+      // 2xx: mark done so the buttons and sheet stay disabled through the
+      // navigation delay (STEP 4). finally will not re-enable after success.
+      doneRef.current = true
+      setSubmitting(false)
+      submittingRef.current = false
 
       // Haptics only after server returns 200 (STEP 8).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
@@ -176,13 +186,16 @@ function SignTheVerdictInner() {
         toast.show("Approve failed")
       }
     } finally {
-      setSubmitting(false)
-      submittingRef.current = false
+      // Only re-enable if we did not reach a 2xx (STEP 4).
+      if (!doneRef.current) {
+        setSubmitting(false)
+        submittingRef.current = false
+      }
     }
   }, [router, id, verdict, contentHash, refetch, toast])
 
   const handleDenyConfirm = useCallback(async () => {
-    if (!verdict || submitting || submittingRef.current) return
+    if (!verdict || submitting || submittingRef.current || doneRef.current) return
 
     // Set submitting immediately to prevent double-tap (STEP 6).
     setSubmitting(true)
@@ -192,27 +205,35 @@ function SignTheVerdictInner() {
     const recordedVerdictId = verdict.id
     const recordedContentHash = contentHash
 
-    const fresh = await refetch()
-    const freshCf = fresh.data as CaseFileWithDelivery | undefined
-    if (
-      freshCf?.verdict?.id !== recordedVerdictId ||
-      freshCf?.verdict?.contentHash !== recordedContentHash
-    ) {
-      setHashMismatch(true)
-      setSubmitting(false)
-      submittingRef.current = false
-      return
-    }
-
-    // Build the reason string from reason + optional note (STEP 7).
-    const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
-
     try {
+      const fresh = await refetch()
+      if (fresh.isError || fresh.status !== "success") {
+        toast.show("Could not confirm the latest verdict. Check your connection and try again.")
+        return
+      }
+      const freshCf = fresh.data as CaseFileWithDelivery | undefined
+      if (
+        freshCf?.verdict?.id !== recordedVerdictId ||
+        freshCf?.verdict?.contentHash !== recordedContentHash
+      ) {
+        setHashMismatch(true)
+        return
+      }
+
+      // Build the reason string from reason + optional note (STEP 7).
+      const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
+
       await api(`/reports/${id}/deny`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ verdictId: recordedVerdictId, contentHash: recordedContentHash, reason }),
       } as any)
+
+      // 2xx: mark done so the buttons and sheet stay disabled through the
+      // navigation delay (STEP 4).
+      doneRef.current = true
+      setSubmitting(false)
+      submittingRef.current = false
 
       // Haptics only after server returns 200 (STEP 8).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
@@ -230,12 +251,15 @@ function SignTheVerdictInner() {
         toast.show("Denied failed")
       }
     } finally {
-      setSubmitting(false)
-      submittingRef.current = false
+      // Only re-enable if we did not reach a 2xx (STEP 4).
+      if (!doneRef.current) {
+        setSubmitting(false)
+        submittingRef.current = false
+      }
     }
   }, [router, id, verdict, contentHash, denyReason, denyNote, refetch, toast])
 
-  const canSubmit = !!verdict && !isError && !hashMismatch && !submitting
+  const canSubmit = !!verdict && !isError && !hashMismatch && !submitting && !doneRef.current
 
   // Auth errors are terminal: render nothing rather than a broken shell.
   if (isError && error instanceof ApiError && (error.status === 401 || error.status === 403)) return null

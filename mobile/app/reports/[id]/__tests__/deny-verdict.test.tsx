@@ -65,14 +65,8 @@ jest.mock("expo-haptics", () => ({
   NotificationFeedbackType: { Success: "success", Warning: "warning" },
 }))
 
-// Keep real ToastProvider; stub useToast (same pattern as M11).
-jest.mock("@/components/primitives", () => {
-  const actual = jest.requireActual("@/components/primitives")
-  return {
-    ...actual,
-    useToast: () => ({ show: jest.fn() }),
-  }
-})
+// Use the real ToastProvider and useToast — do not stub them.
+jest.mock("@/components/primitives", () => jest.requireActual("@/components/primitives"))
 
 const DenyVerdict = require("../deny-verdict").default
 
@@ -81,6 +75,7 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
     data: data,
     error: opts.error ?? undefined,
     isError: opts.isError ?? false,
+    status: opts.isError ? "error" : "success",
     refetch: mockRefetch,
   })
 }
@@ -88,7 +83,8 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
 describe("M13 Deny verdict", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockRefetch.mockResolvedValue({ data: sampleCaseFile })
+    jest.clearAllTimers()
+    mockRefetch.mockResolvedValue({ data: sampleCaseFile, isError: false, status: "success" })
     ;(LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(false)
     ;(LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(false)
   })
@@ -142,6 +138,64 @@ describe("M13 Deny verdict", () => {
     const body = JSON.parse(denyCall[1].body)
     expect(body.verdictId).toBe(sampleCaseFile.verdict.id)
     expect(body.contentHash).toBe(sampleCaseFile.verdict.contentHash)
+  })
+
+  it("does not call deny when refetch returns isError:true", async () => {
+    setMockData(sampleCaseFile)
+    mockRefetch.mockResolvedValueOnce({ data: null, isError: true, status: "error" })
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByLabelText } = await render(<DenyVerdict />)
+
+    await fireEvent.press(getByLabelText("Confirm"))
+    await new Promise((r) => setTimeout(r, 500))
+
+    const denyCall = mockApi.mock.calls.find((c: any) => c[0] && c[0].toString().includes("/deny"))
+    expect(denyCall).toBeFalsy()
+  })
+
+  it("does not submit again after a 2xx response", async () => {
+    setMockData(sampleCaseFile)
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByLabelText, queryByText } = await render(<DenyVerdict />)
+
+    const confirmBtn = await waitFor(() => getByLabelText("Confirm"))
+
+    await fireEvent.press(confirmBtn)
+    await new Promise((r) => setTimeout(r, 500))
+
+    // First confirm submitted once.
+    let denyCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/deny"))
+    expect(denyCalls.length).toBe(1)
+
+    // A second tap must NOT submit again — doneRef is true now.
+    fireEvent.press(confirmBtn)
+    await new Promise((r) => setTimeout(r, 500))
+
+    denyCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/deny"))
+    expect(denyCalls.length).toBe(1)
+  })
+
+  it("re-enables the buttons when refetch throws", async () => {
+    setMockData(sampleCaseFile)
+    mockRefetch.mockRejectedValueOnce(new Error("network error"))
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByLabelText, queryByText } = await render(<DenyVerdict />)
+
+    await fireEvent.press(getByLabelText("Confirm"))
+    // Let all pending microtasks settle before asserting.
+    await new Promise((r) => setTimeout(r, 100))
+
+    await waitFor(() => {
+      expect(queryByText("Denied failed")).toBeTruthy()
+    })
+
+    // Buttons should be re-enabled (denying false again).
+    await waitFor(() => {
+      expect(queryByText("Deny")).toBeTruthy()
+    })
   })
 
   it("does not auto-retry on 409 content_hash_mismatch and shows the refresh state", async () => {

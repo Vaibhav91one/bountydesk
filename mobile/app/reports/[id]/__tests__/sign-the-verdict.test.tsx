@@ -71,14 +71,9 @@ jest.mock("expo-haptics", () => ({
   NotificationFeedbackType: { Success: "success", Warning: "warning" },
 }))
 
-// --- Mock primitives (keep real ToastProvider, but stub useToast) ---
-jest.mock("@/components/primitives", () => {
-  const actual = jest.requireActual("@/components/primitives")
-  return {
-    ...actual,
-    useToast: () => ({ show: jest.fn() }),
-  }
-})
+// Use the real ToastProvider and useToast — do not stub them. The screens render
+// inside <ToastProvider> at the default-export boundary, so toasts are real.
+jest.mock("@/components/primitives", () => jest.requireActual("@/components/primitives"))
 
 // --- Static require for the screen component (no dynamic import) ---
 const SignTheVerdict = require("../sign-the-verdict").default
@@ -88,6 +83,7 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
     data: data,
     error: opts.error ?? undefined,
     isError: opts.isError ?? false,
+    status: opts.isError ? "error" : "success",
     refetch: mockRefetch,
   })
 }
@@ -95,7 +91,8 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
 describe("M11 Sign the verdict", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockRefetch.mockResolvedValue({ data: sampleCaseFile })
+    jest.clearAllTimers()
+    mockRefetch.mockResolvedValue({ data: sampleCaseFile, isError: false, status: "success" })
     ;(LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(false)
     ;(LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(false)
     ;(LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: true })
@@ -181,7 +178,7 @@ describe("M11 Sign the verdict", () => {
     }
 
     // First refetch (inside handleApprove) returns the changed case file.
-    mockRefetch.mockResolvedValueOnce({ data: changedCaseFile })
+    mockRefetch.mockResolvedValueOnce({ data: changedCaseFile, isError: false, status: "success" })
 
     setMockData(sampleCaseFile)
     mockApi.mockResolvedValueOnce({ ok: true })
@@ -194,6 +191,62 @@ describe("M11 Sign the verdict", () => {
     // The api() should never have been called with /approve.
     const approveCall = mockApi.mock.calls.find((c: any) => c[0] && c[0].toString().includes("/approve"))
     expect(approveCall).toBeFalsy()
+  })
+
+  it("does not call approve when refetch returns isError:true", async () => {
+    setMockData(sampleCaseFile)
+    // react-query v5 refetch() resolves (does not throw) with isError:true on network error.
+    mockRefetch.mockResolvedValueOnce({ data: null, isError: true, status: "error" })
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByText } = await render(<SignTheVerdict />)
+
+    await fireEvent.press(getByText("Approve"))
+    await new Promise((r) => setTimeout(r, 500))
+
+    // api() should never have been called with /approve.
+    const approveCall = mockApi.mock.calls.find((c: any) => c[0] && c[0].toString().includes("/approve"))
+    expect(approveCall).toBeFalsy()
+  })
+
+  it("re-enables the buttons when the biometric step throws", async () => {
+    setMockData(sampleCaseFile)
+    // hasHardwareAsync throws — the catch fires, finally re-enables submitting.
+    ;(LocalAuthentication.hasHardwareAsync as jest.Mock).mockRejectedValueOnce(new Error("biometric unavailable"))
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByText, queryByText } = await render(<SignTheVerdict />)
+
+    await fireEvent.press(getByText("Approve"))
+    await waitFor(() => {
+      expect(queryByText("Approve failed")).toBeTruthy()
+    })
+
+    // Buttons should be re-enabled (submitting false again).
+    await waitFor(() => {
+      expect(queryByText("Approve")).toBeTruthy()
+    })
+  })
+
+  it("does not submit again after a 2xx response", async () => {
+    setMockData(sampleCaseFile)
+    mockApi.mockResolvedValue({ ok: true })
+
+    const { getByText } = await render(<SignTheVerdict />)
+
+    await fireEvent.press(getByText("Approve"))
+    await new Promise((r) => setTimeout(r, 500))
+
+    // First tap submitted once.
+    let approveCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/approve"))
+    expect(approveCalls.length).toBe(1)
+
+    // A second tap must NOT submit again — doneRef is true now.
+    fireEvent.press(getByText("Approve"))
+    await new Promise((r) => setTimeout(r, 500))
+
+    approveCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/approve"))
+    expect(approveCalls.length).toBe(1)
   })
 
   it("double tap on Approve submits only once", async () => {
