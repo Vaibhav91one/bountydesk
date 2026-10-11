@@ -224,7 +224,7 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
                   >
                     #{retestOf.originalReportId.slice(0, 8)} {retestOf.originalTitle}
                   </Link>
-                  <span>at {retestOf.commitSha.slice(0, 12)}</span>
+                  <span>at {retestOf.commitSha ? retestOf.commitSha.slice(0, 12) : "upload material"}</span>
                 </>
               ) : null}
 
@@ -284,10 +284,13 @@ export default async function CaseFilePage({ params }: { params: Promise<{ id: s
         <RetestPanel
           reportId={file.id}
           canStart={offerRetest}
+          canGit={file.repositoryFullName !== null}
+          canUpload={file.repositoryFullName === null}
           retests={retests.map((item) => ({
             id: item.id,
             childReportId: item.childReportId,
             commitSha: item.commitSha,
+            materialKind: item.materialKind,
             actor: item.actor,
             createdAt: item.createdAt.toISOString(),
             result: item.result,

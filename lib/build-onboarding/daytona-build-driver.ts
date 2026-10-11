@@ -214,7 +214,7 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         // a host the connected repository does not live on. The token is minted right before the clone
         // and revoked right after it, before the repository's own build steps run in this sandbox.
         const cloneToken =
-          source.kind === "git" && source.cloneUrl === `https://github.com/${input.repoFullName}.git`
+          shouldMintToken(source, input.repoFullName)
             ? await readToken(input.repoFullName)
             : null;
         let buildMarker: string;
@@ -844,6 +844,36 @@ export function cloneHostOf(cloneUrl: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Whether a git source clone URL points at the connected repository with the given full name on
+ * github.com. Normalises both sides so that https://github.com/o/r,
+ * https://github.com/o/r.git (the canonical URL) and https://github.com/o/r/ all match.
+ * A token is only minted when the source is exactly this repository on github.com, so a token is
+ * never handed to another host.
+ */
+export function cloneUrlsMatch(cloneUrl: string, repoFullName: string): boolean {
+  try {
+    const url = new URL(cloneUrl);
+    if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "github.com") return false;
+    // Strip one trailing ".git" and any trailing "/", so the comparison is order-independent on
+    // those decorations.
+    const path = url.pathname.replace(/\/$/, "").replace(/\.git$/, "");
+    return path === `/${repoFullName}`;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decides whether the build driver should mint a Contents:read token for a private clone.
+ * Only a git source whose clone URL resolves to the connected repository on github.com qualifies;
+ * an explicit git source pointing anywhere else is always cloned anonymously, so a token is never
+ * handed to a host the connected repository does not live on.
+ */
+export function shouldMintToken(source: BuildSource, repoFullName: string): boolean {
+  return source.kind === "git" && cloneUrlsMatch(source.cloneUrl, repoFullName);
 }
 
 export function egressAllowList(plan: BuildPlan, extraHost?: string): string[] {

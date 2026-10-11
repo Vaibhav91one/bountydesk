@@ -231,6 +231,39 @@ test("a retest child build fails fast: one attempt, then FAILED with no retry", 
   assert.ok(await analysisJob(reportId));
 });
 
+test("a retest child with a connected repository clones through the repo's full name so the build driver mints a scoped token", async () => {
+  // A retest child records the connected repository id; the build driver checks the clone URL
+  // against repoFullName to decide whether a private repo needs a Contents:read token. If the
+  // placeholder "upload/<id>" name were sent instead, the driver would clone anonymously and
+  // a private repo would fail with POLICY_REFUSED.
+  const [inst] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({ installationId: 1, accountLogin: "example", accountId: 1 })
+    .returning({ id: dbm.githubInstallation.id });
+  const [repo] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({
+      installationId: inst.id,
+      repoId: 99,
+      fullName: "example/app",
+      isPrivate: true,
+      active: true,
+    })
+    .returning({ id: dbm.connectedRepository.id });
+  const reportId = await heldUpload({ gitUrl: "https://github.com/example/app", gitCommit: "c".repeat(40) });
+  await gate.approveUploadTarget(reportId, "reviewer", TARGET);
+  await dbm.db
+    .update(dbm.uploadIntake)
+    .set({ isRetest: true, connectedRepositoryId: repo.id })
+    .where(dbm.eq(dbm.uploadIntake.reportId, reportId));
+
+  const driver = fakeDriver("ok");
+  assert.ok(await build.buildUploadOnce({ driver }));
+
+  // The build driver received the connected repo's full name, not the upload placeholder.
+  assert.equal(driver.calls[0]?.repoFullName, "example/app");
+});
+
 test("a target bound by hand while the build waits is not mistaken for this upload's build", async () => {
   const reportId = await heldUpload({ imageRef: "nginx:1.27", imageDigest: IMAGE_DIGEST });
   await gate.approveUploadTarget(reportId, "reviewer", TARGET);

@@ -7,7 +7,7 @@ import { resolveAppeal } from "@/lib/appeals/appeals";
 import { deliverById } from "@/lib/delivery/worker";
 import { requestOwnerAdvisory } from "@/lib/delivery/advisory";
 import { cancelHeldReport, retryHeldDelivery } from "@/lib/delivery/retry";
-import { startRetest } from "@/lib/retests/retest";
+import { startRetest, type RetestMaterial } from "@/lib/retests/retest";
 import {
   cancelRecheck,
   requestRecheck,
@@ -98,22 +98,42 @@ export async function requestRecheckAction(
 }
 
 /**
- * Start a fix-verification retest of a REPRODUCED report at a commit the reviewer names. The
- * retest runs as a separate child report, so this never edits the original report or its target,
- * and the child's verdict is never delivered (it has no reporter contact).
+ * Start a fix-verification retest of a REPRODUCED report. The material can be a git commit SHA on the
+ * report's connected repository, or upload material (archive, Dockerfile, image ref, or git URL) for a
+ * connectionless target. The retest runs as a separate child report, so this never edits the original
+ * report or its target, and the child's verdict is never delivered (it has no reporter contact).
  */
 export async function requestRetestAction(
   reportId: string,
-  commitSha: string,
+  formData: FormData,
 ): Promise<ActionResult & { childReportId?: string }> {
   const access = await requireWriteAccess();
   if (!access.ok) return access;
-  // A server action is callable with any JSON, so the types are checked here.
-  if (typeof reportId !== "string" || !isReportId(reportId) || typeof commitSha !== "string") {
-    return { ok: false, error: "That report or commit is not valid." };
+  if (typeof reportId !== "string" || !isReportId(reportId)) {
+    return { ok: false, error: "That report is not valid." };
   }
+
+  // The form sends which mode the reviewer selected. Route by that, not by whether a SHA parses,
+  // so a non-SHA in the Commit SHA tab is refused with a clear message instead of silently
+  // falling through to the upload branch.
+  const mode = formData.get("mode");
+  const material: RetestMaterial =
+    mode === "git"
+      ? { kind: "git", commitSha: typeof formData.get("commitSha") === "string" ? (formData.get("commitSha") as string).trim() : "" }
+      : {
+          kind: "upload",
+          archive: formData.get("archive") instanceof File ? (formData.get("archive") as File) : undefined,
+          dockerfile: formData.get("dockerfile") instanceof File ? (formData.get("dockerfile") as File) : undefined,
+          imageRef: typeof formData.get("imageRef") === "string" ? (formData.get("imageRef") as string) : undefined,
+          imageDigest:
+            typeof formData.get("imageDigest") === "string" ? (formData.get("imageDigest") as string) : undefined,
+          gitUrl: typeof formData.get("gitUrl") === "string" ? (formData.get("gitUrl") as string) : undefined,
+          gitCommitSha:
+            typeof formData.get("gitCommitSha") === "string" ? (formData.get("gitCommitSha") as string) : undefined,
+        };
+
   try {
-    const result = await startRetest(reportId, commitSha.trim(), { login: access.session.login });
+    const result = await startRetest(reportId, material, { login: access.session.login });
     revalidateReportViews(reportId);
     return result.ok ? { ok: true, childReportId: result.childReportId } : { ok: false, error: result.reason };
   } catch (error) {

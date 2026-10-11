@@ -8,6 +8,8 @@ import type { Sandbox } from "@/lib/sandbox/daytona";
 import { onboardingSnapshotImageRef, type BuildInput, type BuildSource } from "./build-driver";
 import {
   cloneHostOf,
+  cloneUrlsMatch,
+  shouldMintToken,
   createDaytonaBuildDriver,
   dockerEnvLine,
   egressAllowList,
@@ -343,4 +345,38 @@ test("an explicit git source adds only its own clone host to the build egress al
     () => resolveBuildSource({ ...base, source: { ...source, resolvedCommitSha: "main" } }),
     /40-character commit SHA/,
   );
+});
+
+test("cloneUrlsMatch matches github.com URLs regardless of trailing slash or .git suffix", () => {
+  // The parseGitSource cloneUrl has no .git suffix, so the driver must accept it as matching
+  // the connected repository's full name for token mintage on private repos.
+  const matches = [
+    "https://github.com/acme/app",
+    "https://github.com/acme/app.git",
+    "https://github.com/acme/app/",
+    "https://github.com/acme/app.git/",
+  ];
+  for (const url of matches) {
+    assert.equal(cloneUrlsMatch(url, "acme/app"), true, `expected match: ${url}`);
+  }
+  // A sub-path that is not exactly the repo is not confused with a prefix match.
+  assert.equal(cloneUrlsMatch("https://github.com/acme/app-extra", "acme/app"), false);
+  assert.equal(cloneUrlsMatch("https://github.com/acme/app/tree/main", "acme/app"), false);
+  // A different host never matches.
+  assert.equal(cloneUrlsMatch("https://gitlab.com/acme/app", "acme/app"), false);
+  assert.equal(cloneUrlsMatch("ssh://git@github.com/acme/app.git", "acme/app"), false);
+  // Garbage does not throw.
+  assert.equal(cloneUrlsMatch("not-a-url", "acme/app"), false);
+});
+
+test("shouldMintToken gates token mintage on a git source matching the connected repo on github.com", () => {
+  // A git source whose cloneUrl points at the connected repo on github.com (with or without .git)
+  // mints a token; a non-git source never does.
+  const gitNoGit = { kind: "git" as const, cloneUrl: "https://github.com/acme/app", resolvedCommitSha: "b".repeat(40) };
+  const gitWithGit = { kind: "git" as const, cloneUrl: "https://github.com/acme/app.git", resolvedCommitSha: "b".repeat(40) };
+  const archive = { kind: "archive" as const, archive: Buffer.from("x"), sourceArchiveDigest: `sha256:${"a".repeat(64)}` };
+  assert.equal(shouldMintToken(gitNoGit, "acme/app"), true, "no-.git clone URL still matches");
+  assert.equal(shouldMintToken(gitWithGit, "acme/app"), true, "canonical .git clone URL matches");
+  assert.equal(shouldMintToken(archive, "acme/app"), false, "non-git sources never mint a token");
+  assert.equal(shouldMintToken({ kind: "git" as const, cloneUrl: "https://gitlab.com/acme/app", resolvedCommitSha: "b".repeat(40) }, "acme/app"), false, "a different host never mints a token");
 });
