@@ -265,6 +265,9 @@ describe("M6 Reports", () => {
       expect(getByText("Open redirect on /login")).toBeTruthy()
     })
     expect(queryByText("Stored XSS in search results")).toBeNull()
+    // The header counts the rows the chip shows, not the server total of 6.
+    const shown = mockReportsData.reports.filter((r: { state: string }) => ["TRIAGING", "NEEDS_DECISION"].includes(r.state)).length
+    expect(getByText(`${shown} reports`)).toBeTruthy()
   })
 
   it("renders loading state while fetching", async () => {

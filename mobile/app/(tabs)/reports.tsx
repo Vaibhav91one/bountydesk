@@ -183,6 +183,9 @@ function ReportsScreenContent() {
   })
 
   const hasFilter = needle.length > 0 || activeChip !== "all"
+  // The server total already reflects the search; a phase chip filters loaded rows on the client, so
+  // its count is the rows shown, marked "+" while more pages remain unloaded.
+  const shownCount = activeChip === "all" ? String(totalReports) : `${filtered.length}${hasMore ? "+" : ""}`
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -206,7 +209,7 @@ function ReportsScreenContent() {
           <>
             <Text style={[styles.h1, { color: colors.foreground }]}>Reports</Text>
             <Text style={[styles.hmeta, { color: colors.muted }]}>
-              {totalReports} reports
+              {shownCount} reports
             </Text>
 
             {/* Search field (.search in c.css) */}
