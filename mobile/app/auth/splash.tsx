@@ -1,30 +1,67 @@
-/** M1 Splash. Brand surface shown while the session check resolves; advances to sign-in. */
+/** M1 Splash. Brand surface with greeting mascot and logo lockup. Advances to sign-in.
+ * Matches docs/site/screens/m1.html exactly.
+ *
+ * Layout: centered column with greeting mascot (animated float), logo lockup (inverted on light),
+ * and tagline. Advances to /auth/sign-in after 1600ms.
+ */
 import { useEffect } from "react"
-import { View, Text, StyleSheet } from "react-native"
+import { View, Text, StyleSheet, Animated, Easing, useColorScheme } from "react-native"
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
+
+import { SvgAsset } from "@/components/SvgImage"
+import { darkTheme, lightTheme } from "@/theme"
 
 export default function SplashScreen() {
   const router = useRouter()
   const { isLoaded } = useAuth()
+  const cs = useColorScheme()
+  const t = cs === "dark" ? darkTheme : lightTheme
+  const floatAnim = new Animated.Value(0)
 
   useEffect(() => {
-    // Wait for Clerk to finish hydrating, then hand off. A signed-in user never
-    // reaches this screen (the auth group redirects them to tabs), so once loaded
-    // we always go to sign-in.
-    if (!isLoaded) return
+    // Floating animation: translateY -8px over 3.2s, ease-in-out, infinite.
+    // In c.css: @keyframes m1f { 50% { transform: translate-y(-8px) } }
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, {
+          toValue: -8,
+          duration: 1600,
+          easing: Easing.bezier(0.95, 0, 0.39, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(floatAnim, {
+          toValue: 0,
+          duration: 1600,
+          easing: Easing.bezier(0.95, 0, 0.39, 1),
+          useNativeDriver: true,
+        }),
+      ]),
+    )
+    anim.start()
+    return () => anim.stop()
+  }, [floatAnim])
 
-    const t = setTimeout(() => {
+  useEffect(() => {
+    if (!isLoaded) return
+    // data-auto-ms defaults to 1600ms in c.js
+    const timeout = setTimeout(() => {
       router.replace("/auth/sign-in")
-    }, 1200)
-    return () => clearTimeout(t)
+    }, 1600)
+    return () => clearTimeout(timeout)
   }, [isLoaded, router])
 
   return (
-    <View style={styles.container}>
-      <View style={styles.surface}>
-        <Text style={styles.wordmark}>BountyDesk</Text>
-        <Text style={styles.tagline}>Security triage, reviewer-first.</Text>
+    <View style={[styles.container, { backgroundColor: t.colors.background }]}>
+      <View style={styles.wrap}>
+        <Animated.View style={{ transform: [{ translateY: floatAnim }] }}>
+          <SvgAsset name="mascot/greeting" width={220} height={220} />
+        </Animated.View>
+        {/* m1-lockup: invert on light theme (filter:invert(1) hue-rotate(180deg)) */}
+        <SvgAsset name="logo-lockup" width={230} height={59} />
+        <Text style={[styles.tagline, { color: t.colors.muted }]}>
+          Triage you can trust, one approval at a time.
+        </Text>
       </View>
     </View>
   )
@@ -33,23 +70,17 @@ export default function SplashScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#1a1a1f",
     alignItems: "center",
     justifyContent: "center",
   },
-  surface: {
+  wrap: {
+    flexDirection: "column",
     alignItems: "center",
-    gap: 16,
-  },
-  wordmark: {
-    fontSize: 48,
-    fontWeight: "800",
-    letterSpacing: -2,
-    color: "#ffffff",
+    gap: 28, // matches gap:28px in .m1-wrap
+    paddingBottom: 40,
   },
   tagline: {
-    fontSize: 17,
-    color: "#919199",
-    letterSpacing: 0.3,
+    fontSize: 15, // .9375rem in c.css
+    letterSpacing: 0,
   },
 })

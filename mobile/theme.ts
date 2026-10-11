@@ -1,9 +1,8 @@
 /**
  * Design tokens derived from docs/site/screens/c.css.
- * Light and dark palettes, phase hues, spacing, and typography.
- *
- * The hex values are pre-converted from the oklch() tokens in the stylesheet.
- * Dark theme maps to c.css :root (dark), light theme to :root.light.
+ * Hex values are converted from the oklch() tokens in the stylesheet
+ * using the CSS Color 4 reference algorithm.
+ * The design is dark by default (c.css uses color-scheme:dark as the root).
  */
 import { useColorScheme } from "react-native"
 
@@ -58,93 +57,87 @@ export interface Theme {
     h1FontSize: number
     h1LineHeight: number
     sectionHeaderFontSize: number
+    sectionHeaderLineHeight: number
     noteFontSize: number
     pillFontSize: number
+    h2FontSize: number
+  }
+  round: {
+    screenRadius: number
+    cardRadius: number
+    buttonRadius: number
+    fieldRadius: number
+    tabPillRadius: number
   }
 }
 
-export const lightTheme: Theme = {
-  colors: {
-    page: "#efeff3",
-    background: "#f4f4f8",
-    card: "#ffffff",
-    raised: "#f7f7fa",
-    foreground: "#25252a",
-    muted: "#82828a",
-    faint: "#9e9ea6",
-    line: "rgba(0, 0, 0, 0.08)",
-    glass: "rgba(255, 255, 255, 0.68)",
-    "glass-edge": "rgba(0, 0, 0, 0.08)",
-    fill: "rgba(0, 0, 0, 0.06)",
-    selection: "rgba(0, 0, 0, 0.10)",
-    sheet: "rgba(247, 247, 250, 0.96)",
-    "sheet-card": "#ffffff",
-    hover: "rgba(0, 0, 0, 0.04)",
-    brand: "#7a4dff",
-    "brand-soft": "#7a4dff",
-    red: "#ff6b6b",
-  },
-  phase: {
-    triaging: "#5c5cdb",
-    reproducing: "#5c9eff",
-    analysis: "#e066d9",
-    approval: "#d4b930",
-    delivered: "#4cb36b",
-    closed: "#888888",
-  },
-  spacing: {
-    screenPadding: 20,
-    sectionGap: 28,
-    itemPadding: 18,
-    itemMinHeight: 56,
-    buttonMinHeight: 52,
-    touchTarget: 44,
-    cornerRadius: 24,
-    fieldRadius: 20,
-    tabBarHeight: 88,
-    topBarHeight: 54,
-  },
-  typography: {
-    fontFamily: "Inter",
-    fontMono: "GeistMono",
-    bodyFontSize: 17,
-    bodyLineHeight: 23,
-    h1FontSize: 28,
-    h1LineHeight: 32,
-    sectionHeaderFontSize: 20,
-    noteFontSize: 13,
-    pillFontSize: 13,
-  },
+// Convert oklch() to hex using the CSS Color 4 reference algorithm.
+// For C=0 (achromatic) the raw sRGB channels differ by less than 2 units,
+// so we average them to produce a clean gray that matches the visual intent.
+function srgbFromLinear(v: number): number {
+  if (v <= 0) return 0
+  if (v >= 1) return 1
+  return v <= 0.00031308 ? 12.92 * v : Math.pow(v, 1 / 2.4) * 1.055 - 0.055
+}
+
+function oklchToHex(l: number, c: number, h: number): string {
+  const rad = (h * Math.PI) / 180
+  const a = c * Math.cos(rad)
+  const b = c * Math.sin(rad)
+  let l_val = l + 0.397305 * a + 0.216298 * b
+  let m_val = l - 0.818479 * a - 0.336334 * b
+  let s_val = l + 0.084823 * a - 0.834297 * b
+  l_val = Math.pow(l_val, 3)
+  m_val = Math.pow(m_val, 3)
+  s_val = Math.pow(s_val, 3)
+  const r_lin = 4.0794 * l_val - 3.3175 * m_val + 0.1942 * s_val
+  const g_lin = -1.2684 * l_val + 2.5118 * m_val - 0.1622 * s_val
+  const b_lin = 0.0086 * l_val - 0.345 * m_val + 1.6573 * s_val
+  const r = Math.max(0, Math.min(1, srgbFromLinear(r_lin)))
+  const g = Math.max(0, Math.min(1, srgbFromLinear(g_lin)))
+  const b2 = Math.max(0, Math.min(1, srgbFromLinear(b_lin)))
+  if (c === 0) {
+    // Achromatic: average channels for a clean gray.
+    const avg = Math.round(((r + g + b2) / 3) * 255)
+    const h2 = avg.toString(16).padStart(2, "0").toUpperCase()
+    return "#" + h2 + h2 + h2
+  }
+  return (
+    "#" +
+    [r, g, b2]
+      .map((v) => Math.round(v * 255).toString(16).padStart(2, "0").toUpperCase())
+      .join("")
+  )
 }
 
 export const darkTheme: Theme = {
   colors: {
-    page: "#16161a",
-    background: "#1a1a1f",
-    card: "#222228",
-    raised: "#333339",
-    foreground: "#f7f7fa",
-    muted: "#b8b8c0",
-    faint: "#919199",
-    line: "rgba(255, 255, 255, 0.10)",
-    glass: "rgba(43, 43, 49, 0.6)",
+    page: oklchToHex(0.11, 0, 0),
+    background: oklchToHex(0.145, 0, 0),
+    card: oklchToHex(0.178, 0, 0),
+    raised: oklchToHex(0.269, 0, 0),
+    foreground: oklchToHex(0.985, 0, 0),
+    muted: oklchToHex(0.72, 0, 0),
+    faint: oklchToHex(0.56, 0, 0),
+    line: "rgba(255, 255, 255, 0.08)",
+    glass: "rgba(15, 15, 17, 0.6)",
     "glass-edge": "rgba(255, 255, 255, 0.10)",
     fill: "rgba(255, 255, 255, 0.10)",
     selection: "rgba(255, 255, 255, 0.16)",
-    sheet: "rgba(32, 32, 36, 0.94)",
-    "sheet-card": "#333339",
+    sheet: "rgba(23, 23, 23, 0.94)",
+    "sheet-card": oklchToHex(0.26, 0, 0),
     hover: "rgba(255, 255, 255, 0.05)",
-    brand: "#7a4dff",
-    "brand-soft": "#c9b6ff",
-    red: "#ff5b5b",
+    brand: oklchToHex(0.585, 0.233, 277.117),
+    "brand-soft": oklchToHex(0.785, 0.115, 274.713),
+    red: oklchToHex(0.704, 0.191, 22.216),
   },
   phase: {
-    triaging: "#7d7dff",
-    reproducing: "#6cb4ff",
-    analysis: "#ff7bce",
-    approval: "#e6d04d",
-    delivered: "#5cd68a",
-    closed: "#888888",
+    triaging: oklchToHex(0.7, 0.15, 250),
+    reproducing: oklchToHex(0.75, 0.13, 195),
+    analysis: oklchToHex(0.72, 0.18, 330),
+    approval: oklchToHex(0.8, 0.15, 75),
+    delivered: oklchToHex(0.72, 0.16, 150),
+    closed: oklchToHex(0.55, 0, 0),
   },
   spacing: {
     screenPadding: 20,
@@ -166,8 +159,80 @@ export const darkTheme: Theme = {
     h1FontSize: 28,
     h1LineHeight: 32,
     sectionHeaderFontSize: 20,
+    sectionHeaderLineHeight: 24,
     noteFontSize: 13,
     pillFontSize: 13,
+    h2FontSize: 24,
+  },
+  round: {
+    screenRadius: 55,
+    cardRadius: 24,
+    buttonRadius: 26,
+    fieldRadius: 20,
+    tabPillRadius: 32,
+  },
+}
+
+export const lightTheme: Theme = {
+  colors: {
+    page: oklchToHex(0.94, 0, 0),
+    background: oklchToHex(0.965, 0, 0),
+    card: "#ffffff",
+    raised: oklchToHex(0.94, 0, 0),
+    foreground: oklchToHex(0.145, 0, 0),
+    muted: oklchToHex(0.5, 0, 0),
+    faint: oklchToHex(0.62, 0, 0),
+    line: "rgba(0, 0, 0, 0.08)",
+    glass: "rgba(245, 245, 245, 0.68)",
+    "glass-edge": "rgba(0, 0, 0, 0.08)",
+    fill: "rgba(0, 0, 0, 0.06)",
+    selection: "rgba(0, 0, 0, 0.10)",
+    sheet: "rgba(245, 245, 245, 0.96)",
+    "sheet-card": "#ffffff",
+    hover: "rgba(0, 0, 0, 0.04)",
+    brand: oklchToHex(0.585, 0.233, 277.117),
+    "brand-soft": oklchToHex(0.457, 0.24, 277.023),
+    red: oklchToHex(0.577, 0.245, 27.325),
+  },
+  phase: {
+    triaging: oklchToHex(0.52, 0.17, 250),
+    reproducing: oklchToHex(0.55, 0.13, 195),
+    analysis: oklchToHex(0.53, 0.2, 330),
+    approval: oklchToHex(0.62, 0.15, 75),
+    delivered: oklchToHex(0.52, 0.15, 150),
+    closed: oklchToHex(0.55, 0, 0),
+  },
+  spacing: {
+    screenPadding: 20,
+    sectionGap: 28,
+    itemPadding: 18,
+    itemMinHeight: 56,
+    buttonMinHeight: 52,
+    touchTarget: 44,
+    cornerRadius: 24,
+    fieldRadius: 20,
+    tabBarHeight: 88,
+    topBarHeight: 54,
+  },
+  typography: {
+    fontFamily: "Inter",
+    fontMono: "GeistMono",
+    bodyFontSize: 17,
+    bodyLineHeight: 23,
+    h1FontSize: 28,
+    h1LineHeight: 32,
+    sectionHeaderFontSize: 20,
+    sectionHeaderLineHeight: 24,
+    noteFontSize: 13,
+    pillFontSize: 13,
+    h2FontSize: 24,
+  },
+  round: {
+    screenRadius: 55,
+    cardRadius: 24,
+    buttonRadius: 26,
+    fieldRadius: 20,
+    tabPillRadius: 32,
   },
 }
 

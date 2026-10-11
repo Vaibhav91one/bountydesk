@@ -3,24 +3,33 @@
 Every screen in the Expo Router app maps to one of the 28 HTML mockups in `docs/site/screens/mN.html`.
 Route names are derived from the mockup titles in kebab-case.
 
-## Auth stack (signed out)
+## Auth stack (signed out, Variant C "M1 Splash" flow)
 
-| Route                   | Mockup | Title                |
-| ----------------------- | :----: | -------------------- |
-| `/auth/splash`          | M1     | Splash               |
-| `/auth/sign-in`         | M2     | Sign in              |
-| `/auth/not-authorized`  | M3     | Not authorized       |
+| Route              | Mockup | Title          |
+| ------------------ | :----: | -------------- |
+| `/auth/splash`     | M1     | Splash         |
+| `/auth/sign-in`    | M2     | Sign in        |
+| `/auth/not-authorized` | M3 | Not authorized |
 
-## Signed-in tabs
+## Signed-in tabs + chrome (Variant C)
 
-| Tab label   | Mockup | Title     |
-| ----------- | :----: | --------- |
-| Home        | M4     | Home      |
-| Queue       | M5     | Queue     |
-| Reports     | M6     | Reports   |
-| (Review FAB)| M11    | Sign the verdict |
-| Inbox (bell)| M23    | Inbox     |
-| More        | M19    | Settings  |
+The signed-in shell uses a custom floating tab dock (not expo-router Tabs) to match
+`m4.html`'s navigation chrome exactly:
+
+- **Tab bar** (bottom, glass pill): Home, Queue, Reports
+- **Review FAB** (separate circular button, next to the tab pill): opens the next
+  report needing a decision, shows a count badge ("3")
+- **Top bar** (top-right glass pills): bell icon opens Inbox (M23), more icon opens
+  the Settings / Connections / Integrations menu
+
+| Tab label   | Route              | Mockup | Title            |
+| ----------- | ------------------ | :----: | ---------------- |
+| Home        | `/(tabs)`          | M4     | Home             |
+| Queue       | `/(tabs)/queue`    | M5     | Queue            |
+| Reports     | `/(tabs)/reports`  | M6     | Reports          |
+| (Review FAB)| `/(tabs)/review`   | M11    | Sign the verdict |
+| Inbox (bell)| `/(tabs)/inbox`    | M23    | Inbox            |
+| More menu   | `/(tabs)/more`     | M19    | Settings         |
 
 ## Case file detail (under `reports/[id]/`)
 
@@ -51,3 +60,18 @@ Route names are derived from the mockup titles in kebab-case.
 | `more/terms`                       | M25    | Terms                |
 | `more/onboarding`                  | M27    | Onboarding           |
 | `more/submit-a-target`             | M28    | Submit a target      |
+
+## Navigation chrome
+
+The Variant C floating tab dock (from `m4.html` and `c.js` TABS constant):
+
+```
+TABS = [[home, Home], [queue, Queue], [reports, Reports]]
+```
+
+- Tabs render inside a glass pill with `data-tabs` attribute.
+- A separate Review FAB (`.fab`) sits next to the tab pill, showing `data-review="3"`.
+- The top bar (`.topbar.glass`) contains icon-only buttons: bell (Inbox) and
+  more (Settings menu).
+- Screens that need a back button (e.g. Inbox, Settings sub-routes) use
+  `.topbar.l.glass.round` with a `data-back` back icon button.

@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "dependencies": {
     "@clerk/expo": "^4.10.1",
+    "@expo-google-fonts/geist-mono": "^0.4.3",
+    "@expo-google-fonts/inter": "^0.4.2",
     "expo": "~57.0.27",
     "expo-auth-session": "~57.0.14",
     "expo-constants": "~57.0.21",

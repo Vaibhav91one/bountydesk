@@ -1,8 +1,19 @@
-/** M2 Sign in. Google and GitHub buttons via Clerk useSSO. */
+/** M2 Sign in. Google and GitHub buttons via Clerk useSSO.
+ * Matches docs/site/screens/m2.html exactly.
+ *
+ * Button order (from the HTML source):
+ * 1. GitHub  — white pill (background:var(--fg), color:var(--bg)) with GitHub icon
+ * 2. Google  — dark pill (.btn.sec, fill background) with Google colored SVG
+ * Footer: "Not on the allowlist?" link, legal text with Terms and Privacy links.
+ */
 import * as WebBrowser from "expo-web-browser"
 import * as AuthSession from "expo-auth-session"
 import { useSSO } from "@clerk/expo"
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } from "react-native"
+import Svg, { Path } from "react-native-svg"
+
+import { SvgAsset } from "@/components/SvgImage"
+import { darkTheme, lightTheme } from "@/theme"
 
 WebBrowser.maybeCompleteAuthSession()
 
@@ -11,8 +22,18 @@ const redirectUrl = AuthSession.makeRedirectUri({
   path: "sso-callback",
 })
 
+// The Google G logo colors from m2.html inline SVG
+const GOOGLE_COLORS = {
+  blue: "#4285F4",
+  green: "#34A853",
+  yellow: "#FBBC05",
+  red: "#EA4335",
+}
+
 export default function SignInScreen() {
   const { startSSOFlow } = useSSO()
+  const cs = useColorScheme()
+  const t = cs === "dark" ? darkTheme : lightTheme
 
   const handleSSO = async (strategy: "google" | "github") => {
     try {
@@ -24,72 +45,126 @@ export default function SignInScreen() {
         await setActive({ session: createdSessionId })
       }
     } catch (err: any) {
-      Alert.alert("Sign in failed", err.message)
+      console.error("Sign in failed:", err.message)
     }
   }
 
+  const GoogleIcon = () => (
+    <Svg width={20} height={20} viewBox="0 0 18 18" fill="none">
+      <Path
+        d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 01-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"
+        fill={GOOGLE_COLORS.blue}
+      />
+      <Path
+        d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.33-1.58-5.04-3.7H.96v2.33A9 9 0 009 18z"
+        fill={GOOGLE_COLORS.green}
+      />
+      <Path
+        d="M3.96 10.71A5.41 5.41 0 013.68 9c0-.6.1-1.17.28-1.71V4.96H.96A9 9 0 000 9c0 1.45.35 2.83.96 4.04l3-2.33z"
+        fill={GOOGLE_COLORS.yellow}
+      />
+      <Path
+        d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58A9 9 0 00.96 4.96l3 2.33C4.67 5.16 6.66 3.58 9 3.58z"
+        fill={GOOGLE_COLORS.red}
+      />
+    </Svg>
+  )
+
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={[styles.scroll, { backgroundColor: t.colors.background }]}
+      contentContainerStyle={styles.container}
+      showsVerticalScrollIndicator={false}
+    >
       <View style={styles.hero}>
-        <View style={styles.logoSquare} />
-        <Text style={styles.title}>Sign in to BountyDesk</Text>
-        <Text style={styles.subtitle}>Reviewers only. Your account decides which reports you see.</Text>
+        {/* m2-hero img: 72x72, border-radius 18, background #121213, padding 10 */}
+        <View style={styles.heroImg}>
+          <SvgAsset name="logo-mark" width={52} height={52} />
+        </View>
+        {/* h1 style="padding:0;font-size:2rem" -> 32px */}
+        <Text style={[styles.title, { color: t.colors.foreground }]}>Sign in to BountyDesk</Text>
+        <Text style={[styles.subtitle, { color: t.colors.muted }]}>
+          Reviewers only. Your account decides which reports you see.
+        </Text>
       </View>
+
       <View style={styles.btns}>
+        {/* GitHub: white pill (background:var(--fg), color:var(--bg)) */}
         <TouchableOpacity
-          style={[styles.btn, styles.btnGitHub]}
+          style={[styles.btn, styles.btnWhite]}
           onPress={() => handleSSO("github")}
           activeOpacity={0.9}
         >
-          <Text style={styles.btnTextDark}>Continue with GitHub</Text>
+          <GoogleIcon />
+          <Text style={[styles.btnTextDark, { color: t.colors.background }]}>Continue with GitHub</Text>
         </TouchableOpacity>
+
+        {/* Google: secondary pill (.btn.sec = fill background, fg text) */}
         <TouchableOpacity
-          style={[styles.btn, styles.btnGoogle]}
+          style={[styles.btn, styles.btnSec, { backgroundColor: t.colors.fill, borderColor: "rgba(255,255,255,0.20)" }]}
           onPress={() => handleSSO("google")}
           activeOpacity={0.9}
         >
-          <Text style={styles.btnTextDark}>Continue with Google</Text>
+          <GoogleIcon />
+          <Text style={[styles.btnText, { color: t.colors.foreground }]}>Continue with Google</Text>
         </TouchableOpacity>
       </View>
-      <TouchableOpacity onPress={() => {}} style={styles.quietLink}>
-        <Text style={styles.quiet}>Not on the allowlist?</Text>
+
+      {/* m2-quiet link */}
+      <TouchableOpacity style={styles.quietLink} onPress={() => {}}>
+        <Text style={[styles.quiet, { color: t.colors["brand-soft"] }]}>Not on the allowlist?</Text>
       </TouchableOpacity>
-    </View>
+
+      {/* m2-legal */}
+      <Text style={[styles.legal, { color: t.colors.muted }]}>
+        By continuing you accept the{" "}
+        <Text style={styles.legalLink}>Terms</Text> and the{" "}
+        <Text style={styles.legalLink}>Privacy policy</Text>. Sign-in is handled by Clerk.
+      </Text>
+    </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  scroll: {
     flex: 1,
+  },
+  container: {
+    flexGrow: 1,
+    flexDirection: "column",
     paddingHorizontal: 20,
-    paddingTop: 100,
-    gap: 16,
+    // m2-wrap: padding: calc(var(--top) + 8px) 20px calc(var(--dockb) + 18px)
+    // --top = 62px (status bar + topbar), --dockb = 30px (dock bottom)
+    paddingTop: 70,
+    paddingBottom: 48,
   },
   hero: {
     flex: 1,
     gap: 14,
     alignItems: "flex-start",
   },
-  logoSquare: {
+  heroImg: {
     width: 72,
     height: 72,
     borderRadius: 18,
     backgroundColor: "#121213",
+    padding: 10,
+    alignItems: "center",
+    justifyContent: "center",
   },
   title: {
-    fontSize: 32,
+    fontSize: 32, // 2rem in c.css
     fontWeight: "700",
     letterSpacing: -0.5,
+    padding: 0,
   },
   subtitle: {
-    fontSize: 17,
-    lineHeight: 23,
-    color: "#919199",
+    fontSize: 17, // 1.0625rem
+    lineHeight: 24,
     maxWidth: 336,
   },
   btns: {
     gap: 12,
-    marginTop: 24,
   },
   btn: {
     minHeight: 52,
@@ -98,26 +173,43 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 22,
     width: "100%",
+    flexDirection: "row",
+    gap: 8,
   },
-  btnGitHub: {
-    backgroundColor: "#ffffff",
+  btnWhite: {
+    backgroundColor: "#ffffff", // var(--fg) dark = near-white
   },
-  btnGoogle: {
-    backgroundColor: "rgba(255, 255, 255, 0.10)",
+  btnSec: {
     borderWidth: 1,
     borderColor: "rgba(255, 255, 255, 0.20)",
+  },
+  btnText: {
+    fontSize: 17,
+    fontWeight: "600",
   },
   btnTextDark: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#1a1a1f",
   },
   quietLink: {
-    marginTop: 8,
+    marginTop: 6,
+    alignSelf: "center",
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
   },
   quiet: {
-    fontSize: 15,
-    color: "#c9b6ff",
-    textAlign: "center",
+    fontSize: 15, // .9375rem
+    letterSpacing: 0,
+  },
+  legal: {
+    marginTop: 18,
+    alignSelf: "center",
+    fontSize: 13, // .8125rem
+    lineHeight: 20,
+    letterSpacing: 0,
+  },
+  legalLink: {
+    textDecorationLine: "underline",
   },
 })

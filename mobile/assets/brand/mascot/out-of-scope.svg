@@ -1,0 +1,2648 @@
+<svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<style>
+#out-of-scope__mascot-out-of-scope {
+  transform-origin: 0 0;
+  animation: kf_out-of-scope__mascot-out-of-scope_transform_0 4s linear infinite;
+}
+#out-of-scope__Vector_149 {
+  translate: 61.826px 47.721px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_149_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_150 {
+  translate: 84.244px 50.676px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_150_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_151 {
+  translate: 96.689px 60.583px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_151_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_152 {
+  translate: 99.685px 63.593px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_152_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_153 {
+  translate: 104.522px 68.056px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_153_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_154 {
+  translate: 107.521px 71.059px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_154_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_155 {
+  translate: 64.851px 56.755px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_155_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_156 {
+  translate: 88.231px 158.401px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_156_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_157 {
+  translate: 101.934px 165.862px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_157_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_158 {
+  translate: 118.871px 169.31px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_158_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_159 {
+  translate: 98.092px 179.301px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_159_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_160 {
+  translate: 107.888px 160.424px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_160_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_161 {
+  translate: 107.888px 160.424px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_161_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_162 {
+  translate: 122.175px 175.238px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_162_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_163 {
+  translate: 123.59px 175.238px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_163_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_164 {
+  translate: 174.434px 174.885px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_164_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_165 {
+  translate: 176.356px 174.885px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_165_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_166 {
+  translate: 153.696px 178.542px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_166_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_167 {
+  translate: 157.525px 161.034px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_167_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__Vector_168 {
+  translate: 160.577px 170.103px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation: kf_out-of-scope__Vector_168_offset_distance_0 4s linear infinite;
+}
+#out-of-scope__block-bar {
+  translate: 121px 103px;
+  transform-origin: 0 0;
+  transform-box: view-box;
+  offset-path: path('M0 0 C0 -3.333 0 -6.667 0 -10 C2.667 -10 5.333 -10 8 -10 C2.667 -10 -2.667 -10 -8 -10 C-3.333 -10 1.333 -10 6 -10 C2 -10 -2 -10 -6 -10 C-4 -10 -2 -10 0 -10 C0 -6.667 0 -3.333 0 0');
+  offset-rotate: 0deg;
+  offset-anchor: 0px 0px;
+  animation:
+    kf_out-of-scope__block-bar_offset_distance_0 4s linear infinite,
+    kf_out-of-scope__block-bar_opacity_0 4s linear infinite;
+}
+@keyframes kf_out-of-scope__mascot-out-of-scope_transform_0 {
+  0% {
+    animation-timing-function: ease-in-out;
+    transform: translateX(580px) translateY(381px) translateY(0px) translate(128px, 128px) scaleX(1) scaleY(1) translate(-128px, -128px);
+  }
+  25% {
+    animation-timing-function: ease-in-out;
+    transform: translateX(580px) translateY(381px) translateY(-8px) translate(128px, 128px) scaleX(1.02) scaleY(0.98) translate(-128px, -128px);
+  }
+  50% {
+    animation-timing-function: ease-in-out;
+    transform: translateX(580px) translateY(381px) translateY(0px) translate(128px, 128px) scaleX(1) scaleY(1) translate(-128px, -128px);
+  }
+  75% {
+    animation-timing-function: ease-in-out;
+    transform: translateX(580px) translateY(381px) translateY(-8px) translate(128px, 128px) scaleX(0.98) scaleY(1.02) translate(-128px, -128px);
+  }
+  100% {
+    transform: translateX(580px) translateY(381px) translateY(0px) translate(128px, 128px) scaleX(1) scaleY(1) translate(-128px, -128px);
+  }
+}
+@keyframes kf_out-of-scope__Vector_149_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_150_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_151_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_152_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_153_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_154_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_155_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_156_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_157_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_158_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_159_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_160_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_161_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_162_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_163_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_164_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_165_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_166_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_167_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__Vector_168_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__block-bar_offset_distance_0 {
+  0% {
+    offset-distance: 0%;
+  }
+  1.25% {
+    offset-distance: 3.289%;
+  }
+  2.5% {
+    offset-distance: 6.579%;
+  }
+  3.75% {
+    offset-distance: 8.772%;
+  }
+  5% {
+    offset-distance: 10.965%;
+  }
+  6.25% {
+    offset-distance: 12.61%;
+  }
+  7.5% {
+    offset-distance: 13.158%;
+  }
+  8.75% {
+    offset-distance: 14.474%;
+  }
+  10% {
+    offset-distance: 18.421%;
+  }
+  11.25% {
+    offset-distance: 22.368%;
+  }
+  12.5% {
+    offset-distance: 23.684%;
+  }
+  13.75% {
+    offset-distance: 26.316%;
+  }
+  15% {
+    offset-distance: 34.211%;
+  }
+  16.25% {
+    offset-distance: 42.105%;
+  }
+  17.5% {
+    offset-distance: 44.737%;
+  }
+  18.75% {
+    offset-distance: 47.039%;
+  }
+  20% {
+    offset-distance: 53.947%;
+  }
+  21.25% {
+    offset-distance: 60.855%;
+  }
+  22.5% {
+    offset-distance: 63.158%;
+  }
+  23.75% {
+    offset-distance: 65.132%;
+  }
+  25% {
+    offset-distance: 71.053%;
+  }
+  26.25% {
+    offset-distance: 76.974%;
+  }
+  27.5% {
+    offset-distance: 78.947%;
+  }
+  28.75% {
+    offset-distance: 79.934%;
+  }
+  30% {
+    offset-distance: 82.895%;
+  }
+  31.25% {
+    offset-distance: 85.855%;
+  }
+  32.5% {
+    offset-distance: 86.842%;
+  }
+  51.25% {
+    offset-distance: 86.842%;
+  }
+  52.5% {
+    offset-distance: 87.939%;
+  }
+  53.75% {
+    offset-distance: 89.035%;
+  }
+  55% {
+    offset-distance: 91.228%;
+  }
+  56.25% {
+    offset-distance: 93.421%;
+  }
+  57.5% {
+    offset-distance: 95.614%;
+  }
+  58.75% {
+    offset-distance: 97.807%;
+  }
+  60% {
+    offset-distance: 98.904%;
+  }
+  61.25% {
+    offset-distance: 100%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+@keyframes kf_out-of-scope__block-bar_opacity_0 {
+  0% {
+    animation-timing-function: linear;
+    opacity: 0;
+  }
+  10% {
+    animation-timing-function: ease-out;
+    opacity: 0;
+  }
+  12.5% {
+    animation-timing-function: linear;
+    opacity: 0.8;
+  }
+  37.5% {
+    animation-timing-function: ease-out;
+    opacity: 0.8;
+  }
+  50% {
+    animation-timing-function: linear;
+    opacity: 0;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+</style>
+<g transform="translate(-580 -381)">
+<g id="out-of-scope__mascot-out-of-scope" clip-path="url(#out-of-scope__clip8_98_149)" transform="translate(580 381)">
+<path id="out-of-scope__Vector_149" d="M54.8925 0.144461C67.521 -0.255039 80.737 0.255208 93.3673 0.691458C100.541 1.15171 108.036 1.00621 115.116 2.26921C124.329 3.91271 127.158 11.6825 127.808 19.8027C129.252 37.834 129.511 55.7115 128.834 73.7682C128.528 81.9365 128.28 90.2925 127.139 98.3947C124.546 113.751 110.076 111.602 98.7243 112.499C100.33 115.055 101.835 117.332 103.973 119.412C106.536 121.905 109.708 123.819 110.956 127.295C111.198 127.971 111.713 128.787 112.102 129.404C115.059 126.428 117.741 123.859 122.527 124.277C135.76 125.432 135.423 157.365 122.631 158.637C119.701 158.928 110.423 157.468 106.866 156.904C100.856 156.227 93.5593 154.802 87.6955 154.607C86.5303 154.568 80.3315 155.96 77.532 156.149C72.514 162.015 68.9078 160.587 62.1248 159.57L44.9475 156.89C35.0453 155.326 26.0233 154.563 23.8513 142.232C22.6898 135.637 23.7173 128.096 24.0658 121.43C24.2685 117.558 24.7908 113.144 25.3935 109.315C19.3095 107.122 10.8928 103.039 6.22853 98.6225C4.45828 96.9462 3.17902 95.018 2.40577 92.6937C0.197525 86.0552 0.376779 68.5865 0.152529 60.9507C-0.0887214 52.734 -0.32922 29.4047 1.83803 22.0112C2.50753 19.727 3.74903 17.735 5.38103 16.017C10.734 10.382 26.622 2.39096 34.3148 1.09046C40.6023 0.0277098 48.4508 0.332211 54.8925 0.144461Z" fill="black"/>
+<path id="out-of-scope__Vector_150" d="M32.1739 0.187137C32.2692 0.180887 32.3647 0.17564 32.4602 0.17139C41.5807 -0.19536 51.2192 0.109888 60.3579 0.314888C70.7517 0.548138 81.4802 0.856888 91.7874 2.18889C96.0642 2.74164 99.8487 5.73889 101.108 9.90839C103.202 17.7066 103.054 26.1114 103.48 34.1346C103.9 54.7894 104.339 75.8676 101.497 96.3471C100.676 100.141 97.3107 104.435 93.2299 105.105C86.4557 106.219 78.2087 106.52 71.3329 106.616L70.9702 106.636C57.6377 107.328 43.2047 107.056 29.7972 107.139C23.9642 106.891 17.6702 107.268 11.9194 106.413C1.97518 104.934 1.07368 95.3351 0.954435 87.2794C0.907435 84.1084 0.643936 80.7191 0.511686 77.5796C-0.182314 60.1856 -0.170321 42.7706 0.547429 25.3776C0.842679 19.0069 0.253431 9.42864 4.92593 4.55714C9.00118 0.30839 16.6884 0.632139 22.1877 0.472389L32.1739 0.187137Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_151" d="M39.7786 0.205182C63.9711 -2.12182 85.4663 15.6117 87.7786 39.8059C90.0908 63.9999 72.3438 85.4839 48.1483 87.7812C23.9741 90.0764 2.51283 72.3484 0.202581 48.1754C-2.10767 24.0027 15.6071 2.53043 39.7786 0.205182Z" fill="black"/>
+<path id="out-of-scope__Vector_152" d="M36.696 0.228035C59.2268 -2.14122 79.405 14.2213 81.7415 36.7555C84.0778 59.2898 67.686 79.4443 45.1483 81.7478C22.657 84.0465 2.55326 67.6958 0.22176 45.208C-2.10999 22.72 14.2115 2.59254 36.696 0.228035Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_153" d="M34.6016 0.0503937C54.6991 -0.997356 71.8531 14.4191 72.9492 34.5144C74.0452 54.6094 58.6697 71.8001 38.5774 72.9444C18.4167 74.0924 1.1549 58.6531 0.0551516 38.4899C-1.0446 18.3266 14.4356 1.10189 34.6016 0.0503937Z" fill="black"/>
+<path id="out-of-scope__Vector_154" d="M31.4734 0.0628554C49.9374 -1.05989 65.8177 12.9929 66.9499 31.4561C68.0819 49.9194 54.0377 65.8071 35.5749 66.9489C17.0987 68.0914 1.19694 54.0344 0.0639445 35.5576C-1.06931 17.0809 12.9959 1.18611 31.4734 0.0628554Z" fill="white"/>
+<path id="out-of-scope__Vector_155" d="M19.0906 0C19.3434 0.47275 19.0431 0.927747 18.8849 1.48075C17.7119 5.57925 17.4164 9.691 17.1951 13.9458C16.3159 31.1335 16.1461 48.3503 16.6866 65.552C16.9084 74.4373 16.8174 88.004 19.9279 96.0577C15.9174 94.2057 13.2316 92.8442 9.51038 90.5532C6.76463 88.8095 4.16713 87.1255 2.73413 84.06C-0.794622 76.5098 -0.309377 28.4532 0.884373 18.0155C1.08187 16.2892 1.43613 14.5147 2.04963 12.885C4.36063 6.74525 13.4531 2.60825 19.0906 0Z" fill="#534789"/>
+<path id="out-of-scope__Vector_156" d="M34.5976 45.6308C32.0431 45.423 28.3189 44.7252 25.7424 44.3135C21.4844 43.665 17.2326 42.9745 12.9884 42.2417C2.65188 40.3695 -0.273372 35.184 0.0196278 24.9982C0.249378 17.0077 0.448874 7.86125 1.91237 0C7.04387 2.17725 11.0351 2.05949 16.5106 2.15724C17.6259 4.59499 18.5044 5.58775 20.5136 7.46075C24.8709 9.49125 28.5811 8.05351 31.3126 10.9093C34.0759 13.9473 34.2014 17.5628 31.6414 20.8025C26.7189 26.9408 18.6131 23.3537 13.7031 19.3745C10.0824 16.1395 8.49538 12.8352 6.49788 8.5015C6.25588 7.97675 5.99337 7.97875 5.50837 7.87325C4.72112 8.17274 4.62712 8.21824 4.10212 8.87274C3.37537 11.9332 8.79687 18.6917 11.0846 20.9005C17.2534 26.3977 23.7649 29.4598 31.6659 24.8C31.0491 29.4043 30.7734 32.345 31.3629 36.93C31.9466 40.2855 32.8914 42.7075 34.5976 45.6308Z" fill="#534789"/>
+<path id="out-of-scope__Vector_157" d="M0 11.9137C0.66325 10.3227 -0.0137475 7.343 1.75575 4.49675C2.79875 2.81925 4.83275 0.5615 6.8105 0C11.1678 2.0305 14.878 0.592752 17.6095 3.4485C20.3728 6.4865 20.4983 10.102 17.9383 13.3418C13.0158 19.48 4.91 15.893 0 11.9137Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_158" d="M1.00068 9.89325C0.28918 8.439 1.46868 6.46475 1.22318 4.86674C1.03818 3.66199 -0.263571 1.54574 0.0479291 0.303986L0.67193 0C3.43518 3.038 3.56068 6.6535 1.00068 9.89325Z" fill="#9588BD"/>
+<path id="out-of-scope__Vector_159" d="M1.22347 0C7.39222 5.49725 13.9037 8.55926 21.8047 3.89951C21.188 8.50376 20.9122 11.4445 21.5017 16.0295C16.4627 15.6147 7.71972 14.4945 3.36072 11.7905C0.204469 9.83275 -1.19228 3.09875 1.22347 0Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_160" d="M46.6995 0L46.898 2.47525C48.092 10.569 51.132 27.7695 46.2215 34.2318C43.4078 37.9347 39.5725 39.41 35.1653 40.041C34.5265 40.1348 33.8865 40.2215 33.2455 40.3015C35.9308 32.3625 36.3613 16.1367 26.3623 12.208C23.1648 10.9517 19.69 12.257 16.9688 14.1452C16.631 11.042 15.9033 8.70175 13.5945 6.40375C9.03076 3.00475 6.95625 4.98775 2.40575 2.61325C1.95475 2.37775 0.44775 0.787493 0 0.317993C15.8223 0.496743 30.894 0.2335 46.6995 0Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_161" d="M46.6995 0L46.898 2.47525C44.019 3.13725 38.6092 3.56124 36.2947 4.09724C32.9275 4.87749 14.99 5.43175 13.5945 6.40375C9.03076 3.00475 6.95625 4.98775 2.40575 2.61325C1.95475 2.37775 0.44775 0.787493 0 0.317993C15.8223 0.496743 30.894 0.2335 46.6995 0Z" fill="#534789"/>
+<path id="out-of-scope__Vector_162" d="M1.41503 6.77369C2.33553 4.38819 3.61002 2.10595 5.94002 0.819696C7.49102 -0.0480542 9.33203 -0.236305 11.0263 0.300195C13.5503 1.1027 14.8435 3.02144 15.9698 5.23519C18.7043 10.8864 18.5303 26.1172 11.8878 29.339C10.3013 30.1125 8.47102 30.2179 6.80602 29.6317C-0.42798 27.0889 -1.05997 13.5457 1.07203 7.62069C1.17478 7.33394 1.28928 7.05144 1.41503 6.77369Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_163" d="M0 6.77369C0.9205 4.38819 2.19499 2.10595 4.52499 0.819696C6.07599 -0.0480542 7.917 -0.236305 9.61125 0.300195C12.1353 1.1027 13.4285 3.02144 14.5547 5.23519C13.2612 5.28344 11.989 4.0077 10.8495 3.52645C7.46675 2.0987 4.516 2.82169 1.91325 5.26269C1.1545 5.97444 1.02075 6.47469 0 6.77369Z" fill="#9588BD"/>
+<path id="out-of-scope__Vector_164" d="M1.92212 5.1168C4.35512 -0.437946 10.5424 -2.0897 14.3151 3.28605C17.8011 8.09756 17.6166 23.4006 12.1696 27.3896C10.8006 28.4108 9.07538 28.8318 7.38988 28.5558C-1.20162 27.0745 -1.23363 10.9613 1.92212 5.1168Z" fill="#6E61A4"/>
+<path id="out-of-scope__Vector_165" d="M0 5.1168C2.433 -0.437946 8.62026 -2.0897 12.393 3.28605C10.8078 4.3923 8.21575 2.73856 6.14575 2.77931C4.39475 2.81406 1.025 5.3308 0 5.1168Z" fill="#9588BD"/>
+<path id="out-of-scope__Vector_166" d="M5.8555 0C8.1615 0.43 16.632 0.679497 19.382 0.815247C18.9528 2.4345 18.5925 4.07149 18.3022 5.72124C17.2567 11.852 17.553 18.7505 21.2713 23.9875C20.0643 23.7682 18.7395 23.6335 17.5143 23.484C11.9225 22.6495 5.5955 21.7145 0 21.1092C0.45175 20.6585 0.896497 20.201 1.33475 19.7372C6.82725 13.8932 6.10075 7.47925 5.8555 0Z" fill="#534789"/>
+<path id="out-of-scope__Vector_167" d="M3.05275 14.5832C2.758 14.5457 2.28774 14.434 1.98074 14.3705C1.58849 13.727 0.54625 2.25875 0 0C2.57125 3.92225 3.54201 5.5815 6.92026 9.0685C9.78051 11.1745 11.024 12.15 12.8755 15.2927C9.744 14.9567 6.209 14.667 3.05275 14.5832Z" fill="#534789"/>
+<path id="out-of-scope__Vector_168" d="M3.86751 0C6.72776 2.106 7.97125 3.08149 9.82275 6.22424C6.69125 5.88824 3.15625 5.59849 0 5.51474C1.3345 2.78924 1.71151 2.10975 3.86751 0Z" fill="#6E61A4"/>
+<rect id="out-of-scope__block-bar" opacity="0" width="40" height="4" rx="2" fill="#D94040"/>
+</g>
+</g>
+<defs>
+<clipPath id="out-of-scope__clip8_98_149">
+<rect width="256" height="256" fill="white"/>
+</clipPath>
+</defs>
+</svg>
