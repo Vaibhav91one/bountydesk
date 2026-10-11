@@ -144,7 +144,8 @@ async function file(opts: { commit: boolean; split: "dev" | "test" | "all"; ids:
     return;
   }
 
-  const target = await demoTarget();
+  // Unbound cases carry no target by design, so an unbound-only selection must not need one.
+  const target = cases.some((c) => c.negativeType !== "unbound") ? await demoTarget() : null;
   const entries: Manifest["entries"] = [];
 
   for (const c of cases) {
@@ -157,8 +158,8 @@ async function file(opts: { commit: boolean; split: "dev" | "test" | "all"; ids:
       body: c.body,
       reporterHandle: "bountydesk-bench",
       state: "TRIAGING",
-      connectedRepositoryId: bound ? target.connectedRepositoryId : null,
-      targetProfileId: bound ? target.targetProfileId : null,
+      connectedRepositoryId: bound ? target!.connectedRepositoryId : null,
+      targetProfileId: bound ? target!.targetProfileId : null,
     });
 
     await enqueue({
