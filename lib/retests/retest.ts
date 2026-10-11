@@ -163,6 +163,7 @@ export async function startRetest(
       materialKind: "git",
       gitUrl: git.source.cloneUrl,
       gitCommitSha: git.source.commitSha,
+      isRetest: true,
     });
     await tx.insert(retest).values({
       originalReportId: reportId,

@@ -1,0 +1,1 @@
+ALTER TABLE "upload_intake" ADD COLUMN "is_retest" boolean DEFAULT false NOT NULL;

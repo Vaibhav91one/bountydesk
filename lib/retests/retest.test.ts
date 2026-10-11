@@ -169,6 +169,7 @@ test("a retest creates a git-material child with no contact and leaves the origi
   assert.equal(upload.gitCommitSha, SHA);
   assert.equal(upload.buildState, "PENDING");
   assert.equal(upload.approvedBy, REVIEWER.login);
+  assert.equal(upload.isRetest, true, "the child is flagged as a retest so the build loop fails it fast");
   const target = upload.reviewedTarget as { definition: { config: { baseUrl: string } } };
   assert.equal(target.definition.config.baseUrl, "http://localhost:3000");
 

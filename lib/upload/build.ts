@@ -51,6 +51,7 @@ type ClaimedUpload = {
   reviewedTarget: ReviewedUploadTarget;
   approvedBy: string;
   buildAttempts: number;
+  isRetest: boolean;
 };
 
 /** Exported so the lease tests can drive the real claim and fence. */
@@ -260,8 +261,12 @@ export async function buildUploadOnce({
     if (signal?.aborted) throw error;
     const reason = safeErrorText(error, 500);
     console.error(`upload build ${upload.id} failed: ${reason}`);
+    // A retest child is a one-shot fix-verification: a failed build is conclusive, so it goes
+    // straight to FAILED instead of PENDING, which would let the loop retry and then wait on a
+    // lease before the panel could show INCONCLUSIVE (issue #388). Ordinary builds keep retrying.
+    const retryable = upload.buildAttempts < MAX_BUILD_ATTEMPTS && !(error instanceof UploadBuildSkipped);
     await finish(upload, {
-      state: upload.buildAttempts < MAX_BUILD_ATTEMPTS && !(error instanceof UploadBuildSkipped) ? "PENDING" : "FAILED",
+      state: upload.isRetest || !retryable ? "FAILED" : "PENDING",
       error: reason,
     });
   }
