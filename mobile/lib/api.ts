@@ -42,24 +42,20 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    const code = response.headers.get("X-Error-Code") ?? undefined
-    const body = await response.text().catch(() => "")
-
-    if (response.status === 401) {
-      // The caller (e.g. the auth flow) should sign out.
-      throw new ApiError(401, code, body ? body.slice(0, 200) : undefined)
+    // The mobile routes answer errors as JSON { error, code } (lib/mobile/auth.ts json/jsonError),
+    // so the code that tells a 409 hash mismatch apart comes from the body, not a header.
+    const text = await response.text().catch(() => "")
+    let code: string | undefined
+    let message: string | undefined = text ? text.slice(0, 200) : undefined
+    try {
+      const parsed = JSON.parse(text) as { error?: unknown; code?: unknown }
+      if (typeof parsed.code === "string") code = parsed.code
+      if (typeof parsed.error === "string") message = parsed.error
+    } catch {
+      // Not JSON: keep the raw text as the message.
     }
-
-    if (response.status === 403) {
-      // Route to the not-authorized screen.
-      throw new ApiError(403, code, body ? body.slice(0, 200) : undefined)
-    }
-
-    throw new ApiError(
-      response.status,
-      code,
-      body ? body.slice(0, 200) : undefined,
-    )
+    // 401 means the caller signs out; 403 routes to the not-authorized screen.
+    throw new ApiError(response.status, code, message)
   }
 
   const contentType = response.headers.get("content-type")
