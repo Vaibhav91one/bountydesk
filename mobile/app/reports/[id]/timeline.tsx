@@ -98,7 +98,9 @@ export default function TimelineScreen() {
   const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
-  if (isError && !isAuthError) {
+  // The shared query hook signs out or redirects on 401/403; render nothing until it does.
+  if (isAuthError) return null
+  if (isError) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.error, { color: colors.red }]}>{error?.message}</Text>
