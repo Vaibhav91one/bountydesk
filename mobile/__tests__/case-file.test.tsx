@@ -339,7 +339,7 @@ describe("M7 Case file", () => {
 
     const { getByText } = await render(<CaseFileScreen />)
     fireEvent.press(getByText("Vaibhav91one/juice-shop"))
-    expect(mockPush).toHaveBeenCalledWith("/more/target-and-scope")
+    expect(mockPush).toHaveBeenCalledWith("/reports/BD-1042/target-and-scope")
   })
 
   it("renders loading state while fetching", async () => {
