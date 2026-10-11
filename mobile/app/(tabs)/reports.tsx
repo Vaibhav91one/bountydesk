@@ -164,7 +164,9 @@ function ReportsScreenContent() {
     )
   }
 
-  if (!firstPage && !isError && isFetching) {
+  // The full-screen spinner is for the very first load only. A new search keeps the list (and the
+  // focused search field) mounted and shows the previous results until its own page arrives.
+  if (pagesFor === null && !firstPage && !isError) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator color={colors.brand} size="large" />
@@ -285,7 +287,7 @@ function ReportsScreenContent() {
               No reports match {needle ? `"${search.trim()}"` : ""}
             </Text>
             <Text style={[styles.noResultP, { color: colors.muted }]}>
-              Check the spelling, try a report id such as {firstPage?.reports[0]?.sourceLabel ?? "BD-1042"}, or remove a filter.
+              Check the spelling, try a report id, or remove a filter.
             </Text>
             {hasFilter ? (
               <Pressable

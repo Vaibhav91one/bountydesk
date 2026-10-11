@@ -478,7 +478,7 @@ describe("M6 Reports", () => {
     const { getByTestId } = await render(<ReportsScreen />)
     const list = getByTestId("reports-list")
     // Fire twice without waiting: the first request is still pending when the second arrives.
-    act(() => {
+    await act(async () => {
       void list.props.onEndReached()
       void list.props.onEndReached()
     })
@@ -488,5 +488,20 @@ describe("M6 Reports", () => {
       await Promise.resolve()
     })
     expect(mockApi).toHaveBeenCalledTimes(1)
+  })
+  it("keeps the search field mounted while a new search loads", async () => {
+    // First path answers; any q= path is still loading, as on a fresh query key.
+    mockUseApiQuery.mockImplementation((path: string) =>
+      path.includes("q=")
+        ? { data: undefined, error: undefined, isError: false, isFetching: true }
+        : { data: mockReportsData, error: undefined, isError: false, isFetching: false },
+    )
+    const { getByPlaceholderText } = await render(<ReportsScreen />)
+    const field = getByPlaceholderText("Search reports")
+    await fireEvent.changeText(field, "XSS")
+    await waitFor(() => {
+      expect(mockUseApiQuery).toHaveBeenCalledWith("/reports?limit=50&q=XSS")
+    })
+    expect(getByPlaceholderText("Search reports")).toBe(field)
   })
 })
