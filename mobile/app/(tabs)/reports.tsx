@@ -87,8 +87,7 @@ function ageLabelFor(updatedAt: string): string {
   if (minutes < 60) return `${minutes}m`
   const hours = Math.floor(minutes / 60)
   if (hours < 24) return `${hours}h`
-  if (hours < 24 * 7) return `${Math.floor(hours / 24)}d`
-  return "Yesterday"
+  return `${Math.floor(hours / 24)}d`
 }
 
 function ReportsScreenContent() {
