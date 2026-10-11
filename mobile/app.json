@@ -31,7 +31,13 @@
       ],
       "expo-secure-store",
       "@clerk/expo",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "BountyDesk uses Face ID to confirm that you approve a verdict."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
