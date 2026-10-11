@@ -152,3 +152,50 @@ export type MobileCaseFile = {
     resolutionNote: string | null
   }[]
 }
+
+/**
+ * A repository row in the connections list, matching the shape returned by
+ * connectionRows() on the server (GET /api/mobile/v1/connections).
+ */
+export type ConnectionRow = {
+  id: string
+  account: string
+  status: string
+  fullName: string
+  owner: string
+  name: string
+  label: string
+  hint: string
+  target: string | null
+  repoId: number
+  configured: boolean
+  connected: boolean
+  reportCount: number
+  awaitingReview: number
+  delivered: number
+  lastReportAt: string | null
+  lastSyncedAt: string
+  manageUrl: string | null
+  onboarding: unknown | null
+  onboardingProgress: unknown | null
+  onboardingDetail: unknown | null
+}
+
+/**
+ * Scope fields for the target-and-scope screen, from the
+ * targetScope field on the case file (GET /api/mobile/v1/reports/[id]).
+ */
+export type TargetScope = {
+  imageDigest: string
+  snapshotId: string
+  buildMarker: string
+  scopeRules: { allow: string[]; egress: string }
+  readinessPath: string
+  startCommand: string
+}
+
+// Extend MobileCaseFile to include targetScope when present (not in the
+// existing type but returned by the server for M22).
+export interface MobileCaseFileWithScope extends MobileCaseFile {
+  targetScope: TargetScope | null
+}
