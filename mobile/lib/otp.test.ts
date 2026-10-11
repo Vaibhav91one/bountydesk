@@ -16,3 +16,8 @@ it("keeps the new digit when typing over a filled box", () => {
 it("ignores non-digits", () => {
   expect(applyOtpInput("12", 2, "a", 6)).toEqual({ code: "12", focus: 2 })
 })
+
+it("clears a filled box when it is emptied", () => {
+  expect(applyOtpInput("4829", 3, "", 6)).toEqual({ code: "482", focus: 3 })
+  expect(applyOtpInput("4829", 1, "", 6)).toEqual({ code: "4", focus: 1 })
+})
