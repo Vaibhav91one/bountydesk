@@ -11,6 +11,7 @@ import {
   eq,
   report,
   retest,
+  sql,
   targetOnboarding,
   targetProfile,
   uploadIntake,
@@ -245,20 +246,29 @@ async function startGitRetest(
     return { ok: false, reason: error instanceof Error ? error.message : "the target settings are not valid" };
   }
 
-  const duplicate = await db
-    .select({ id: retest.id })
-    .from(retest)
-    .where(and(eq(retest.originalVerdictId, latest.id), eq(retest.commitSha, git.source.commitSha)))
-    .limit(1);
-  if (duplicate.length > 0) return { ok: false, reason: "this commit was already retested for this verdict" };
+  let childReportId: string;
+  try {
+    childReportId = await db.transaction(async (tx) => {
+      // Advisory lock on the original verdict id serializes concurrent retests for the same verdict,
+      // so the read-then-write dedupe check is race-safe without a DB-level unique index on nullable commit_sha.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${latest.id}, 0))`);
 
-  const childReportId = await db.transaction(async (tx) => {
-    const id = await ensureReport(
-      {
-        channel: "upload",
-        sourceRef: `upload:retest-${randomUUID()}`,
-        title: `Retest: ${original.title}`.slice(0, 200),
-        body: `${original.body}\n\nThis is a fix-verification retest at commit ${git.source.commitSha}. Check whether the issue reported above still reproduces on this build.`,
+      const duplicate = await tx
+        .select({ id: retest.id })
+        .from(retest)
+        .where(and(eq(retest.originalVerdictId, latest.id), eq(retest.commitSha, git.source.commitSha)))
+        .limit(1);
+      if (duplicate.length > 0) {
+        // Release the lock and signal the caller to treat this as a dedupe refusal.
+        throw new Error("DUPLICATE_RETEST");
+      }
+
+      const id = await ensureReport(
+        {
+          channel: "upload",
+          sourceRef: `upload:retest-${randomUUID()}`,
+          title: `Retest: ${original.title}`.slice(0, 200),
+          body: `${original.body}\n\nThis is a fix-verification retest at commit ${git.source.commitSha}. Check whether the issue reported above still reproduces on this build.`,
         reporterHandle: reviewer.login,
         // No contact and no verified sender: delivery refuses, so the child verdict goes nowhere.
         reporterContact: null,
@@ -294,7 +304,13 @@ async function startGitRetest(
       { tx },
     );
     return id;
-  });
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "DUPLICATE_RETEST") {
+      return { ok: false, reason: "this commit was already retested for this verdict" };
+    }
+    throw error;
+  }
 
   // The reviewer triggering the retest is the approver, so the child skips the gate and goes to
   // the build; the same call the reviewer upload path makes.
@@ -350,70 +366,84 @@ async function startUploadRetest(
 
   // Deduplicate: compare the material's identity anchor against prior retests for this verdict.
   const anchor = uploadMaterialAnchor(material_);
-  const existing = await db
-    .select({
-      gitCommitSha: uploadIntake.gitCommitSha,
-      imageDigest: uploadIntake.imageDigest,
-      sourceArchiveDigest: uploadIntake.sourceArchiveDigest,
-    })
-    .from(retest)
-    .innerJoin(report, eq(report.id, retest.childReportId))
-    .innerJoin(uploadIntake, eq(uploadIntake.reportId, report.id))
-    .where(eq(retest.originalVerdictId, latest.id))
-    .limit(100);
-  if (anchor && existing.some((row) => anchorMatches(row, anchor))) {
-    return { ok: false, reason: "this material was already retested for this verdict" };
-  }
 
-  const childReportId = await db.transaction(async (tx) => {
-    const id = await ensureReport(
-      {
-        channel: "upload",
-        sourceRef: `upload:retest-${randomUUID()}`,
-        title: `Retest: ${original.title}`.slice(0, 200),
-        body: `${original.body}\n\nThis is a fix-verification retest with reviewer-supplied material. Check whether the issue reported above still reproduces on this build.`,
-        reporterHandle: reviewer.login,
-        // No contact and no verified sender: delivery refuses, so the child verdict goes nowhere.
-        reporterContact: null,
-        state: "NEEDS_DECISION",
-        connectedRepositoryId: null,
-        targetProfileId: null,
-      },
-      tx,
-    );
-    const m = material_;
-    const isArchive = m.kind === "archive" || m.kind === "dockerfile";
-    const materialDigest = isArchive ? `sha256:${createHash("sha256").update(m.archive).digest("hex")}` : null;
-    await tx.insert(uploadIntake).values({
-      reportId: id,
-      senderKey: `retest:${reportId}`,
-      senderDomain: "retest.internal",
-      clientIp: null,
-      materialKind: m.kind,
-      archive: isArchive ? m.archive : null,
-      sourceArchiveDigest: materialDigest,
-      imageRef: m.kind === "image" ? m.imageRef : null,
-      imageDigest: m.kind === "image" ? m.imageDigest : null,
-      gitUrl: m.kind === "git" ? m.gitUrl : null,
-      gitCommitSha: m.kind === "git" ? m.gitCommitSha : null,
-      materialBytes: isArchive ? m.archive.length : null,
+  let childReportId: string;
+  try {
+    childReportId = await db.transaction(async (tx) => {
+      // Advisory lock on the original verdict id serializes concurrent retests for the same verdict,
+      // so the read-then-write dedupe check is race-safe.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${latest.id}, 0))`);
+
+      const existing = await tx
+        .select({
+          gitCommitSha: uploadIntake.gitCommitSha,
+          imageDigest: uploadIntake.imageDigest,
+          sourceArchiveDigest: uploadIntake.sourceArchiveDigest,
+        })
+        .from(retest)
+        .innerJoin(report, eq(report.id, retest.childReportId))
+        .innerJoin(uploadIntake, eq(uploadIntake.reportId, report.id))
+        .where(eq(retest.originalVerdictId, latest.id))
+        .limit(100);
+      if (anchor && existing.some((row) => anchorMatches(row, anchor))) {
+        throw new Error("DUPLICATE_RETEST");
+      }
+
+      const id = await ensureReport(
+        {
+          channel: "upload",
+          sourceRef: `upload:retest-${randomUUID()}`,
+          title: `Retest: ${original.title}`.slice(0, 200),
+          body: `${original.body}\n\nThis is a fix-verification retest with reviewer-supplied material. Check whether the issue reported above still reproduces on this build.`,
+          reporterHandle: reviewer.login,
+          // No contact and no verified sender: delivery refuses, so the child verdict goes nowhere.
+          reporterContact: null,
+          state: "NEEDS_DECISION",
+          connectedRepositoryId: null,
+          targetProfileId: null,
+        },
+        tx,
+      );
+      const m = material_;
+      const isArchive = m.kind === "archive" || m.kind === "dockerfile";
+      const materialDigest = isArchive ? `sha256:${createHash("sha256").update(m.archive).digest("hex")}` : null;
+      await tx.insert(uploadIntake).values({
+        reportId: id,
+        senderKey: `retest:${reportId}`,
+        senderDomain: "retest.internal",
+        clientIp: null,
+        materialKind: m.kind,
+        archive: isArchive ? m.archive : null,
+        sourceArchiveDigest: materialDigest,
+        imageRef: m.kind === "image" ? m.imageRef : null,
+        imageDigest: m.kind === "image" ? m.imageDigest : null,
+        gitUrl: m.kind === "git" ? m.gitUrl : null,
+        gitCommitSha: m.kind === "git" ? m.gitCommitSha : null,
+        materialBytes: isArchive ? m.archive.length : null,
+        isRetest: true,
+      });
+      await tx.insert(retest).values({
+        originalReportId: reportId,
+        originalVerdictId: latest.id,
+        childReportId: id,
+        materialKind: "upload",
+        commitSha: null,
+        actor: reviewer.login,
+      });
+      await recordEvent(
+        id,
+        "retest.created",
+        { originalReportId: reportId, materialKind: "upload", reviewer: reviewer.login },
+        { tx },
+      );
+      return id;
     });
-    await tx.insert(retest).values({
-      originalReportId: reportId,
-      originalVerdictId: latest.id,
-      childReportId: id,
-      materialKind: "upload",
-      commitSha: null,
-      actor: reviewer.login,
-    });
-    await recordEvent(
-      id,
-      "retest.created",
-      { originalReportId: reportId, materialKind: "upload", reviewer: reviewer.login },
-      { tx },
-    );
-    return id;
-  });
+  } catch (error) {
+    if (error instanceof Error && error.message === "DUPLICATE_RETEST") {
+      return { ok: false, reason: "this material was already retested for this verdict" };
+    }
+    throw error;
+  }
 
   // The reviewer is the approver, so the child skips the gate.
   const approved = await approveUploadTarget(childReportId, reviewer.login, target.input);

@@ -321,6 +321,7 @@ test("a connectionless upload retest creates a child with no contact and leaves 
   assert.equal(upload.materialKind, "archive");
   assert.equal(upload.buildState, "PENDING");
   assert.equal(upload.approvedBy, REVIEWER.login);
+  assert.equal(upload.isRetest, true, "upload retest children are flagged isRetest so the build loop fails them fast");
 
   const [link] = await dbm.db.select().from(dbm.retest).where(dbm.eq(dbm.retest.childReportId, child.id));
   assert.equal(link.materialKind, "upload");
@@ -410,4 +411,35 @@ test("listRetests reads the latest child verdict", async () => {
   assert.equal(row.result, "FIXED");
   assert.equal(row.childReportId, started.childReportId);
   assert.equal(row.commitSha, "d".repeat(40), "listRetests carries the nullable commitSha through");
+});
+
+test("two concurrent identical upload retests create exactly one child", async () => {
+  const seeded = await seedConnectionless();
+  const { singleFileTar } = await import("@/lib/upload/intake");
+  const tar = singleFileTar("README.md", Buffer.from("fix for the bug"));
+  const material: UploadRetestMaterial = {
+    kind: "upload",
+    archive: new File([new Uint8Array(tar)], "source.tar.gz"),
+  };
+
+  // Fire both at once. The advisory lock serializes them, so one wins and the other is refused
+  // as a duplicate rather than both creating a child report.
+  const [first, second] = await Promise.all([
+    retests.startRetest(seeded.original.id, material, REVIEWER),
+    retests.startRetest(seeded.original.id, material, REVIEWER),
+  ]);
+
+  const okCount = [first, second].filter((r) => r.ok).length;
+  const refused = [first, second].filter((r) => !r.ok).map((r) => (!r.ok ? r.reason : ""));
+  assert.equal(okCount, 1, `exactly one child should be created; first=${JSON.stringify(first)} second=${JSON.stringify(second)}`);
+  assert.equal(refused.length, 1, "one was refused");
+  assert.match(refused[0] ?? "", /already retested/);
+
+  // Only one child report row exists for this verdict.
+  const children = await dbm.db
+    .select({ id: dbm.report.id })
+    .from(dbm.report)
+    .innerJoin(dbm.retest, dbm.eq(dbm.retest.childReportId, dbm.report.id))
+    .where(dbm.eq(dbm.retest.originalVerdictId, seeded.verdict.id));
+  assert.equal(children.length, 1, "only one child report was created");
 });
