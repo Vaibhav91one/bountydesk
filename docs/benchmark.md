@@ -52,19 +52,20 @@ already see would not tell us anything about that gap.
 Negatives (`expected: "NOT_REPRODUCED"` or, for `unbound`, `"ANALYSIS_ONLY"`) are twenty cases
 across five labelled types, four of each:
 
-- **fixed** — the described bug is not present in the pinned build (an invented endpoint, or a
-  real bug class described through behavior/credentials/codes that do not actually trigger it).
-- **wrong-payload** — a real endpoint and a real bug class, but the payload targets the wrong
+- **nonexistent**: the report describes an endpoint or behavior that does not exist in the pinned build (an invented route, or a real bug class described through behavior, credentials, or codes that do not actually trigger it).
+- **wrong-payload**: a real endpoint and a real bug class, but the payload targets the wrong
   field or parameter (the injection is really in `email`, the report says `password`; and so on).
-- **informative** — real, reproducible behavior with no security boundary crossed: self-XSS
+- **informative**: real, reproducible behavior with no security boundary crossed: self-XSS
   against the reporter's own content, a client route name visible in a bundled SPA, ordinary 404
   behavior described as if it were a leak.
-- **duplicate** — the same root cause and the same endpoint as one of the ten positives, described
+- **duplicate**: the same root cause and the same endpoint as one of the ten positives, described
   with a different payload or from a different angle.
-- **unbound** — a plausible-sounding report against a host with no connected repository and no
+- **unbound**: a plausible-sounding report against a host with no connected repository and no
   `TargetProfile`, by design: per the architecture invariants, no bound target means the only
   correct outcome is `ANALYSIS_ONLY`, never `REPRODUCED` or `NOT_REPRODUCED`, whatever the report
   describes.
+
+A true fixed-in-build negative case, meaning the same report run against a second pinned commit where the bug is patched, is future work and requires a second pinned commit and its own TargetProfile.
 
 Hard negatives (`wrong-payload`, `informative`, `duplicate`) are built from the same app as the
 positives on purpose: a benchmark where every negative is obviously off-topic would not pressure-

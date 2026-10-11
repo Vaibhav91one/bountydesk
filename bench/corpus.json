@@ -108,10 +108,10 @@
     },
 
     {
-      "id": "n-fixed-1",
+      "id": "n-nonexistent-1",
       "split": "dev",
       "kind": "negative",
-      "negativeType": "fixed",
+      "negativeType": "nonexistent",
       "expected": "NOT_REPRODUCED",
       "title": "Admin dashboard exposes a debug endpoint that dumps the full environment, including secrets",
       "body": "GET /rest/admin/environment-dump returns the process's environment variables as JSON, including DATABASE_URL and the session signing secret, to any authenticated user regardless of role. This should require the admin role at minimum, and arguably should not exist at all outside of local development.",
@@ -119,10 +119,10 @@
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching route in the pinned build)"
     },
     {
-      "id": "n-fixed-2",
+      "id": "n-nonexistent-2",
       "split": "dev",
       "kind": "negative",
-      "negativeType": "fixed",
+      "negativeType": "nonexistent",
       "expected": "NOT_REPRODUCED",
       "title": "Password reset email leaks the reset token in the response body",
       "body": "Calling POST /rest/user/reset-password/request-token with a valid email returns the generated reset token directly in the JSON response instead of only mailing it, so anyone who knows a victim's email can read the token from the HTTP response and reset their password without touching their inbox.",
@@ -130,10 +130,10 @@
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching behavior in the pinned build)"
     },
     {
-      "id": "n-fixed-3",
+      "id": "n-nonexistent-3",
       "split": "test",
       "kind": "negative",
-      "negativeType": "fixed",
+      "negativeType": "nonexistent",
       "expected": "NOT_REPRODUCED",
       "title": "Checkout accepts a negative quantity and credits the attacker's account",
       "body": "Submitting an order via POST /rest/basket/:id/checkout with a basket line item quantity of -5 is accepted, and the resulting total is negative, which the payment step then treats as a refund onto the attacker's stored payment method rather than a charge.",
@@ -141,10 +141,10 @@
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no matching behavior in the pinned build)"
     },
     {
-      "id": "n-fixed-4",
+      "id": "n-nonexistent-4",
       "split": "test",
       "kind": "negative",
-      "negativeType": "fixed",
+      "negativeType": "nonexistent",
       "expected": "NOT_REPRODUCED",
       "title": "Deluxe membership can be granted for free by replaying an old coupon",
       "body": "The coupon code WMNSDY2019 (from the 2019 Women's Day promotion) is still accepted at checkout in the deluxe membership upgrade flow and applies a 100% discount, even though the promotion ended years ago.",

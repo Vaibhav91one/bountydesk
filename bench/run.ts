@@ -53,7 +53,7 @@ type Case = {
   id: string;
   split: "dev" | "test";
   kind: "positive" | "negative";
-  negativeType?: "fixed" | "wrong-payload" | "informative" | "duplicate" | "unbound";
+  negativeType?: "nonexistent" | "wrong-payload" | "informative" | "duplicate" | "unbound";
   expected: GroundTruthOutcome;
   title: string;
   body: string;
