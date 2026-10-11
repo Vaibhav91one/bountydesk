@@ -57,8 +57,18 @@ function phaseForEvent(type: string): PhaseKey {
   return "analysis"
 }
 
-/** Derive label, subtitle, and phase from a case event. */
+/** Derive label, subtitle, and phase from a case event.
+ *  Checks event.type FIRST: a scope_tool_denied event renders as a denial,
+ *  never as the tool's success label. */
 function describeEvent(event: CaseEvent): { label: string; subtitle: string; phase: PhaseKey } {
+  if (event.type === "agent.scope_tool_denied") {
+    const toolName = event.toolName ?? "unknown"
+    return {
+      label: `Denied: ${toolName}`,
+      subtitle: event.argsPreview ?? "",
+      phase: "closed",
+    }
+  }
   let label: string
   if (event.toolName) {
     label = EVENT_LABELS[`agent.tool_call:${event.toolName}`] ?? event.toolName
