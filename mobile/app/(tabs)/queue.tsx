@@ -9,8 +9,9 @@
  * the Reports tab.
  */
 import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator, Share } from "react-native"
 import { useRouter } from "expo-router"
+import * as Clipboard from "expo-clipboard"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
@@ -29,6 +30,20 @@ interface QueueColumnView {
 
 interface QueueCardView extends QueueCard {
   ageLabel: string
+  issueNumber: number | null
+}
+
+/** Display a report id as "BD-<issueNumber>" per the mockup. */
+function idLabel(card: QueueCardView): string {
+  return card.issueNumber != null ? `BD-${card.issueNumber}` : card.id
+}
+
+/** Map internal channel names to the labels shown in the mockups. */
+const CHANNEL_LABELS: Record<string, string> = {
+  github: "GitHub issue",
+  email: "Email",
+  upload: "Upload",
+  advisory: "Security advisory",
 }
 
 interface QueueResponse {
@@ -82,6 +97,8 @@ function QueueScreenContent() {
   const { data, error, isError, isFetching } = useApiQuery<QueueResponse>("/queue")
   const toast = useToast()
 
+  const [lpReportId, setLpReportId] = useState<string | null>(null)
+
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {
     return (
@@ -119,8 +136,6 @@ function QueueScreenContent() {
       </View>
     )
   }
-
-  const [lpReportId, setLpReportId] = useState<string | null>(null)
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -162,29 +177,30 @@ function QueueScreenContent() {
       <TopBarPill />
       <ReviewFab />
 
-      {lpReportId && (
-        <LongPressMenu
-          reportId={lpReportId}
-          visible={true}
-          onClose={() => setLpReportId(null)}
-          onOpenCaseFile={() => {
-            setLpReportId(null)
-            router.push(`/reports/${lpReportId}`)
-          }}
-          onCopyId={() => {
-            setLpReportId(null)
-            toast.show("Copied " + lpReportId)
-          }}
-          onShare={() => {
-            setLpReportId(null)
-            toast.show("Link to " + lpReportId + " ready to share")
-          }}
-          onAssignToMe={() => {
-            setLpReportId(null)
-            toast.show("Assigned to you")
-          }}
-        />
-      )}
+      {lpReportId && (() => {
+        const card = cols.flatMap((c) => c.cards).find((c) => c.id === lpReportId)
+        const copyLabel = idLabel(card ?? { id: lpReportId, issueNumber: null } as QueueCardView)
+        return (
+          <LongPressMenu
+            reportId={copyLabel}
+            visible={true}
+            onClose={() => setLpReportId(null)}
+            onOpenCaseFile={() => {
+              setLpReportId(null)
+              router.push(`/reports/${lpReportId}`)
+            }}
+            onCopyId={async () => {
+              setLpReportId(null)
+              await Clipboard.setStringAsync(copyLabel)
+              toast.show("Copied " + copyLabel)
+            }}
+            onShare={async () => {
+              setLpReportId(null)
+              await Share.share({ message: `${copyLabel} ${card?.title ?? ""}` })
+            }}
+          />
+        )
+      })()}
     </View>
   )
 }
@@ -210,7 +226,8 @@ interface QueueRowProps {
 function QueueRow({ card, onPress, onLongPress, showDivider }: QueueRowProps) {
   const { colors, spacing } = useTheme()
   const phase = phaseForCard(card)
-  const subtitle = card.targetName ? `${card.id} · ${card.targetName}` : `${card.id} · ${card.channel}`
+  const channelLabel = CHANNEL_LABELS[card.channel] ?? card.channel
+  const subtitle = card.targetName ? `${idLabel(card)} · ${card.targetName}` : `${idLabel(card)} · ${channelLabel}`
 
   return (
     <Pressable

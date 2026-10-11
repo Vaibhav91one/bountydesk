@@ -47,6 +47,14 @@ jest.mock("@/theme", () => ({
       "brand-soft": "#d8d7e5",
       red: "#ef4444",
     },
+    phase: {
+      triaging: "#6366f1",
+      reproducing: "#3b82f6",
+      analysis: "#ec4899",
+      approval: "#f59e0b",
+      delivered: "#22c55e",
+      closed: "#9ca3af",
+    },
     spacing: { screenPadding: 20, sectionGap: 28, itemPadding: 18, itemMinHeight: 56, buttonMinHeight: 52, touchTarget: 44, cornerRadius: 24, fieldRadius: 20, tabBarHeight: 88, topBarHeight: 54 },
     round: { screenRadius: 55, cardRadius: 24, buttonRadius: 26, fieldRadius: 20, tabPillRadius: 32 },
     typography: { fontFamily: "Inter", fontMono: "GeistMono", bodyFontSize: 17, bodyLineHeight: 23, h1FontSize: 28, h1LineHeight: 32, sectionHeaderFontSize: 20, sectionHeaderLineHeight: 24, noteFontSize: 13, pillFontSize: 13, h2FontSize: 24 },
@@ -182,7 +190,7 @@ describe("M7 Case file", () => {
 
     const { getByText } = await render(<CaseFileScreen />)
     expect(getByText("Awaiting approval")).toBeTruthy()
-    expect(getByText(/BD-1042 · opened/)).toBeTruthy()
+    expect(getByText(/BD-482 · opened/)).toBeTruthy()
   })
 
   it("renders the Report section with Severity, Channel, Reporter", async () => {
@@ -213,6 +221,28 @@ describe("M7 Case file", () => {
     expect(getByText("Bound target")).toBeTruthy()
     expect(getByText("Vaibhav91one/juice-shop")).toBeTruthy()
     expect(getByText("Verified")).toBeTruthy()
+  })
+
+  it("renders unbound target card without a press handler", async () => {
+    const unboundCaseFile = {
+      ...mockCaseFile,
+      target: null,
+      targetScope: null,
+    }
+    mockUseApiQuery.mockReturnValue({
+      data: unboundCaseFile,
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    const { getByText } = await render(<CaseFileScreen />)
+    expect(getByText("Bound target")).toBeTruthy()
+    expect(getByText("No target bound")).toBeTruthy()
+    // The unbound text should NOT navigate — verify no push was called
+    mockPush.mockClear()
+    fireEvent.press(getByText("No target bound"))
+    expect(mockPush).not.toHaveBeenCalled()
   })
 
   it("renders the Agent summary section", async () => {

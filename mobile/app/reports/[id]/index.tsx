@@ -8,7 +8,7 @@
  *
  * Data: GET /api/mobile/v1/reports/[id] returns MobileCaseFile.
  */
-import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, Share } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { useTheme } from "@/theme"
@@ -70,15 +70,6 @@ const SEVERITY_RANK: Record<string, number> = {
   info: 0,
 }
 
-/** Severity display labels matching c.css .sev / .sev.m / .sev.l colors. */
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: "#EF4444",
-  high: "#EF4444",
-  medium: "#F59E0B",
-  low: "#9CA3AF",
-  info: "#9CA3AF",
-}
-
 function severityLabel(sev: string): string {
   return sev.charAt(0).toUpperCase() + sev.slice(1)
 }
@@ -90,10 +81,13 @@ function reportSeverity(findings: Finding[]): string | null {
   return severityLabel(top.severity)
 }
 
-/** Map a finding severity to its display color (c.css .sev rules). */
-function severityColor(sev: string): string {
+/** Map a finding severity to its display colour using theme tokens.
+ * critical/high → red, medium → approval, low/info → closed (gray). */
+function severityColor(sev: string, colors: { red: string; approval: string; closed: string }): string {
   const s = sev.toLowerCase()
-  return SEVERITY_COLORS[s] ?? "#9CA3AF"
+  if (s === "critical" || s === "high") return colors.red
+  if (s === "medium") return colors.approval
+  return colors.closed
 }
 
 /** Relative age label, matching c.css ageLabelFor. */
@@ -140,9 +134,10 @@ function TileNav({ icon, label, sub, onPress }: TileNavProps) {
 
 export default function CaseFileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { colors } = useTheme()
+  const { colors, phase: phaseColors } = useTheme()
   const router = useRouter()
   const { data: file, error, isFetching } = useApiQuery<CaseFileView>(`/reports/${id}`)
+  const reportIdLabel = file ? `BD-${file.issueNumber ?? file.id}` : ""
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {
@@ -194,11 +189,13 @@ export default function CaseFileScreen() {
         </Pressable>
       </View>
 
-      {/* Top-right glass pill: Share + More */}
+      {/* Top-right glass pill: Share */}
       <View style={styles.topRightWrapper}>
         <View style={[styles.glassPill, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
           <Pressable
-            onPress={() => {}}
+            onPress={async () => {
+              await Share.share({ message: `${reportIdLabel} ${file.title}` })
+            }}
             style={({ pressed }) => [
               styles.iconBtn,
               { backgroundColor: colors.background },
@@ -207,17 +204,6 @@ export default function CaseFileScreen() {
             accessibilityLabel="Share"
           >
             <Icon name="share" size={22} stroke={colors.foreground} />
-          </Pressable>
-          <Pressable
-            onPress={() => {}}
-            style={({ pressed }) => [
-              styles.iconBtn,
-              { backgroundColor: colors.background },
-              pressed && { opacity: 0.7 },
-            ]}
-            accessibilityLabel="More"
-          >
-            <Icon name="more" size={22} stroke={colors.foreground} />
           </Pressable>
         </View>
       </View>
@@ -236,7 +222,7 @@ export default function CaseFileScreen() {
             style={isApproval ? styles.approvalHalo : undefined}
           />
           <Text style={[styles.hmetaText, { color: colors.muted }]}>
-            {file.id} · opened {ageLabelFor(file.createdAt)}
+            {reportIdLabel} · opened {ageLabelFor(file.createdAt)}
           </Text>
         </View>
 
@@ -254,26 +240,34 @@ export default function CaseFileScreen() {
         <View style={styles.section}>
           <Text style={[styles.shPlain, { color: colors.foreground }]}>Bound target</Text>
           <Card style={styles.cardList}>
-            <Pressable
-              onPress={() => router.push(`/more/target-and-scope`)}
-              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-            >
+            {file.target ? (
+              <Pressable
+                onPress={() => router.push(`/more/target-and-scope`)}
+                style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+              >
+                <View style={styles.targetRow}>
+                  <View style={styles.targetMain}>
+                    <Text style={[styles.targetTitle, { color: colors.foreground }]} numberOfLines={1}>
+                      {file.target?.name ?? file.repositoryFullName ?? "No target bound"}
+                    </Text>
+                    {targetSubtitle ? (
+                      <Text style={[styles.targetSubtitle, { color: colors.muted }]} numberOfLines={1}>
+                        {targetSubtitle}
+                      </Text>
+                    ) : null}
+                  </View>
+                  <PhasePill phase="delivered" label="Verified" style={styles.targetPill} />
+                </View>
+              </Pressable>
+            ) : (
               <View style={styles.targetRow}>
                 <View style={styles.targetMain}>
                   <Text style={[styles.targetTitle, { color: colors.foreground }]} numberOfLines={1}>
-                    {file.target?.name ?? file.repositoryFullName ?? "No target bound"}
+                    No target bound
                   </Text>
-                  {targetSubtitle ? (
-                    <Text style={[styles.targetSubtitle, { color: colors.muted }]} numberOfLines={1}>
-                      {targetSubtitle}
-                    </Text>
-                  ) : null}
                 </View>
-                {file.target ? (
-                  <PhasePill phase="delivered" label="Verified" style={styles.targetPill} />
-                ) : null}
               </View>
-            </Pressable>
+            )}
           </Card>
           <Text style={[styles.note, { color: colors.muted }]}>
             Reproduction ran against this pinned snapshot only.
@@ -311,7 +305,7 @@ export default function CaseFileScreen() {
                       {f.evidenceRef}
                     </Text>
                   </View>
-                  <Text style={[styles.findSev, { color: severityColor(f.severity) }]}>
+                  <Text style={[styles.findSev, { color: severityColor(f.severity, { red: colors.red, approval: phaseColors.approval, closed: phaseColors.closed }) }]}>
                     {severityLabel(f.severity)}
                   </Text>
                 </View>
@@ -395,7 +389,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   error: { fontSize: 16 },
   meta: { fontSize: 16 },

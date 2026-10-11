@@ -6,8 +6,9 @@
  * nothing matches. Data: GET /api/mobile/v1/reports.
  */
 import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, ActivityIndicator } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, ActivityIndicator, Share } from "react-native"
 import { useRouter } from "expo-router"
+import * as Clipboard from "expo-clipboard"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
@@ -27,6 +28,20 @@ interface ReportsResponse {
 
 interface ReportRow extends QueueCard {
   origin: string
+  issueNumber: number | null
+}
+
+/** Display a report id as "BD-<issueNumber>" per the mockup. */
+function idLabel(row: ReportRow): string {
+  return row.issueNumber != null ? `BD-${row.issueNumber}` : row.id
+}
+
+/** Map internal channel names to the labels shown in the mockups. */
+const CHANNEL_LABELS: Record<string, string> = {
+  github: "GitHub issue",
+  email: "Email",
+  upload: "Upload",
+  advisory: "Security advisory",
 }
 
 /** Map report state to the PhaseKey used by PhasePill and chip filter. */
@@ -233,29 +248,30 @@ function ReportsScreenContent() {
       <TopBarPill />
       <ReviewFab />
 
-      {lpReportId && (
-        <LongPressMenu
-          reportId={lpReportId}
-          visible={true}
-          onClose={() => setLpReportId(null)}
-          onOpenCaseFile={() => {
-            setLpReportId(null)
-            router.push(`/reports/${lpReportId}`)
-          }}
-          onCopyId={() => {
-            setLpReportId(null)
-            toast.show("Copied " + lpReportId)
-          }}
-          onShare={() => {
-            setLpReportId(null)
-            toast.show("Link to " + lpReportId + " ready to share")
-          }}
-          onAssignToMe={() => {
-            setLpReportId(null)
-            toast.show("Assigned to you")
-          }}
-        />
-      )}
+      {lpReportId && (() => {
+        const card = allReports.find((r) => r.id === lpReportId)
+        const copyLabel = idLabel(card ?? { id: lpReportId, issueNumber: null } as ReportRow)
+        return (
+          <LongPressMenu
+            reportId={copyLabel}
+            visible={true}
+            onClose={() => setLpReportId(null)}
+            onOpenCaseFile={() => {
+              setLpReportId(null)
+              router.push(`/reports/${lpReportId}`)
+            }}
+            onCopyId={async () => {
+              setLpReportId(null)
+              await Clipboard.setStringAsync(copyLabel)
+              toast.show("Copied " + copyLabel)
+            }}
+            onShare={async () => {
+              setLpReportId(null)
+              await Share.share({ message: `${copyLabel} ${card?.title ?? ""}` })
+            }}
+          />
+        )
+      })()}
     </View>
   )
 }
@@ -278,7 +294,8 @@ interface ReportRowProps {
 function ReportRow({ row, onPress, onLongPress, showDivider }: ReportRowProps) {
   const { colors, spacing } = useTheme()
   const phase = phaseForRow(row)
-  const subtitle = row.targetName ? `${row.id} · ${row.targetName}` : `${row.id} · ${row.origin}`
+  const channelLabel = CHANNEL_LABELS[row.channel] ?? row.channel
+  const subtitle = row.targetName ? `${idLabel(row)} · ${row.targetName}` : `${idLabel(row)} · ${channelLabel}`
   const timeLabel = row.investigating ? "Running" : `${ageLabelFor(row.updatedAt)} ago`
 
   return (
