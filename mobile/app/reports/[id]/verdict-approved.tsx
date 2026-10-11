@@ -9,6 +9,7 @@
 import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 
+import { deliveryLabel } from "@/lib/delivery-label"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile } from "@/lib/types"
 import { useTheme } from "@/theme"
@@ -58,7 +59,7 @@ export default function VerdictApprovedScreen() {
   const deliveryState = cf.delivery?.state ?? "PENDING"
   const isDelivered = deliveryState.toUpperCase() === "DELIVERED"
   // M12 receipt rows.
-  const channel = cf.delivery?.target ?? deliveryState
+  const channel = deliveryLabel(cf.channel, cf.delivery?.target)
   const receipt = cf.delivery?.transportReceipt ?? deliveryState
   // Delivered time — mockup shows a time like "9:41 AM".
   const deliveredAt = cf.delivery?.deliveredAt ? new Date(cf.delivery.deliveredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""

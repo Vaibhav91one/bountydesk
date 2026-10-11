@@ -10,6 +10,7 @@ import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-
 import { useRouter, useLocalSearchParams } from "expo-router"
 import * as Haptics from "expo-haptics"
 
+import { deliveryLabel } from "@/lib/delivery-label"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { api } from "@/lib/api"
 import type { MobileCaseFile } from "@/lib/types"
@@ -27,18 +28,6 @@ type CaseFileWithDelivery = MobileCaseFile & {
     transportReceipt?: string | null
     target?: string | null
   } | null
-}
-
-function deliveryLabel(cf: CaseFileWithDelivery): string {
-  const d = cf.delivery
-  if (d?.target) {
-    const t = d.target
-    if (/^github:/.test(t) && /:issue:/.test(t)) return "Comment on GitHub issue"
-    if (/^github:/.test(t) && /:advisory:/.test(t)) return "Update security advisory"
-    if (t.includes("@")) return "Email to reporter"
-  }
-  if (cf.channel === "github") return "Comment on GitHub issue"
-  return cf.channel || "Unknown"
 }
 
 function maxSeverity(cf: CaseFileWithDelivery): string | null {
@@ -113,7 +102,7 @@ function DenyVerdictInner() {
   const displayHash = contentHash ? `sha256:${contentHash}` : ""
   const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? ""
   const severity = useMemo(() => (cf ? maxSeverity(cf) : null), [cf])
-  const delivery = useMemo(() => (cf ? deliveryLabel(cf) : ""), [cf])
+  const delivery = useMemo(() => (cf ? deliveryLabel(cf.channel, cf.delivery?.target) : ""), [cf])
 
   const handleDenyConfirm = useCallback(async () => {
     if (!verdict || denying || denyingRef.current || doneRef.current) return
