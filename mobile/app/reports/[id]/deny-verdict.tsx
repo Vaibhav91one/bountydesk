@@ -1,11 +1,11 @@
 /**
  * M13 Deny verdict. The deny sheet (reasons + optional note) floats over the
- * M11 sign-the-verdict screen. The sheet posts { verdictId, contentHash, reason }
- * and warns on success.
+ * sign-the-verdict screen content. M13 has no Approve action — only Deny is
+ * available here; Approve only happens on M11.
  *
  * Matches docs/site/screens/m13.html pixel for pixel (c.css tokens from theme.ts).
  */
-import { useState, useMemo } from "react"
+import { useState, useMemo, useCallback, useRef } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import * as Haptics from "expo-haptics"
@@ -65,12 +65,38 @@ const DENY_REASONS = [
   { value: "Insufficient detail", note: "Steps or payload is missing" },
 ]
 
-export default function DenyVerdictScreen() {
+function TopBack({ onBack }: { onBack: () => void }) {
+  const { colors } = useTheme()
+  return (
+    <View style={styles.topbar}>
+      <Pressable
+        onPress={onBack}
+        style={({ pressed }) => [styles.glassBtn, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }, pressed && { opacity: 0.92 }]}
+        accessibilityLabel="Back to Sign the verdict"
+      >
+        <Icon name="back" size={24} strokeWidth={2.2} stroke={colors.foreground} />
+      </Pressable>
+    </View>
+  )
+}
+
+function FloatingBar({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme()
+  return (
+    <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      {children}
+    </View>
+  )
+}
+
+// Inner component: calls useToast(), so it must be rendered inside <ToastProvider>.
+function DenyVerdictInner() {
   const router = useRouter()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors, phase } = useTheme()
   const toast = useToast()
 
+  // --- All hooks above every early return (STEP 4) ---
   const { data: cf, error, isError, refetch } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
 
   // M13 opens the deny sheet by default.
@@ -79,6 +105,7 @@ export default function DenyVerdictScreen() {
   const [denyNote, setDenyNote] = useState("")
   const [hashMismatch, setHashMismatch] = useState(false)
   const [denying, setDenying] = useState(false)
+  const denyingRef = useRef(false)
 
   const verdict = cf?.verdict
   const contentHash = verdict?.contentHash ?? ""
@@ -87,63 +114,42 @@ export default function DenyVerdictScreen() {
   const severity = useMemo(() => (cf ? maxSeverity(cf) : null), [cf])
   const delivery = useMemo(() => (cf ? deliveryLabel(cf) : ""), [cf])
 
-  if (isError) {
-    if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return null
-    return (
-      <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <Text style={[styles.errorText, { color: colors.red }]}>{error?.message ?? "Failed to load case file"}</Text>
-        <Pressable onPress={() => refetch()} style={styles.retryLink}>
-          <Text style={{ color: colors.brand, fontWeight: "600" }}>Retry</Text>
-        </Pressable>
-      </View>
-    )
-  }
+  const handleDenyConfirm = useCallback(async () => {
+    if (!verdict || denying || denyingRef.current) return
 
-  if (!cf || !verdict) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <TopBack onBack={() => router.back()} />
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <Text style={[styles.h1, { color: colors.muted }]}>Loading</Text>
-        </ScrollView>
-        <FloatingBar>
-          <PrimaryButton title="Deny" variant="secondary" onPress={() => {}} disabled />
-          <PrimaryButton title="Approve" onPress={() => {}} disabled />
-        </FloatingBar>
-      </View>
-    )
-  }
-
-  if (hashMismatch) {
-    return (
-      <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <TopBack onBack={() => router.back()} />
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <View style={styles.mismatchBox}>
-            <Text style={[styles.mismatchTitle, { color: colors.foreground }]}>This verdict changed</Text>
-            <Text style={[styles.mismatchBody, { color: colors.muted }]}>
-              Refresh and review again.
-            </Text>
-            <Pressable onPress={() => { setHashMismatch(false); refetch() }} style={[styles.mismatchBtn, { backgroundColor: colors.brand }]}>
-              <Text style={{ color: "#ffffff", fontWeight: "600", fontSize: 16 }}>Refresh</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-      </View>
-    )
-  }
-
-  const handleDenyConfirm = async () => {
+    // Set denying immediately to prevent double-tap (STEP 6).
     setDenying(true)
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+    denyingRef.current = true
+
+    // Record the hash the reviewer is looking at right now (STEP 5 + gate rule).
+    const recordedVerdictId = verdict.id
+    const recordedContentHash = contentHash
+
+    const fresh = await refetch()
+    const freshCf = fresh.data as CaseFileWithDelivery | undefined
+    if (
+      freshCf?.verdict?.id !== recordedVerdictId ||
+      freshCf?.verdict?.contentHash !== recordedContentHash
+    ) {
+      setHashMismatch(true)
+      setDenying(false)
+      denyingRef.current = false
+      setDenySheetOpen(false)
+      return
+    }
+
+    // Build the reason string from reason + optional note (STEP 7).
+    const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
 
     try {
-      await api("/reports/" + id + "/deny", {
+      await api(`/reports/${id}/deny`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdictId: verdict.id, contentHash, reason: denyReason }),
+        body: JSON.stringify({ verdictId: recordedVerdictId, contentHash: recordedContentHash, reason }),
       } as any)
 
+      // Haptics only after server returns 200 (STEP 8).
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
       setDenySheetOpen(false)
       toast.show("Denied. Nothing was sent")
       setTimeout(() => {
@@ -154,86 +160,121 @@ export default function DenyVerdictScreen() {
       const err = e as ApiError
       if (err.status === 409 && err.code === "content_hash_mismatch") {
         setHashMismatch(true)
-        await refetch()
         setDenySheetOpen(false)
       } else {
         toast.show("Denied failed")
       }
     } finally {
       setDenying(false)
+      denyingRef.current = false
     }
-  }
+  }, [router, id, verdict, contentHash, denyReason, denyNote, refetch, toast])
+
+  const canSubmit = !!verdict && !isError && !hashMismatch && !denying
+
+  // Auth errors are terminal: render nothing rather than a broken shell.
+  if (isError && error instanceof ApiError && (error.status === 401 || error.status === 403)) return null
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ToastProvider>
-        <TopBack onBack={() => router.back()} />
+      <TopBack onBack={() => router.back()} />
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <Text style={[styles.h1, { color: colors.foreground }]}>Sign the verdict</Text>
-          <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.id} · {cf.title}</Text>
-
-          <View style={styles.sect}>
-            <Text style={[styles.shPlain, { color: colors.foreground }]}>Outcome</Text>
-            <Card style={styles.cardList}>
-              <Row style={styles.itemNoDivider}>
-                <Text style={[styles.rowT, { color: colors.foreground }]}>Outcome</Text>
-                <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
-              </Row>
-              <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
-                <Text style={[styles.kvLabel, { color: colors.muted }]}>Severity</Text>
-                <Text style={[styles.kvValue, { color: colors.red, fontWeight: "600" }]}>{severity ?? "Unknown"}</Text>
-              </View>
-              <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
-                <Text style={[styles.kvLabel, { color: colors.muted }]}>Delivery</Text>
-                <Text style={[styles.kvValue, { color: colors.foreground }]}>{delivery}</Text>
-              </View>
-            </Card>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {isError ? (
+          <View style={[styles.centered, { backgroundColor: colors.background }]}>
+            <Text style={[styles.errorText, { color: colors.red }]}>
+              {error?.message ?? "Failed to load case file"}
+            </Text>
+            <Pressable onPress={() => refetch()} style={styles.retryLink} hitSlop={8}>
+              <Text style={[styles.retryText, { color: colors.brand }]}>Retry</Text>
+            </Pressable>
           </View>
+        ) : !cf || !verdict ? (
+          <Text style={[styles.h1, { color: colors.muted }]}>Loading</Text>
+        ) : hashMismatch ? (
+          <View style={styles.mismatchBox}>
+            <Text style={[styles.mismatchTitle, { color: colors.foreground }]}>This verdict changed</Text>
+            <Text style={[styles.mismatchBody, { color: colors.muted }]}>
+              Refresh and review again.
+            </Text>
+            <Pressable onPress={() => { setHashMismatch(false); refetch() }} style={[styles.mismatchBtn, { backgroundColor: colors.brand }]}>
+              <Text style={{ color: colors.card, fontWeight: "600", fontSize: 16 }}>Refresh</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <>
+            <Text style={[styles.h1, { color: colors.foreground }]}>Sign the verdict</Text>
+            <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.id} · {cf.title}</Text>
 
-          <View style={styles.sect}>
-            <Text style={[styles.shPlain, { color: colors.foreground }]}>Drafted comment</Text>
-            <Card style={styles.cardNoList}>
-              <Text style={[styles.body, { color: colors.foreground }]} selectable>
-                {verdict.payload}
+            <View style={styles.sect}>
+              <Text style={[styles.shPlain, { color: colors.foreground }]}>Outcome</Text>
+              <Card style={styles.cardList}>
+                <Row style={styles.itemNoDivider}>
+                  <Text style={[styles.rowT, { color: colors.foreground }]}>Outcome</Text>
+                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
+                </Row>
+                {/* Severity and Delivery are shown as key/value rows. Severity uses the red
+                    colour from c.css; KvRow has no per-value style prop, so render it inline. */}
+                <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
+                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Severity</Text>
+                  <Text style={[styles.kvValue, { color: colors.red, fontWeight: "600" }]}>{severity ?? "Unknown"}</Text>
+                </View>
+                <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
+                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Delivery</Text>
+                  <Text style={[styles.kvValue, { color: colors.foreground }]}>{delivery}</Text>
+                </View>
+              </Card>
+            </View>
+
+            <View style={styles.sect}>
+              <Text style={[styles.shPlain, { color: colors.foreground }]}>Drafted comment</Text>
+              <Card style={styles.cardNoList}>
+                <Text style={[styles.body, { color: colors.foreground }]} selectable>
+                  {verdict.payload}
+                </Text>
+              </Card>
+              <Text style={[styles.note, { color: colors.muted }]}>
+                This exact text is what gets sent. Editing it creates a new revision that needs a fresh approval.
               </Text>
-            </Card>
-            <Text style={[styles.note, { color: colors.muted }]}>
-              This exact text is what gets sent. Editing it creates a new revision that needs a fresh approval.
-            </Text>
-          </View>
+            </View>
 
-          <View style={styles.sect}>
-            <Text style={[styles.shPlain, { color: colors.foreground }]}>Content hash</Text>
-            <Card style={styles.cardNoList}>
-              <Mono style={[styles.hash, { color: colors.foreground }] as any}>{displayHash}</Mono>
-            </Card>
-            <Text style={[styles.note, { color: colors.muted }]}>
-              Approval is bound to this hash. Delivery is refused if the text differs.
-            </Text>
-          </View>
-        </ScrollView>
+            <View style={styles.sect}>
+              <Text style={[styles.shPlain, { color: colors.foreground }]}>Content hash</Text>
+              <Card style={styles.cardNoList}>
+                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{displayHash}</Mono>
+              </Card>
+              <Text style={[styles.note, { color: colors.muted }]}>
+                Approval is bound to this hash. Delivery is refused if the text differs.
+              </Text>
+            </View>
+          </>
+        )}
+      </ScrollView>
 
-        <FloatingBar>
-          <PrimaryButton title="Deny" variant="secondary" onPress={() => setDenySheetOpen(true)} />
-          <PrimaryButton title="Approve" onPress={() => {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
-            router.push(`/reports/${id}/verdict-approved`)
-          }} />
-        </FloatingBar>
+      <FloatingBar>
+        <PrimaryButton
+          title="Deny"
+          variant="destructive"
+          onPress={() => setDenySheetOpen(true)}
+          disabled={!canSubmit}
+        />
+      </FloatingBar>
 
-        <Sheet
-          visible={denySheetOpen}
-          onClose={() => setDenySheetOpen(false)}
-          onConfirm={handleDenyConfirm}
-          subtitle={cf.id + " · " + cf.title}
-        >
+      <Sheet
+        visible={denySheetOpen}
+        onClose={() => setDenySheetOpen(false)}
+        onConfirm={handleDenyConfirm}
+        subtitle={cf ? cf.id + " · " + cf.title : ""}
+        confirmDisabled={!canSubmit}
+      >
+        {cf ? (
           <View style={{ width: "100%" }}>
             <Text style={[styles.lbl, { color: colors.muted }]}>Reason</Text>
             {DENY_REASONS.map((reason) => (
               <Pressable
                 key={reason.value}
                 onPress={() => setDenyReason(reason.value)}
+                disabled={!canSubmit}
                 style={[styles.reasonRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}
               >
                 <View style={styles.reasonMain}>
@@ -261,44 +302,29 @@ export default function DenyVerdictScreen() {
               Nothing is sent to the reporter until you confirm. The report moves to Denied.
             </Text>
           </View>
-        </Sheet>
-      </ToastProvider>
+        ) : null}
+      </Sheet>
     </View>
   )
 }
 
-function TopBack({ onBack }: { onBack: () => void }) {
-  const { colors } = useTheme()
+export default function DenyVerdictScreen() {
   return (
-    <View style={styles.topbar}>
-      <Pressable
-        onPress={onBack}
-        style={({ pressed }) => [styles.glassBtn, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }, pressed && { opacity: 0.92 }]}
-        accessibilityLabel="Back to Sign the verdict"
-      >
-        <Icon name="back" size={24} strokeWidth={2.2} stroke={colors.foreground} />
-      </Pressable>
-    </View>
-  )
-}
-
-function FloatingBar({ children }: { children: React.ReactNode }) {
-  const { colors } = useTheme()
-  return (
-    <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-      {children}
-    </View>
+    <ToastProvider>
+      <DenyVerdictInner />
+    </ToastProvider>
   )
 }
 
 const styles = StyleSheet.create({
   topbar: { position: "absolute", top: 54, left: 16, zIndex: 30 },
   glassBtn: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
   errorText: { fontSize: 16 },
-  retryLink: { marginTop: 12 },
+  retryLink: { paddingVertical: 8, paddingHorizontal: 12, minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center" },
+  retryText: { fontSize: 16, fontWeight: "600" },
   scrollContent: { paddingTop: 100, paddingBottom: 90, marginHorizontal: 20 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.84, marginTop: 8 },
+  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.84, marginTop: 8, paddingHorizontal: 4 },
   hmeta: { fontSize: 15, lineHeight: 20, marginTop: 4 },
   sect: { marginBottom: 28 },
   shPlain: { fontSize: 20, fontWeight: "600", lineHeight: 24, marginBottom: 12 },

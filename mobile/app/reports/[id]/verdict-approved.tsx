@@ -110,7 +110,7 @@ const styles = StyleSheet.create({
   cardList: { borderRadius: 24, overflow: "hidden" },
   receiptCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
   receiptRow: { paddingVertical: 10, paddingHorizontal: 18, minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20, color: "#9CA3AF" },
+  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
   hash: { padding: 18, fontSize: 13, lineHeight: 20 },
   note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
   fbar: { position: "absolute", left: 16, right: 16, bottom: 30, padding: 6 },
