@@ -282,6 +282,9 @@ export type Connection = {
   accountLogin: string;
   accountType: string | null;
   suspendedAt: Date | null;
+  /** The installation's accepted Contents and Repository security advisories permissions, null when not granted. */
+  contentsPermission: string | null;
+  advisoriesPermission: string | null;
   /**
    * The most recent write across the installation row and its repositories. A rename,
    * transfer, archive or removal touches only connected_repository, so reading the
@@ -333,6 +336,8 @@ export async function listConnections(): Promise<Connection[]> {
       accountLogin: githubInstallation.accountLogin,
       accountType: githubInstallation.accountType,
       suspendedAt: githubInstallation.suspendedAt,
+      contentsPermission: githubInstallation.contentsPermission,
+      advisoriesPermission: githubInstallation.repositoryAdvisoriesPermission,
       updatedAt: githubInstallation.updatedAt,
       repositoryUpdatedAt: connectedRepository.updatedAt,
       connectedRepositoryId: connectedRepository.id,
@@ -364,6 +369,8 @@ export async function listConnections(): Promise<Connection[]> {
         accountLogin: row.accountLogin,
         accountType: row.accountType,
         suspendedAt: row.suspendedAt,
+        contentsPermission: row.contentsPermission,
+        advisoriesPermission: row.advisoriesPermission,
         lastSyncedAt: row.updatedAt,
         grantedRepositoryCount: 0,
         repositories: [],

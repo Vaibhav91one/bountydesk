@@ -50,6 +50,8 @@ export async function connectionRows(): Promise<RepositoryRow[]> {
         configured: repo.targetProfileName !== null,
         connected: repo.status === "admissible",
         isPrivate: repo.isPrivate,
+        contentsPermission: connection.contentsPermission,
+        advisoriesPermission: connection.advisoriesPermission,
         reportCount: repo.reports.total,
         awaitingReview: repo.reports.awaitingReview,
         delivered: repo.reports.delivered,

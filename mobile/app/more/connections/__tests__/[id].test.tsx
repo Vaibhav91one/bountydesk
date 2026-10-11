@@ -73,6 +73,8 @@ const mockData = [
     configured: true,
     connected: true,
     isPrivate: false,
+    contentsPermission: null,
+    advisoriesPermission: "write",
     reportCount: 5,
     awaitingReview: 3,
     delivered: 2,
@@ -133,15 +135,17 @@ describe("M15 Connection detail", () => {
 
   it("renders Private visibility and installation-token clone for a private repo", async () => {
     mockUseApiQuery.mockReturnValue({
-      data: [{ ...mockData[0], isPrivate: true }],
+      data: [{ ...mockData[0], isPrivate: true, contentsPermission: "read" }],
       error: null,
     })
-    const { getByText } = await render(<ConnectionDetailScreen />)
+    const { getByText, queryByText } = await render(<ConnectionDetailScreen />)
     await waitFor(() => {
       expect(getByText("Visibility")).toBeTruthy()
     })
     expect(getByText("Private")).toBeTruthy()
     expect(getByText("Installation token (Contents read)")).toBeTruthy()
+    // The Contents row follows the installation's real grant, so it cannot contradict the clone row.
+    expect(queryByText("Not granted")).toBeNull()
   })
 
   it("shows 'Not set' target when configured is false", async () => {

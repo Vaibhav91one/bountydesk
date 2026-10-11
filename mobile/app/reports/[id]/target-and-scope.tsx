@@ -130,7 +130,7 @@ export default function TargetAndScopeScreen() {
             <View style={styles.readinessMain}>
               <Text style={[styles.readinessTitle, { color: colors.foreground }]}>Health check</Text>
               <Text style={[styles.readinessSubtitle, { color: colors.muted }]}>
-                Answered on port 3000, readiness {scope.readinessPath}
+                Readiness check at {scope.readinessPath}
               </Text>
               {scope.startCommand ? (
                 <Text style={[styles.readinessStart, { color: colors.muted }]}>

@@ -15,13 +15,22 @@ import { Icon } from "@/components/icons"
 import { Card, KvRow, SectionHeader, ScreenHeader, EmptyState } from "@/components/primitives"
 
 // Fixed by the GitHub App's least-privilege scope described in docs/mobile-api.md:
-// Metadata read, Issues read+write, Security advisories read+write.
-const PERMISSIONS = [
-  { key: "Metadata", value: "Read" },
-  { key: "Issues", value: "Read and write" },
-  { key: "Security advisories", value: "Read and write" },
-  { key: "Contents", value: "Not granted" },
-]
+function grant(value: string | null): string {
+  if (value === "write") return "Read and write"
+  if (value === "read") return "Read"
+  return "Not granted"
+}
+
+// Metadata and Issues are the App's fixed least privilege; the other two are what the
+// installation owner has actually accepted.
+function permissions(row: ConnectionRow): { key: string; value: string }[] {
+  return [
+    { key: "Metadata", value: "Read" },
+    { key: "Issues", value: "Read and write" },
+    { key: "Security advisories", value: grant(row.advisoriesPermission) },
+    { key: "Contents", value: grant(row.contentsPermission) },
+  ]
+}
 
 export default function ConnectionDetailScreen() {
   const { colors } = useTheme()
@@ -86,7 +95,7 @@ export default function ConnectionDetailScreen() {
         {/* Granted permissions */}
         <SectionHeader title="Granted permissions" chevron={false} />
         <Card style={styles.card}>
-          {PERMISSIONS.map((p) => (
+          {permissions(row).map((p) => (
             <KvRow key={p.key} label={p.key} value={p.value} />
           ))}
         </Card>

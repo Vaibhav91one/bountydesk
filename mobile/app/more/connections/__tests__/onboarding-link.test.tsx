@@ -93,6 +93,8 @@ const BASE_ROW: ConnectionRow = {
   configured: true,
   connected: true,
   isPrivate: false,
+  contentsPermission: null,
+  advisoriesPermission: "write",
   reportCount: 1,
   awaitingReview: 0,
   delivered: 0,

@@ -34,7 +34,7 @@ after(async () => {
 let ids = 0;
 
 async function installation(
-  opts: { suspended?: boolean; deleted?: boolean; accountType?: string | null } = {},
+  opts: { suspended?: boolean; deleted?: boolean; accountType?: string | null; contents?: string } = {},
 ) {
   ids += 1;
   const [row] = await dbm.db
@@ -46,6 +46,7 @@ async function installation(
       accountType: opts.accountType ?? "User",
       suspendedAt: opts.suspended ? new Date() : null,
       deletedAt: opts.deleted ? new Date() : null,
+      contentsPermission: opts.contents ?? null,
     })
     .returning({ id: dbm.githubInstallation.id });
 
@@ -178,7 +179,7 @@ test("manage repositories points at the right GitHub settings page", () => {
 });
 
 test("every status is derived from the real rows", async () => {
-  const live = await installation();
+  const live = await installation({ contents: "read" });
   await repo(live.id);
   await repo(live.id, { configured: false });
   await repo(live.id, { archived: true });
@@ -212,6 +213,10 @@ test("every status is derived from the real rows", async () => {
     liveRow?.repositories.find((r) => r.isPrivate === true)?.isPrivate,
     true,
   );
+
+  // The installation's accepted permissions ride along so the phone shows the real grant.
+  assert.equal(liveRow?.contentsPermission, "read");
+  assert.equal(liveRow?.advisoriesPermission, null);
 
   // Otherwise fine, but the installation is suspended, so nothing under it is admissible.
   const suspendedRow = all.find((c) => c.installationRowId === suspended.id);

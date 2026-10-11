@@ -171,6 +171,9 @@ export type ConnectionRow = {
   configured: boolean
   connected: boolean
   isPrivate: boolean
+  /** The installation's accepted permissions, null when not granted. */
+  contentsPermission: string | null
+  advisoriesPermission: string | null
   reportCount: number
   awaitingReview: number
   delivered: number
