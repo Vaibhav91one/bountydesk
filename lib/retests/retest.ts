@@ -374,19 +374,27 @@ async function startUploadRetest(
       // so the read-then-write dedupe check is race-safe.
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${latest.id}, 0))`);
 
-      const existing = await tx
-        .select({
-          gitCommitSha: uploadIntake.gitCommitSha,
-          imageDigest: uploadIntake.imageDigest,
-          sourceArchiveDigest: uploadIntake.sourceArchiveDigest,
-        })
-        .from(retest)
-        .innerJoin(report, eq(report.id, retest.childReportId))
-        .innerJoin(uploadIntake, eq(uploadIntake.reportId, report.id))
-        .where(eq(retest.originalVerdictId, latest.id))
-        .limit(100);
-      if (anchor && existing.some((row) => anchorMatches(row, anchor))) {
-        throw new Error("DUPLICATE_RETEST");
+      // Filter directly in the WHERE on the material identity, so dedupe works past any row cap.
+      if (anchor) {
+        const dupe = await tx
+          .select({ id: retest.id })
+          .from(retest)
+          .innerJoin(report, eq(report.id, retest.childReportId))
+          .innerJoin(uploadIntake, eq(uploadIntake.reportId, report.id))
+          .where(
+            and(
+              eq(retest.originalVerdictId, latest.id),
+              sql`
+                ${uploadIntake.sourceArchiveDigest} = ${anchor}
+                OR ${uploadIntake.imageDigest} = ${anchor}
+                OR ${uploadIntake.gitCommitSha} = ${anchor}
+              `,
+            ),
+          )
+          .limit(1);
+        if (dupe.length > 0) {
+          throw new Error("DUPLICATE_RETEST");
+        }
       }
 
       const id = await ensureReport(
@@ -492,13 +500,6 @@ function uploadMaterialAnchor(material: UploadMaterial): string | null {
   return null;
 }
 
-/** Whether a stored child row's material anchor matches a freshly submitted one. */
-function anchorMatches(
-  row: { gitCommitSha: string | null; imageDigest: string | null; sourceArchiveDigest: string | null },
-  anchor: string,
-): boolean {
-  return row.gitCommitSha === anchor || row.imageDigest === anchor || row.sourceArchiveDigest === anchor;
-}
 
 export type RetestRow = {
   id: string;

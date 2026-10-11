@@ -443,3 +443,63 @@ test("two concurrent identical upload retests create exactly one child", async (
     .where(dbm.eq(dbm.retest.originalVerdictId, seeded.verdict.id));
   assert.equal(children.length, 1, "only one child report was created");
 });
+
+test("an upload retest whose material matches a prior row beyond the old 100-row cap is still refused", async () => {
+  const seeded = await seedConnectionless();
+  const { singleFileTar } = await import("@/lib/upload/intake");
+  const tar = singleFileTar("README.md", Buffer.from("fix for the bug"));
+  const { createHash } = await import("node:crypto");
+
+  // Insert a matching child retest row first (the one we are trying to reproduce), then 100
+  // non-matching ones to push it past the old .limit(100) cap.
+  const { db, eq } = dbm;
+  for (let i = 0; i < 101; i++) {
+    const [child] = await db
+      .insert(dbm.report)
+      .values({
+        channel: "upload",
+        sourceRef: `upload:dupe-${i}`,
+        title: `dupe ${i}`,
+        body: "body",
+        state: "TRIAGING",
+        targetProfileId: seeded.profile.id,
+      })
+      .returning();
+    const archiveBytes = i === 0 ? Buffer.from(tar) : Buffer.from(`non-matching-${i}`);
+    const md5Digest = `sha256:${createHash("sha256").update(archiveBytes).digest("hex")}`;
+    await db.insert(dbm.uploadIntake).values({
+      reportId: child.id,
+      senderKey: "test",
+      senderDomain: "test",
+      materialKind: "archive",
+      archive: i === 0 ? Buffer.from(tar) : null,
+      sourceArchiveDigest: md5Digest,
+      isRetest: true,
+      buildState: "BUILT",
+      approvedBy: "tester",
+    });
+    await db.insert(dbm.retest).values({
+      originalReportId: seeded.original.id,
+      originalVerdictId: seeded.verdict.id,
+      childReportId: child.id,
+      materialKind: "upload",
+      commitSha: null,
+      actor: "tester",
+    });
+  }
+
+  // The matching row is buried under 100 non-matching ones. The dedupe must still find it.
+  const result = await retests.startRetest(seeded.original.id, {
+    kind: "upload",
+    archive: new File([new Uint8Array(tar)], "source.tar.gz"),
+  }, REVIEWER);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /already retested/);
+  // No additional child was created.
+  const children = await db
+    .select({ id: dbm.report.id })
+    .from(dbm.report)
+    .innerJoin(dbm.retest, eq(dbm.retest.childReportId, dbm.report.id))
+    .where(eq(dbm.retest.originalVerdictId, seeded.verdict.id));
+  assert.equal(children.length, 101, "no extra child was created");
+});
