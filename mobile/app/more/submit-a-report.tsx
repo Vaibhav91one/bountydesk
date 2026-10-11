@@ -3,15 +3,20 @@
  *
  * Form: Title, Report (multi-line), Your email, Target material picker (sheet
  * with radios: None, Tarball, Dockerfile, Prebuilt image). Submit sends a
- * multipart form to POST /api/intake/upload, then navigates to M21 (contact verify).
+ * multipart form to POST /api/intake/upload, then navigates to M21 (contact verify)
+ * passing the report id and contact email as params.
+ *
+ * The upload route is public (no auth), so this screen calls fetch directly rather
+ * than useApiMutation, which prefixes the mobile API base path. The route returns
+ * { reportId, codeSent } with status 202.
  */
 import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Modal, Platform } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useTheme } from "@/theme"
 import { ScreenHeader, Card, Sheet, useToast } from "@/components/primitives"
 import { Icon } from "@/components/icons"
-import { useApiMutation, ApiError } from "@/lib/use-query"
+import { ApiError } from "@/lib/use-query"
 
 const TARGET_MATERIALS: { value: string; label: string; subtitle: string }[] = [
   { value: "none", label: "None", subtitle: "Describe the issue in the report only" },
@@ -25,16 +30,16 @@ export default function SubmitReportScreen() {
   const router = useRouter()
   const { show } = useToast()
 
-  const [title, setTitle] = useState("Stored XSS in search results")
-  const [report, setReport] = useState("The q parameter on the search page is stored and rendered without encoding. Steps to reproduce are below.")
-  const [email, setEmail] = useState("you@company.com")
+  const [title, setTitle] = useState("")
+  const [report, setReport] = useState("")
+  const [email, setEmail] = useState("")
   const [material, setMaterial] = useState("none")
   const [sheetVisible, setSheetVisible] = useState(false)
-
-  const submitMutation = useApiMutation<{ ok: boolean; reportId?: string }>("/intake/upload")
+  const [submitting, setSubmitting] = useState(false)
 
   const handleSubmit = async () => {
     try {
+      setSubmitting(true)
       // Build a multipart form to POST /api/intake/upload.
       const formData = new FormData()
       formData.append("title", title)
@@ -59,14 +64,19 @@ export default function SubmitReportScreen() {
         throw new Error(result.error || "Submit failed")
       }
 
-      // Navigate to contact verify (M21).
-      router.push("/more/submit-a-report/contact-verify")
+      // Navigate to contact verify (M21) with the report id and email.
+      router.push({
+        pathname: "/more/submit-a-report/contact-verify",
+        params: { reportId: result.reportId, email },
+      })
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         return
       }
       const msg = e instanceof Error ? e.message : String(e)
       show(msg.slice(0, 200))
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -178,7 +188,7 @@ export default function SubmitReportScreen() {
                       material === m.value && { backgroundColor: colors.brand, borderColor: colors.brand },
                     ]}
                   >
-                    {material === m.value && <View style={styles.radioDot} />}
+                    {material === m.value && <View style={[styles.radioDot, { backgroundColor: colors.brand }]} />}
                   </View>
                 </View>
               </Pressable>
@@ -191,15 +201,15 @@ export default function SubmitReportScreen() {
       <View style={[styles.fbar, { backgroundColor: colors.background }]}>
         <Pressable
           onPress={handleSubmit}
-          disabled={submitMutation.isPending || !title || !report || !email}
+          disabled={submitting || !title || !report || !email}
           style={({ pressed }) => [
             styles.fbarBtn,
             { backgroundColor: colors.brand },
-            (submitMutation.isPending || !title || !report || !email) && { opacity: 0.4 },
-            pressed && !submitMutation.isPending && { opacity: 0.92 },
+            (submitting || !title || !report || !email) && { opacity: 0.4 },
+            pressed && !submitting && { opacity: 0.92 },
           ]}
         >
-          <Text style={styles.fbarBtnText}>Submit report</Text>
+          <Text style={[styles.fbarBtnText, { color: colors.foreground }]}>Submit report</Text>
         </Pressable>
       </View>
     </View>
@@ -314,7 +324,6 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: "#ffffff",
   },
   note: {
     fontSize: 13,
@@ -343,6 +352,5 @@ const styles = StyleSheet.create({
   fbarBtnText: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#ffffff",
   },
 })

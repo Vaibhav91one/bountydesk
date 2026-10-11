@@ -36,11 +36,21 @@ export function useApiQuery<T>(path: string) {
   return query
 }
 
-export function useApiMutation<TData = unknown, TVariables = unknown>(path: string) {
+export function useApiMutation<TData = unknown, TVariables = unknown>(
+  path: string,
+  options?: {
+    onSuccess?: (data: TData) => void
+    onError?: (error: ApiError) => void
+  },
+) {
   const queryClient = useQueryClient()
   return useMutation<TData, ApiError, TVariables>({
     mutationFn: (vars: TVariables) =>
       api<TData>(path, { method: "POST", body: JSON.stringify(vars) }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKey(path) }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: queryKey(path) })
+      options?.onSuccess?.(data)
+    },
+    onError: options?.onError,
   })
 }

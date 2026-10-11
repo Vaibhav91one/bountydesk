@@ -187,6 +187,7 @@ export default function SettingsScreen() {
                   <View
                     style={[
                       styles.switchKnob,
+                      { backgroundColor: colors.foreground },
                       (notifToggles[t.key] ?? t.default) && { transform: [{ translateX: 20 }] },
                     ]}
                   />
@@ -402,7 +403,6 @@ const styles = StyleSheet.create({
     width: 27,
     height: 27,
     borderRadius: 14,
-    backgroundColor: "#ffffff",
     position: "absolute",
     top: 2,
     left: 2,

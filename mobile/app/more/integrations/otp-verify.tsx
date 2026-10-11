@@ -3,14 +3,16 @@
  *
  * Six single-digit boxes. A digit moves focus on, a paste fills all six.
  * The first box gets textContentType=oneTimeCode and inputMode=numeric.
- * The sixth digit accepts the code, shows "Verified", and pops back to M17.
- * Resend code shows a toast "Code sent".
+ * The sixth digit accepts the code, POSTs it to the verify route, shows
+ * "Verified" on success, and pops back to M17. On failure it shows the
+ * server's error and clears the boxes. Resend re-POSTs the add route.
  */
 import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useTheme } from "@/theme"
 import { ScreenHeader, useToast } from "@/components/primitives"
+import { useApiMutation } from "@/lib/use-query"
 
 const OTP_LENGTH = 6
 
@@ -20,16 +22,40 @@ export default function OtpVerifyScreen() {
   const { colors } = useTheme()
   const { show } = useToast()
 
-  const email = params.email ?? "alex@example.com"
+  const email = params.email
+  const verifyMutation = useApiMutation<{ ok: boolean } & Record<string, unknown>>(
+    "/integrations/email/verify"
+  )
+  const resendMutation = useApiMutation<{ ok: boolean; codeSent?: boolean } & Record<string, unknown>>(
+    "/integrations/email"
+  )
+
   const [code, setCode] = useState("")
   const inputs = useRef<(TextInput | null)[]>([])
 
+  // Stable refs so effect deps don't trigger re-runs from context identity changes.
+  const showRef = useRef(show)
+  showRef.current = show
+  const backRef = useRef(router.back)
+  backRef.current = router.back
+
+  // No email param: show an error and go back.
+  useEffect(() => {
+    if (!email) {
+      showRef.current("No email address to verify")
+      backRef.current()
+    }
+  }, [email])
+
   // Focus the first box on mount.
   useEffect(() => {
-    inputs.current[0]?.focus()
-  }, [])
+    if (email) {
+      inputs.current[0]?.focus()
+    }
+  }, [email])
 
   const onChangeText = (index: number, value: string) => {
+    if (verifyMutation.isPending) return
     // Keep only digits, take the last one.
     const digit = value.replace(/\D/g, "").slice(-1)
     if (!digit) return
@@ -41,12 +67,9 @@ export default function OtpVerifyScreen() {
     if (index < OTP_LENGTH - 1) {
       inputs.current[index + 1]?.focus()
     } else {
-      // Sixth digit: verify succeeds, show toast, pop back.
+      // Sixth digit: POST the verify route.
       Keyboard.dismiss()
-      show("Verified")
-      setTimeout(() => {
-        router.back()
-      }, 1000)
+      verifyMutation.mutate({ email, code: newCode })
     }
   }
 
@@ -58,12 +81,45 @@ export default function OtpVerifyScreen() {
   }
 
   const handleResend = () => {
-    show("Code sent")
+    if (!email) return
+    resendMutation.mutate({ email })
   }
 
   const getBoxValue = (index: number): string => {
     return code[index] ?? ""
   }
+
+  // Show server errors and the success toast, and clear boxes on failure.
+  useEffect(() => {
+    if (verifyMutation.isError && verifyMutation.error) {
+      const msg =
+        verifyMutation.error instanceof Error
+          ? verifyMutation.error.message
+          : "Verification failed"
+      showRef.current(msg.slice(0, 200))
+      setCode("")
+      inputs.current[0]?.focus()
+    }
+  }, [verifyMutation.isError, verifyMutation.error])
+
+  useEffect(() => {
+    if (verifyMutation.isSuccess && verifyMutation.data?.ok) {
+      showRef.current("Verified")
+      setTimeout(() => {
+        backRef.current()
+      }, 1000)
+    }
+  }, [verifyMutation.isSuccess, verifyMutation.data])
+
+  useEffect(() => {
+    if (resendMutation.isError && resendMutation.error) {
+      const msg =
+        resendMutation.error instanceof Error
+          ? resendMutation.error.message
+          : "Could not resend code"
+      showRef.current(msg.slice(0, 200))
+    }
+  }, [resendMutation.isError, resendMutation.error])
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -90,6 +146,8 @@ export default function OtpVerifyScreen() {
               maxLength={1}
               textAlign="center"
               selectTextOnFocus
+              autoComplete="one-time-code"
+              testID={`otp-box-${i}`}
             />
           ))}
         </View>

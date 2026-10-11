@@ -6,7 +6,7 @@
  * Only an owner can add reviewers -- the Add button is disabled otherwise.
  * The Add field validates email shape and shows a toast on invalid input.
  */
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
@@ -44,9 +44,30 @@ export default function EmailAccessScreen() {
   const { show } = useToast()
   const reviewers = useApiQuery<EmailReviewer[]>("/integrations/email")
   const me = useApiQuery<MobileMe>("/me")
-  const addMutation = useApiMutation<{ ok: boolean } & Record<string, unknown>>("/integrations/email")
-
   const [newEmail, setNewEmail] = useState("")
+  const pendingEmail = useRef<string>("")
+
+  const addMutation = useApiMutation<{ ok: boolean; codeSent?: boolean; message?: string } & Record<string, unknown>>(
+    "/integrations/email",
+    {
+      onSuccess: (data) => {
+        if (data?.ok && data?.codeSent) {
+          show(`Code sent to ${pendingEmail.current}`)
+          router.push({ pathname: "/more/integrations/otp-verify", params: { email: pendingEmail.current } })
+          setNewEmail("")
+          pendingEmail.current = ""
+        } else if (data?.ok && data?.message) {
+          show(data.message)
+          setNewEmail("")
+          pendingEmail.current = ""
+        }
+      },
+      onError: (error) => {
+        const msg = error instanceof Error ? error.message : "Could not add that address"
+        show(msg.slice(0, 200))
+      },
+    }
+  )
 
   const isAuthError =
     (reviewers.error instanceof ApiError && (reviewers.error.status === 401 || reviewers.error.status === 403)) ||
@@ -62,6 +83,7 @@ export default function EmailAccessScreen() {
       show("Enter a valid email")
       return
     }
+    pendingEmail.current = email
     addMutation.mutate({ email })
   }
 
@@ -142,7 +164,7 @@ export default function EmailAccessScreen() {
               disabled={!isOwner || addMutation.isPending}
               style={[styles.addBtn, { backgroundColor: colors.brand, opacity: !isOwner || addMutation.isPending ? 0.4 : undefined }]}
             >
-              <Text style={styles.addBtnText}>Add</Text>
+              <Text style={[styles.addBtnText, { color: colors.foreground }]}>Add</Text>
             </Pressable>
           </View>
           <Text style={[styles.note, { color: colors.muted }]}>
@@ -298,7 +320,6 @@ const styles = StyleSheet.create({
   addBtnText: {
     fontSize: 17,
     fontWeight: "600",
-    color: "#ffffff",
   },
   note: {
     fontSize: 13,

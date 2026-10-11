@@ -15,6 +15,7 @@ import { useEffect, useState } from "react"
 import { View, ActivityIndicator } from "react-native"
 
 import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
+import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { darkTheme } from "@/theme"
 
@@ -49,7 +50,9 @@ export default function RootLayout() {
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
       <ClerkTokenBridge>
-        <Stack screenOptions={{ headerShown: false }} />
+        <ToastProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ToastProvider>
       </ClerkTokenBridge>
     </ClerkProvider>
   )

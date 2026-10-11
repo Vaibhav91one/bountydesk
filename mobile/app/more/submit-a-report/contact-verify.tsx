@@ -1,9 +1,10 @@
 /** M21 Contact verify. Six-digit code for the submitted report.
  * Matches docs/site/screens/m21.html exactly.
  *
- * Six single-digit boxes (same as M18). On completion, the success card is shown
- * in place: a delivered mascot, "Report received" heading, and the report id
- * with a reply-to line. Resend code shows a toast "Code sent".
+ * Six single-digit boxes (same as M18). On completion, POSTs the code to the public
+ * upload verify route. On success, the server-confirmed report id is shown with a
+ * delivered mascot. On failure the server's error is shown and the boxes are cleared.
+ * Resend uses the verify route's resend form (action=resend, reportId).
  */
 import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
@@ -20,8 +21,8 @@ export default function ContactVerifyScreen() {
   const { colors } = useTheme()
   const { show } = useToast()
 
-  const email = params.email ?? "you@company.com"
-  const reportId = params.reportId ?? "BD-1045"
+  const email = params.email ?? ""
+  const reportId = params.reportId ?? ""
 
   const [code, setCode] = useState("")
   const inputs = useRef<(TextInput | null)[]>([])
@@ -43,9 +44,9 @@ export default function ContactVerifyScreen() {
     if (index < OTP_LENGTH - 1) {
       inputs.current[index + 1]?.focus()
     } else {
-      // Sixth digit: verify succeeds, show the success card in place.
+      // Sixth digit: POST the public verify route.
       Keyboard.dismiss()
-      setVerified(true)
+      verifyCode(newCode)
     }
   }
 
@@ -55,8 +56,65 @@ export default function ContactVerifyScreen() {
     }
   }
 
-  const handleResend = () => {
-    show("Code sent")
+  const verifyCode = async (enteredCode: string) => {
+    try {
+      const baseURL = process.env.EXPO_PUBLIC_API_BASE
+      const response = await fetch(`${baseURL}/api/intake/upload/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId, code: enteredCode }),
+      })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "")
+        const msg = body || `Verification failed (${response.status})`
+        show(msg.slice(0, 200))
+        setCode("")
+        inputs.current[0]?.focus()
+        return
+      }
+
+      const result = await response.json().catch(() => ({}))
+      if (result.ok) {
+        setVerified(true)
+      } else {
+        show(result.error || "Verification failed")
+        setCode("")
+        inputs.current[0]?.focus()
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      show(msg.slice(0, 200))
+      setCode("")
+      inputs.current[0]?.focus()
+    }
+  }
+
+  const handleResend = async () => {
+    try {
+      const baseURL = process.env.EXPO_PUBLIC_API_BASE
+      const response = await fetch(`${baseURL}/api/intake/upload/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportId, action: "resend" }),
+      })
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "")
+        show((body || "Could not resend code").slice(0, 200))
+        return
+      }
+
+      const result = await response.json().catch(() => ({}))
+      if (result.ok) {
+        show("Code sent")
+      } else {
+        show(result.error || "Could not resend code")
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      show(msg.slice(0, 200))
+    }
   }
 
   const getBoxValue = (index: number): string => {
@@ -93,6 +151,8 @@ export default function ContactVerifyScreen() {
                   maxLength={1}
                   textAlign="center"
                   selectTextOnFocus
+                  autoComplete="one-time-code"
+                  testID={`otp-box-${i}`}
                 />
               ))}
             </View>
