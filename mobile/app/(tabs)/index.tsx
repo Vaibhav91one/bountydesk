@@ -33,21 +33,20 @@ export type QueueResponse = {
  * "analysis-only" and "awaiting-approval" carry the phase colours of
  * `analysis` and `approval`. This is the single place that bridge lives.
  */
-const COLUMN_TO_PHASE: Record<string, PhaseKey> = {
-  triaging: "triaging",
-  "analysis-only": "analysis",
-  "awaiting-approval": "approval",
-  delivered: "delivered",
-  closed: "closed",
+// Every report state named explicitly: a state missing here would fall to a wrong pill colour.
+const STATE_TO_PHASE: Record<string, PhaseKey> = {
+  TRIAGING: "triaging",
+  NEEDS_DECISION: "triaging",
+  REPRODUCING: "reproducing",
+  ANALYSIS_ONLY: "analysis",
+  AWAITING_APPROVAL: "approval",
+  DELIVERING: "delivered",
+  DELIVERED: "delivered",
 }
 
-/**
- * Map a report state to its phase pill key, mirroring the column mapping
- * queue.tsx uses via phaseOf. REPRODUCING folds into the analysis column on the
- * board, so it gets the analysis phase colour.
- */
+/** The phase pill for a report state; the five terminal non-delivered states are closed. */
 function stateToPhaseKey(state: string): PhaseKey {
-  return COLUMN_TO_PHASE[state.replace(/_/g, "-").toLowerCase()] ?? "closed"
+  return STATE_TO_PHASE[state] ?? "closed"
 }
 
 /**
@@ -89,6 +88,10 @@ export default function HomeScreen() {
   const triagingCards = colByKey("triaging")?.cards ?? []
   const deliveredCards = colByKey("delivered")?.cards ?? []
   const closedCards = colByKey("closed")?.cards ?? []
+  // Section counts are the server totals; the rows below show only the newest few.
+  const total = (key: string) => colByKey(key)?.total ?? 0
+  const activeTotal = total("analysis-only") + total("triaging")
+  const deliveredTotal = total("delivered") + total("closed")
 
   // 401/403 are handled by useApiQuery's shared effect (sign out / not-authorized).
   // Only surface a retryable inline message for other errors.
@@ -148,7 +151,7 @@ export default function HomeScreen() {
       {/* Active section */}
       {active.length > 0 ? (
         <View style={styles.section}>
-          <SectionHeader title="Active" count={5} onSort={() => {}} />
+          <SectionHeader title="Active" count={activeTotal} />
           <Card style={styles.list}>
             {active.map((r) => (
               <Pressable key={r.id} onPress={() => router.push(`/reports/${r.id}`)}>
@@ -162,7 +165,7 @@ export default function HomeScreen() {
       {/* Delivered section */}
       {delivered.length > 0 ? (
         <View style={styles.section}>
-          <SectionHeader title="Delivered" count={2} onSort={() => {}} />
+          <SectionHeader title="Delivered" count={deliveredTotal} />
           <Card style={styles.list}>
             {delivered.map((r) => (
               <Pressable key={r.id} onPress={() => router.push(`/reports/${r.id}`)}>

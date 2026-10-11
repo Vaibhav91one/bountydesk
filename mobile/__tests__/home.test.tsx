@@ -347,4 +347,20 @@ describe("M4 Home", () => {
     expect(queryByText("BD-1042")).toBeNull()
     expect(queryByText("juice-shop v17.3.0")).toBeNull()
   })
+  it("counts sections from server totals, including DELIVERING rows", async () => {
+    const cols = (QUEUE_DATA as Array<{ key: string; total: number; cards: Array<Record<string, unknown>> }>).map((c) => {
+      if (c.key === "triaging") return { ...c, total: 12 }
+      if (c.key === "delivered") return { ...c, total: 7, cards: c.cards.map((card) => ({ ...card, state: "DELIVERING" })) }
+      return c
+    })
+    mockQueryData["/queue?limit=50"] = { data: { columns: cols } }
+    const { getByText, queryByText } = await render(<HomeScreen />)
+    const triaging = cols.find((c) => c.key === "triaging")!.total
+    const analysis = cols.find((c) => c.key === "analysis-only")!.total
+    const delivered = cols.find((c) => c.key === "delivered")!.total
+    const closed = cols.find((c) => c.key === "closed")!.total
+    expect(getByText(String(triaging + analysis))).toBeTruthy()
+    expect(getByText(String(delivered + closed))).toBeTruthy()
+    expect(queryByText("5")).toBeNull()
+  })
 })
