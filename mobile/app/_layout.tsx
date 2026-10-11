@@ -9,7 +9,8 @@
  */
 import { ClerkProvider } from "@clerk/expo"
 import { tokenCache } from "@clerk/expo/token-cache"
-import { Stack } from "expo-router"
+import { Stack, useRouter } from "expo-router"
+import * as Notifications from "expo-notifications"
 import * as WebBrowser from "expo-web-browser"
 import { useEffect, useState } from "react"
 import { View, ActivityIndicator } from "react-native"
@@ -17,6 +18,7 @@ import { View, ActivityIndicator } from "react-native"
 import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
 import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
+import { routeForNotification } from "@/lib/push"
 import { darkTheme } from "@/theme"
 import { restoreThemeMode } from "@/lib/theme-mode"
 
@@ -28,8 +30,25 @@ import { restoreThemeMode } from "@/lib/theme-mode"
 WebBrowser.maybeCompleteAuthSession()
 
 export default function RootLayout() {
+  const router = useRouter()
   const fontsReady = useFonts()
   const [showLoading, setShowLoading] = useState(true)
+
+  // Route the user to the report behind a tapped notification on cold start and
+  // while the app is foregrounded. Placed above the font/loading early return so
+  // a notification opened while the app is still bootstrapping is not lost.
+  useEffect(() => {
+    const handleResponse = (response: Notifications.NotificationResponse | null) => {
+      if (!response) return
+      const route = routeForNotification(response.notification.request.content.data)
+      if (route) router.push(route)
+    }
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse)
+    Notifications.getLastNotificationResponseAsync().then(handleResponse)
+    return () => {
+      subscription.remove()
+    }
+  }, [router])
 
   // Apply the reviewer's saved Light/Dark choice before the first screen renders.
   useEffect(() => {

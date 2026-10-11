@@ -37,7 +37,8 @@
         {
           "faceIDPermission": "BountyDesk uses Face ID to confirm that you approve a verdict."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "experiments": {
       "typedRoutes": true,

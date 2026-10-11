@@ -90,8 +90,20 @@ export default function SettingsScreen() {
     saveThemeMode(next)
   }
 
-  const toggleNotif = (key: string) => {
-    setNotifToggles((prev) => ({ ...prev, [key]: !prev[key] }))
+  const toggleNotif = async (key: string) => {
+    const turningOn = !notifToggles[key]
+    setNotifToggles((prev) => ({ ...prev, [key]: turningOn }))
+    if (turningOn && (key === "approvals" || key === "delivery")) {
+      // Lazy so the native push modules are only loaded when a toggle is
+      // actually turned on, not when the settings screen mounts.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { registerForPush } = require("@/lib/push")
+      const result = await registerForPush()
+      if (!result.ok) {
+        show(result.reason)
+        setNotifToggles((prev) => ({ ...prev, [key]: false }))
+      }
+    }
   }
 
   const handleSignOut = async () => {
@@ -202,6 +214,9 @@ export default function SettingsScreen() {
           </Card>
           <Text style={[styles.note, { color: colors.muted }]}>
             Push shows a report id and short title only, never the verdict text.
+          </Text>
+          <Text style={[styles.note, { color: colors.muted }]}>
+            Reproduction failures are not sent as pushes yet.
           </Text>
         </View>
 
