@@ -153,3 +153,48 @@ test("corpus: source field contains a valid URL or n/a marker", () => {
     );
   }
 });
+
+// The 30 original cases must keep their reviewed split and expected outcome verbatim.
+const ORIGINAL_CASES: Array<{ id: string; split: string; expected: string }> = [
+  { id: "p-sqli-login", split: "dev", expected: "REPRODUCED" },
+  { id: "p-idor-basket", split: "dev", expected: "REPRODUCED" },
+  { id: "p-ftp-listing", split: "dev", expected: "REPRODUCED" },
+  { id: "p-sqli-exfil", split: "test", expected: "REPRODUCED" },
+  { id: "p-default-admin-creds", split: "test", expected: "REPRODUCED" },
+  { id: "p-forgot-password-weak-question", split: "test", expected: "REPRODUCED" },
+  { id: "p-stacktrace-disclosure", split: "test", expected: "REPRODUCED" },
+  { id: "p-review-author-spoof", split: "test", expected: "REPRODUCED" },
+  { id: "p-dom-xss-search", split: "test", expected: "REPRODUCED" },
+  { id: "p-csrf-profile-name", split: "test", expected: "REPRODUCED" },
+  { id: "n-nonexistent-1", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-nonexistent-2", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-nonexistent-3", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-nonexistent-4", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-wrong-1", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-wrong-2", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-wrong-3", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-wrong-4", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-info-1", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-info-2", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-info-3", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-info-4", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-dup-1", split: "dev", expected: "NOT_REPRODUCED" },
+  { id: "n-dup-2", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-dup-3", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-dup-4", split: "test", expected: "NOT_REPRODUCED" },
+  { id: "n-unbound-1", split: "dev", expected: "ANALYSIS_ONLY" },
+  { id: "n-unbound-2", split: "test", expected: "ANALYSIS_ONLY" },
+  { id: "n-unbound-3", split: "test", expected: "ANALYSIS_ONLY" },
+  { id: "n-unbound-4", split: "test", expected: "ANALYSIS_ONLY" },
+];
+
+test("corpus: original 30 reviewed cases keep their original split and expected", () => {
+  const corpus = loadCorpus();
+  const byId = new Map(corpus.cases.map((c) => [c.id, c]));
+  for (const orig of ORIGINAL_CASES) {
+    const c = byId.get(orig.id);
+    assert.ok(c, `original case ${orig.id} is missing from corpus`);
+    assert.equal(c!.split, orig.split, `original case ${orig.id} changed split: expected ${orig.split}, got ${c!.split}`);
+    assert.equal(c!.expected, orig.expected, `original case ${orig.id} changed expected: expected ${orig.expected}, got ${c!.expected}`);
+  }
+});
