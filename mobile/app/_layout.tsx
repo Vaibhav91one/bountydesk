@@ -15,8 +15,10 @@ import { useEffect, useState } from "react"
 import { View, ActivityIndicator } from "react-native"
 
 import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
+import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { darkTheme } from "@/theme"
+import { restoreThemeMode } from "@/lib/theme-mode"
 
 /**
  * Resolve the auth session as soon as the root layout mounts, so the SSO
@@ -28,6 +30,11 @@ WebBrowser.maybeCompleteAuthSession()
 export default function RootLayout() {
   const fontsReady = useFonts()
   const [showLoading, setShowLoading] = useState(true)
+
+  // Apply the reviewer's saved Light/Dark choice before the first screen renders.
+  useEffect(() => {
+    restoreThemeMode()
+  }, [])
 
   useEffect(() => {
     if (fontsReady) {
@@ -49,7 +56,9 @@ export default function RootLayout() {
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
       <ClerkTokenBridge>
-        <Stack screenOptions={{ headerShown: false }} />
+        <ToastProvider>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ToastProvider>
       </ClerkTokenBridge>
     </ClerkProvider>
   )
