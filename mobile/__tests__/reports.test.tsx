@@ -2,7 +2,7 @@
  * Render tests for M6 Reports.
  * Covers loading, data, search filtering, and no-results states.
  */
-import { render, fireEvent, waitFor } from "@testing-library/react-native"
+import { render, fireEvent, waitFor, act } from "@testing-library/react-native"
 import * as Clipboard from "expo-clipboard"
 import ReportsScreen from "../app/(tabs)/reports"
 
@@ -462,5 +462,31 @@ describe("M6 Reports", () => {
 
     expect(queryByText("Open case file")).toBeTruthy()
     expect(queryByText("Assign to me")).toBeNull()
+  })
+  it("fires one request when onEndReached repeats before the page arrives", async () => {
+    const row = { id: "BD-1", title: "Report one", sourceLabel: "#1", targetName: "t", channel: "github", state: "TRIAGING", outcome: null, verdictSuperseded: false, jobDeadLettered: false, sessionErrored: false, runStatus: null, deliveryState: null, handoffFailed: false, eventCount: 1, updatedAt: "2025-01-01T10:00:00Z", awaitingVerdictId: null, investigating: false, origin: "t" }
+    const mockApi = require("@/lib/api").api as jest.Mock
+    mockApi.mockClear()
+    let release: (v: unknown) => void = () => {}
+    mockApi.mockReturnValueOnce(new Promise((r) => { release = r }))
+    mockUseApiQuery.mockReturnValue({
+      data: { reports: [row], total: 2, nextOffset: 1 },
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+    const { getByTestId } = await render(<ReportsScreen />)
+    const list = getByTestId("reports-list")
+    // Fire twice without waiting: the first request is still pending when the second arrives.
+    act(() => {
+      void list.props.onEndReached()
+      void list.props.onEndReached()
+    })
+    expect(mockApi).toHaveBeenCalledTimes(1)
+    release({ reports: [{ ...row, id: "BD-2", title: "Report two" }], total: 2, nextOffset: null })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(mockApi).toHaveBeenCalledTimes(1)
   })
 })

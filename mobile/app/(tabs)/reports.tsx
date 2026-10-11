@@ -129,17 +129,29 @@ function ReportsScreenContent() {
     }
   }, [firstPage, path, pagesFor])
 
+  // onEndReached can fire again before state flushes, so a ref guards the in-flight request.
+  // pathRef drops a page that arrives after the search changed, so it never lands in new results.
+  const loadingMoreRef = React.useRef(false)
+  const pathRef = React.useRef(path)
+  pathRef.current = path
   const loadMore = async () => {
-    if (!hasMore || isFetching) return
+    if (!hasMore || isFetching || loadingMoreRef.current || nextOffset == null) return
+    loadingMoreRef.current = true
+    const forPath = path
     try {
       const more: ReportsResponse = await api<ReportsResponse>(`/reports?limit=50&offset=${nextOffset}${qs}`)
+      if (pathRef.current !== forPath) return
       setPages((prev) => [...prev, more.reports])
       setNextOffset(more.nextOffset)
       setHasMore(more.nextOffset != null)
     } catch (e) {
+      if (pathRef.current !== forPath) return
       setLoadError(e instanceof Error ? e.message : "Failed to load more")
+    } finally {
+      loadingMoreRef.current = false
     }
   }
+
 
   const allReports = pages.flat()
   const totalReports = firstPage?.total ?? allReports.length

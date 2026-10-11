@@ -136,7 +136,7 @@ export default function CaseFileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors, phase: phaseColors } = useTheme()
   const router = useRouter()
-  const { data: file, error, isFetching } = useApiQuery<CaseFileView>(`/reports/${id}`)
+  const { data: file, error } = useApiQuery<CaseFileView>(`/reports/${id}`)
   const reportIdLabel = file
     ? file.issueNumber != null
       ? `BD-${file.issueNumber}`
@@ -152,7 +152,8 @@ export default function CaseFileScreen() {
     )
   }
 
-  if (isFetching || !file) {
+  // Only the first load shows the placeholder; a background refetch keeps the rendered file.
+  if (!file) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
         <Text style={[styles.meta, { color: colors.muted }]}>Loading case file</Text>
