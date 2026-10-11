@@ -1,5 +1,5 @@
 /** M2 Sign in. Google and GitHub buttons via Clerk useSSO. */
-import { useSSO } from "@clerk/clerk-expo"
+import { useSSO } from "@clerk/expo"
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native"
 
 export default function SignInScreen() {

@@ -1,5 +1,5 @@
 /** M19 Settings (More tab). Links to Connections, Integrations, Target and scope, Privacy, Terms, Submit a report. Stub. */
-import { useAuth } from "@clerk/clerk-expo"
+import { useAuth } from "@clerk/expo"
 import { Redirect, Tabs } from "expo-router"
 import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"

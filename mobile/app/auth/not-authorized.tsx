@@ -1,7 +1,7 @@
 /** M3 Not authorized. Shown when GET /me returns allowlisted: false. */
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/clerk-expo"
+import { useAuth } from "@clerk/expo"
 
 export default function NotAuthorizedScreen() {
   const router = useRouter()
