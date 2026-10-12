@@ -19,8 +19,8 @@ import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
 import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { routeForNotification } from "@/lib/push"
-import { darkTheme } from "@/theme"
-import { restoreThemeMode } from "@/lib/theme-mode"
+import { darkTheme, useTheme } from "@/theme"
+import { fixturesEnabled } from "@/lib/fixtures"
 
 /**
  * Resolve the auth session as soon as the root layout mounts, so the SSO
@@ -33,6 +33,7 @@ export default function RootLayout() {
   const router = useRouter()
   const fontsReady = useFonts()
   const [showLoading, setShowLoading] = useState(true)
+  const { colors } = useTheme()
 
   // Route the user to the report behind a tapped notification on cold start and
   // while the app is foregrounded. Placed above the font/loading early return so
@@ -52,11 +53,6 @@ export default function RootLayout() {
     }
   }, [router, showLoading])
 
-  // Apply the reviewer's saved Light/Dark choice before the first screen renders.
-  useEffect(() => {
-    restoreThemeMode()
-  }, [])
-
   useEffect(() => {
     if (fontsReady) {
       setShowLoading(false)
@@ -71,16 +67,35 @@ export default function RootLayout() {
     )
   }
 
+  const shell = (
+    <ClerkTokenBridge>
+      <ToastProvider>
+        <Stack screenOptions={{ headerShown: false }}>
+          {/* M13: a native form sheet over M11; the sheet colour is the opaque c.css --sheet. */}
+          <Stack.Screen
+            name="reports/[id]/deny-verdict"
+            options={{
+              presentation: "formSheet",
+              sheetGrabberVisible: true,
+              sheetAllowedDetents: [0.96],
+              sheetCornerRadius: 36,
+              contentStyle: { backgroundColor: darkTheme.colors["sheet-solid"] },
+            }}
+          />
+        </Stack>
+      </ToastProvider>
+    </ClerkTokenBridge>
+  )
+
+  // Fixture mode (dev only) signs the reviewer in locally, so Clerk is not mounted at all.
+  if (fixturesEnabled()) return shell
+
   return (
     <ClerkProvider
       tokenCache={tokenCache}
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
-      <ClerkTokenBridge>
-        <ToastProvider>
-          <Stack screenOptions={{ headerShown: false }} />
-        </ToastProvider>
-      </ClerkTokenBridge>
+      {shell}
     </ClerkProvider>
   )
 }

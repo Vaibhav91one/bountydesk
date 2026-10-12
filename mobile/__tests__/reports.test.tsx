@@ -112,6 +112,9 @@ jest.mock("@/components/SvgImage", () => ({
   },
 }))
 
+/** A scroll event within 600pt of the content end, which is what loads the next page. */
+const NEAR_END = { nativeEvent: { contentOffset: { y: 900 }, layoutMeasurement: { height: 800 }, contentSize: { height: 1500 } } }
+
 const mockUseApiQuery = require("@/lib/use-query").useApiQuery as jest.Mock
 
 // Mock data matching m6.html
@@ -360,7 +363,7 @@ describe("M6 Reports", () => {
     warnSpy.mockRestore()
   })
 
-  it("renders a single FlatList with the header inside it (no outer ScrollView ancestor)", async () => {
+  it("renders a single scroller with the header inside it (no outer ScrollView ancestor)", async () => {
     mockUseApiQuery.mockReturnValue({
       data: mockReportsData,
       error: undefined,
@@ -403,7 +406,7 @@ describe("M6 Reports", () => {
     const flatList = getByTestId("reports-list")
 
     // Trigger loadMore to load page 2 by firing onEndReached
-    await fireEvent(flatList, "onEndReached")
+    await fireEvent.scroll(flatList, NEAR_END)
     await waitFor(() => {
       expect(getByText("Second page report")).toBeTruthy()
     })
@@ -442,7 +445,7 @@ describe("M6 Reports", () => {
     const { getByTestId, getByText } = await render(<ReportsScreen />)
     const flatList = getByTestId("reports-list")
 
-    await fireEvent(flatList, "onEndReached")
+    await fireEvent.scroll(flatList, NEAR_END)
 
     await waitFor(() => {
       expect(getByText("Could not load more. Tap to retry")).toBeTruthy()
@@ -482,8 +485,8 @@ describe("M6 Reports", () => {
     const list = getByTestId("reports-list")
     // Fire twice without waiting: the first request is still pending when the second arrives.
     await act(async () => {
-      void list.props.onEndReached()
-      void list.props.onEndReached()
+      void list.props.onScroll(NEAR_END)
+      void list.props.onScroll(NEAR_END)
     })
     expect(mockApi).toHaveBeenCalledTimes(1)
     release({ reports: [{ ...row, id: "BD-2", title: "Report two" }], total: 2, nextOffset: null })

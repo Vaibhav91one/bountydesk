@@ -66,6 +66,10 @@ export type QueueCard = {
   updatedAt: string
   awaitingVerdictId: string | null
   investigating: boolean
+  /** triage severity of the drafted verdict; absent until the server sends it */
+  severity?: "high" | "medium" | "low" | null
+  /** the pinned target version, e.g. "v17.3.0"; the home card appends it to the target name */
+  targetVersion?: string | null
 }
 
 /**
@@ -202,6 +206,8 @@ export type MobileCaseFile = {
     name: string
     imageDigest: string
   } | null
+  /** the pinned target version, e.g. "v17.3.0"; the case file shows it beside the short commit */
+  targetVersion?: string | null
   summary: string | null
   destination: string
   verdict: {

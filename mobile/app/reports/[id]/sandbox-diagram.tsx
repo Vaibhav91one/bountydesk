@@ -6,13 +6,16 @@
  * and the static "Outside the sandbox" oracle note. The diagram itself is a
  * custom View layout — no @expo/ui equivalent exists for it.
  */
-import { View, Text, StyleSheet } from "react-native"
+import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile } from "@/lib/types"
-import { ScreenHeader, KvRow, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, KvLine, Note } from "@/components/CaseUi"
 import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 /** The four sandbox-diagram nodes from m26.html, in order. */
 const NODES = [
@@ -57,10 +60,15 @@ const NODES = [
 /** The connector labels between consecutive nodes. */
 const CONNECTORS = ["Built artifact only", "Probe results only", "Reviewer approves exact text"]
 
+/** The short commit in a build marker, which is the source commit baked into the image. */
+function shortCommit(marker: string | null | undefined): string | null {
+  return marker?.match(/[0-9a-f]{7,40}/)?.[0].slice(0, 7) ?? null
+}
+
 export default function SandboxDiagramScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { colors, typography } = useTheme()
+  const { colors } = useTheme()
   const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
@@ -78,67 +86,57 @@ export default function SandboxDiagramScreen() {
   // not yet in mobile/lib/types.ts's MobileCaseFile. Cast to read it; removing
   // this cast once the type is updated is the OPEN QUESTION.
   const targetScope = (report as MobileCaseFile & {
-    targetScope: { snapshotId: string | null; egress: string | null } | null
+    targetScope: { snapshotId: string | null; buildMarker: string | null; egress: string | null } | null
   })?.targetScope
 
+  const egress = targetScope?.egress ?? "none"
   const notes = [
-    { label: "Target", value: target?.name ?? "unknown" },
-    { label: "Snapshot", value: targetScope?.snapshotId ?? target?.imageDigest?.slice(0, 12) ?? "—" },
-    { label: "Egress", value: targetScope?.egress ?? "None" },
+    { label: "Target", value: [target?.name.split("/").pop() ?? "unknown", report?.targetVersion].filter(Boolean).join(" ") },
+    {
+      label: "Snapshot",
+      value: shortCommit(targetScope?.buildMarker) ?? targetScope?.snapshotId ?? target?.imageDigest?.slice(0, 12) ?? "—",
+    },
+    { label: "Egress", value: egress.charAt(0).toUpperCase() + egress.slice(1) },
     { label: "Oracle", value: "Outside the sandbox" },
   ]
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader
-        title="Reproduction sandbox"
-        meta={
-          report ? `${report.id} · ${report.title}` : ""
-        }
-        back
-        backLabel="Case file"
-        onBack={() => router.back()}
-      />
-
-      <View style={styles.diag}>
-        {NODES.map((node, index) => (
-          <View key={node.kind}>
-            <SandboxNode
-              node={node}
-              colors={colors}
-              mono={typography.fontMono}
-            />
-            {index < NODES.length - 1 ? (
-              <Connector label={CONNECTORS[index]} colors={colors} dashed={index === CONNECTORS.length - 1} />
-            ) : null}
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.notesSection}>
-        <Text style={[styles.sectionHeader, { color: colors.foreground }]}>Notes</Text>
-        <View style={[styles.notesCard, { backgroundColor: colors.card }]}>
-          {notes.map((row, i) => (
-            <KvRow
-              key={row.label}
-              label={row.label}
-              value={row.value}
-              mono={row.label === "Snapshot"}
-              style={i > 0 ? { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line } : undefined}
-            />
+      <ScreenHeader back backLabel="Case file" onBack={() => router.back()} />
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScreenTitle
+          title="Reproduction sandbox"
+          meta={report ? `${report.sourceLabel} · ${report.title}` : ""}
+          metaBottom={20}
+        />
+        <View style={styles.diag}>
+          {NODES.map((node, index) => (
+            <View key={node.kind}>
+              <SandboxNode node={node} />
+              {index < NODES.length - 1 ? <Connector label={CONNECTORS[index]} dashed={index === CONNECTORS.length - 1} /> : null}
+            </View>
           ))}
         </View>
-        <Text style={[styles.note, { color: colors.muted, fontFamily: typography.fontFamily }]}>
-          The oracle runs outside the sandbox. A sandbox status file reports readiness only and never decides the outcome.
-        </Text>
-      </View>
+
+        <View style={styles.notes}>
+          <SectionHead title="Notes" />
+          <ListCard>
+            {notes.map((row, i) => (
+              <KvLine key={row.label} label={row.label} value={row.value} mono={row.label === "Snapshot"} divider={i > 0} />
+            ))}
+          </ListCard>
+          <Note>
+            The oracle runs outside the sandbox. A sandbox status file reports readiness only and never decides the outcome.
+          </Note>
+        </View>
+      </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
 interface SandboxNodeProps {
   node: {
-    kind: string
     badge: string
     title: string
     subtitle: string
@@ -146,33 +144,27 @@ interface SandboxNodeProps {
     hot: boolean
     off: boolean
   }
-  colors: ReturnType<typeof useTheme>["colors"]
-  mono: string
 }
 
-function SandboxNode({ node, colors, mono }: SandboxNodeProps) {
-  const isOff = node.off
-  const containerBg = isOff ? "transparent" : colors.card
-  const containerBorder = isOff ? colors.line : "transparent"
-  const badgeColor = colors["brand-soft"]
+/** c.css .node. The mockup's `.off` node sets `border-style: dashed` and no width or colour, so it
+ * renders as a 3px dashed border in the text colour; that is what is drawn here. */
+function SandboxNode({ node }: SandboxNodeProps) {
+  const { colors } = useTheme()
   return (
     <View
       style={[
         styles.node,
-        {
-          backgroundColor: containerBg,
-          borderColor: containerBorder,
-          borderWidth: isOff ? 1.5 : 0,
-          borderStyle: "dashed",
-          shadowColor: node.hot ? colors.brand : "transparent",
-        },
+        node.off
+          ? { borderWidth: 3, borderStyle: "dashed", borderColor: colors.foreground }
+          : { backgroundColor: colors.card },
+        node.hot && { boxShadow: `0 0 0 1.5px ${colors.brand}` },
       ]}
     >
-      <View style={[styles.nodeIcon, { backgroundColor: `${colors.brand}29` }]}>
-        <Icon name={node.icon} size={24} stroke={colors["brand-soft"]} />
+      <View style={[styles.nodeIcon, { backgroundColor: colors.brand + "29" }]}>
+        <Icon name={node.icon} size={22} stroke={colors["brand-soft"]} />
       </View>
       <View style={styles.nodeMain}>
-        <Text style={[styles.nodeBadge, { color: badgeColor }]}>{node.badge}</Text>
+        <Text style={[styles.nodeBadge, { color: colors.muted }]}>{node.badge}</Text>
         <Text style={[styles.nodeTitle, { color: colors.foreground }]}>{node.title}</Text>
         <Text style={[styles.nodeSubtitle, { color: colors.muted }]}>{node.subtitle}</Text>
       </View>
@@ -180,130 +172,44 @@ function SandboxNode({ node, colors, mono }: SandboxNodeProps) {
   )
 }
 
-function Connector({
-  label,
-  colors,
-  dashed,
-}: {
-  label: string
-  colors: ReturnType<typeof useTheme>["colors"]
-  dashed: boolean
-}) {
+/** c.css .conn: a 2 by 40 arrow between nodes with its label to the right; .dash breaks the line into 5 on, 4 off. */
+function Connector({ label, dashed }: { label: string; dashed: boolean }) {
+  const { colors } = useTheme()
   return (
-    <View style={styles.connectorCol}>
-      <View
-        style={[
-          styles.connectorLine,
-          {
-            backgroundColor: colors.faint,
-            borderTopWidth: 2,
-            borderTopColor: dashed ? "transparent" : colors.faint,
-          },
-        ]}
-      >
-        {dashed ? (
-          <View style={[styles.connectorDash, { backgroundColor: colors.faint }]} />
-        ) : null}
-      </View>
-      <Text style={[styles.connectorLabel, { color: colors.muted }]}>{label}</Text>
+    <View style={[styles.conn, !dashed && { backgroundColor: colors.faint }]}>
+      {dashed
+        ? [0, 9, 18, 27, 36].map((top) => (
+            <View key={top} style={{ position: "absolute", top, height: Math.min(5, 40 - top), width: 2, backgroundColor: colors.faint }} />
+          ))
+        : null}
+      <View style={[styles.arrow, { borderColor: colors.faint }]} />
+      <Text style={[styles.connLabel, { color: colors.muted }]}>{label}</Text>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  diag: {
-    flexDirection: "column",
-    alignItems: "stretch",
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  node: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-  },
-  nodeHot: {
-    shadowOffset: { width: 0, height: 0 },
-    shadowRadius: 0,
-    elevation: 0,
-  },
-  nodeIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  nodeMain: {
-    flex: 1,
-    minWidth: 0,
-  },
-  nodeBadge: {
-    fontSize: 11,
-    fontWeight: "600",
-    lineHeight: 14,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  nodeTitle: {
-    fontSize: 17,
-    fontWeight: "600",
-    lineHeight: 22,
-  },
-  nodeSubtitle: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 2,
-  },
-  connectorCol: {
-    alignItems: "flex-start",
-    paddingLeft: 54,
-  },
-  connectorLine: {
-    width: 2,
-    height: 40,
-    marginVertical: 2,
-  },
-  connectorDash: {
+  scroll: { paddingBottom: 150 },
+  diag: { paddingHorizontal: 16 },
+  node: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 20 },
+  nodeIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  nodeMain: { flex: 1, minWidth: 0 },
+  nodeBadge: { fontFamily: font.semibold, fontSize: 11, lineHeight: 11, letterSpacing: 0.88, textTransform: "uppercase", marginBottom: 4 },
+  nodeTitle: { fontFamily: font.semibold, fontSize: 17, lineHeight: 21.25, letterSpacing: -0.187 },
+  nodeSubtitle: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.33, marginTop: 2 },
+  conn: { alignSelf: "center", width: 2, height: 40 },
+  arrow: {
     position: "absolute",
-    left: 0,
-    width: 2,
-    height: 40,
-    borderLeftWidth: 2,
+    bottom: -1,
+    left: -3,
+    width: 8,
+    height: 8,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    transform: [{ rotate: "45deg" }],
   },
-  connectorLabel: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  notesSection: {
-    marginTop: 28,
-    paddingHorizontal: 20,
-  },
-  sectionHeader: {
-    fontSize: 20,
-    fontWeight: "600",
-    lineHeight: 24,
-    marginBottom: 10,
-  },
-  notesCard: {
-    borderRadius: 24,
-    overflow: "hidden",
-  },
-  note: {
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 10,
-    textAlign: "center",
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  error: {
-    fontSize: 16,
-  },
+  connLabel: { position: "absolute", left: 14, top: 11.9, fontFamily: font.regular, fontSize: 12, lineHeight: 16.2, width: 220 },
+  notes: { marginTop: 28 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

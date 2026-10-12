@@ -24,8 +24,12 @@ import * as DocumentPicker from "expo-document-picker"
 
 import { api, ApiError } from "@/lib/api"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
-import { Card, SectionHeader, ScreenHeader, Mono, ToastProvider, useToast } from "@/components/primitives"
+import { PrimaryButton, ScreenHeader, ToastProvider, useToast, ScreenTitle } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, KvLine, Note } from "@/components/CaseUi"
+import { font } from "@/lib/fonts"
 
 type SourceKind = "tar" | "dockerfile" | "image"
 
@@ -110,336 +114,162 @@ function SubmitTargetInner() {
     }
   }
 
+  const filePicker = (title: string, subtitle: string) => (
+    <View style={styles.panel}>
+      <ListCard>
+        <Pressable onPress={handlePickFile} style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]} accessibilityLabel={title}>
+          <ItemLine
+            title={pickedFile?.name ?? title}
+            subtitle={subtitle}
+            leading={
+              <View style={[styles.avatar, { backgroundColor: colors.brand + "38" }]}>
+                <Icon name="upload" size={20} stroke={colors["brand-soft"]} />
+              </View>
+            }
+          />
+        </Pressable>
+      </ListCard>
+    </View>
+  )
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Submit a target" back backLabel="Connections" />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Submit a target</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>
-          Upload target material and the settings to run it
-        </Text>
+      <ScreenHeader back backLabel="Connections" />
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <ScreenTitle title="Submit a target" meta="Upload target material and the settings to run it" metaBottom={24} />
 
-        {/* Source */}
-        <SectionHeader title="Source" chevron={false} />
-        <View style={styles.segContainer}>
-          <View style={[styles.seg, { backgroundColor: colors.raised }]}>
-            <SegButton
-              label="Tarball"
-              selected={source === "tar"}
-              onPress={() => setSource("tar")}
-              colors={colors}
-            />
-            <SegButton
-              label="Dockerfile"
-              selected={source === "dockerfile"}
-              onPress={() => setSource("dockerfile")}
-              colors={colors}
-            />
-            <SegButton
-              label="Image"
-              selected={source === "image"}
-              onPress={() => setSource("image")}
-              colors={colors}
-            />
+        <View style={styles.sect}>
+          <SectionHead title="Source" />
+          <View style={styles.segWrap}>
+            <View style={[styles.seg, { backgroundColor: colors.raised }]}>
+              <SegButton label="Tarball" selected={source === "tar"} onPress={() => setSource("tar")} />
+              <SegButton label="Dockerfile" selected={source === "dockerfile"} onPress={() => setSource("dockerfile")} />
+              <SegButton label="Image" selected={source === "image"} onPress={() => setSource("image")} />
+            </View>
           </View>
-        </View>
 
-        {/* Source detail panel */}
-        {source === "tar" && (
-          <Card style={styles.cardPick}>
-            <Pressable
-              onPress={handlePickFile}
-              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-            >
-              <View style={styles.filePickerRow}>
-                <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
-                  <Icon name="upload" size={20} stroke={colors.foreground} />
-                </View>
-                <View style={styles.filePickerMain}>
-                  <Text style={[styles.filePickerTitle, { color: colors.foreground }]}>
-                    {pickedFile?.name ?? "Choose a file"}
-                  </Text>
-                  <Text style={[styles.filePickerSubtitle, { color: colors.muted }]}>
-                    .tar or .tgz, Dockerfile at its root
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          </Card>
-        )}
+          {source === "tar" && filePicker("Choose a file", ".tar or .tgz, Dockerfile at its root")}
+          {source === "dockerfile" && filePicker("Choose a Dockerfile", "A single file, built in the sandbox")}
 
-        {source === "dockerfile" && (
-          <Card style={styles.cardPick}>
-            <Pressable
-              onPress={handlePickFile}
-              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-            >
-              <View style={styles.filePickerRow}>
-                <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
-                  <Icon name="upload" size={20} stroke={colors.foreground} />
-                </View>
-                <View style={styles.filePickerMain}>
-                  <Text style={[styles.filePickerTitle, { color: colors.foreground }]}>
-                    {pickedFile?.name ?? "Choose a Dockerfile"}
-                  </Text>
-                  <Text style={[styles.filePickerSubtitle, { color: colors.muted }]}>
-                    A single file, built in the sandbox
-                  </Text>
-                </View>
-              </View>
-            </Pressable>
-          </Card>
-        )}
-
-        {source === "image" && (
-          <View style={styles.imageInputs}>
-            <View style={styles.fieldGroup}>
+          {source === "image" && (
+            <View style={styles.imageInputs}>
               <Text style={[styles.lbl, { color: colors.muted }]}>Image</Text>
               <TextInput
                 value={imageRef}
                 onChangeText={setImageRef}
                 placeholder="docker.io/owner/image"
                 placeholderTextColor={colors.faint}
-                style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground, borderColor: colors.line }]}
+                style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground }]}
                 autoCapitalize="none"
+                autoCorrect={false}
               />
-            </View>
-            <View style={styles.fieldGroup}>
               <Text style={[styles.lbl, { color: colors.muted }]}>Digest</Text>
               <TextInput
                 value={digest}
                 onChangeText={setDigest}
                 placeholder="sha256:"
                 placeholderTextColor={colors.faint}
-                style={[styles.field, styles.fieldMono, { backgroundColor: colors.raised, color: colors.foreground, borderColor: colors.line }]}
+                style={[styles.field, styles.fieldMono, { backgroundColor: colors.raised, color: colors.foreground }]}
                 autoCapitalize="none"
+                autoCorrect={false}
               />
+              <Text style={[styles.imageNote, { color: colors.muted }]}>Pinned by digest. Docker Hub and GHCR unless the operator allows others.</Text>
             </View>
-            <Text style={[styles.note, { color: colors.muted }]}>
-              Pinned by digest. Docker Hub and GHCR unless the operator allows others.
-            </Text>
-          </View>
-        )}
-
-        {/* Report */}
-        <SectionHeader title="Report" chevron={false} />
-        <View style={[styles.card, styles.reportCard]}>
-          <TextInput
-            value={report}
-            onChangeText={setReport}
-            multiline
-            placeholder="Describe the target and what it should run"
-            placeholderTextColor={colors.faint}
-            style={[styles.area, { backgroundColor: colors.raised, color: colors.foreground }]}
-            textAlignVertical="top"
-          />
+          )}
         </View>
 
-        {/* How the target runs */}
-        <SectionHeader title="How the target runs" chevron={false} />
-        <Card style={styles.card}>
-          <KvRowEdit label="Port" value={port} onChange={setPort} colors={colors} numeric />
-          <KvRowEdit label="Readiness path" value={readinessPath} onChange={setReadinessPath} colors={colors} mono />
-          <KvRowEdit label="Start command" value={startCommand} onChange={setStartCommand} colors={colors} mono placeholder="npm start"
-          />
-        </Card>
-        <Text style={[styles.note, { color: colors.muted }]}>
-          The build runs in a sandbox. The drafted verdict still needs your approval before anything is delivered.
-        </Text>
+        <View style={styles.sect}>
+          <SectionHead title="Report" />
+          <View style={styles.segWrap}>
+            <TextInput
+              value={report}
+              onChangeText={setReport}
+              multiline
+              placeholder="Describe the target and what it should run"
+              placeholderTextColor={colors.faint}
+              accessibilityLabel="Report"
+              style={[styles.field, styles.area, { backgroundColor: colors.raised, color: colors.foreground }]}
+              textAlignVertical="top"
+            />
+          </View>
+        </View>
 
-        {submitError ? <Text style={[styles.note, { color: colors.red }]}>{submitError}</Text> : null}
+        <View style={styles.sect}>
+          <SectionHead title="How the target runs" />
+          <ListCard>
+            <KvLine label="Port" trailing={<RunInput value={port} onChange={setPort} placeholder="Port" numeric />} />
+            <KvLine label="Readiness path" trailing={<RunInput value={readinessPath} onChange={setReadinessPath} placeholder="Readiness path" mono />} divider />
+            <KvLine label="Start command" trailing={<RunInput value={startCommand} onChange={setStartCommand} placeholder="npm start" mono />} divider />
+          </ListCard>
+          <Note>The build runs in a sandbox. The drafted verdict still needs your approval before anything is delivered.</Note>
+          {submitError ? <Text style={[styles.error, { color: colors.red }]}>{submitError}</Text> : null}
+        </View>
       </ScrollView>
 
-      {/* Footer: Build and bind target */}
-      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-        <Pressable
+      <BottomFade />
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
+        <PrimaryButton
+          title={isSubmitting ? "Building…" : "Build and bind target"}
           onPress={handleBuild}
           disabled={isSubmitting}
-          style={({ pressed }) => [styles.btn, { backgroundColor: colors.brand, opacity: pressed ? 0.92 : 1 }]}
-          accessibilityLabel="Build and bind target"
-        >
-          <Text style={[styles.btnText, { color: colors.foreground }]}>
-            {isSubmitting ? "Building…" : "Build and bind target"}
-          </Text>
-        </Pressable>
+          style={styles.btn}
+        />
       </View>
     </View>
   )
 }
 
-function SegButton({
-  label,
-  selected,
-  onPress,
-  colors,
-}: {
-  label: string
-  selected: boolean
-  onPress: () => void
-  colors: { brand: string; foreground: string; muted: string; raised: string }
-}) {
+/** c.css .seg button: 44 high, 15px, the selected one on the selection fill. */
+function SegButton({ label, selected, onPress }: { label: string; selected: boolean; onPress: () => void }) {
+  const { colors } = useTheme()
   return (
     <Pressable
       onPress={onPress}
-      style={[
-        styles.segBtn,
-        {
-          backgroundColor: selected ? colors.brand : "transparent",
-        },
-      ]}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      style={[styles.segBtn, { backgroundColor: selected ? colors.selection : "transparent" }]}
     >
-      <Text
-        style={[
-          styles.segBtnText,
-          {
-            color: selected ? colors.foreground : colors.muted,
-            fontWeight: selected ? "600" : "500",
-          },
-        ]}
-      >
-        {label}
-      </Text>
+      <Text style={[styles.segBtnText, { color: selected ? colors.foreground : colors.muted, fontFamily: selected ? font.semibold : font.medium }]}>{label}</Text>
     </Pressable>
   )
 }
 
-function KvRowEdit({
-  label,
-  value,
-  onChange,
-  colors,
-  mono,
-  numeric,
-  placeholder,
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  colors: { foreground: string; muted: string; raised: string; line: string; faint: string }
-  mono?: boolean
-  numeric?: boolean
-  placeholder?: string
-}) {
+/** The value side of a "How the target runs" row: an input that reads like the design's muted value text. */
+function RunInput({ value, onChange, placeholder, mono, numeric }: { value: string; onChange: (v: string) => void; placeholder: string; mono?: boolean; numeric?: boolean }) {
+  const { colors } = useTheme()
   return (
-    <View style={[styles.kvRow, { borderBottomColor: colors.line }]}>
-      <Text style={[styles.kvLabel, { color: colors.muted }]}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChange}
-        placeholder={placeholder ?? label}
-        placeholderTextColor={colors.faint}
-        style={[styles.kvValue, mono && styles.kvValueMono, numeric && styles.kvValueNumeric, { color: colors.foreground }]}
-        autoCapitalize="none"
-        keyboardType={numeric ? "numeric" : "default"}
-      />
-    </View>
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor={colors.muted}
+      style={[styles.runInput, mono && styles.runInputMono, { color: colors.muted }]}
+      autoCapitalize="none"
+      autoCorrect={false}
+      keyboardType={numeric ? "numeric" : "default"}
+    />
   )
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
-  card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  cardPick: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4, marginTop: 8 },
-  reportCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4, padding: 0 },
-  segContainer: { paddingHorizontal: 16, paddingVertical: 12 },
-  seg: {
-    flexDirection: "row",
-    borderRadius: 24,
-    padding: 2,
-    gap: 2,
-  },
-  segBtn: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  segBtnText: {
-    fontSize: 14,
-    letterSpacing: 0,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  filePickerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 18,
-  },
-  filePickerMain: { flex: 1, minWidth: 0 },
-  filePickerTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  filePickerSubtitle: { fontSize: 13, marginTop: 3 },
-  imageInputs: { paddingHorizontal: 16, gap: 16, marginBottom: 4 },
-  fieldGroup: { gap: 6 },
-  lbl: { fontSize: 13, fontWeight: "600", lineHeight: 18 },
-  field: {
-    minHeight: 52,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 16,
-    fontSize: 17,
-    lineHeight: 22,
-  },
-  fieldMono: {
-    fontFamily: "GeistMono",
-    fontSize: 15,
-  },
-  area: {
-    minHeight: 92,
-    borderRadius: 0,
-    borderWidth: 0,
-    paddingHorizontal: 18,
-    paddingTop: 14,
-    fontSize: 17,
-    lineHeight: 22,
-  },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
-  kvRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 16,
-    minHeight: 56,
-    paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  kvValue: { fontSize: 17, textAlign: "right", flexShrink: 1, paddingVertical: 10 },
-  kvValueMono: { fontFamily: "GeistMono", fontSize: 15 },
-  kvValueNumeric: { width: 80, textAlign: "right" },
-  fbar: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 30,
-    flexDirection: "row",
-    gap: 6,
-    padding: 6,
-    borderRadius: 36,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  btn: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 22,
-    // backgroundColor moved to inline style below (theme token)
-  },
-  btnText: { fontSize: 17, fontWeight: "600" },
+  scrollContent: { paddingBottom: 150 },
+  sect: { marginBottom: 28 },
+  segWrap: { paddingHorizontal: 16 },
+  panel: { paddingTop: 12 },
+  seg: { flexDirection: "row", borderRadius: 24, padding: 2, gap: 2 },
+  segBtn: { flex: 1, minHeight: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  segBtnText: { fontSize: 15, lineHeight: 15 },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  imageInputs: { paddingHorizontal: 16 },
+  lbl: { fontFamily: font.semibold, fontSize: 15, lineHeight: 15, paddingTop: 20, paddingBottom: 10, paddingHorizontal: 4 },
+  field: { minHeight: 52, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 14, fontFamily: font.regular, fontSize: 17, lineHeight: 23.8 },
+  fieldMono: { fontFamily: font.mono, fontSize: 15 },
+  area: { height: 92, minHeight: 92 },
+  imageNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingTop: 10, paddingLeft: 4 },
+  runInput: { flex: 1, padding: 0, marginTop: -1.5, fontFamily: font.regular, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187, textAlign: "right" },
+  runInputMono: { fontFamily: font.mono, fontSize: 14, lineHeight: 21, letterSpacing: 0 },
+  error: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingTop: 10, paddingHorizontal: 20 },
+  fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: 1 },
+  btn: { flex: 1 },
 })

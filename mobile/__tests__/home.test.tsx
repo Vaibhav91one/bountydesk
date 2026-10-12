@@ -5,7 +5,7 @@
 import React from "react"
 import { render, fireEvent } from "@testing-library/react-native"
 
-import HomeScreen from "../app/(tabs)/index"
+import HomeScreen, { activeRows, sortNeedsYou } from "../app/(tabs)/index"
 import type { HomeSummary, QueueColumnView } from "@/lib/types"
 import type { PhaseKey } from "@/lib/phases"
 
@@ -79,9 +79,8 @@ jest.mock("@/components/primitives", () => {
     PhasePill: ({ phase, children }: { phase: string; children?: React.ReactNode }) => (
       <RNView><RNText>PhasePill:{phase}</RNText>{children ? <RNText>{children}</RNText> : null}</RNView>
     ),
-    SectionHeader: ({ title, count }: { title: string; count?: number }) => (
-      <RNView><RNText>{title}</RNText>{count !== undefined ? <RNText>{count}</RNText> : null}</RNView>
-    ),
+    phaseLabel: (phase: string) => phase,
+    TOP_INSET: 116,
     Card: ({ children }: { children: React.ReactNode }) => (
       <RNView>{children}</RNView>
     ),
@@ -292,10 +291,9 @@ describe("M4 Home", () => {
     jest.useRealTimers()
   })
 
-  it("renders the home header with counts", async () => {
-    const { getByText } = await render(<HomeScreen />)
-    expect(getByText("Home")).toBeTruthy()
-    expect(getByText("12 total reports · 9 open")).toBeTruthy()
+  it("has no title block: m4 opens straight on its sections", async () => {
+    const { queryByText } = await render(<HomeScreen />)
+    expect(queryByText("Home")).toBeNull()
   })
 
   it("renders the awaiting needs-you card with title and Not reproduced pill", async () => {
@@ -368,5 +366,32 @@ describe("M4 Home", () => {
     const { getByText, queryByText } = await render(<HomeScreen />)
     expect(getByText("queue unavailable")).toBeTruthy()
     expect(queryByText("Nothing needs you")).toBeNull()
+  })
+})
+
+describe("home ordering", () => {
+  const card = (id: string, state: string, updatedAt: string, extra: Record<string, unknown> = {}) =>
+    ({ id, state, updatedAt, investigating: false, severity: null, ...extra }) as never
+
+  it("lists active reports by phase, longest waiting first, running ones last", () => {
+    const rows = activeRows([
+      card("tri-new", "TRIAGING", "2026-08-26T11:55:00Z"),
+      card("running", "REPRODUCING", "2026-08-26T11:58:00Z", { investigating: true }),
+      card("tri-old", "TRIAGING", "2026-08-25T11:00:00Z"),
+      card("analysis", "ANALYSIS_ONLY", "2026-08-26T09:00:00Z"),
+      card("repro", "REPRODUCING", "2026-08-26T11:00:00Z"),
+    ])
+    expect(rows.map((r: { id: string }) => r.id)).toEqual(["repro", "analysis", "tri-old"])
+  })
+
+  it("sorts needs-you by severity, newest first within a severity", () => {
+    const cards = [
+      card("low", "AWAITING_APPROVAL", "2026-08-26T11:50:00Z", { severity: "low" }),
+      card("none", "AWAITING_APPROVAL", "2026-08-26T11:59:00Z"),
+      card("high-old", "AWAITING_APPROVAL", "2026-08-26T10:00:00Z", { severity: "high" }),
+      card("high-new", "AWAITING_APPROVAL", "2026-08-26T11:00:00Z", { severity: "high" }),
+    ]
+    expect(sortNeedsYou(cards, "severity").map((c: { id: string }) => c.id)).toEqual(["high-new", "high-old", "low", "none"])
+    expect(sortNeedsYou(cards, "newest").map((c: { id: string }) => c.id)).toEqual(["none", "low", "high-new", "high-old"])
   })
 })

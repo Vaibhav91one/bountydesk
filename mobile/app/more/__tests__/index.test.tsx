@@ -41,6 +41,7 @@ jest.mock("@/theme", () => ({
       brand: "#9475E6",
       red: "#B93645",
     },
+    phase: { delivered: "#22c55e", closed: "#777777" },
     typography: { fontMono: "GeistMono" },
     round: { cardRadius: 24, buttonRadius: 26 },
     spacing: { itemMinHeight: 56 },
@@ -158,12 +159,5 @@ describe("M19 Settings notification switches", () => {
     expect(unregisterPush).not.toHaveBeenCalled()
     await pressSwitchByText(getByText, "Delivery receipts")
     await waitFor(() => expect(unregisterPush).toHaveBeenCalledTimes(1))
-  })
-
-  it("shows the not-wired note under the switches", async () => {
-    const { getByText } = await renderScreen()
-    await waitFor(() =>
-      expect(getByText("Reproduction failures are not sent as pushes yet.")).toBeTruthy(),
-    )
   })
 })

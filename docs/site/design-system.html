@@ -68,13 +68,12 @@ const desktopTree = {c:'Design system', n:'Tokens, type, color, mascot\nDark is 
   ]},
 ]};
 const mobileTree = {c:'Design system (mobile)', n:'PROPOSED, NOT BUILT\nVariant C, iOS and Android only\nTokens from screens/c.css', root:true, mid:true, wrap:3, k:[
-  {c:'Color tokens', n:'Brand, phase and destructive match desktop\nSurfaces are a touch lighter in dark\nDark by default, ?theme=light flips them', side:-1, cls:'ref', k:[
-    {c:'Surface', n:'dark  bg 0.145, card 0.178 with a 10% hairline, raised 0.269\nlight bg 0.965, card 1, raised 0.94\nsame card and border as desktop', h:sw('oklch(0.145 0 0)', 'oklch(0.178 0 0)', 'oklch(0.269 0 0)', 'oklch(0.965 0 0)', 'oklch(1 0 0)')},
-    {c:'Ink', n:'dark  fg 0.985, muted 0.72, faint 0.56\nlight fg 0.145, muted 0.5, faint 0.62', h:sw('oklch(0.985 0 0)', 'oklch(0.72 0 0)', 'oklch(0.56 0 0)', 'oklch(0.145 0 0)', 'oklch(0.5 0 0)')},
-    {c:'Brand and destructive', n:'brand oklch(0.585 0.233 277.117)\nbrand-soft 0.785 0.115 274.713 (dark), 0.457 0.24 277 (light)\nred 0.704 0.191 22.216 (dark), 0.577 0.245 27.325 (light)', h:sw('oklch(0.585 0.233 277.117)', 'oklch(0.785 0.115 274.713)', 'oklch(0.704 0.191 22.216)', 'oklch(0.577 0.245 27.325)')},
-    {c:'Phase hues, dark', n:'triaging, reproducing, analysis,\napproval, delivered, closed', h:sw('oklch(0.7 0.15 250)', 'oklch(0.75 0.13 195)', 'oklch(0.72 0.18 330)', 'oklch(0.8 0.15 75)', 'oklch(0.72 0.16 150)', 'oklch(0.55 0 0)')},
-    {c:'Phase hues, light', n:'Darker inks so the pill label reads:\ntriaging 0.52, reproducing 0.55, analysis 0.53,\napproval 0.62, delivered 0.52, closed 0.55', h:sw('oklch(0.52 0.17 250)', 'oklch(0.55 0.13 195)', 'oklch(0.53 0.2 330)', 'oklch(0.62 0.15 75)', 'oklch(0.52 0.15 150)', 'oklch(0.55 0 0)')},
-    {c:'Android tonal', n:'Material 3 tonal surface under the glass pills\ndark  tonal 0.3 0.03 277, active 0.42 0.09 277\nlight tonal 0.92 0.03 277, active 0.84 0.07 277', h:sw('oklch(0.3 0.03 277)', 'oklch(0.42 0.09 277)', 'oklch(0.92 0.03 277)', 'oklch(0.84 0.07 277)')},
+  {c:'Color tokens', n:'Brand, phase and destructive match desktop\nSurfaces are a touch lighter in dark\nDark only on mobile', side:-1, cls:'ref', k:[
+    {c:'Surface', n:'bg 0.145, card 0.178 with a 10% hairline, raised 0.269\nsame card and border as desktop', h:sw('oklch(0.145 0 0)', 'oklch(0.178 0 0)', 'oklch(0.269 0 0)')},
+    {c:'Ink', n:'fg 0.985, muted 0.72, faint 0.56', h:sw('oklch(0.985 0 0)', 'oklch(0.72 0 0)', 'oklch(0.56 0 0)')},
+    {c:'Brand and destructive', n:'brand oklch(0.585 0.233 277.117)\nbrand-soft 0.785 0.115 274.713\nred 0.704 0.191 22.216', h:sw('oklch(0.585 0.233 277.117)', 'oklch(0.785 0.115 274.713)', 'oklch(0.704 0.191 22.216)')},
+    {c:'Phase hues', n:'triaging, reproducing, analysis,\napproval, delivered, closed', h:sw('oklch(0.7 0.15 250)', 'oklch(0.75 0.13 195)', 'oklch(0.72 0.18 330)', 'oklch(0.8 0.15 75)', 'oklch(0.72 0.16 150)', 'oklch(0.55 0 0)')},
+    {c:'Android tonal', n:'Material 3 tonal surface under the glass pills\ntonal 0.3 0.03 277, active 0.42 0.09 277', h:sw('oklch(0.3 0.03 277)', 'oklch(0.42 0.09 277)')},
   ]},
   {c:'Type scale', n:'Inter, Geist Mono for ids and hashes\nAll sizes in rem, so Large text (root 125%) scales them', side:-1, cls:'ref', k:[
     {c:'Screen title', n:'1.75rem (28), 700, tracking -0.03em\nBody is 1.0625rem (17)', h:typeSample('font:700 28px Inter,sans-serif;letter-spacing:-.03em', 'Queue')},

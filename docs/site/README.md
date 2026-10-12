@@ -12,7 +12,7 @@ work starts. The tracking issue for building it is linked from the PR that added
 
 - `mvp-mindmap.html` is the mobile app flow, all 28 screens grouped by journey.
 - `prototype.html` shows every screen on iOS and Android side by side. A tap in either phone moves
-  both. It has toggles for light theme, large text, a screen reader view and a touch target check,
+  both. It has toggles for large text, a screen reader view and a touch target check,
   and buttons that play the back swipe, sheet, pull to refresh, long press and push notification.
 - `screens/` holds the screens (`m1.html` to `m28.html`) and their shared kit: `c.css` for the
   components, `c.js` for the behaviour, `platform.js` and `embed.*` for the prototype.

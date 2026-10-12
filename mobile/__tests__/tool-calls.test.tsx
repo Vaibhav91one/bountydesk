@@ -69,9 +69,11 @@ jest.mock("@/theme", () => ({
 jest.mock("@/components/primitives", () => {
   const { View: RNView, Text: RNText } = require("react-native")
   return {
-    ScreenHeader: ({ title, meta, back }: { title: string; meta?: string; back?: boolean }) => (
-      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}{back ? <RNText>Back</RNText> : null}</RNView>
+    ScreenHeader: ({ back }: { back?: boolean }) => <RNView>{back ? <RNText>Back</RNText> : null}</RNView>,
+    ScreenTitle: ({ title, meta }: { title: string; meta?: string }) => (
+      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}</RNView>
     ),
+    PhasePill: ({ label }: { label?: string }) => <RNText>{label}</RNText>,
     EmptyState: ({ heading, body }: { heading: string; body?: string }) => (
       <RNView><RNText>{heading}</RNText>{body ? <RNText>{body}</RNText> : null}</RNView>
     ),
@@ -141,7 +143,7 @@ describe("M9 Tool calls", () => {
     mockQueryData["/reports/report-1"] = { data: SAMPLE_REPORT }
     const { getByText, getAllByText } = await render(<ToolCallsScreen />)
     expect(getByText("Tool calls")).toBeTruthy()
-    expect(getByText(/report-1 · 6 calls/)).toBeTruthy()
+    expect(getByText(/github · 6 calls/)).toBeTruthy()
     expect(getByText("Investigation")).toBeTruthy()
     expect(getByText("Human gate")).toBeTruthy()
     // Tool names
@@ -175,7 +177,7 @@ describe("M9 Tool calls", () => {
     mockQueryData["/reports/report-1"] = { data: reportWithDenial }
     const { getByText, getAllByText } = await render(<ToolCallsScreen />)
     // 4 actual calls (scope_check + 2 probe_target + publish_verdict), denial excluded
-    expect(getByText(/report-1 · 4 calls/)).toBeTruthy()
+    expect(getByText(/github · 4 calls/)).toBeTruthy()
     expect(getByText("Denied")).toBeTruthy()
   })
 

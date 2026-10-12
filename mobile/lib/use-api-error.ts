@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "./auth-hooks"
 import { useCallback } from "react"
 
 import { ApiError } from "./api"

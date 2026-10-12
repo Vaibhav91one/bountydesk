@@ -70,9 +70,11 @@ jest.mock("@/theme", () => ({
 jest.mock("@/components/primitives", () => {
   const { View: RNView, Text: RNText } = require("react-native")
   return {
-    ScreenHeader: ({ title, meta, back }: { title: string; meta?: string; back?: boolean }) => (
-      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}{back ? <RNText>Back</RNText> : null}</RNView>
+    ScreenHeader: ({ back }: { back?: boolean }) => <RNView>{back ? <RNText>Back</RNText> : null}</RNView>,
+    ScreenTitle: ({ title, meta }: { title: string; meta?: string }) => (
+      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}</RNView>
     ),
+    PhasePill: ({ label }: { label?: string }) => <RNText>{label}</RNText>,
     EmptyState: ({ heading, body }: { heading: string; body?: string }) => (
       <RNView><RNText>{heading}</RNText>{body ? <RNText>{body}</RNText> : null}</RNView>
     ),
@@ -130,7 +132,7 @@ describe("M8 Timeline", () => {
     // Header
     expect(getByText("Timeline")).toBeTruthy()
     // Meta line
-    expect(getByText(/report-1 · 4 events/)).toBeTruthy()
+    expect(getByText("github · 4 events in 39 s")).toBeTruthy()
     // Event labels derived from type
     expect(getByText("Received")).toBeTruthy()
     expect(getByText("Session created")).toBeTruthy()
@@ -138,6 +140,22 @@ describe("M8 Timeline", () => {
     expect(getByText("Probe")).toBeTruthy()
     // Footnote
     expect(getByText(/Times are UTC/)).toBeTruthy()
+  })
+
+  it("labels parsed and approval-requested events and words the span", async () => {
+    mockQueryData["/reports/report-1"] = {
+      data: {
+        ...SAMPLE_REPORT,
+        events: [
+          { seq: 1, type: "intake.parsed", channel: "intake", at: "2026-01-01T09:14:03Z", toolName: null, argsPreview: null },
+          { seq: 2, type: "approval.requested", channel: "approval", at: "2026-01-01T09:16:22Z", toolName: null, argsPreview: null },
+        ],
+      },
+    }
+    const { getByText } = await render(<TimelineScreen />)
+    expect(getByText("Parsed")).toBeTruthy()
+    expect(getByText("Awaiting approval")).toBeTruthy()
+    expect(getByText("github · 2 events in 2 min 19 s")).toBeTruthy()
   })
 
   it("renders an empty state when there are no events", async () => {

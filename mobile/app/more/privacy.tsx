@@ -5,18 +5,19 @@
  */
 import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useTheme } from "@/theme"
-import { ScreenHeader } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle } from "@/components/primitives"
+import { BottomFade } from "@/components/CaseUi"
+import { font } from "@/lib/fonts"
 
 export default function PrivacyScreen() {
   const { colors } = useTheme()
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Privacy" back backLabel="Settings" />
+      <ScreenHeader back backLabel="Settings" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Privacy</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Last updated September 2026</Text>
+        <ScreenTitle title="Privacy" meta="Last updated September 2026" metaBottom={21.3} />
 
         <View style={styles.article}>
           <Text style={[styles.lead, { color: colors.foreground }]}>
@@ -30,7 +31,7 @@ export default function PrivacyScreen() {
 
           <Text style={[styles.h2, { color: colors.foreground }]}>What the system stores</Text>
           <Text style={[styles.p, { color: colors.foreground }]}>
-            It keeps the reports it is sent and their evidence, the reporter contact address it needs to deliver a verdict by email, the GitHub account, installation, and repository metadata it receives through the GitHub App, the target configuration it is authorized to touch, the raw inbound webhook and email payloads, processing errors, the verdict and delivery text a reviewer approves, the delivery provider's response to each attempt, and a step-by-step log of each agent session.
+            It keeps the reports it is sent and their evidence, the reporter contact address it needs to deliver a verdict by email, the GitHub account, installation, and repository metadata it receives through the GitHub App, the target configuration it is authorized to touch, the raw inbound webhook and email payloads, processing errors, the verdict and delivery text a reviewer approves, the delivery provider’s response to each attempt, and a step-by-step log of each agent session.
           </Text>
 
           <Text style={[styles.h2, { color: colors.foreground }]}>GitHub access</Text>
@@ -45,7 +46,7 @@ export default function PrivacyScreen() {
 
           <Text style={[styles.h2, { color: colors.foreground }]}>Contact</Text>
           <Text style={[styles.p, { color: colors.foreground }]}>
-            BountyDesk is developed in the open at github.com/Vaibhav91one/bountydesk. Open an issue there with any question about your data or the project.
+            BountyDesk is developed in the open at <Text style={{ color: colors["brand-soft"] }}>github.com/Vaibhav91one/bountydesk</Text>. Open an issue there with any question about your data or the project.
           </Text>
 
           <Text style={[styles.end, { color: colors.muted }]}>
@@ -53,56 +54,41 @@ export default function PrivacyScreen() {
           </Text>
         </View>
       </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
-    paddingBottom: 40,
-  },
-  h1: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.03 * 28,
-    lineHeight: 32,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  hmeta: {
-    fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingBottom: 150,
   },
   article: {
     paddingHorizontal: 20,
   },
   h2: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
     lineHeight: 24,
-    letterSpacing: -0.02 * 20,
+    letterSpacing: -0.4,
     marginTop: 32,
     marginBottom: 10,
   },
   lead: {
-    fontSize: 17,
-    lineHeight: 26,
+    fontFamily: font.regular, fontSize: 17,
+    lineHeight: 26.35,
     marginTop: 0,
     marginBottom: 0,
     opacity: 0.88,
   },
   p: {
-    fontSize: 17,
-    lineHeight: 26,
+    fontFamily: font.regular, fontSize: 17,
+    lineHeight: 26.35,
     opacity: 0.88,
     marginBottom: 0,
   },
   end: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
+    lineHeight: 17.55,
     marginTop: 32,
   },
 })

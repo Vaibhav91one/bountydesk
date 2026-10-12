@@ -20,8 +20,12 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
-import { Card, SectionHeader, ScreenHeader, ToastProvider } from "@/components/primitives"
+import { PhasePill, PrimaryButton, ScreenHeader, ToastProvider, ScreenTitle, phaseTint } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
+import { font } from "@/lib/fonts"
 
 // The Install button opens the web app's Connections page in the system
 // browser. That page holds the real GitHub App install link; the mobile
@@ -31,21 +35,17 @@ const CONNECTIONS_URL = `${process.env.EXPO_PUBLIC_API_BASE}/connections`
 function InstallRow({ title, subtitle, onPress }: { title: string; subtitle: string; onPress: () => void }) {
   const { colors } = useTheme()
   return (
-    <Pressable
-      onPress={onPress}
-      style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-      accessibilityLabel={title}
-    >
-      <View style={styles.installRow}>
-        <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
-          <Icon name="github" size={20} stroke={colors.foreground} />
-        </View>
-        <View style={styles.installMain}>
-          <Text style={[styles.installTitle, { color: colors.foreground }]}>{title}</Text>
-          <Text style={[styles.installSubtitle, { color: colors.muted }]}>{subtitle}</Text>
-        </View>
-        <Icon name="chev" size={18} stroke={colors.faint} />
-      </View>
+    <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]} accessibilityLabel={title}>
+      <ItemLine
+        title={title}
+        subtitle={subtitle}
+        leading={
+          <View style={[styles.avatar, { backgroundColor: colors.brand + "38" }]}>
+            <Icon name="github" size={20} stroke={colors["brand-soft"]} />
+          </View>
+        }
+        trailing={<Icon name="chev" size={18} stroke={colors.faint} />}
+      />
     </Pressable>
   )
 }
@@ -84,123 +84,89 @@ export default function ConnectionsScreen() {
   return (
     <ToastProvider>
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="Connections" back backLabel="Settings" />
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <Text style={[styles.h1, { color: colors.foreground }]}>Connections</Text>
-          <Text style={[styles.hmeta, { color: colors.muted }]}>
-            GitHub App installations and their repositories
-          </Text>
+        <ScreenHeader back backLabel="Settings" />
+        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <ScreenTitle title="Connections" meta="GitHub App installations and their repositories" metaBottom={24} />
 
-          {/* Installation header */}
-          <SectionHeader title="Installation" chevron={false} />
-          <Card style={styles.card}>
-            {accounts.length === 0 ? (
-              <InstallRow title="GitHub App not installed" subtitle="Install it to connect repositories" onPress={handleInstall} />
-            ) : (
-              accounts.map(({ account, count }) => (
-                <InstallRow
-                  key={account}
-                  title={account}
-                  subtitle={`GitHub App installed · ${count} ${count === 1 ? "repository" : "repositories"}`}
-                  onPress={handleInstall}
-                />
-              ))
-            )}
-          </Card>
+          <View style={styles.sect}>
+            <SectionHead title="Installation" />
+            <ListCard>
+              {accounts.length === 0 ? (
+                <InstallRow title="GitHub App not installed" subtitle="Install it to connect repositories" onPress={handleInstall} />
+              ) : (
+                accounts.map(({ account, count }) => (
+                  <InstallRow
+                    key={account}
+                    title={account}
+                    subtitle={`GitHub App installed · ${count} ${count === 1 ? "repository" : "repositories"}`}
+                    onPress={handleInstall}
+                  />
+                ))
+              )}
+            </ListCard>
+          </View>
 
-          {/* Repositories */}
-          <SectionHeader title="Repositories" chevron={false} />
-          <Card style={styles.card}>
-            {rows && rows.length > 0 ? (
-              rows.map((row) => (
-                <RepoRow
-                  key={row.id}
-                  row={row}
-                  onPress={() => router.push(`/more/connections/${row.repoId}`)}
-                />
-              ))
-            ) : (
-              <View style={[styles.emptyRow, { backgroundColor: colors.card }]}>
-                <Text style={[styles.emptyText, { color: colors.muted }]}>No repositories connected</Text>
-              </View>
-            )}
-          </Card>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            Reproduction needs a bound target. A repository without one stops at analysis only.
-          </Text>
+          <View style={styles.sect}>
+            <SectionHead title="Repositories" />
+            <ListCard>
+              {rows && rows.length > 0 ? (
+                rows.map((row, i) => (
+                  <RepoRow key={row.id} row={row} divider={i > 0} onPress={() => router.push(`/more/connections/${row.repoId}`)} />
+                ))
+              ) : (
+                <View style={styles.emptyRow}>
+                  <Text style={[styles.emptyText, { color: colors.muted }]}>No repositories connected</Text>
+                </View>
+              )}
+            </ListCard>
+            <Note>Reproduction needs a bound target. A repository without one stops at analysis only.</Note>
+          </View>
 
-          {/* Targets */}
-          <SectionHeader title="Targets" chevron={false} />
-          <Card style={styles.card}>
-            {onboardingRepo ? (
-              <>
+          <View style={styles.sect}>
+            <SectionHead title="Targets" />
+            <ListCard>
+              {onboardingRepo ? (
                 <TargetLink
-                  icon="cube"
                   title="View onboarding"
-                  subtitle={onboardingRepo.fullName}
+                  subtitle="How a repository becomes a bound target"
                   onPress={() => router.push(`/more/connections/${onboardingRepo.repoId}/onboarding`)}
                 />
-                <View style={[styles.divider, { backgroundColor: colors.line }]} />
-              </>
-            ) : null}
-            <TargetLink
-              icon="upload"
-              title="Upload a target"
-              subtitle="Archive, Dockerfile or prebuilt image"
-              onPress={() => router.push("/more/submit-a-target")}
-            />
-          </Card>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            Least privilege: Metadata, Issues and Repository security advisories. Contents read is
-            added only for private repositories.
-          </Text>
+              ) : null}
+              <TargetLink
+                title="Upload a target"
+                subtitle="Archive, Dockerfile or prebuilt image"
+                divider={!!onboardingRepo}
+                onPress={() => router.push("/more/submit-a-target")}
+              />
+            </ListCard>
+          </View>
+          <View style={{ marginTop: -10 }}>
+            <Note>Least privilege: Metadata, Issues and Repository security advisories. Contents read is added only for private repositories.</Note>
+          </View>
         </ScrollView>
 
-        {/* Footer: Install GitHub App button */}
-        <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-          <Pressable
-            onPress={handleInstall}
-            style={({ pressed }) => [styles.btn, { backgroundColor: colors.brand, opacity: pressed ? 0.92 : 1 }]}
-            accessibilityLabel="Install GitHub App"
-          >
-            <Text style={[styles.btnText, { color: colors.foreground }]}>Install GitHub App</Text>
-          </Pressable>
+        <BottomFade />
+        <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
+          <PrimaryButton title="Install GitHub App" onPress={handleInstall} style={styles.btn} />
         </View>
       </View>
     </ToastProvider>
   )
 }
 
-function RepoRow({ row, onPress }: { row: ConnectionRow; onPress: () => void }) {
-  const { colors, phase } = useTheme()
-  const pill = repoStatusPill(row, colors, phase)
+function RepoRow({ row, divider, onPress }: { row: ConnectionRow; divider: boolean; onPress: () => void }) {
+  const pill = repoStatusPill(row)
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}>
-      <View style={[styles.repoRow, { borderBottomColor: colors.line }]}>
-        <View style={styles.repoMain}>
-          <Text style={[styles.repoTitle, { color: colors.foreground }]}>{row.name}</Text>
-          <Text style={[styles.repoSubtitle, { color: colors.muted }]}>{repoStatusHint(row)}</Text>
-        </View>
-        <StatusPill label={pill.label} color={pill.color} />
-        <Icon name="chev" size={18} stroke={colors.faint} />
-      </View>
+      <ItemLine title={row.name} subtitle={repoStatusHint(row)} divider={divider} trailing={pill} />
     </Pressable>
   )
 }
 
-function repoStatusPill(
-  row: ConnectionRow,
-  colors: { red: string },
-  phase: { delivered: string; closed: string },
-): { label: string; color: string } {
-  if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected")
-    return { label: "Policy refused", color: colors.red }
-  if (row.configured) return { label: "Target bound", color: phase.delivered }
-  return { label: "No target", color: phase.closed }
+function repoStatusPill(row: ConnectionRow) {
+  if (row.status === "suspended" || row.status === "archived" || row.status === "disconnected") return <RedPill label="Policy refused" />
+  if (row.configured) return <PhasePill phase="delivered" label="Target bound" />
+  return <PhasePill phase="closed" label="No target" />
 }
 
 function repoStatusHint(row: ConnectionRow): string {
@@ -220,121 +186,37 @@ function repoStatusHint(row: ConnectionRow): string {
   }
 }
 
-function StatusPill({ label, color }: { label: string; color: string }) {
-  const tint = color + "29"
+function RedPill({ label }: { label: string }) {
+  const { colors } = useTheme()
   return (
-    <View style={[styles.pill, { backgroundColor: tint, borderColor: tint }]}>
-      <View style={[styles.pillDot, { backgroundColor: color }]} />
-      <Text style={[styles.pillLabel, { color }]}>{label}</Text>
+    <View style={[styles.pill, { backgroundColor: phaseTint(colors.red) }]}>
+      <View style={[styles.pillDot, { backgroundColor: colors.red }]} />
+      <Text style={[styles.pillLabel, { color: colors.red }]}>{label}</Text>
     </View>
   )
 }
 
-function TargetLink({
-  icon,
-  title,
-  subtitle,
-  onPress,
-}: {
-  icon: string
-  title: string
-  subtitle: string
-  onPress: () => void
-}) {
+function TargetLink({ title, subtitle, divider, onPress }: { title: string; subtitle: string; divider?: boolean; onPress: () => void }) {
   const { colors } = useTheme()
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}>
-      <View style={styles.targetLink}>
-        <View style={[styles.avatar, { backgroundColor: colors.fill }]}>
-          <Icon name={icon as any} size={20} stroke={colors.foreground} />
-        </View>
-        <View style={styles.targetLinkMain}>
-          <Text style={[styles.repoTitle, { color: colors.foreground }]}>{title}</Text>
-          <Text style={[styles.repoSubtitle, { color: colors.muted }]}>{subtitle}</Text>
-        </View>
-        <Icon name="chev" size={18} stroke={colors.faint} />
-      </View>
+      <ItemLine title={title} subtitle={subtitle} divider={divider} trailing={<Icon name="chev" size={18} stroke={colors.faint} />} />
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
-  card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  installRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 18,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  installMain: { flex: 1, minWidth: 0 },
-  installTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  installSubtitle: { fontSize: 13, marginTop: 3 },
-  repoRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  repoMain: { flex: 1, minWidth: 0 },
-  repoTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  repoSubtitle: { fontSize: 13, marginTop: 3 },
-  pill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 99,
-  },
+  scrollContent: { paddingBottom: 150 },
+  sect: { marginBottom: 28 },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  pill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 99 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
-  pillLabel: { fontSize: 13, fontWeight: "600", lineHeight: 14 },
-  targetLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingHorizontal: 18,
-  },
-  targetLinkMain: { flex: 1, minWidth: 0 },
-  divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 18 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
+  pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 13 },
   emptyRow: { minHeight: 56, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
-  emptyText: { fontSize: 15 },
-  fbar: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 30,
-    flexDirection: "row",
-    gap: 6,
-    padding: 6,
-    borderRadius: 36,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  btn: {
-    flex: 1,
-    minHeight: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 22,
-    // backgroundColor moved to inline style below (theme token)
-  },
-  btnText: { fontSize: 17, fontWeight: "600" },
+  emptyText: { fontFamily: font.regular, fontSize: 15 },
+  fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: 1 },
+  btn: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

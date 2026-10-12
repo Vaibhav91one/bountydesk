@@ -10,9 +10,12 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { IntegrationRow, EmailReviewer } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, PhasePill } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
+import { font } from "@/lib/fonts"
 
 // Maps integration id to the c.js icon name.
 const INTEGRATION_ICONS: Record<string, IconName> = {
@@ -21,6 +24,9 @@ const INTEGRATION_ICONS: Record<string, IconName> = {
   upload: "upload",
 }
 
+// The status pill is design copy per channel; the server's action label is a link caption ("Manage").
+const STATUS_LABELS: Record<string, string> = { email: "Active", github: "Connected" }
+
 const INTEGRATION_LABELS: Record<string, string> = {
   email: "Email",
   github: "GitHub",
@@ -28,8 +34,7 @@ const INTEGRATION_LABELS: Record<string, string> = {
 }
 
 export default function IntegrationsScreen() {
-  const theme = useTheme()
-  const { colors } = theme
+  const { colors } = useTheme()
   const router = useRouter()
   const integrations = useApiQuery<IntegrationRow[]>("/integrations")
   const emailReviewers = useApiQuery<EmailReviewer[]>("/integrations/email")
@@ -42,7 +47,7 @@ export default function IntegrationsScreen() {
   if (integrations.error) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ color: colors.red, fontSize: 16, textAlign: "center" }}>{integrations.error.message}</Text>
+        <Text style={{ color: colors.red, fontFamily: font.regular, fontSize: 16, textAlign: "center" }}>{integrations.error.message}</Text>
       </View>
     )
   }
@@ -67,146 +72,37 @@ export default function IntegrationsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Integrations" back backLabel="Settings" />
+      <ScreenHeader back backLabel="Settings" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Integrations</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Where reports come in and verdicts go out</Text>
+        <ScreenTitle title="Integrations" meta="Where reports come in and verdicts go out" metaBottom={24} />
 
-        <View style={styles.section}>
-          <View style={styles.sh}>
-            <Text style={[styles.shText, { color: colors.foreground }]}>Channels</Text>
-          </View>
-          <Card style={styles.list}>
-            {items.map((integration) => {
-              const iconName = INTEGRATION_ICONS[integration.id] ?? "mail"
-              const label = integration.installed ? "Connected" : "Not configured"
-              const pillColor = integration.installed ? theme.phase.delivered : theme.phase.closed
-              return (
-                <Pressable
-                  key={integration.id}
-                  onPress={() => handlePress(integration)}
-                  style={[styles.item, { backgroundColor: colors.card }]}
-                >
-                  <View style={styles.rowLeading}>
-                    <Icon name={iconName} size={20} stroke={colors.muted} />
+        <SectionHead title="Channels" />
+        <ListCard>
+          {items.map((integration, i) => (
+            <Pressable key={integration.id} onPress={() => handlePress(integration)} accessibilityRole="button" accessibilityLabel={INTEGRATION_LABELS[integration.id] ?? integration.name}>
+              <ItemLine
+                divider={i > 0}
+                title={INTEGRATION_LABELS[integration.id] ?? integration.name}
+                subtitle={subtitle(integration)}
+                leading={
+                  <View style={[styles.avatar, { backgroundColor: colors.brand + "38" }]}>
+                    <Icon name={INTEGRATION_ICONS[integration.id] ?? "mail"} size={20} stroke={colors["brand-soft"]} />
                   </View>
-                  <View style={styles.main}>
-                    <Text style={[styles.itemT, { color: colors.foreground }]}>{INTEGRATION_LABELS[integration.id] ?? integration.name}</Text>
-                    <Text style={[styles.itemS, { color: colors.muted }]}>{subtitle(integration)}</Text>
-                  </View>
-                  <View style={styles.rowTrailing}>
-                    <View style={[styles.pill, { backgroundColor: pillColor + "29" }]}>
-                      <View style={[styles.pillDot, { backgroundColor: pillColor }]} />
-                      <Text style={[styles.pillLabel, { color: pillColor }]}>{label}</Text>
-                    </View>
-                  </View>
-                </Pressable>
-              )
-            })}
-          </Card>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            Each channel is independent. Email and upload need no GitHub connection to create and triage a report.
-          </Text>
-        </View>
+                }
+                trailing={<PhasePill phase={integration.installed ? "delivered" : "closed"} label={integration.installed ? (STATUS_LABELS[integration.id] ?? "Connected") : "Not configured"} />}
+              />
+            </Pressable>
+          ))}
+        </ListCard>
+        <Note>Each channel is independent. Email and upload need no GitHub connection to create and triage a report.</Note>
       </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingTop: 62,
-    paddingBottom: 40,
-  },
-  h1: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.03 * 28,
-    lineHeight: 32,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  hmeta: {
-    fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  section: {
-    marginBottom: 28,
-  },
-  sh: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-  },
-  shText: {
-    fontSize: 20,
-    fontWeight: "600",
-    lineHeight: 24,
-  },
-  list: {
-    marginHorizontal: 16,
-    borderRadius: 24,
-    overflow: "hidden",
-    padding: 0,
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  rowLeading: {
-    paddingLeft: 0,
-    paddingRight: 12,
-  },
-  main: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemT: {
-    fontSize: 17,
-    fontWeight: "500",
-    lineHeight: 20,
-  },
-  itemS: {
-    fontSize: 13,
-    marginTop: 3,
-  },
-  rowTrailing: {
-    paddingLeft: 12,
-    paddingRight: 0,
-  },
-  pill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 99,
-  },
-  pillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  pillLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    lineHeight: 14,
-  },
-  note: {
-    fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
+  scroll: { paddingBottom: 150 },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
 })

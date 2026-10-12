@@ -7,18 +7,17 @@
  *
  * m3-actions has a 22px gap, margin-top 22px, max-width 300px.
  */
-import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert, Image } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Image } from "react-native"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 
 import { signOutAndClear } from "@/lib/session"
-import { darkTheme, lightTheme } from "@/theme"
+import { darkTheme } from "@/theme"
 
 export default function NotAuthorizedScreen() {
   const router = useRouter()
   const { signOut } = useAuth()
-  const cs = useColorScheme()
-  const t = cs === "dark" ? darkTheme : lightTheme
+  const t = darkTheme
 
   const handleRequestAccess = () => {
     // In c.js: data-toast="Access requested"

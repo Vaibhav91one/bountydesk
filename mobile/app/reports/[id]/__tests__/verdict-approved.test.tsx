@@ -2,6 +2,8 @@ import { render, fireEvent, waitFor } from "@testing-library/react-native"
 
 const sampleCaseFile = {
   id: "BD-1042",
+  sourceLabel: "BD-1042",
+  state: "DELIVERED",
   title: "Stored XSS in search results",
   channel: "github",
   verdict: {
@@ -20,6 +22,8 @@ const sampleCaseFile = {
     transportReceipt: "issue comment 2xx",
   },
 }
+
+jest.mock("../../../../assets/brand/mascot-png/celebrating.png", () => 1, { virtual: true })
 
 const mockRefetch = jest.fn()
 const mockApiQuery = jest.fn()
@@ -95,8 +99,8 @@ describe("M12 Verdict approved", () => {
     expect(getByText("Server crashed")).toBeTruthy()
   })
 
-  it("does not show 'Verdict delivered' when delivery.state is SENT", async () => {
-    setMockData({ ...sampleCaseFile, delivery: { ...sampleCaseFile.delivery, state: "SENT" } })
+  it("shows the in-progress receipt while the report is DELIVERING", async () => {
+    setMockData({ ...sampleCaseFile, state: "DELIVERING", delivery: { ...sampleCaseFile.delivery, state: "SENT" } })
     const { queryByText } = await render(<VerdictApproved />)
 
     expect(queryByText("Verdict delivered")).toBeFalsy()
@@ -105,12 +109,22 @@ describe("M12 Verdict approved", () => {
     expect(queryByText("SENT")).toBeTruthy()
   })
 
-  it("shows 'Verdict delivered' only when delivery.state is DELIVERED", async () => {
-    setMockData({ ...sampleCaseFile, delivery: { ...sampleCaseFile.delivery, state: "DELIVERED" } })
+  it("decides from the report state, not the delivery row: DELIVERED shows the receipt", async () => {
+    setMockData({ ...sampleCaseFile, state: "DELIVERED", delivery: { ...sampleCaseFile.delivery, state: "SENT" } })
     const { queryByText, getAllByText } = await render(<VerdictApproved />)
 
     expect(queryByText("Verdict delivered")).toBeTruthy()
     expect(queryByText("Approved. Delivery in progress")).toBeFalsy()
     expect(getAllByText("issue comment 2xx").length).toBeGreaterThanOrEqual(1) // receipt value shown
+  })
+
+  it("says there is no receipt for a report that was never approved", async () => {
+    setMockData({ ...sampleCaseFile, state: "AWAITING_APPROVAL", delivery: null as any })
+    const { queryByText } = await render(<VerdictApproved />)
+
+    expect(queryByText("Verdict delivered")).toBeFalsy()
+    expect(queryByText("Approved. Delivery in progress")).toBeFalsy()
+    expect(queryByText("No receipt yet")).toBeTruthy()
+    expect(queryByText("Receipt")).toBeFalsy()
   })
 })

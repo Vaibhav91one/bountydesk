@@ -70,7 +70,8 @@ jest.mock("@/components/primitives", () => {
         React.createElement(Text, { "data-testid": `kvvalue-${label}` }, value),
       ),
     SectionHeader: ({ title }: any) => React.createElement(Text, { "data-testid": `section-${title}` }, title),
-    ScreenHeader: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
+    ScreenHeader: () => null,
+    ScreenTitle: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
     Mono: ({ children, style }: any) => React.createElement(Text, { style, "data-testid": "mono" }, children),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),
   }
@@ -110,7 +111,7 @@ describe("M27 OnboardingScreen", () => {
     jest.clearAllMocks()
   })
 
-  it("renders row.fullName and the buildMarker short from a real-shaped row", async () => {
+  it("renders the stage diagram, the short commit and the status from a real-shaped row", async () => {
     const detail = {
       state: "CONFIGURED",
       progressNote: null,
@@ -136,14 +137,20 @@ describe("M27 OnboardingScreen", () => {
     const { getByText, queryAllByText } = await render(<OnboardingScreen />)
 
     await waitFor(() => {
-      // Repository shows fullName
-      expect(getByText("test/repo")).toBeTruthy()
+      // Stage 1 names the repository
+      expect(getByText("test/repo at the pinned commit")).toBeTruthy()
     })
 
-    // buildMarker first 7 chars shown via Mono
+    // buildMarker first 7 chars shown in the Commit row
     expect(queryAllByText("1867b92")).toHaveLength(1)
-    // imageDigest first 12 chars shown
-    expect(queryAllByText("sha256:abcdef12")).toBeTruthy()
+    expect(getByText("Configured")).toBeTruthy()
+  })
+
+  it("shows no 'Connection not found' while the connections list is still loading", async () => {
+    mockUseApiQuery.mockReturnValue({ data: undefined, error: undefined })
+    const { queryByText } = await render(<OnboardingScreen />)
+    expect(queryByText("Connection not found")).toBeNull()
+    expect(queryByText("Not onboarded yet")).toBeNull()
   })
 
   it("shows the reason when onboardingProgress state is FAILED", async () => {

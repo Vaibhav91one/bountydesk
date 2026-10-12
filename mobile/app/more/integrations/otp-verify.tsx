@@ -12,8 +12,10 @@ import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useTheme } from "@/theme"
-import { ScreenHeader, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, useToast } from "@/components/primitives"
+import { Note } from "@/components/CaseUi"
 import { useApiMutation } from "@/lib/use-query"
+import { font } from "@/lib/fonts"
 
 const OTP_LENGTH = 6
 
@@ -121,12 +123,10 @@ export default function OtpVerifyScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Verify your email" back backLabel="Email access" />
+      <ScreenHeader back backLabel="Email access" />
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scroll}
-      >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScreenTitle title="Verify your email" meta={`Enter the 6-digit code sent to ${email ?? ""}`} metaBottom={20} />
         <View style={styles.otp}>
           {Array.from({ length: OTP_LENGTH }).map((_, i) => (
             <TextInput
@@ -134,7 +134,11 @@ export default function OtpVerifyScreen() {
               ref={(el) => {
                 inputs.current[i] = el
               }}
-              style={[styles.otpBox, { backgroundColor: colors.raised, color: colors.foreground }]}
+              style={[
+                styles.otpBox,
+                { backgroundColor: colors.raised, color: colors.foreground },
+                getBoxValue(i) ? { boxShadow: `0 0 0 1.5px ${colors.faint}` } : null,
+              ]}
               value={getBoxValue(i)}
               onChangeText={(v) => onChangeText(i, v)}
               onKeyPress={({ nativeEvent }) => onKeyPress(i, nativeEvent.key)}
@@ -145,67 +149,27 @@ export default function OtpVerifyScreen() {
               textAlign="center"
               selectTextOnFocus
               autoComplete="one-time-code"
+              selectionColor={colors.brand}
               testID={`otp-box-${i}`}
             />
           ))}
         </View>
-
-        <Text style={[styles.note, { color: colors.muted, textAlign: "center" }]}>
-          The code expires in 10 minutes. Verifying makes you an authorized reviewer.
-        </Text>
+        <View style={styles.resendRow}>
+          <Pressable onPress={handleResend} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.resendBtn]}>
+            <Text style={[styles.resendText, { color: colors["brand-soft"] }]}>Resend code</Text>
+          </Pressable>
+        </View>
+        <Note center>The code expires in 10 minutes. Verifying makes you an authorized reviewer.</Note>
       </ScrollView>
-
-      <View style={styles.resendRow}>
-        <Pressable onPress={handleResend} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.resendBtn]}>
-          <Text style={[styles.resendText, { color: colors["brand-soft"] }]}>Resend code</Text>
-        </Pressable>
-      </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingTop: 62,
-    paddingBottom: 80,
-    alignItems: "center",
-  },
-  otp: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingTop: 20,
-    paddingBottom: 20,
-  },
-  otpBox: {
-    width: 48,
-    height: 58,
-    borderRadius: 16,
-    fontSize: 24,
-    fontWeight: "600",
-    lineHeight: 28,
-    padding: 0,
-  },
-  note: {
-    fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 12,
-  },
-  resendRow: {
-    paddingHorizontal: 16,
-    paddingBottom: 30,
-  },
-  resendBtn: {
-    minHeight: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 22,
-  },
-  resendText: {
-    fontSize: 17,
-    fontWeight: "600",
-  },
+  scroll: { paddingBottom: 150 },
+  otp: { flexDirection: "row", justifyContent: "center", gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
+  otpBox: { width: 48, height: 58, borderRadius: 16, fontFamily: font.semibold, fontSize: 24, lineHeight: 28, padding: 0 },
+  resendRow: { paddingTop: 12, paddingHorizontal: 16, alignItems: "center" },
+  resendBtn: { minHeight: 52, borderRadius: 26, alignItems: "center", justifyContent: "center", paddingHorizontal: 22 },
+  resendText: { fontFamily: font.semibold, fontSize: 17 },
 })
