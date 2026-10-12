@@ -83,7 +83,7 @@ export default function RootLayout() {
             options={{
               presentation: "formSheet",
               sheetGrabberVisible: true,
-              sheetAllowedDetents: "fitToContents",
+              sheetAllowedDetents: [0.96],
               sheetCornerRadius: 36,
               contentStyle: { backgroundColor: colors.card === darkTheme.colors.card ? "#171717" : "#f5f5f5" },
             }}
