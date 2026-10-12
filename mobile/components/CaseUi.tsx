@@ -10,18 +10,19 @@ import { useTheme } from "@/theme"
 import { font } from "@/lib/fonts"
 
 /** The 1px rule drawn above every row but the first, inset 18 on both sides. */
-function Divider() {
+function Divider({ dashed }: { dashed?: boolean }) {
   const { colors } = useTheme()
+  if (dashed) return <View style={[styles.divider, { height: 0, borderTopWidth: 1.5, borderStyle: "dashed", borderColor: colors.line }]} />
   return <View style={[styles.divider, { backgroundColor: colors.line }]} />
 }
 
-export function KvLine({ label, value, mono, strong, divider }: { label: string; value: string; mono?: boolean; strong?: boolean; divider?: boolean }) {
+export function KvLine({ label, value, mono, strong, divider, dashed, trailing }: { label: string; value?: string; mono?: boolean; strong?: boolean; divider?: boolean; /** receipt cards draw a dashed rule (c.css .receipt) */ dashed?: boolean; /** replaces the value text, e.g. a pill */ trailing?: ReactNode }) {
   const { colors } = useTheme()
   return (
     <View style={styles.kv}>
-      {divider ? <Divider /> : null}
+      {divider ? <Divider dashed={dashed} /> : null}
       <Text style={[styles.kvK, { color: colors.foreground }]}>{label}</Text>
-      <Text
+      {trailing ?? <Text
         style={[
           styles.kvV,
           { color: colors.muted },
@@ -30,7 +31,7 @@ export function KvLine({ label, value, mono, strong, divider }: { label: string;
         ]}
       >
         {value}
-      </Text>
+      </Text>}
     </View>
   )
 }

@@ -58,9 +58,11 @@ const PHASE: Record<string, [string, string]> = {
 }
 
 /** GET /reports/:id. BD-1042 carries the full m7 to m13 sample; the others share its shape. */
-export function caseFile(id: string): MobileCaseFileWithScope | null {
-  const r = ROWS.find((x) => rid(x.n) === id)
-  if (!r) return null
+export function caseFile(id: string, asReceipt = false): MobileCaseFileWithScope | null {
+  const found = ROWS.find((x) => rid(x.n) === id)
+  if (!found) return null
+  // M12 shows BD-1042 as delivered at 9:41 AM while M11 shows it awaiting approval.
+  const r = asReceipt && found.awaiting ? { ...found, state: "DELIVERED", awaiting: false } : found
   const [stateLabel, phase] = PHASE[r.state] ?? [r.state, "closed"]
   const hasVerdict = r.outcome != null
   const delivered = r.state === "DELIVERED"
@@ -100,7 +102,7 @@ export function caseFile(id: string): MobileCaseFileWithScope | null {
     awaitingVerdictId: r.awaiting ? verdictIdFor(r.n) : null,
     approval: null,
     delivery: delivered
-      ? { state: "DELIVERED", target: "github:1:issue:214", transportReceipt: "issue comment 2xx", deliveredAt: ago(r.min) }
+      ? { state: "DELIVERED", target: "github:1:issue:214", transportReceipt: "issue comment 2xx", deliveredAt: asReceipt ? new Date(new Date().setHours(9, 41, 0, 0)).toISOString() : ago(r.min) }
       : null,
     events: EVENTS,
     toolCalls: TOOL_CALLS,

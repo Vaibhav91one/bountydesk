@@ -46,4 +46,13 @@ describe("fixture mode", () => {
     await expect(api("/nope")).rejects.toMatchObject({ status: 404 })
     expect(fixtureFor("/nope")).toBeUndefined()
   })
+
+  it("serves BD-1042 as awaiting for M11 and as the delivered receipt only when asked", () => {
+    const awaiting = fixtureFor(`/reports/${rid(1042)}`) as { state: string; delivery: unknown }
+    expect(awaiting.state).toBe("AWAITING_APPROVAL")
+    expect(awaiting.delivery).toBeNull()
+    const receipt = fixtureFor(`/reports/${rid(1042)}?as=receipt`) as { state: string; delivery: { state: string; transportReceipt: string } }
+    expect(receipt.state).toBe("DELIVERED")
+    expect(receipt.delivery).toMatchObject({ state: "DELIVERED", transportReceipt: "issue comment 2xx" })
+  })
 })

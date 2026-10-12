@@ -19,7 +19,7 @@ import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
 import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { routeForNotification } from "@/lib/push"
-import { darkTheme } from "@/theme"
+import { darkTheme, useTheme } from "@/theme"
 import { restoreThemeMode } from "@/lib/theme-mode"
 import { fixturesEnabled } from "@/lib/fixtures"
 
@@ -34,6 +34,7 @@ export default function RootLayout() {
   const router = useRouter()
   const fontsReady = useFonts()
   const [showLoading, setShowLoading] = useState(true)
+  const { colors } = useTheme()
 
   // Route the user to the report behind a tapped notification on cold start and
   // while the app is foregrounded. Placed above the font/loading early return so
@@ -75,7 +76,19 @@ export default function RootLayout() {
   const shell = (
     <ClerkTokenBridge>
       <ToastProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false }}>
+          {/* M13: a native form sheet over M11; the sheet colour is the opaque c.css --sheet. */}
+          <Stack.Screen
+            name="reports/[id]/deny-verdict"
+            options={{
+              presentation: "formSheet",
+              sheetGrabberVisible: true,
+              sheetAllowedDetents: "fitToContents",
+              sheetCornerRadius: 36,
+              contentStyle: { backgroundColor: colors.card === darkTheme.colors.card ? "#171717" : "#f5f5f5" },
+            }}
+          />
+        </Stack>
       </ToastProvider>
     </ClerkTokenBridge>
   )

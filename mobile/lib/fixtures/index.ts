@@ -32,6 +32,6 @@ export function fixtureFor(path: string, init?: RequestInit): unknown {
   const chatMatch = /^\/reports\/([^/]+)\/chat$/.exec(pathname)
   if (chatMatch) return chat(chatMatch[1])
   const reportMatch = /^\/reports\/([^/]+)$/.exec(pathname)
-  if (reportMatch) return caseFile(reportMatch[1]) ?? undefined
+  if (reportMatch) return caseFile(reportMatch[1], search.get("as") === "receipt") ?? undefined
   return undefined
 }

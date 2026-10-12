@@ -1,315 +1,158 @@
 /**
- * M13 Deny verdict. The deny sheet (reasons + optional note) floats over the
- * sign-the-verdict screen content. M13 has no Approve action — only Deny is
- * available here; Approve only happens on M11.
- *
- * Matches docs/site/screens/m13.html pixel for pixel (c.css tokens from theme.ts).
+ * M13 Deny verdict: a native form sheet over M11 (presentation set in app/_layout.tsx). Cancel and
+ * Deny live in the sheet's own header. Deny posts the reason and optional note only when pressed,
+ * and only if a fresh fetch still holds the verdict M11 showed (its id and hash arrive as params).
  */
-import { useState, useMemo, useCallback, useRef } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
+import { useState, useCallback, useRef } from "react"
+import { View, Text, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import * as Haptics from "expo-haptics"
 
-import { deliveryLabel } from "@/lib/delivery-label"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { api } from "@/lib/api"
-import type { MobileCaseFile } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { Icon } from "@/components/icons"
-import { PhasePill, Card, Row, Mono, PrimaryButton, Sheet, ToastProvider, useToast } from "@/components/primitives"
+import { ToastProvider, useToast } from "@/components/primitives"
+import { awaitsApproval, type CaseFileWithDelivery } from "@/components/VerdictReview"
 import { font } from "@/lib/fonts"
-
-const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
-
-type CaseFileWithDelivery = MobileCaseFile & {
-  delivery: {
-    state: string
-    deliveredAt: string | null
-    requiresHumanReview: boolean
-    transportReceipt?: string | null
-    target?: string | null
-  } | null
-}
-
-function maxSeverity(cf: CaseFileWithDelivery): string | null {
-  const v = cf.verdict
-  if (!v || !v.findings || v.findings.length === 0) return null
-  let best: string | null = null
-  let bestRank = Infinity
-  for (const f of v.findings) {
-    const sev = (f as { severity?: string }).severity
-    if (!sev) continue
-    const rank = SEVERITY_ORDER[sev.toLowerCase()]
-    if (rank !== undefined && rank < bestRank) {
-      bestRank = rank
-      best = sev.charAt(0).toUpperCase() + sev.slice(1)
-    }
-  }
-  return best
-}
 
 const DENY_REASONS = [
   { value: "Out of scope", note: "The target is not covered by the program" },
   { value: "Not reproduced", note: "The agent could not trigger the behavior" },
   { value: "Duplicate", note: "Matches an earlier report" },
-  { value: "Insufficient detail", note: "Steps or payload is missing" },
+  { value: "Insufficient detail", note: "Steps or payload are missing" },
 ]
 
-function TopBack({ onBack }: { onBack: () => void }) {
-  const { colors } = useTheme()
-  return (
-    <View style={styles.topbar}>
-      <Pressable
-        onPress={onBack}
-        style={({ pressed }) => [styles.glassBtn, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }, pressed && { opacity: 0.92 }]}
-        accessibilityLabel="Back to Sign the verdict"
-      >
-        <Icon name="back" size={24} strokeWidth={2.2} stroke={colors.foreground} />
-      </Pressable>
-    </View>
-  )
-}
-
-function FloatingBar({ children }: { children: React.ReactNode }) {
-  const { colors } = useTheme()
-  return (
-    <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-      {children}
-    </View>
-  )
-}
-
-// Inner component: calls useToast(), so it must be rendered inside <ToastProvider>.
-function DenyVerdictInner() {
+function DenySheet() {
   const router = useRouter()
-  const { id } = useLocalSearchParams<{ id: string }>()
-  const { colors, phase } = useTheme()
+  const params = useLocalSearchParams<{ id: string; verdictId?: string; contentHash?: string }>()
+  const { id } = params
+  const { colors } = useTheme()
   const toast = useToast()
+  const { data: cf, isError, refetch } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
 
-  // --- All hooks above every early return (STEP 4) ---
-  const { data: cf, error, isError, refetch } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
-
-  // M13 opens the deny sheet by default.
-  const [denySheetOpen, setDenySheetOpen] = useState(true)
-  const [denyReason, setDenyReason] = useState("Out of scope")
-  const [denyNote, setDenyNote] = useState("")
-  const [hashMismatch, setHashMismatch] = useState(false)
-  const [denying, setDenying] = useState(false)
-  const denyingRef = useRef(false)
+  const [reason, setReason] = useState<string | null>(null)
+  const [note, setNote] = useState("")
+  const [submitting, setSubmitting] = useState(false)
+  const [changed, setChanged] = useState(false)
+  const submittingRef = useRef(false)
   const doneRef = useRef(false)
 
   const verdict = cf?.verdict
-  const contentHash = verdict?.contentHash ?? ""
-  const displayHash = contentHash ? `sha256:${contentHash}` : ""
-  const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? ""
-  const severity = useMemo(() => (cf ? maxSeverity(cf) : null), [cf])
-  const delivery = useMemo(() => (cf ? deliveryLabel(cf.deliveryChannel ?? cf.channel, cf.delivery?.target) : ""), [cf])
+  // The reviewed verdict: what M11 showed, else what this sheet loaded first.
+  const reviewedId = params.verdictId ?? verdict?.id
+  const reviewedHash = params.contentHash ?? verdict?.contentHash
+  const awaiting = awaitsApproval(cf)
+  const canSubmit = !!verdict && awaiting && !isError && !changed && reason != null && !submitting && !doneRef.current
 
-  const handleDenyConfirm = useCallback(async () => {
-    if (!verdict || denying || denyingRef.current || doneRef.current) return
-
-    // Set denying immediately to prevent double-tap (STEP 6).
-    setDenying(true)
-    denyingRef.current = true
-
-    // Record the hash the reviewer is looking at right now (STEP 5 + gate rule).
-    const recordedVerdictId = verdict.id
-    const recordedContentHash = contentHash
-
-    // The refetch and submit are inside ONE try/catch/finally (STEP 3).
+  const submit = useCallback(async () => {
+    if (!verdict || !awaiting || !reason || !reviewedId || !reviewedHash) return
+    if (submittingRef.current || doneRef.current) return
+    setSubmitting(true)
+    submittingRef.current = true
     try {
-      // react-query v5 refetch() does not throw on a network error; it resolves with
-      // isError true. Guard against that so stale data never gets denied.
+      // react-query v5 refetch() resolves with isError on a network error instead of throwing.
       const fresh = await refetch()
       if (fresh.isError || fresh.status !== "success") {
         toast.show("Could not confirm the latest verdict. Check your connection and try again.")
         return
       }
-      const freshCf = fresh.data as CaseFileWithDelivery | undefined
-      if (
-        freshCf?.verdict?.id !== recordedVerdictId ||
-        freshCf?.verdict?.contentHash !== recordedContentHash
-      ) {
-        setDenySheetOpen(false)
-        setHashMismatch(true)
+      const f = fresh.data as CaseFileWithDelivery | undefined
+      if (f?.verdict?.id !== reviewedId || f?.verdict?.contentHash !== reviewedHash || !awaitsApproval(f)) {
+        setChanged(true)
         return
       }
-
-      // Build the reason string from reason + optional note (STEP 7).
-      const reason = denyNote.trim() ? `${denyReason}: ${denyNote.trim()}` : denyReason
-
+      const text = note.trim() ? `${reason}: ${note.trim()}` : reason
       await api(`/reports/${id}/deny`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdictId: recordedVerdictId, contentHash: recordedContentHash, reason }),
+        body: JSON.stringify({ verdictId: reviewedId, contentHash: reviewedHash, reason: text }),
       } as any)
 
-      // 2xx: mark done so the buttons and sheet stay disabled through the
-      // navigation delay (STEP 4). finally will not re-enable after success.
       doneRef.current = true
-      setDenying(false)
-      denyingRef.current = false
-
-      // Haptics only after server returns 200 (STEP 8).
+      setSubmitting(false)
+      submittingRef.current = false
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
-      setDenySheetOpen(false)
       toast.show("Denied. Nothing was sent")
       setTimeout(() => {
-        // dismissAll unwinds the report stack; replace then lands on the tabs.
         if (router.canDismiss()) router.dismissAll()
         router.replace("/(tabs)")
       }, 1100)
     } catch (e) {
       const err = e as ApiError
-      if (err.status === 409 && err.code === "content_hash_mismatch") {
-        setHashMismatch(true)
-        setDenySheetOpen(false)
-      } else {
-        toast.show("Denied failed")
-      }
+      if (err.status === 409 && err.code === "content_hash_mismatch") setChanged(true)
+      else toast.show("Denied failed")
     } finally {
-      // Only re-enable if we did not reach a 2xx (STEP 4).
       if (!doneRef.current) {
-        setDenying(false)
-        denyingRef.current = false
+        setSubmitting(false)
+        submittingRef.current = false
       }
     }
-  }, [router, id, verdict, contentHash, denyReason, denyNote, refetch, toast])
-
-  const canSubmit = !!verdict && !isError && !hashMismatch && !denying && !doneRef.current
-
-  // Auth errors are terminal: render nothing rather than a broken shell.
-  if (isError && error instanceof ApiError && (error.status === 401 || error.status === 403)) return null
+  }, [router, id, verdict, awaiting, reason, note, reviewedId, reviewedHash, refetch, toast])
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <TopBack onBack={() => router.back()} />
+    <View style={styles.root}>
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancel" style={styles.side}>
+          <Text style={[styles.action, { color: colors.foreground }]}>Cancel</Text>
+        </Pressable>
+        <View style={styles.center}>
+          <Text style={[styles.title, { color: colors.muted }]}>Deny report</Text>
+        </View>
+        <Pressable
+          onPress={submit}
+          disabled={!canSubmit}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Submit denial"
+          accessibilityState={{ disabled: !canSubmit }}
+          style={[styles.side, styles.sideRight]}
+        >
+          <Text style={[styles.action, styles.submit, { color: colors.red }, !canSubmit && { opacity: 0.4 }]}>Deny</Text>
+        </Pressable>
+      </View>
+      <Text style={[styles.sub, { color: colors.faint }]}>{cf ? `${cf.sourceLabel} · ${cf.title}` : ""}</Text>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        {isError ? (
-          <View style={[styles.centered, { backgroundColor: colors.background }]}>
-            <Text style={[styles.errorText, { color: colors.red }]}>
-              {error?.message ?? "Failed to load case file"}
-            </Text>
-            <Pressable onPress={() => refetch()} style={styles.retryLink} hitSlop={8}>
-              <Text style={[styles.retryText, { color: colors.brand }]}>Retry</Text>
-            </Pressable>
-          </View>
-        ) : !cf || !verdict ? (
-          <Text style={[styles.h1, { color: colors.muted }]}>Loading</Text>
-        ) : hashMismatch ? (
-          <View style={styles.mismatchBox}>
-            <Text style={[styles.mismatchTitle, { color: colors.foreground }]}>This verdict changed</Text>
-            <Text style={[styles.mismatchBody, { color: colors.muted }]}>
-              Refresh and review again.
-            </Text>
-            <Pressable onPress={() => { setHashMismatch(false); refetch() }} style={[styles.mismatchBtn, { backgroundColor: colors.brand }]}>
-              <Text style={{ color: colors.card,  fontFamily: font.semibold, fontSize: 16 }}>Refresh</Text>
-            </Pressable>
+      <View style={styles.body}>
+        {changed ? (
+          <View style={styles.changed}>
+            <Text style={[styles.changedTitle, { color: colors.foreground }]}>This verdict changed</Text>
+            <Text style={[styles.changedBody, { color: colors.muted }]}>Refresh and review again.</Text>
           </View>
         ) : (
           <>
-            <Text style={[styles.h1, { color: colors.foreground }]}>Sign the verdict</Text>
-            <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.id} · {cf.title}</Text>
-
-            <View style={styles.sect}>
-              <Text style={[styles.shPlain, { color: colors.foreground }]}>Outcome</Text>
-              <Card style={styles.cardList}>
-                <Row style={styles.itemNoDivider}>
-                  <Text style={[styles.rowT, { color: colors.foreground }]}>Outcome</Text>
-                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
-                </Row>
-                {/* Severity and Delivery are shown as key/value rows. Severity uses the red
-                    colour from c.css; KvRow has no per-value style prop, so render it inline. */}
-                <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
-                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Severity</Text>
-                  <Text style={[styles.kvValue, { color: colors.red, fontWeight: "600" }]}>{severity ?? "Unknown"}</Text>
-                </View>
-                <View style={[styles.kvRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}>
-                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Delivery</Text>
-                  <Text style={[styles.kvValue, { color: colors.foreground }]}>{delivery}</Text>
-                </View>
-              </Card>
+            <View style={[styles.reasons, { backgroundColor: colors["sheet-card"] }]} accessibilityRole="radiogroup">
+              {DENY_REASONS.map((r, i) => {
+                const on = reason === r.value
+                return (
+                  <Pressable key={r.value} onPress={() => setReason(r.value)} disabled={submitting} style={styles.reasonRow}>
+                    {i > 0 ? <View style={[styles.divider, { backgroundColor: colors.line }]} /> : null}
+                    <View style={styles.reasonMain}>
+                      <Text style={[styles.reasonTitle, { color: colors.foreground }]}>{r.value}</Text>
+                      <Text style={[styles.reasonNote, { color: colors.muted }]}>{r.note}</Text>
+                    </View>
+                    <View style={[styles.radio, { borderColor: on ? colors.brand : colors.faint }]}>
+                      {on ? <View style={[styles.radioDot, { backgroundColor: colors.brand }]} /> : null}
+                    </View>
+                  </Pressable>
+                )
+              })}
             </View>
-
-            <View style={styles.sect}>
-              <Text style={[styles.shPlain, { color: colors.foreground }]}>Drafted comment</Text>
-              <Card style={styles.cardNoList}>
-                <Text style={[styles.body, { color: colors.foreground }]} selectable>
-                  {verdict.payload}
-                </Text>
-              </Card>
-              <Text style={[styles.note, { color: colors.muted }]}>
-                This exact text is what gets sent. Editing it creates a new revision that needs a fresh approval.
-              </Text>
-            </View>
-
-            <View style={styles.sect}>
-              <Text style={[styles.shPlain, { color: colors.foreground }]}>Content hash</Text>
-              <Card style={styles.cardNoList}>
-                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{displayHash}</Mono>
-              </Card>
-              <Text style={[styles.note, { color: colors.muted }]}>
-                Approval is bound to this hash. Delivery is refused if the text differs.
-              </Text>
-            </View>
-          </>
-        )}
-      </ScrollView>
-
-      <FloatingBar>
-        <PrimaryButton
-          title="Deny"
-          variant="destructive"
-          onPress={() => setDenySheetOpen(true)}
-          disabled={!canSubmit}
-        />
-      </FloatingBar>
-
-      <Sheet
-        visible={denySheetOpen}
-        onClose={() => setDenySheetOpen(false)}
-        onConfirm={handleDenyConfirm}
-        subtitle={cf ? cf.id + " · " + cf.title : ""}
-        confirmDisabled={!canSubmit}
-      >
-        {cf ? (
-          <View style={{ width: "100%" }}>
-            <Text style={[styles.lbl, { color: colors.muted }]}>Reason</Text>
-            {DENY_REASONS.map((reason) => (
-              <Pressable
-                key={reason.value}
-                onPress={() => setDenyReason(reason.value)}
-                disabled={!canSubmit}
-                style={[styles.reasonRow, { backgroundColor: colors.card, borderBottomColor: colors.line }]}
-              >
-                <View style={styles.reasonMain}>
-                  <Text style={[styles.reasonTitle, { color: colors.foreground }]}>{reason.value}</Text>
-                  <Text style={[styles.reasonNote, { color: colors.muted }]}>{reason.note}</Text>
-                </View>
-                <View style={[styles.radio, { borderColor: colors.faint }]}>
-                  {denyReason === reason.value && (
-                    <View style={[styles.radioDot, { backgroundColor: colors.brand }]} />
-                  )}
-                </View>
-              </Pressable>
-            ))}
             <Text style={[styles.lbl, { color: colors.muted }]}>Note to reporter (optional)</Text>
             <TextInput
-              style={[styles.textarea, { backgroundColor: colors.raised, borderColor: colors.line, color: colors.foreground }]}
+              style={[styles.textarea, { backgroundColor: colors["sheet-card"], color: colors.foreground }]}
               placeholder="Sent with the denial"
               placeholderTextColor={colors.faint}
-              value={denyNote}
-              onChangeText={setDenyNote}
+              value={note}
+              onChangeText={setNote}
               multiline
               textAlignVertical="top"
             />
-            <Text style={[styles.note, { color: colors.muted, paddingHorizontal: 4 }]}>
+            <Text style={[styles.footnote, { color: colors.muted }]}>
               Nothing is sent to the reporter until you confirm. The report moves to Denied.
             </Text>
-          </View>
-        ) : null}
-      </Sheet>
+          </>
+        )}
+      </View>
     </View>
   )
 }
@@ -317,44 +160,34 @@ function DenyVerdictInner() {
 export default function DenyVerdictScreen() {
   return (
     <ToastProvider>
-      <DenyVerdictInner />
+      <DenySheet />
     </ToastProvider>
   )
 }
 
 const styles = StyleSheet.create({
-  topbar: { position: "absolute", top: 54, left: 16, zIndex: 30 },
-  glassBtn: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth },
-  centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  errorText: { fontFamily: font.regular, fontSize: 16 },
-  retryLink: { paddingVertical: 8, paddingHorizontal: 12, minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center" },
-  retryText: { fontFamily: font.semibold, fontSize: 16, },
-  scrollContent: { paddingTop: 100, paddingBottom: 90, marginHorizontal: 20 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.84, marginTop: 8, paddingHorizontal: 4 },
-  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, marginTop: 4 },
-  sect: { marginBottom: 28 },
-  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12 },
-  cardList: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
-  cardNoList: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", padding: 0 },
-  itemNoDivider: { paddingVertical: 10, paddingHorizontal: 18, minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  rowT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  body: { padding: 18, fontFamily: font.regular, fontSize: 17, lineHeight: 23 },
-  hash: { padding: 18, fontFamily: font.regular, fontSize: 13, lineHeight: 20 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
-  fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: StyleSheet.hairlineWidth },
-  kvRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 56, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
-  kvLabel: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  kvValue: { fontFamily: font.regular, fontSize: 17, textAlign: "right", flexShrink: 1 },
-  lbl: { fontFamily: font.semibold, fontSize: 13, paddingHorizontal: 4, paddingBottom: 6 },
-  reasonRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 64 },
+  root: {},
+  header: { flexDirection: "row", alignItems: "flex-start", paddingTop: 22, paddingHorizontal: 20 },
+  side: { width: 72, paddingTop: 2 },
+  sideRight: { alignItems: "flex-end" },
+  action: { fontFamily: font.regular, fontSize: 17, lineHeight: 22 },
+  submit: { fontFamily: font.semibold },
+  center: { flex: 1, alignItems: "center" },
+  title: { fontFamily: font.semibold, fontSize: 17, lineHeight: 20.4 },
+  sub: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 4, marginBottom: 14, textAlign: "center", paddingHorizontal: 20 },
+  body: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 },
+  reasons: { borderRadius: 24, paddingVertical: 6, overflow: "hidden" },
+  reasonRow: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 64, paddingVertical: 10, paddingHorizontal: 18 },
+  divider: { position: "absolute", top: 0, left: 18, right: 18, height: 1 },
   reasonMain: { flex: 1, minWidth: 0 },
-  reasonTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  reasonNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, marginTop: 3 },
-  radio: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, alignItems: "center", justifyContent: "center", flexShrink: 0, marginLeft: 12 },
+  reasonTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 21.25, letterSpacing: -0.187 },
+  reasonNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 3 },
+  radio: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, alignItems: "center", justifyContent: "center" },
   radioDot: { width: 14, height: 14, borderRadius: 7 },
-  textarea: { width: "100%", minHeight: 92, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 14, fontFamily: font.regular, fontSize: 17, lineHeight: 23, textAlignVertical: "top" },
-  mismatchBox: { alignItems: "center", paddingVertical: 60 },
-  mismatchTitle: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 8 },
-  mismatchBody: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, marginBottom: 20 },
-  mismatchBtn: { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 26, minWidth: 160, alignItems: "center", justifyContent: "center" },
+  lbl: { fontFamily: font.semibold, fontSize: 15, lineHeight: 15, paddingTop: 20, paddingBottom: 10, paddingHorizontal: 4 },
+  textarea: { height: 92, borderRadius: 20, paddingVertical: 14, paddingHorizontal: 16, fontFamily: font.regular, fontSize: 17, lineHeight: 23.8, textAlignVertical: "top" },
+  footnote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingTop: 12, paddingHorizontal: 4 },
+  changed: { alignItems: "center", paddingVertical: 40 },
+  changedTitle: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 8 },
+  changedBody: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, textAlign: "center" },
 })

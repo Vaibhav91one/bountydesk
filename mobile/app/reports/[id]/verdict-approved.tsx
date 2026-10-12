@@ -1,39 +1,28 @@
 /**
- * M12 Verdict approved. Confirmation screen after a verdict is delivered.
- * Shows a celebrating mascot, the report id/title, and a receipt card with
- * outcome, channel, transport receipt, delivered time, and the content hash.
- * A Back to queue button returns to the Home/Queue.
- *
- * Matches docs/site/screens/m12.html pixel for pixel (c.css tokens from theme.ts).
+ * M12 Verdict approved (docs/site/screens/m12.html). The receipt is decided by the report's own
+ * state: DELIVERED shows the delivered receipt, DELIVERING the in-progress one, anything else says
+ * there is no receipt yet. A report is DELIVERED only after the transport receipt (see AGENTS.md).
  */
-import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Image } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 
 import { deliveryLabel } from "@/lib/delivery-label"
 import { useApiQuery, ApiError } from "@/lib/use-query"
-import type { MobileCaseFile } from "@/lib/types"
+import { fixturesEnabled } from "@/lib/fixtures"
 import { useTheme } from "@/theme"
-import { PhasePill, Card, KvRow, Mono, PrimaryButton, ToastProvider, Row } from "@/components/primitives"
-
-import { SvgImage } from "@/components/SvgImage"
+import { PhasePill, PrimaryButton, TOP_INSET, TopFade } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, KvLine, Note } from "@/components/CaseUi"
+import type { CaseFileWithDelivery } from "@/components/VerdictReview"
 import { font } from "@/lib/fonts"
-
-type CaseFileWithDelivery = MobileCaseFile & {
-  delivery: {
-    state: string
-    deliveredAt: string | null
-    requiresHumanReview: boolean
-    transportReceipt?: string | null
-    target?: string | null
-  } | null
-}
 
 export default function VerdictApprovedScreen() {
   const router = useRouter()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { colors, phase } = useTheme()
 
-  const { data: cf, error, isError } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
+  // Fixture mode only: BD-1042 awaits approval on M11 and is delivered on M12, so M12 asks for the receipt view.
+  const { data: cf, error, isError } = useApiQuery<CaseFileWithDelivery>(fixturesEnabled() ? `/reports/${id}?as=receipt` : `/reports/${id}`)
 
   if (isError) {
     if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return null
@@ -46,99 +35,85 @@ export default function VerdictApprovedScreen() {
 
   if (!cf) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
+      <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.muted }}>Loading</Text>
       </View>
     )
   }
 
   const verdict = cf.verdict
-  const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? "Delivered"
+  const outcomeLabel = verdict?.outcomeLabel ?? verdict?.outcome ?? ""
   const hashForDisplay = verdict?.contentHash ? `sha256:${verdict.contentHash}` : ""
-  // Delivery state comes from the case file (lib/mobile/views.ts). A report is
-  // DELIVERED only after the transport receipt; otherwise it is in progress.
-  const deliveryState = cf.delivery?.state ?? "PENDING"
-  const isDelivered = deliveryState.toUpperCase() === "DELIVERED"
-  // M12 receipt rows.
+  const isDelivered = cf.state === "DELIVERED"
+  const isDelivering = cf.state === "DELIVERING"
   const channel = deliveryLabel(cf.deliveryChannel ?? cf.channel, cf.delivery?.target)
-  const receipt = cf.delivery?.transportReceipt ?? deliveryState
-  // Delivered time — mockup shows a time like "9:41 AM".
-  const deliveredAt = cf.delivery?.deliveredAt ? new Date(cf.delivery.deliveredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""
+  const receipt = cf.delivery?.transportReceipt ?? "None yet"
+  const deliveredAt = cf.delivery?.deliveredAt
+    ? new Date(cf.delivery.deliveredAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).replace(/[\u202f\u00a0]/g, " ")
+    : ""
+  const title = isDelivered ? "Verdict delivered" : isDelivering ? "Approved. Delivery in progress" : "No receipt yet"
+  const hasReceipt = isDelivered || isDelivering
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ToastProvider>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Mascot */}
-          <View style={styles.mascotBox}>
-            <SvgImage name="mascot/celebrating" width={180} height={180} />
-            {isDelivered ? (
-              <Text style={[styles.h1, { color: colors.foreground }]}>Verdict delivered</Text>
-            ) : (
-              <Text style={[styles.h1, { color: colors.foreground }]}>Approved. Delivery in progress</Text>
-            )}
-            <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.id} · {cf.title}</Text>
-          </View>
-
-          {/* Receipt card — only shown once the transport receipt confirms delivery */}
-          {isDelivered ? (
-            <View style={styles.sect}>
-              <Text style={[styles.shPlain, { color: colors.foreground }]}>Receipt</Text>
-              <Card style={styles.receiptCard}>
-                <Row style={styles.receiptRow}>
-                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Outcome</Text>
-                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
-                </Row>
-                <KvRow label="Channel" value={channel} />
-                <KvRow label="Receipt" value={receipt} mono />
-                {deliveredAt ? <KvRow label="Delivered" value={deliveredAt} /> : null}
-                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{hashForDisplay}</Mono>
-              </Card>
-              <Text style={[styles.note, { color: colors.muted }]}>
-                Marked delivered only after the transport confirmed delivery.
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.sect}>
-              <Text style={[styles.shPlain, { color: colors.foreground }]}>Delivery</Text>
-              <Card style={styles.receiptCard}>
-                <Row style={styles.receiptRow}>
-                  <Text style={[styles.kvLabel, { color: colors.muted }]}>Outcome</Text>
-                  <PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />
-                </Row>
-                <KvRow label="State" value={deliveryState} />
-                <Mono style={[styles.hash, { color: colors.foreground }] as any}>{hashForDisplay}</Mono>
-              </Card>
-              <Text style={[styles.note, { color: colors.muted }]}>
-                Delivery is in progress. The verdict will be marked delivered once the transport confirms it.
-              </Text>
-            </View>
-          )}
-        </ScrollView>
-
-        {/* Back to queue button (matches .fbar .btn) */}
-        <View style={styles.fbar}>
-          <PrimaryButton title="Back to queue" onPress={() => router.replace("/(tabs)")} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.top}>
+          <Image source={require("../../../assets/brand/mascot-png/celebrating.png")} style={styles.mascot} />
+          <Text style={[styles.h1, { color: colors.foreground }]}>{title}</Text>
+          <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.sourceLabel} · {cf.title}</Text>
         </View>
-      </ToastProvider>
+
+        {hasReceipt ? (
+          <View>
+            <SectionHead title={isDelivered ? "Receipt" : "Delivery"} />
+            <ListCard>
+              <KvLine
+                label="Outcome"
+                trailing={<PhasePill phase="delivered" label={outcomeLabel} labelStyle={{ color: phase.delivered }} />}
+              />
+              <KvLine label="Channel" value={channel} divider dashed />
+              {isDelivered ? (
+                <>
+                  <KvLine label="Receipt" value={receipt} mono divider dashed />
+                  {deliveredAt ? <KvLine label="Delivered" value={deliveredAt} divider dashed /> : null}
+                </>
+              ) : (
+                <KvLine label="State" value={cf.delivery?.state ?? "Sending"} divider dashed />
+              )}
+              <Text style={[styles.hash, { color: colors.foreground }]}>{hashForDisplay}</Text>
+            </ListCard>
+            <Note>
+              {isDelivered
+                ? "Marked delivered only after GitHub confirmed the comment. An email report shows the mail provider receipt instead."
+                : "Delivery is in progress. The verdict will be marked delivered once the transport confirms it."}
+            </Note>
+          </View>
+        ) : (
+          <Note>This verdict has not been approved yet, so there is no receipt to show.</Note>
+        )}
+      </ScrollView>
+
+      <BottomFade />
+      <View pointerEvents="none" style={styles.topFade}>
+        <TopFade />
+      </View>
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+        <PrimaryButton title="Back to queue" onPress={() => router.replace("/(tabs)")} style={styles.btn} />
+      </View>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  scrollContent: { paddingTop: 40, paddingBottom: 80 },
+  scrollContent: { paddingTop: TOP_INSET, paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   errorText: { fontFamily: font.regular, fontSize: 16 },
-  mascotBox: { display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "auto", paddingHorizontal: 24, paddingBottom: 20 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.84, paddingTop: 6, textAlign: "center" },
-  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingTop: 10, textAlign: "center" },
-  sect: { marginBottom: 28, marginHorizontal: 16 },
-  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12 },
-  cardList: { borderRadius: 24, overflow: "hidden" },
-  receiptCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
-  receiptRow: { paddingVertical: 10, paddingHorizontal: 18, minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  kvLabel: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  hash: { padding: 18, fontFamily: font.regular, fontSize: 13, lineHeight: 20 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
-  fbar: { position: "absolute", left: 16, right: 16, bottom: 30, padding: 6 },
+  top: { alignItems: "center", paddingTop: 4, paddingBottom: 20, paddingHorizontal: 24 },
+  mascot: { width: 180, height: 180 },
+  h1: { fontFamily: font.bold, fontSize: 28, lineHeight: 32.2, letterSpacing: -0.84, paddingTop: 6, textAlign: "center" },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20.25, paddingTop: 10, textAlign: "center" },
+  hash: { fontFamily: font.mono, fontSize: 13, lineHeight: 20.15, letterSpacing: 0, paddingTop: 12, paddingBottom: 16, paddingHorizontal: 18 },
+  topFade: { position: "absolute", top: 0, left: 0, right: 0, height: 124 },
+  fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: 1 },
+  btn: { flex: 1 },
 })

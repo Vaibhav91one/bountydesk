@@ -5,6 +5,9 @@ import * as Haptics from "expo-haptics"
 // --- Mock data (STEP 10: no mocking of ToastProvider or useToast) ---
 const sampleCaseFile = {
   id: "BD-1042",
+  sourceLabel: "BD-1042",
+  state: "AWAITING_APPROVAL",
+  awaitingVerdictId: "v_abc123",
   title: "Stored XSS in search results",
   channel: "github",
   verdict: {
@@ -167,6 +170,44 @@ describe("M11 Sign the verdict", () => {
 
     const { getByText } = await render(<SignTheVerdict />)
     expect(getByText("Server crashed")).toBeTruthy()
+  })
+
+  it("offers no Approve or Deny on a DELIVERED report and routes to the receipt", async () => {
+    setMockData({ ...sampleCaseFile, state: "DELIVERED", awaitingVerdictId: null } as any)
+    const { queryByText } = await render(<SignTheVerdict />)
+    expect(queryByText("Approve")).toBeFalsy()
+    expect(queryByText("Deny")).toBeFalsy()
+    expect(queryByText("View receipt")).toBeTruthy()
+  })
+
+  it("offers no decision on a DENIED report", async () => {
+    setMockData({ ...sampleCaseFile, state: "DENIED", awaitingVerdictId: null } as any)
+    const { queryByText } = await render(<SignTheVerdict />)
+    expect(queryByText("Approve")).toBeFalsy()
+    expect(queryByText("Deny")).toBeFalsy()
+    expect(queryByText("View receipt")).toBeFalsy()
+  })
+
+  it("offers no decision when the shown verdict is not the one awaiting approval", async () => {
+    setMockData({ ...sampleCaseFile, awaitingVerdictId: "v_newer" } as any)
+    const { queryByText } = await render(<SignTheVerdict />)
+    expect(queryByText("Approve")).toBeFalsy()
+    expect(queryByText("Deny")).toBeFalsy()
+  })
+
+  it("shows backtick code runs as styled text without changing the stored payload", async () => {
+    const payload = "Fix the `q` parameter and drop `bypassSecurityTrustHtml` now."
+    setMockData({ ...sampleCaseFile, verdict: { ...sampleCaseFile.verdict, payload } } as any)
+    mockApi.mockResolvedValueOnce({ ok: true })
+    const { getByText, queryByText } = await render(<SignTheVerdict />)
+    expect(getByText("Fix the q parameter and drop bypassSecurityTrustHtml now.")).toBeTruthy()
+    expect(queryByText(/`/)).toBeFalsy()
+
+    await fireEvent.press(getByText("Approve"))
+    await new Promise((r) => setTimeout(r, 500))
+    const call = mockApi.mock.calls.find((c: any) => c[0].includes("/approve"))
+    // Only the id and the API's hash go out; the display text never does.
+    expect(JSON.parse(call[1].body)).toEqual({ verdictId: sampleCaseFile.verdict.id, contentHash: sampleCaseFile.verdict.contentHash })
   })
 
   it("does not submit approve when refetch changes the contentHash during the biometric prompt", async () => {

@@ -392,7 +392,8 @@ export function Sheet({ children, visible, onClose, onConfirm, title, subtitle, 
       setShow(true)
       Animated.spring(anim, { toValue: 1, useNativeDriver: true, bounciness: 8, speed: 12 } as any).start()
     } else {
-      Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setShow(false))
+      // An interrupted close (visible turned true again) must not hide the sheet.
+      Animated.timing(anim, { toValue: 0, duration: 200, useNativeDriver: true }).start(({ finished }) => finished && setShow(false))
     }
   }, [visible, anim])
 
