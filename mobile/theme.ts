@@ -77,22 +77,22 @@ export interface Theme {
 function srgbFromLinear(v: number): number {
   if (v <= 0) return 0
   if (v >= 1) return 1
-  return v <= 0.00031308 ? 12.92 * v : Math.pow(v, 1 / 2.4) * 1.055 - 0.055
+  return v <= 0.0031308 ? 12.92 * v : Math.pow(v, 1 / 2.4) * 1.055 - 0.055
 }
 
-function oklchToHex(l: number, c: number, h: number): string {
+export function oklchToHex(l: number, c: number, h: number): string {
   const rad = (h * Math.PI) / 180
   const a = c * Math.cos(rad)
   const b = c * Math.sin(rad)
-  let l_val = l + 0.397305 * a + 0.216298 * b
-  let m_val = l - 0.818479 * a - 0.336334 * b
-  let s_val = l + 0.084823 * a - 0.834297 * b
+  let l_val = l + 0.3963377774 * a + 0.2158037573 * b
+  let m_val = l - 0.1055613458 * a - 0.0638541728 * b
+  let s_val = l - 0.0894841775 * a - 1.291485548 * b
   l_val = Math.pow(l_val, 3)
   m_val = Math.pow(m_val, 3)
   s_val = Math.pow(s_val, 3)
-  const r_lin = 4.0794 * l_val - 3.3175 * m_val + 0.1942 * s_val
-  const g_lin = -1.2684 * l_val + 2.5118 * m_val - 0.1622 * s_val
-  const b_lin = 0.0086 * l_val - 0.345 * m_val + 1.6573 * s_val
+  const r_lin = 4.0767416621 * l_val - 3.3077115913 * m_val + 0.2309699292 * s_val
+  const g_lin = -1.2684380046 * l_val + 2.6097574011 * m_val - 0.3413193965 * s_val
+  const b_lin = -0.0041960863 * l_val - 0.7034186147 * m_val + 1.707614701 * s_val
   const r = Math.max(0, Math.min(1, srgbFromLinear(r_lin)))
   const g = Math.max(0, Math.min(1, srgbFromLinear(g_lin)))
   const b2 = Math.max(0, Math.min(1, srgbFromLinear(b_lin)))

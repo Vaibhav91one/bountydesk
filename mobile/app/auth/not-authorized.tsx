@@ -7,11 +7,10 @@
  *
  * m3-actions has a 22px gap, margin-top 22px, max-width 300px.
  */
-import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert, Image } from "react-native"
 import { useRouter } from "expo-router"
 import { useAuth } from "@clerk/expo"
 
-import { SvgImage } from "@/components/SvgImage"
 import { signOutAndClear } from "@/lib/session"
 import { darkTheme, lightTheme } from "@/theme"
 
@@ -34,7 +33,7 @@ export default function NotAuthorizedScreen() {
   return (
     <View style={[styles.container, { backgroundColor: t.colors.background }]}>
       <View style={styles.empty}>
-        <SvgImage name="mascot/out-of-scope" width={200} height={200} />
+        <Image source={require("../../assets/brand/mascot-png/out-of-scope.png")} style={{ width: 200, height: 200, marginTop: -5, marginBottom: 5 }} />
         <Text style={[styles.title, { color: t.colors.foreground }]}>
           You are not on the reviewer allowlist
         </Text>
@@ -66,31 +65,33 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
+    paddingTop: 200,
+    paddingHorizontal: 40,
   },
   empty: {
     alignItems: "center",
-    gap: 18,
-    paddingBottom: 40,
   },
   title: {
     fontSize: 24, // 1.5rem in c.css .empty h1
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    lineHeight: 29,
+    fontFamily: "Inter_700Bold",
+    letterSpacing: -0.72,
+    lineHeight: 28.8,
     textAlign: "center",
+    marginTop: 18,
   },
   body: {
     fontSize: 15, // .9375rem in c.css
-    lineHeight: 23,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 21.75,
     textAlign: "center",
     maxWidth: 300,
+    marginTop: 10,
   },
   actions: {
     flexDirection: "column",
     gap: 6,
-    width: "100%",
-    maxWidth: 300,
+    width: 300,
     marginTop: 22,
   },
   btn: {
@@ -103,7 +104,8 @@ const styles = StyleSheet.create({
   btnPrimary: {},
   btnTextPrimary: {
     fontSize: 17,
-    fontWeight: "600",
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: -0.187,
     color: "#ffffff",
   },
   btnGhost: {
@@ -111,6 +113,7 @@ const styles = StyleSheet.create({
   },
   btnTextGhost: {
     fontSize: 17,
-    fontWeight: "600",
+    fontFamily: "Inter_600SemiBold",
+    letterSpacing: -0.187,
   },
 })
