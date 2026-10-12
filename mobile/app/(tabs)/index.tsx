@@ -6,7 +6,7 @@
  * components/ReportList so M5 and M6 render the same chrome.
  */
 import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, Alert } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
 import { useRouter } from "expo-router"
 
 import { useApiQuery, ApiError } from "@/lib/use-query"
@@ -14,6 +14,7 @@ import type { HomeSummary, QueueColumnView } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { TopBarPill } from "@/components/TopBarPill"
 import { PhasePill, TOP_INSET, phaseLabel } from "@/components/primitives"
+import { PopoverMenu, type AnchorRect } from "@/components/PopoverMenu"
 import { ListCard, ReportRow, SectionHead } from "@/components/ReportList"
 import { Icon } from "@/components/icons"
 import { ageText } from "@/lib/age"
@@ -89,6 +90,7 @@ export default function HomeScreen() {
   const { colors } = useTheme()
   const router = useRouter()
   const [sort, setSort] = useState<Sort>("newest")
+  const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null)
   const { data: summary, error } = useApiQuery<HomeSummary>("/home")
   const { data: queue, error: queueError } = useApiQuery<QueueResponse>("/queue?limit=50")
 
@@ -125,12 +127,10 @@ export default function HomeScreen() {
   const delivered = deliveredRows(deliveredCards, closedCards)
   const moreActive = activeTotal - active.length
 
-  const openSortMenu = () =>
-    Alert.alert("Sort", undefined, [
-      { text: "Sort by newest", onPress: () => setSort("newest") },
-      { text: "Sort by severity", onPress: () => setSort("severity") },
-      { text: "Cancel", style: "cancel" },
-    ])
+  const sortItems = [
+    { label: "Sort by newest", onPress: () => setSort("newest") },
+    { label: "Sort by severity", onPress: () => setSort("severity") },
+  ]
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -140,7 +140,7 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.section}>
-          <SectionHead title="Needs you" count={awaitingTotal} onPress={() => router.push("/queue")} onMore={openSortMenu} />
+          <SectionHead title="Needs you" count={awaitingTotal} onPress={() => router.push("/queue")} onMore={setMenuAnchor} />
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -162,7 +162,7 @@ export default function HomeScreen() {
 
         {active.length > 0 ? (
           <View style={styles.section}>
-            <SectionHead title="Active" count={activeTotal} onPress={() => router.push("/queue")} onMore={openSortMenu} />
+            <SectionHead title="Active" count={activeTotal} onPress={() => router.push("/queue")} onMore={setMenuAnchor} />
             <ListCard>
               {active.map((r, i) => (
                 <HomeRow key={r.id} card={r} divider={i > 0} onPress={() => router.push(`/reports/${r.id}`)} />
@@ -180,7 +180,7 @@ export default function HomeScreen() {
 
         {delivered.length > 0 ? (
           <View style={styles.section}>
-            <SectionHead title="Delivered" count={deliveredTotal} onPress={() => router.push("/reports")} onMore={openSortMenu} />
+            <SectionHead title="Delivered" count={deliveredTotal} onPress={() => router.push("/reports")} onMore={setMenuAnchor} />
             <ListCard>
               {delivered.map((r, i) => (
                 <HomeRow key={r.id} card={r} divider={i > 0} onPress={() => router.push(`/reports/${r.id}`)} />
@@ -193,6 +193,7 @@ export default function HomeScreen() {
         ) : null}
       </ScrollView>
 
+      <PopoverMenu anchor={menuAnchor} items={sortItems} onClose={() => setMenuAnchor(null)} />
       <TopBarPill />
     </View>
   )

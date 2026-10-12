@@ -29,6 +29,7 @@ import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
 import { ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { useRef, useState, useEffect, useCallback } from "react"
 import type { MobileCaseFile } from "@/lib/types"
 import { font } from "@/lib/fonts"
@@ -286,7 +287,7 @@ export default function ChatScreen() {
             </View>
           }
         />
-        <View style={[styles.composer, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+        <View style={[styles.composer, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
           <TextInput
             style={[styles.field, { color: colors.foreground }]}
             value={input}

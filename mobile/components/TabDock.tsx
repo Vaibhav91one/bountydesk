@@ -8,6 +8,7 @@ import type { BottomTabBarProps } from "expo-router/js-tabs"
 import { Icon, type IconName } from "@/components/icons"
 import { ReviewFab } from "@/components/ReviewFab"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { font } from "@/lib/fonts"
 
 const TABS: { route: string; label: string; icon: IconName }[] = [
@@ -22,7 +23,7 @@ export function TabDock({ state, navigation }: BottomTabBarProps) {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       <ReviewFab />
-      <View style={[styles.tabs, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      <View style={[styles.tabs, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
         {TABS.map((t) => {
           const route = state.routes.find((r) => r.name === t.route)
           if (!route) return null

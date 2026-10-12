@@ -15,6 +15,7 @@ import { useState } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { ScreenHeader, ScreenTitle, Card, PrimaryButton, Sheet, useToast } from "@/components/primitives"
 import { BottomFade, Note } from "@/components/CaseUi"
 import { Icon } from "@/components/icons"
@@ -309,7 +310,7 @@ export default function SubmitReportScreen() {
       </ScrollView>
 
       <BottomFade />
-      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
         <PrimaryButton
           title="Submit report"
           onPress={handleSubmit}

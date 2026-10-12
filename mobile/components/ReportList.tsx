@@ -2,10 +2,11 @@
  * The grouped list the three tab screens share: section header (c.css .sh), rounded card
  * (.card.list) and report row (.item.ev) with its phase pill and age.
  */
-import type { ReactNode } from "react"
+import { useRef, type ReactNode } from "react"
 import { View, Text, Pressable, StyleSheet } from "react-native"
 import { Icon } from "@/components/icons"
 import { PhasePill, type PhaseKey } from "@/components/primitives"
+import { measureAnchor, type AnchorRect } from "@/components/PopoverMenu"
 import { useTheme } from "@/theme"
 import { font } from "@/lib/fonts"
 
@@ -15,11 +16,12 @@ export interface SectionHeadProps {
   /** opens the list this header summarises; adds the chevron */
   onPress?: () => void
   /** the "..." button at the right edge */
-  onMore?: () => void
+  onMore?: (anchor: AnchorRect) => void
 }
 
 export function SectionHead({ title, count, onPress, onMore }: SectionHeadProps) {
   const { colors } = useTheme()
+  const moreRef = useRef<View>(null)
   const label = (
     <>
       <Text style={[styles.shTitle, { color: colors.foreground }]}>{title}</Text>
@@ -37,7 +39,7 @@ export function SectionHead({ title, count, onPress, onMore }: SectionHeadProps)
         <View style={styles.shRow}>{label}</View>
       )}
       {onMore ? (
-        <Pressable onPress={onMore} accessibilityRole="button" accessibilityLabel={`More options for ${title}`} style={styles.shMore}>
+        <Pressable ref={moreRef} onPress={() => measureAnchor(moreRef, onMore)} accessibilityRole="button" accessibilityLabel={`More options for ${title}`} style={styles.shMore}>
           <Icon name="more" size={22} stroke={colors.faint} />
         </Pressable>
       ) : null}

@@ -22,6 +22,8 @@ export interface Theme {
     fill: string
     selection: string
     sheet: string
+    /** c.css --sheet without its alpha, for native sheets that cannot be translucent */
+    "sheet-solid": string
     "sheet-card": string
     hover: string
     brand: string
@@ -124,6 +126,7 @@ export const darkTheme: Theme = {
     fill: "rgba(255, 255, 255, 0.10)",
     selection: "rgba(255, 255, 255, 0.16)",
     sheet: "rgba(23, 23, 23, 0.94)",
+    "sheet-solid": oklchToHex(0.2, 0, 0),
     "sheet-card": oklchToHex(0.26, 0, 0),
     hover: "rgba(255, 255, 255, 0.05)",
     brand: oklchToHex(0.585, 0.233, 277.117),

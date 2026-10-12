@@ -79,7 +79,7 @@ export default function RootLayout() {
               sheetGrabberVisible: true,
               sheetAllowedDetents: [0.96],
               sheetCornerRadius: 36,
-              contentStyle: { backgroundColor: "#171717" },
+              contentStyle: { backgroundColor: darkTheme.colors["sheet-solid"] },
             }}
           />
         </Stack>

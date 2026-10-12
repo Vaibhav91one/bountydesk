@@ -10,6 +10,7 @@ import { deliveryLabel } from "@/lib/delivery-label"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { fixturesEnabled } from "@/lib/fixtures"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { PhasePill, PrimaryButton, TOP_INSET, TopFade } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, KvLine, Note } from "@/components/CaseUi"
@@ -97,7 +98,7 @@ export default function VerdictApprovedScreen() {
       <View pointerEvents="none" style={styles.topFade}>
         <TopFade />
       </View>
-      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
         <PrimaryButton title="Back to queue" onPress={() => router.replace("/(tabs)")} style={styles.btn} />
       </View>
     </View>

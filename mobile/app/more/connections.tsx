@@ -20,6 +20,7 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
 import { PhasePill, PrimaryButton, ScreenHeader, ToastProvider, ScreenTitle, phaseTint } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
@@ -145,7 +146,7 @@ export default function ConnectionsScreen() {
         </ScrollView>
 
         <BottomFade />
-        <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+        <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
           <PrimaryButton title="Install GitHub App" onPress={handleInstall} style={styles.btn} />
         </View>
       </View>

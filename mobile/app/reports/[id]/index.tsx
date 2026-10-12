@@ -12,6 +12,7 @@ import { View, Text, ScrollView, StyleSheet, Pressable, Share } from "react-nati
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
 import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
@@ -298,7 +299,7 @@ export default function CaseFileScreen() {
       </ScrollView>
 
       <BottomFade />
-      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
         <Pressable
           onPress={() => router.push(`/reports/${file.id}/chat`)}
           style={({ pressed }) => [styles.fbarChat, { backgroundColor: colors.fill }, pressed && { opacity: 0.7 }]}

@@ -17,6 +17,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import { api } from "@/lib/api"
 import type { MobileCaseFile } from "@/lib/types"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, ToastProvider, useToast } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, KvLine, Note } from "@/components/CaseUi"
@@ -230,12 +231,12 @@ function VerdictReviewInner() {
         <BottomFade />
         <ScreenHeader back backLabel="Case file" onBack={() => router.back()} />
         {awaiting ? (
-          <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+          <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
             <PrimaryButton title="Deny" variant="secondary" onPress={openDeny} disabled={!canSubmit} style={styles.fbarBtn} />
             <PrimaryButton title="Approve" onPress={handleApprove} disabled={!canSubmit} style={styles.fbarBtn} />
           </View>
         ) : receiptReady ? (
-          <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+          <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
             <PrimaryButton title="View receipt" onPress={() => router.push(`/reports/${id}/verdict-approved`)} style={styles.fbarBtn} />
           </View>
         ) : null}

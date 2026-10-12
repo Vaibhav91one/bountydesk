@@ -24,6 +24,7 @@ import * as DocumentPicker from "expo-document-picker"
 
 import { api, ApiError } from "@/lib/api"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
 import { PrimaryButton, ScreenHeader, ToastProvider, useToast, ScreenTitle } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
@@ -206,7 +207,7 @@ function SubmitTargetInner() {
       </ScrollView>
 
       <BottomFade />
-      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" }]}><GlassBlur />
         <PrimaryButton
           title={isSubmitting ? "Building…" : "Build and bind target"}
           onPress={handleBuild}

@@ -28,6 +28,7 @@ import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
 import { useTheme } from "@/theme"
+import { GlassBlur } from "@/components/GlassBlur"
 import { phaseLabel, usePhaseColor, phaseTint } from "@/lib/phases"
 import type { PhaseKey } from "@/lib/phases"
 import { font } from "@/lib/fonts"
@@ -236,9 +237,10 @@ export function TopBar({ side, children, round }: { side: "left" | "right"; chil
         styles.topBar,
         side === "left" ? { left: 16 } : { right: 16 },
         round && { width: 48 },
-        { backgroundColor: colors.glass, borderColor: colors["glass-edge"] },
+        { backgroundColor: colors.glass, borderColor: colors["glass-edge"], overflow: "hidden" },
       ]}
     >
+      <GlassBlur />
       {children}
     </View>
   )
