@@ -109,6 +109,8 @@ export function mobileCaseView(
   });
 
   const verdict = live.verdict;
+  // The version is served as the case file's own targetVersion, not repeated inside the scope.
+  const { version, ...scope } = file.targetScope ?? { version: null, port: null };
   return {
     id: file.id,
     title: file.title,
@@ -129,7 +131,9 @@ export function mobileCaseView(
 
     target: live.target,
     /** Target profile scope and provisioning for M22, read alongside the case file. */
-    targetScope: file.targetScope ?? null,
+    targetScope: file.targetScope ? { ...scope, port: scope.port ?? null } : null,
+    /** The bound target's release label, null when there is no target or its profile names none. */
+    targetVersion: version ?? null,
     summary: live.finalSummary,
     destination: live.destination,
 

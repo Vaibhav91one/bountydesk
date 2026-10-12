@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { json, mobileAuth } from "@/lib/mobile/auth";
-import { paginate, parsePage, type InboxCard, type InboxSection } from "@/lib/mobile/views";
+import { extrasFor, readCardExtras } from "@/lib/mobile/card-extras";
+import { paginate, parsePage, type InboxCard } from "@/lib/mobile/views";
 import { INDEX_LIMIT, listAllReports, listAwaitingReview } from "@/lib/reports/queue";
 
 export const runtime = "nodejs";
@@ -76,27 +77,36 @@ export async function GET(request: Request): Promise<Response> {
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
 
-  if (phase === "needs") {
-    const { items, total, nextOffset } = paginate(needsCards, page);
-    return json({ needsYou: { items, total, nextOffset }, earlier: null });
-  }
-  if (phase === "earlier") {
-    const { items, total, nextOffset } = paginate(earlierCards, page);
-    return json({
-      needsYou: null,
-      earlier: { items, total, nextOffset, truncated: allRows.length >= INDEX_LIMIT } as InboxSection,
-    });
-  }
-
+  // Page first, then one batched read of the extras for just the cards returned.
   const needsPage = paginate(needsCards, page);
   const earlierPage = paginate(earlierCards, page);
+  const shown = [
+    ...(phase === "earlier" ? [] : needsPage.items),
+    ...(phase === "needs" ? [] : earlierPage.items),
+  ];
+  const extras = await readCardExtras(shown.map((card) => card.id));
+  const decorate = (items: InboxCard[]) => items.map((card) => ({ ...card, ...extrasFor(extras, card.id) }));
+  const truncated = allRows.length >= INDEX_LIMIT;
+
+  if (phase === "needs") {
+    return json({
+      needsYou: { items: decorate(needsPage.items), total: needsPage.total, nextOffset: needsPage.nextOffset },
+      earlier: null,
+    });
+  }
+  if (phase === "earlier") {
+    return json({
+      needsYou: null,
+      earlier: { items: decorate(earlierPage.items), total: earlierPage.total, nextOffset: earlierPage.nextOffset, truncated },
+    });
+  }
   return json({
-    needsYou: { items: needsPage.items, total: needsCards.length, nextOffset: needsPage.nextOffset },
+    needsYou: { items: decorate(needsPage.items), total: needsCards.length, nextOffset: needsPage.nextOffset },
     earlier: {
-      items: earlierPage.items,
+      items: decorate(earlierPage.items),
       total: earlierCards.length,
       nextOffset: earlierPage.nextOffset,
-      truncated: allRows.length >= INDEX_LIMIT,
-    } as InboxSection,
+      truncated,
+    },
   });
 }

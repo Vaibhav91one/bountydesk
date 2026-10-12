@@ -29,6 +29,7 @@ export {
   type CaseVerdict,
   type CaseVerdictHistoryEntry,
 } from "@/lib/reports/case-facts";
+import { targetPort, targetVersion } from "@/lib/mobile/fields";
 import type { CaseFile, CaseVerdictHistoryEntry } from "@/lib/reports/case-facts";
 
 /**
@@ -463,6 +464,8 @@ export async function readCase(
               // Every reproduction sandbox enforces networkBlockAll at the network layer;
               // the profile's egress config cannot widen that, so the phone always reads "none".
               egress: "none" as const,
+              port: targetPort(row.targetConfig),
+              version: targetVersion(row.targetName, row.targetConfig),
             }
           : null,
         verdict: latest ?? null,
