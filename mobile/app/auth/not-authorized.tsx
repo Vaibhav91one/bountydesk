@@ -9,7 +9,7 @@
  */
 import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert, Image } from "react-native"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 
 import { signOutAndClear } from "@/lib/session"
 import { darkTheme, lightTheme } from "@/theme"

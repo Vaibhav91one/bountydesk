@@ -8,7 +8,7 @@
 import { useState, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { restoreThemeMode, saveThemeMode, type ThemeMode } from "@/lib/theme-mode"
 import { useApiQuery, ApiError } from "@/lib/use-query"

@@ -8,7 +8,7 @@
  * Auth gate: Clerk says "signed in", then GET /home checks the reviewer
  * allowlist. 403 -> not-authorized.
  */
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 import { Redirect } from "expo-router"
 import { NativeTabs } from "expo-router/unstable-native-tabs"
 import { useEffect, useState } from "react"

@@ -16,7 +16,7 @@
  *    every sign-in/sign-out.
  */
 import { ReactNode, useEffect } from "react"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 
 import { QueryProvider } from "@/components/QueryProvider"
 import { setTokenGetter } from "@/lib/api"

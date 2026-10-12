@@ -7,7 +7,7 @@
 import { useEffect } from "react"
 import { View, Text, StyleSheet, Animated, Easing, useColorScheme } from "react-native"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 
 import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"

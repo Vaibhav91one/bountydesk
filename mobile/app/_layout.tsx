@@ -21,6 +21,7 @@ import { useFonts } from "@/hooks/useFonts"
 import { routeForNotification } from "@/lib/push"
 import { darkTheme } from "@/theme"
 import { restoreThemeMode } from "@/lib/theme-mode"
+import { fixturesEnabled } from "@/lib/fixtures"
 
 /**
  * Resolve the auth session as soon as the root layout mounts, so the SSO
@@ -71,16 +72,23 @@ export default function RootLayout() {
     )
   }
 
+  const shell = (
+    <ClerkTokenBridge>
+      <ToastProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </ToastProvider>
+    </ClerkTokenBridge>
+  )
+
+  // Fixture mode (dev only) signs the reviewer in locally, so Clerk is not mounted at all.
+  if (fixturesEnabled()) return shell
+
   return (
     <ClerkProvider
       tokenCache={tokenCache}
       publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
     >
-      <ClerkTokenBridge>
-        <ToastProvider>
-          <Stack screenOptions={{ headerShown: false }} />
-        </ToastProvider>
-      </ClerkTokenBridge>
+      {shell}
     </ClerkProvider>
   )
 }

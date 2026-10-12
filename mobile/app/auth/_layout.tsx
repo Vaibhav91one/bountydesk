@@ -6,7 +6,7 @@
  * bouncing them to /tabs would re-run /home, 403 again, and loop back here
  * forever. authRedirect keeps them on not-authorized.
  */
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 import { Redirect, Stack, useSegments } from "expo-router"
 
 import { authRedirect } from "@/lib/auth"
