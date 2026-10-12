@@ -13,9 +13,10 @@ import { useRouter, useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { KvRow, PhasePill, Card, PrimaryButton } from "@/components/primitives"
+import { KvRow, PhasePill, Card, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
 import type { MobileCaseFile } from "@/lib/types"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 /** MobileCaseFile plus the targetScope fields the API returns but the local
  * type does not declare. OPEN QUESTIONS entry: targetScope is absent from
@@ -175,57 +176,44 @@ export default function CaseFileScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Back button (top-left glass round) */}
-      <View style={styles.backWrapper}>
-        <Pressable
-          onPress={() => router.back()}
-          style={({ pressed }) => [
-            styles.glassRoundBtn,
-            { backgroundColor: colors.glass, borderColor: colors["glass-edge"] },
-            pressed && { opacity: 0.92 },
-          ]}
-          accessibilityLabel="Back"
-        >
-          <Icon name="back" size={24} strokeWidth={2.2} stroke={colors.foreground} />
-        </Pressable>
-      </View>
-
-      {/* Top-right glass pill: Share */}
-      <View style={styles.topRightWrapper}>
-        <View style={[styles.glassPill, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-          <Pressable
-            onPress={async () => {
-              await Share.share({ message: `${reportIdLabel} ${file.title}` })
-            }}
-            style={({ pressed }) => [
-              styles.iconBtn,
-              { backgroundColor: colors.background },
-              pressed && { opacity: 0.7 },
-            ]}
-            accessibilityLabel="Share"
-          >
-            <Icon name="share" size={22} stroke={colors.foreground} />
-          </Pressable>
-        </View>
-      </View>
+      <ScreenHeader
+        back
+        onBack={() => router.back()}
+        backLabel="Home"
+        right={
+          <>
+            <TopBarButton
+              icon="share"
+              label="Share"
+              onPress={async () => {
+                await Share.share({ message: `${reportIdLabel} ${file.title}` })
+              }}
+            />
+            <TopBarButton icon="more" label="More" />
+          </>
+        }
+      />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* h1 + hmeta */}
-        <Text style={[styles.h1, { color: colors.foreground }]}>{file.title}</Text>
-        <View style={styles.hmeta}>
-          <PhasePill
-            phase={phase}
-            label={phase === "approval" ? "Awaiting approval" : undefined}
-            style={isApproval ? styles.approvalHalo : undefined}
-          />
-          <Text style={[styles.hmetaText, { color: colors.muted }]}>
-            {reportIdLabel} · opened {ageLabelFor(file.createdAt)}
-          </Text>
-        </View>
+        <ScreenTitle
+          title={file.title}
+          meta={
+            <>
+              <PhasePill
+                phase={phase}
+                label={phase === "approval" ? "Awaiting approval" : undefined}
+                style={isApproval ? styles.approvalHalo : undefined}
+              />
+              <Text style={[styles.hmetaText, { color: colors.muted }]}>
+                {reportIdLabel} · opened {ageLabelFor(file.createdAt)}
+              </Text>
+            </>
+          }
+        />
 
         {/* Report section: KvRows */}
         <View style={styles.section}>
@@ -371,51 +359,29 @@ export default function CaseFileScreen() {
 }
 
 const styles = StyleSheet.create({
-  backWrapper: { position: "absolute", top: 54, left: 16, zIndex: 30 },
-  glassRoundBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  topRightWrapper: { position: "absolute", top: 54, right: 16, zIndex: 30 },
-  glassPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderRadius: 24,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  iconBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
-  meta: { fontSize: 16 },
+  error: { fontFamily: font.regular, fontSize: 16 },
+  meta: { fontFamily: font.regular, fontSize: 16 },
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 84, paddingHorizontal: 20, paddingBottom: 120 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, marginBottom: 4 },
-  hmeta: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 28 },
-  hmetaText: { fontSize: 15 },
+  scrollContent: { paddingBottom: 150 },
+  hmetaText: { fontFamily: font.regular, fontSize: 15 },
   approvalHalo: { alignSelf: "center" },
-  section: { marginBottom: 28 },
-  shPlain: { fontSize: 20, fontWeight: "600", lineHeight: 24, marginBottom: 12 },
+  section: { marginBottom: 28, paddingHorizontal: 16 },
+  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12, paddingHorizontal: 4 },
   cardList: { marginHorizontal: 0, borderRadius: 24, overflow: "hidden" },
   summaryCard: { marginHorizontal: 0, borderRadius: 24, overflow: "hidden", padding: 0 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 0, marginTop: 8 },
-  body: { fontSize: 17, lineHeight: 24, padding: 18 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 4, marginTop: 8 },
+  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 24, padding: 18 },
   targetRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 18 },
   targetMain: { flex: 1, minWidth: 0 },
-  targetTitle: { fontSize: 16, fontWeight: "500", lineHeight: 20 },
-  targetSubtitle: { fontSize: 13, marginTop: 3 },
+  targetTitle: { fontFamily: font.medium, fontSize: 16, lineHeight: 20 },
+  targetSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   targetPill: { alignSelf: "center" },
   findItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 18, minHeight: 56 },
   findMain: { flex: 1, minWidth: 0, marginRight: 12 },
-  findTitle: { fontSize: 16, fontWeight: "500", lineHeight: 20 },
-  findSub: { fontSize: 13, marginTop: 3 },
-  findSev: { fontSize: 13, fontWeight: "600" },
+  findTitle: { fontFamily: font.medium, fontSize: 16, lineHeight: 20 },
+  findSub: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
+  findSev: { fontFamily: font.semibold, fontSize: 13, },
   tiles: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
   tile: {
     flex: 1,
@@ -428,8 +394,8 @@ const styles = StyleSheet.create({
     gap: 8,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  tileLabel: { fontSize: 15, fontWeight: "600", lineHeight: 20 },
-  tileSub: { fontSize: 12, lineHeight: 16 },
+  tileLabel: { fontFamily: font.semibold, fontSize: 15, lineHeight: 20 },
+  tileSub: { fontFamily: font.regular, fontSize: 12, lineHeight: 16 },
   fbar: {
     position: "absolute",
     bottom: 0,

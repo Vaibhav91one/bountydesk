@@ -14,6 +14,7 @@ import { useRouter, useLocalSearchParams } from "expo-router"
 import { useTheme } from "@/theme"
 import { ScreenHeader, useToast } from "@/components/primitives"
 import { useApiMutation } from "@/lib/use-query"
+import { font } from "@/lib/fonts"
 
 const OTP_LENGTH = 6
 
@@ -182,13 +183,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 58,
     borderRadius: 16,
-    fontSize: 24,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 24,
+    
     lineHeight: 28,
     padding: 0,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 12,
@@ -205,7 +206,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
   resendText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
 })

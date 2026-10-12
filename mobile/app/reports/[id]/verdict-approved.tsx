@@ -16,6 +16,7 @@ import { useTheme } from "@/theme"
 import { PhasePill, Card, KvRow, Mono, PrimaryButton, ToastProvider, Row } from "@/components/primitives"
 
 import { SvgImage } from "@/components/SvgImage"
+import { font } from "@/lib/fonts"
 
 type CaseFileWithDelivery = MobileCaseFile & {
   delivery: {
@@ -127,17 +128,17 @@ export default function VerdictApprovedScreen() {
 const styles = StyleSheet.create({
   scrollContent: { paddingTop: 40, paddingBottom: 80 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  errorText: { fontSize: 16 },
+  errorText: { fontFamily: font.regular, fontSize: 16 },
   mascotBox: { display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", padding: "auto", paddingHorizontal: 24, paddingBottom: 20 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.84, paddingTop: 6, textAlign: "center" },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingTop: 10, textAlign: "center" },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.84, paddingTop: 6, textAlign: "center" },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingTop: 10, textAlign: "center" },
   sect: { marginBottom: 28, marginHorizontal: 16 },
-  shPlain: { fontSize: 20, fontWeight: "600", lineHeight: 24, marginBottom: 12 },
+  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12 },
   cardList: { borderRadius: 24, overflow: "hidden" },
   receiptCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
   receiptRow: { paddingVertical: 10, paddingHorizontal: 18, minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  hash: { padding: 18, fontSize: 13, lineHeight: 20 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
+  kvLabel: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  hash: { padding: 18, fontFamily: font.regular, fontSize: 13, lineHeight: 20 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
   fbar: { position: "absolute", left: 16, right: 16, bottom: 30, padding: 6 },
 })

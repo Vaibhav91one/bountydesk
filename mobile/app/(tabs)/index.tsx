@@ -18,6 +18,7 @@ import { ReviewFab } from "@/components/ReviewFab"
 import { PhasePill, SectionHeader, Card } from "@/components/primitives"
 import { Pill } from "@/components/ui/Pill"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window")
 const CARD_WIDTH = SCREEN_WIDTH / 2 - 28
@@ -120,11 +121,6 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-      <Text style={[styles.h1, { color: colors.foreground }]}>Home</Text>
-      <Text style={[styles.hmeta, { color: colors.muted }]}>
-        {summary?.reports ?? 10} total reports · {summary?.open ?? 8} open
-      </Text>
-
       {/* Needs you carousel (.rail with .nc cards) */}
       <ScrollView
         horizontal
@@ -254,27 +250,27 @@ function ActiveRow({ card, phase }: ActiveRowProps) {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8 },
+  scrollContent: { paddingTop: 116, paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
-  hmeta: { fontSize: 15, marginBottom: 8 },
+  error: { fontFamily: font.regular, fontSize: 16 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, marginBottom: 8 },
   rail: { gap: 12, paddingBottom: 12, marginBottom: 4 },
   ncCard: { flexShrink: 0, borderRadius: 24, padding: 18, gap: 10 },
   ncTop: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 4 },
-  ncTime: { fontSize: 13 },
-  ncTitle: { fontSize: 19, fontWeight: "600", lineHeight: 24, letterSpacing: -0.02, marginTop: -4 },
-  ncSubtitle: { fontSize: 13 },
+  ncTime: { fontFamily: font.regular, fontSize: 13 },
+  ncTitle: { fontFamily: font.semibold, fontSize: 19, lineHeight: 24, letterSpacing: -0.02, marginTop: -4 },
+  ncSubtitle: { fontFamily: font.regular, fontSize: 13 },
   ncFoot: { marginTop: "auto", flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: 12 },
   outcomePill: { alignSelf: "flex-end" },
   section: { marginBottom: 28 },
   list: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
   item: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, paddingVertical: 10, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
   main: { flex: 1, minWidth: 0 },
-  itemT: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  itemS: { fontSize: 13, marginTop: 3 },
+  itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  itemS: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   itemR: { flexShrink: 0, flexDirection: "column", alignItems: "flex-end", gap: 6 },
-  itemB: { fontSize: 13 },
+  itemB: { fontFamily: font.regular, fontSize: 13 },
   rowPill: { marginTop: 0, marginBottom: 0 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
 })

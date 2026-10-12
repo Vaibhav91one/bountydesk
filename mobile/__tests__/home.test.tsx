@@ -292,10 +292,9 @@ describe("M4 Home", () => {
     jest.useRealTimers()
   })
 
-  it("renders the home header with counts", async () => {
-    const { getByText } = await render(<HomeScreen />)
-    expect(getByText("Home")).toBeTruthy()
-    expect(getByText("12 total reports · 9 open")).toBeTruthy()
+  it("has no title block: m4 opens straight on its sections", async () => {
+    const { queryByText } = await render(<HomeScreen />)
+    expect(queryByText("Home")).toBeNull()
   })
 
   it("renders the awaiting needs-you card with title and Not reproduced pill", async () => {

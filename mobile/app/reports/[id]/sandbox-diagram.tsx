@@ -13,6 +13,7 @@ import type { MobileCaseFile } from "@/lib/types"
 import { ScreenHeader, KvRow, EmptyState } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 /** The four sandbox-diagram nodes from m26.html, in order. */
 const NODES = [
@@ -242,19 +243,19 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   nodeBadge: {
-    fontSize: 11,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 11,
+    
     lineHeight: 14,
     letterSpacing: 0.5,
     textTransform: "uppercase",
   },
   nodeTitle: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
     lineHeight: 22,
   },
   nodeSubtitle: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     marginTop: 2,
   },
@@ -275,7 +276,7 @@ const styles = StyleSheet.create({
     borderLeftWidth: 2,
   },
   connectorLabel: {
-    fontSize: 12,
+    fontFamily: font.regular, fontSize: 12,
     lineHeight: 18,
   },
   notesSection: {
@@ -283,8 +284,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   sectionHeader: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
     marginBottom: 10,
   },
@@ -293,7 +294,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     marginTop: 10,
     textAlign: "center",
@@ -304,6 +305,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   error: {
-    fontSize: 16,
+    fontFamily: font.regular, fontSize: 16,
   },
 })

@@ -5,18 +5,18 @@
  */
 import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useTheme } from "@/theme"
-import { ScreenHeader } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 export default function PrivacyScreen() {
   const { colors } = useTheme()
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Privacy" back backLabel="Settings" />
+      <ScreenHeader back backLabel="Settings" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Privacy</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Last updated September 2026</Text>
+        <ScreenTitle title="Privacy" meta="Last updated September 2026" metaBottom={22} />
 
         <View style={styles.article}>
           <Text style={[styles.lead, { color: colors.foreground }]}>
@@ -59,12 +59,12 @@ export default function PrivacyScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 40,
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -72,7 +72,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -81,28 +81,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   h2: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
     letterSpacing: -0.02 * 20,
     marginTop: 32,
     marginBottom: 10,
   },
   lead: {
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 26,
     marginTop: 0,
     marginBottom: 0,
     opacity: 0.88,
   },
   p: {
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 26,
     opacity: 0.88,
     marginBottom: 0,
   },
   end: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     marginTop: 32,
   },
 })

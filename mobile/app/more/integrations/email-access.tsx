@@ -12,8 +12,9 @@ import { useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
 import type { EmailReviewer, MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, Card, useToast } from "@/components/primitives"
 import { Icon } from "@/components/icons"
+import { font } from "@/lib/fonts"
 
 // Maps role to the subtitle text shown in the reviewer row.
 function reviewerSubtitle(reviewer: EmailReviewer): string {
@@ -95,11 +96,10 @@ export default function EmailAccessScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Email access" back backLabel="Integrations" />
+      <ScreenHeader back backLabel="Integrations" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Email access</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Reviewer allowlist</Text>
+        <ScreenTitle title="Email access" meta="Reviewer allowlist" metaBottom={24} />
 
         {/* Reviewers section */}
         <View style={styles.section}>
@@ -202,12 +202,12 @@ export default function EmailAccessScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 40,
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -231,8 +231,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   shText: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
   },
   list: {
@@ -262,20 +262,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: {
-    fontSize: 16,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 16,
+    
   },
   main: {
     flex: 1,
     minWidth: 0,
   },
   itemT: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 20,
   },
   itemS: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     marginTop: 3,
   },
   rowTrailing: {
@@ -296,8 +296,8 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   pillLabel: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 13,
+    
     lineHeight: 14,
   },
   addRow: {
@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 20,
     paddingHorizontal: 16,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 23,
   },
   addBtn: {
@@ -323,11 +323,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   addBtnText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 10,

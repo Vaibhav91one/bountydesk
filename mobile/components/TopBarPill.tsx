@@ -9,8 +9,9 @@ import { useState } from "react"
 import { View, Text, Pressable, Modal, StyleSheet } from "react-native"
 import { useRouter } from "expo-router"
 import { Icon } from "@/components/icons"
-import { GlassPill } from "@/components/primitives"
+import { TopBar, TopBarButton, TopFade } from "@/components/primitives"
 import { useTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 const MENU_ITEMS: { label: string; icon: IconName; route: string }[] = [
   { label: "Settings", icon: "cog", route: "/more" },
@@ -33,14 +34,13 @@ export function TopBarPill() {
 
   return (
     <>
-      <GlassPill style={styles.pill} round>
-        <Pressable onPress={() => go("/inbox")} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.btn]} aria-label="Inbox">
-          <Icon name="bell" size={22} stroke={colors.foreground} />
-        </Pressable>
-        <Pressable onPress={() => setOpen(true)} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.btn]} aria-label="More">
-          <Icon name="more" size={22} stroke={colors.foreground} />
-        </Pressable>
-      </GlassPill>
+      <View pointerEvents="box-none" style={styles.chrome}>
+        <TopFade />
+        <TopBar side="right">
+          <TopBarButton icon="bell" label="Inbox" onPress={() => go("/inbox")} />
+          <TopBarButton icon="more" label="More" onPress={() => setOpen(true)} />
+        </TopBar>
+      </View>
 
       <Modal transparent visible={open} animationType="fade" onRequestClose={() => setOpen(false)} hardwareAccelerated>
         <Pressable style={styles.scrims} onPress={() => setOpen(false)}>
@@ -59,17 +59,9 @@ export function TopBarPill() {
 }
 
 const styles = StyleSheet.create({
-  pill: {
-    position: "absolute",
-    top: 54,
-    right: 16,
-    zIndex: 30,
-    flexDirection: "row",
-    gap: 8,
-  },
-  btn: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  chrome: { position: "absolute", top: 0, left: 0, right: 0, height: 124, zIndex: 30 },
   scrims: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-start", paddingTop: 110, alignItems: "flex-end", paddingRight: 16 },
   menu: { minWidth: 180, borderRadius: 20, overflow: "hidden", borderWidth: StyleSheet.hairlineWidth, gap: 4 },
   item: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  label: { fontSize: 17, fontWeight: "600", lineHeight: 22 },
+  label: { fontFamily: font.semibold, fontSize: 17, lineHeight: 22 },
 })

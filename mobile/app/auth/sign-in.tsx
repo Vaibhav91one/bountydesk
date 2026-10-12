@@ -14,6 +14,7 @@ import Svg, { Path } from "react-native-svg"
 import { SvgImage } from "@/components/SvgImage"
 import { Icon } from "@/components/icons"
 import { darkTheme, lightTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 // maybeCompleteAuthSession() is called once in app/_layout.tsx at the top
 // level so the SSO redirect is resolved before any screen mounts.
@@ -154,13 +155,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    fontSize: 32, // 2rem in c.css
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 32, // 2rem in c.css
+    
     letterSpacing: -0.5,
     padding: 0,
   },
   subtitle: {
-    fontSize: 17, // 1.0625rem
+    fontFamily: font.regular, fontSize: 17, // 1.0625rem
     lineHeight: 24,
     maxWidth: 336,
   },
@@ -185,12 +186,12 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.20)",
   },
   btnText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   btnTextDark: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   quietLink: {
     marginTop: 6,
@@ -200,13 +201,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   quiet: {
-    fontSize: 15, // .9375rem
+    fontFamily: font.regular, fontSize: 15, // .9375rem
     letterSpacing: 0,
   },
   legal: {
     marginTop: 18,
     alignSelf: "center",
-    fontSize: 13, // .8125rem
+    fontFamily: font.regular, fontSize: 13, // .8125rem
     lineHeight: 20,
     letterSpacing: 0,
   },

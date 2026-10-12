@@ -25,7 +25,8 @@ import * as DocumentPicker from "expo-document-picker"
 import { api, ApiError } from "@/lib/api"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, SectionHeader, ScreenHeader, Mono, ToastProvider, useToast } from "@/components/primitives"
+import { Card, SectionHeader, ScreenHeader, Mono, ToastProvider, useToast, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 type SourceKind = "tar" | "dockerfile" | "image"
 
@@ -112,16 +113,13 @@ function SubmitTargetInner() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Submit a target" back backLabel="Connections" />
+      <ScreenHeader back backLabel="Connections" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Submit a target</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>
-          Upload target material and the settings to run it
-        </Text>
+        <ScreenTitle title="Submit a target" meta="Upload target material and the settings to run it" metaBottom={24} />
 
         {/* Source */}
         <SectionHeader title="Source" chevron={false} />
@@ -342,9 +340,9 @@ function KvRowEdit({
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
+  scrollContent: { paddingTop: 0, paddingBottom: 100 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
   card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
   cardPick: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4, marginTop: 8 },
   reportCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4, padding: 0 },
@@ -363,7 +361,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   segBtnText: {
-    fontSize: 14,
+    fontFamily: font.regular, fontSize: 14,
     letterSpacing: 0,
   },
   avatar: {
@@ -381,21 +379,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   filePickerMain: { flex: 1, minWidth: 0 },
-  filePickerTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  filePickerSubtitle: { fontSize: 13, marginTop: 3 },
+  filePickerTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  filePickerSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   imageInputs: { paddingHorizontal: 16, gap: 16, marginBottom: 4 },
   fieldGroup: { gap: 6 },
-  lbl: { fontSize: 13, fontWeight: "600", lineHeight: 18 },
+  lbl: { fontFamily: font.semibold, fontSize: 13, lineHeight: 18 },
   field: {
     minHeight: 52,
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 16,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 22,
   },
   fieldMono: {
-    fontFamily: "GeistMono",
+    fontFamily: font.mono,
     fontSize: 15,
   },
   area: {
@@ -404,10 +402,10 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     paddingHorizontal: 18,
     paddingTop: 14,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 22,
   },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
   kvRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -417,9 +415,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  kvValue: { fontSize: 17, textAlign: "right", flexShrink: 1, paddingVertical: 10 },
-  kvValueMono: { fontFamily: "GeistMono", fontSize: 15 },
+  kvLabel: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  kvValue: { fontFamily: font.regular, fontSize: 17, textAlign: "right", flexShrink: 1, paddingVertical: 10 },
+  kvValueMono: { fontFamily: font.mono, fontSize: 15 },
   kvValueNumeric: { width: 80, textAlign: "right" },
   fbar: {
     position: "absolute",
@@ -441,5 +439,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     // backgroundColor moved to inline style below (theme token)
   },
-  btnText: { fontSize: 17, fontWeight: "600" },
+  btnText: { fontFamily: font.semibold, fontSize: 17, },
 })

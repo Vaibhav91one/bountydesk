@@ -14,10 +14,11 @@ import { restoreThemeMode, saveThemeMode, type ThemeMode } from "@/lib/theme-mod
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, Card, useToast } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { signOutAndClear } from "@/lib/session"
+import { font } from "@/lib/fonts"
 
 const THEME_ORDER: ("system" | "light" | "dark")[] = ["system", "light", "dark"]
 const THEME_LABELS = { system: "System", light: "Light", dark: "Dark" }
@@ -134,11 +135,10 @@ export default function SettingsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Settings" back backLabel="Home" />
+      <ScreenHeader back backLabel="Home" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Settings</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Account and workspace</Text>
+        <ScreenTitle title="Settings" meta="Account and workspace" metaBottom={20} />
 
         {/* Account row */}
         <View style={styles.section}>
@@ -303,12 +303,12 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 40,
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -332,8 +332,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   shText: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
   },
   list: {
@@ -367,20 +367,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   avatarText: {
-    fontSize: 16,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 16,
+    
   },
   main: {
     flex: 1,
     minWidth: 0,
   },
   itemT: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 20,
   },
   itemS: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     marginTop: 3,
   },
   rowTrailing: {
@@ -391,8 +391,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   value: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 20,
   },
   pill: {
@@ -409,8 +409,8 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   pillLabel: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 13,
+    
     lineHeight: 14,
   },
   switchRow: {
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 10,

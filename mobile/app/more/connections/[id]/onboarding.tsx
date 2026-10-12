@@ -13,7 +13,8 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState } from "@/components/primitives"
+import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 type Stage = {
   label: string
@@ -112,7 +113,7 @@ export default function OnboardingScreen() {
   if (!row) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="" back backLabel="Connections" />
+        <ScreenHeader back backLabel="Connections" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
@@ -128,7 +129,7 @@ export default function OnboardingScreen() {
   if (!row.onboarding && !row.onboardingProgress && !row.onboardingDetail) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="Onboarding" back backLabel="Connections" />
+        <ScreenHeader back backLabel="Connections" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
@@ -148,14 +149,13 @@ export default function OnboardingScreen() {
     const reason = row.onboardingProgress?.reason ?? row.onboardingDetail?.reason ?? "Onboarding failed"
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="Onboarding" back backLabel="Connections" />
+        <ScreenHeader back backLabel="Connections" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.h1, { color: colors.foreground }]}>Onboarding</Text>
-          <Text style={[styles.hmeta, { color: colors.muted }]}>How a repository becomes a bound target</Text>
+          <ScreenTitle title="Onboarding" meta="How a repository becomes a bound target" metaBottom={24} />
           <View style={styles.section}>
             <Text style={[styles.failedReason, { color: colors.red }]}>{reason}</Text>
           </View>
@@ -171,14 +171,13 @@ export default function OnboardingScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Onboarding" back backLabel="Connections" />
+      <ScreenHeader back backLabel="Connections" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Onboarding</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>How a repository becomes a bound target</Text>
+        <ScreenTitle title="Onboarding" meta="How a repository becomes a bound target" metaBottom={24} />
 
         {/* Seven-stage diagram */}
         <View style={styles.diagram}>
@@ -266,11 +265,11 @@ function StageConnector() {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
+  scrollContent: { paddingTop: 0, paddingBottom: 100 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
+  error: { fontFamily: font.regular, fontSize: 16 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
   diagram: { paddingHorizontal: 16, gap: 0 },
   diagramNodeRow: { alignItems: "center" },
   diagramNode: {
@@ -292,9 +291,9 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
   nodeMain: { flex: 1, minWidth: 0 },
-  nodeLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 0.08 * 11, textTransform: "uppercase", lineHeight: 14 },
-  nodeTitle: { fontSize: 17, fontWeight: "600", lineHeight: 22, marginTop: 2 },
-  nodeDetail: { fontSize: 13, marginTop: 2, lineHeight: 18 },
+  nodeLabel: { fontFamily: font.semibold, fontSize: 11, letterSpacing: 0.08 * 11, textTransform: "uppercase", lineHeight: 14 },
+  nodeTitle: { fontFamily: font.semibold, fontSize: 17, lineHeight: 22, marginTop: 2 },
+  nodeDetail: { fontFamily: font.regular, fontSize: 13, marginTop: 2, lineHeight: 18 },
   hotOutline: {
     position: "absolute",
     top: 0,
@@ -313,6 +312,6 @@ const styles = StyleSheet.create({
   },
   section: { marginBottom: 28 },
   card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
-  failedReason: { fontSize: 15, lineHeight: 22, paddingHorizontal: 20, textAlign: "center" },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
+  failedReason: { fontFamily: font.regular, fontSize: 15, lineHeight: 22, paddingHorizontal: 20, textAlign: "center" },
 })

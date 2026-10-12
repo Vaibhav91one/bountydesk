@@ -71,7 +71,8 @@ jest.mock("@/components/primitives", () => {
         React.createElement(Text, {}, typeof value === "string" ? value : "value"),
       ),
     SectionHeader: ({ title }: any) => React.createElement(Text, { "data-testid": `section-${title}` }, title),
-    ScreenHeader: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
+    ScreenHeader: () => null,
+    ScreenTitle: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
     Mono: ({ children }: any) => React.createElement(Text, {}, children),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),
   }

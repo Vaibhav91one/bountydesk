@@ -17,6 +17,7 @@ import type { MobileCaseFile } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { PhasePill, Card, Row, Mono, PrimaryButton, Sheet, ToastProvider, useToast } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
 
@@ -203,7 +204,7 @@ function DenyVerdictInner() {
               Refresh and review again.
             </Text>
             <Pressable onPress={() => { setHashMismatch(false); refetch() }} style={[styles.mismatchBtn, { backgroundColor: colors.brand }]}>
-              <Text style={{ color: colors.card, fontWeight: "600", fontSize: 16 }}>Refresh</Text>
+              <Text style={{ color: colors.card,  fontFamily: font.semibold, fontSize: 16 }}>Refresh</Text>
             </Pressable>
           </View>
         ) : (
@@ -325,35 +326,35 @@ const styles = StyleSheet.create({
   topbar: { position: "absolute", top: 54, left: 16, zIndex: 30 },
   glassBtn: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth },
   centered: { flex: 1, alignItems: "center", justifyContent: "center", gap: 12 },
-  errorText: { fontSize: 16 },
+  errorText: { fontFamily: font.regular, fontSize: 16 },
   retryLink: { paddingVertical: 8, paddingHorizontal: 12, minHeight: 44, minWidth: 44, alignItems: "center", justifyContent: "center" },
-  retryText: { fontSize: 16, fontWeight: "600" },
+  retryText: { fontFamily: font.semibold, fontSize: 16, },
   scrollContent: { paddingTop: 100, paddingBottom: 90, marginHorizontal: 20 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.84, marginTop: 8, paddingHorizontal: 4 },
-  hmeta: { fontSize: 15, lineHeight: 20, marginTop: 4 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.84, marginTop: 8, paddingHorizontal: 4 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, marginTop: 4 },
   sect: { marginBottom: 28 },
-  shPlain: { fontSize: 20, fontWeight: "600", lineHeight: 24, marginBottom: 12 },
+  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12 },
   cardList: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden" },
   cardNoList: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", padding: 0 },
   itemNoDivider: { paddingVertical: 10, paddingHorizontal: 18, minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  rowT: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  body: { padding: 18, fontSize: 17, lineHeight: 23 },
-  hash: { padding: 18, fontSize: 13, lineHeight: 20 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
+  rowT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  body: { padding: 18, fontFamily: font.regular, fontSize: 17, lineHeight: 23 },
+  hash: { padding: 18, fontFamily: font.regular, fontSize: 13, lineHeight: 20 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, paddingTop: 10 },
   fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: StyleSheet.hairlineWidth },
   kvRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 56, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
-  kvLabel: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  kvValue: { fontSize: 17, textAlign: "right", flexShrink: 1 },
-  lbl: { fontSize: 13, fontWeight: "600", paddingHorizontal: 4, paddingBottom: 6 },
+  kvLabel: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  kvValue: { fontFamily: font.regular, fontSize: 17, textAlign: "right", flexShrink: 1 },
+  lbl: { fontFamily: font.semibold, fontSize: 13, paddingHorizontal: 4, paddingBottom: 6 },
   reasonRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth, minHeight: 64 },
   reasonMain: { flex: 1, minWidth: 0 },
-  reasonTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  reasonNote: { fontSize: 13, lineHeight: 18, marginTop: 3 },
+  reasonTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  reasonNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, marginTop: 3 },
   radio: { width: 26, height: 26, borderRadius: 13, borderWidth: 2, alignItems: "center", justifyContent: "center", flexShrink: 0, marginLeft: 12 },
   radioDot: { width: 14, height: 14, borderRadius: 7 },
-  textarea: { width: "100%", minHeight: 92, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 14, fontSize: 17, lineHeight: 23, textAlignVertical: "top" },
+  textarea: { width: "100%", minHeight: 92, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, padding: 14, fontFamily: font.regular, fontSize: 17, lineHeight: 23, textAlignVertical: "top" },
   mismatchBox: { alignItems: "center", paddingVertical: 60 },
-  mismatchTitle: { fontSize: 20, fontWeight: "600", lineHeight: 24, marginBottom: 8 },
-  mismatchBody: { fontSize: 15, lineHeight: 20, marginBottom: 20 },
+  mismatchTitle: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 8 },
+  mismatchBody: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, marginBottom: 20 },
   mismatchBtn: { paddingHorizontal: 24, paddingVertical: 14, borderRadius: 26, minWidth: 160, alignItems: "center", justifyContent: "center" },
 })

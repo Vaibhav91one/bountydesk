@@ -70,7 +70,8 @@ jest.mock("@/components/primitives", () => {
         React.createElement(Text, { "data-testid": `kvvalue-${label}` }, value),
       ),
     SectionHeader: ({ title }: any) => React.createElement(Text, { "data-testid": `section-${title}` }, title),
-    ScreenHeader: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
+    ScreenHeader: () => null,
+    ScreenTitle: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
     Mono: ({ children, style }: any) => React.createElement(Text, { style, "data-testid": "mono" }, children),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),
   }

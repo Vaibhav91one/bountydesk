@@ -30,6 +30,7 @@ import { ScreenHeader, EmptyState } from "@/components/primitives"
 import { useTheme } from "@/theme"
 import { useRef, useState, useEffect, useCallback } from "react"
 import type { MobileCaseFile } from "@/lib/types"
+import { font } from "@/lib/fonts"
 
 /** Chat response shapes. Not in lib/types.ts (which only holds case-file types),
  *  so declared here to avoid editing shared files. */
@@ -388,8 +389,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   dayText: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 13,
+    
     lineHeight: 18,
   },
   empty: {
@@ -406,7 +407,7 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
   },
   who: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     color: "rgba(175,175,190,1)",
     paddingHorizontal: 4,
@@ -422,16 +423,16 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   typingDots: {
-    fontSize: 20,
+    fontFamily: font.regular, fontSize: 20,
     lineHeight: 20,
     letterSpacing: -2,
   },
   typingText: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
   },
   bubbleText: {
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 1.35 * 17,
   },
   sugg: {
@@ -448,8 +449,8 @@ const styles = StyleSheet.create({
     borderRadius: 22,
   },
   fchipText: {
-    fontSize: 15,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 15,
+    
     lineHeight: 20,
   },
   composerWrap: {
@@ -469,7 +470,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
     minHeight: 48,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 1.4 * 17,
     backgroundColor: "transparent",
     outlineWidth: 0,
@@ -482,8 +483,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   sendIcon: {
-    fontSize: 20,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 20,
+    
   },
   centered: {
     flex: 1,
@@ -491,6 +492,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   error: {
-    fontSize: 16,
+    fontFamily: font.regular, fontSize: 16,
   },
 })

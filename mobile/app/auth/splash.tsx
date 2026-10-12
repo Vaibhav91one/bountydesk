@@ -11,6 +11,7 @@ import { useAuth } from "@/lib/auth-hooks"
 
 import { SvgImage } from "@/components/SvgImage"
 import { darkTheme, lightTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 export default function SplashScreen() {
   const router = useRouter()
@@ -80,7 +81,7 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   tagline: {
-    fontSize: 15, // .9375rem in c.css
+    fontFamily: font.regular, fontSize: 15, // .9375rem in c.css
     letterSpacing: 0,
   },
 })

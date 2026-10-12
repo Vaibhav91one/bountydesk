@@ -13,6 +13,7 @@ import { ScreenHeader, EmptyState } from "@/components/primitives"
 import { Pill } from "@/components/ui/Pill"
 import { useTheme } from "@/theme"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 type ToolCallStatus = "Pass" | "Allowed" | "Denied" | "Gated"
 
@@ -220,8 +221,8 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   sectionHeader: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
     marginHorizontal: 20,
     marginBottom: 10,
@@ -245,12 +246,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   toolName: {
-    fontSize: 15,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 15,
+    
     lineHeight: 20,
   },
   argsPreview: {
-    fontSize: 12,
+    fontFamily: font.regular, fontSize: 12,
     lineHeight: 18,
     marginTop: 3,
   },
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
     paddingTop: 40,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -274,6 +275,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   error: {
-    fontSize: 16,
+    fontFamily: font.regular, fontSize: 16,
   },
 })

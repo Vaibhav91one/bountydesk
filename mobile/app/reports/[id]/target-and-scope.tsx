@@ -10,7 +10,8 @@ import { useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFileWithScope } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState } from "@/components/primitives"
+import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 // Keep the digest readable in the header meta.
 function shortDigest(digest: string): string {
@@ -47,13 +48,13 @@ export default function TargetAndScopeScreen() {
   if (!scope) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="Target and scope" back backLabel="Case file" />
+        <ScreenHeader back backLabel="Case file" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.h1, { color: colors.foreground }]}>Target and scope</Text>
+          <ScreenTitle title="Target and scope" />
           <EmptyState
             heading="No bound target"
             body="This report has no authorised target, so nothing was reproduced."
@@ -69,14 +70,13 @@ export default function TargetAndScopeScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Target and scope" back backLabel="Case file" />
+      <ScreenHeader back backLabel="Case file" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Target and scope</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>{meta}</Text>
+        <ScreenTitle title="Target and scope" meta={meta} metaBottom={20} />
 
         {/* Pinned image */}
         <SectionHeader title="Pinned image" chevron={false} />
@@ -154,11 +154,11 @@ export default function TargetAndScopeScreen() {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
+  scrollContent: { paddingTop: 0, paddingBottom: 100 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
   card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
   readinessRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -167,9 +167,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
   },
   readinessMain: { flex: 1, minWidth: 0 },
-  readinessTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  readinessSubtitle: { fontSize: 13, marginTop: 3 },
-  readinessStart: { fontSize: 13, marginTop: 3 },
+  readinessTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  readinessSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
+  readinessStart: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   readyPill: {
     flexDirection: "row",
     alignItems: "center",
@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 99,
   },
-  readyPillText: { fontSize: 13, fontWeight: "600", lineHeight: 14 },
+  readyPillText: { fontFamily: font.semibold, fontSize: 13, lineHeight: 14 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

@@ -15,9 +15,10 @@ import { useState } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card, Sheet, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, Card, Sheet, useToast } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import { ApiError } from "@/lib/use-query"
+import { font } from "@/lib/fonts"
 
 const TARGET_MATERIALS: { value: string; label: string; subtitle: string }[] = [
   { value: "none", label: "None", subtitle: "Describe the issue in the report only" },
@@ -144,15 +145,14 @@ export default function SubmitReportScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Submit a report" />
+      <ScreenHeader />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Submit a report</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>Goes to the reviewer team. No account needed.</Text>
+        <ScreenTitle title="Submit a report" meta="Goes to the reviewer team. No account needed." metaBottom={4} />
 
         <View style={styles.form}>
           <View>
@@ -330,12 +330,12 @@ export default function SubmitReportScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 80,
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -352,8 +352,8 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   lbl: {
-    fontSize: 15,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 15,
+    
     lineHeight: 20,
     paddingHorizontal: 16,
     paddingBottom: 10,
@@ -362,7 +362,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 20,
     paddingHorizontal: 16,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     lineHeight: 23,
     marginHorizontal: 16,
     marginBottom: 4,
@@ -398,12 +398,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   itemT: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 20,
   },
   itemS: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     marginTop: 3,
   },
   rowTrailing: {
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 12,
@@ -468,8 +468,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   fbarBtnText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   prebuiltInputs: {
     gap: 16,

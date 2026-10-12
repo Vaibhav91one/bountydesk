@@ -12,8 +12,9 @@ import { useState, useRef, useEffect } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } from "react-native"
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useTheme } from "@/theme"
-import { ScreenHeader, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, useToast } from "@/components/primitives"
 import { SvgImage } from "@/components/SvgImage"
+import { font } from "@/lib/fonts"
 
 const OTP_LENGTH = 6
 
@@ -120,14 +121,13 @@ export default function ContactVerifyScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Verify your contact" back backLabel="Submit a report" />
+      <ScreenHeader back backLabel="Submit a report" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scroll}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Verify your contact</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>We sent a six digit code to {email}</Text>
+        <ScreenTitle title="Verify your contact" meta={`We sent a six digit code to ${email}`} metaBottom={20} />
 
         {!verified ? (
           <>
@@ -184,13 +184,13 @@ export default function ContactVerifyScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 80,
     alignItems: "center",
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -198,7 +198,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -215,13 +215,13 @@ const styles = StyleSheet.create({
     width: 48,
     height: 58,
     borderRadius: 16,
-    fontSize: 24,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 24,
+    
     lineHeight: 28,
     padding: 0,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 12,
@@ -238,8 +238,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
   },
   resendText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   successCard: {
     borderRadius: 24,
@@ -252,14 +252,14 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   successTitle: {
-    fontSize: 24,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 24,
+    
     letterSpacing: -0.5,
     lineHeight: 29,
     marginBottom: 8,
   },
   successBody: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 23,
     textAlign: "center",
   },

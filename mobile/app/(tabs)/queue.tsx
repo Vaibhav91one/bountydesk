@@ -17,8 +17,9 @@ import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { TopBarPill } from "@/components/TopBarPill"
 import { ReviewFab } from "@/components/ReviewFab"
-import { PhasePill, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { PhasePill, ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 interface QueueColumnView {
   key: string
@@ -150,10 +151,7 @@ function QueueScreenContent() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>Queue</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>
-          {openCount} open reports
-        </Text>
+        <ScreenTitle title="Queue" meta={`${openCount} open reports`} />
 
         {sections.map((s) => (
           <View key={s.key} style={styles.section}>
@@ -274,24 +272,24 @@ function QueueRow({ card, onPress, onLongPress, showDivider }: QueueRowProps) {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8 },
+  scrollContent: { paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
-  hmeta: { fontSize: 15, marginBottom: 8 },
+  error: { fontFamily: font.regular, fontSize: 16 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, marginBottom: 8 },
   section: { marginBottom: 28 },
-  sh: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 4, paddingVertical: 12 },
-  shText: { fontSize: 20, fontWeight: "600", lineHeight: 24 },
-  shCount: { marginLeft: 4, fontSize: 20, fontWeight: "600", lineHeight: 24 },
+  sh: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 20, paddingTop: 0, paddingBottom: 12 },
+  shText: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
+  shCount: { marginLeft: 4, fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
   list: { marginHorizontal: 16 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 18 },
   rowMain: { flex: 1, minWidth: 0 },
-  itemT: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  itemS: { fontSize: 13, marginTop: 3 },
+  itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  itemS: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   rowR: { flexShrink: 0, flexDirection: "column", alignItems: "flex-end", gap: 6 },
   rowPill: { marginTop: 0, marginBottom: 0 },
-  itemB: { fontSize: 13 },
-  shimmer: { fontSize: 13 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
-  sectionNote: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 8 },
+  itemB: { fontFamily: font.regular, fontSize: 13 },
+  shimmer: { fontFamily: font.regular, fontSize: 13 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  sectionNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 8 },
 })

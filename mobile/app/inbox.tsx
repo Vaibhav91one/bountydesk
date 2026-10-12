@@ -10,7 +10,8 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { InboxResponse, InboxCard } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, Card, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, Card, EmptyState } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 type PhaseColor = "approval" | "delivered" | "closed" | "analysis"
 
@@ -111,7 +112,7 @@ export default function InboxScreen() {
   if (inbox.error) {
     return (
       <View style={{ flex: 1, backgroundColor: theme.colors.background, alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <Text style={{ color: theme.colors.red, fontSize: 16, textAlign: "center" }}>{inbox.error.message}</Text>
+        <Text style={{ color: theme.colors.red, fontFamily: font.regular, fontSize: 16, textAlign: "center" }}>{inbox.error.message}</Text>
       </View>
     )
   }
@@ -125,11 +126,10 @@ export default function InboxScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Inbox" back backLabel="Home" />
+      <ScreenHeader back backLabel="Home" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <Text style={[styles.h1, { color: colors.foreground }]}>Inbox</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>{needsYouCount} need you</Text>
+        <ScreenTitle title="Inbox" meta={`${needsYouCount} need you`} metaBottom={20} />
 
         {/* Needs you section */}
         <View style={styles.section}>
@@ -170,12 +170,12 @@ export default function InboxScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 62,
+    paddingTop: 0,
     paddingBottom: 40,
   },
   h1: {
-    fontSize: 28,
-    fontWeight: "700",
+    fontFamily: font.bold, fontSize: 28,
+    
     letterSpacing: -0.03 * 28,
     lineHeight: 32,
     paddingHorizontal: 20,
@@ -183,7 +183,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   hmeta: {
-    fontSize: 15,
+    fontFamily: font.regular, fontSize: 15,
     lineHeight: 20,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -199,8 +199,8 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
   },
   shText: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 20,
+    
     lineHeight: 24,
   },
   list: {
@@ -226,12 +226,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   itemT: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 20,
   },
   itemS: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     marginTop: 3,
   },
   rowTrailing: {
@@ -255,15 +255,15 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   pillLabel: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 13,
+    
     lineHeight: 14,
   },
   itemB: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     marginTop: 10,

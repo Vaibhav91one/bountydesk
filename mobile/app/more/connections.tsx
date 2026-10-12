@@ -21,7 +21,8 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, SectionHeader, ScreenHeader, ToastProvider } from "@/components/primitives"
+import { Card, SectionHeader, ScreenHeader, ToastProvider, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 // The Install button opens the web app's Connections page in the system
 // browser. That page holds the real GitHub App install link; the mobile
@@ -84,16 +85,13 @@ export default function ConnectionsScreen() {
   return (
     <ToastProvider>
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="Connections" back backLabel="Settings" />
+        <ScreenHeader back backLabel="Settings" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={[styles.h1, { color: colors.foreground }]}>Connections</Text>
-          <Text style={[styles.hmeta, { color: colors.muted }]}>
-            GitHub App installations and their repositories
-          </Text>
+          <ScreenTitle title="Connections" meta="GitHub App installations and their repositories" metaBottom={24} />
 
           {/* Installation header */}
           <SectionHeader title="Installation" chevron={false} />
@@ -260,9 +258,9 @@ function TargetLink({
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
+  scrollContent: { paddingTop: 0, paddingBottom: 100 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
   card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
   installRow: {
     flexDirection: "row",
@@ -279,8 +277,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   installMain: { flex: 1, minWidth: 0 },
-  installTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  installSubtitle: { fontSize: 13, marginTop: 3 },
+  installTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  installSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   repoRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -290,8 +288,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   repoMain: { flex: 1, minWidth: 0 },
-  repoTitle: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  repoSubtitle: { fontSize: 13, marginTop: 3 },
+  repoTitle: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  repoSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   pill: {
     flexDirection: "row",
     alignItems: "center",
@@ -301,7 +299,7 @@ const styles = StyleSheet.create({
     borderRadius: 99,
   },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
-  pillLabel: { fontSize: 13, fontWeight: "600", lineHeight: 14 },
+  pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 14 },
   targetLink: {
     flexDirection: "row",
     alignItems: "center",
@@ -311,9 +309,9 @@ const styles = StyleSheet.create({
   },
   targetLinkMain: { flex: 1, minWidth: 0 },
   divider: { height: StyleSheet.hairlineWidth, marginHorizontal: 18 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
   emptyRow: { minHeight: 56, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
-  emptyText: { fontSize: 15 },
+  emptyText: { fontFamily: font.regular, fontSize: 15 },
   fbar: {
     position: "absolute",
     left: 16,
@@ -334,7 +332,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 22,
     // backgroundColor moved to inline style below (theme token)
   },
-  btnText: { fontSize: 17, fontWeight: "600" },
+  btnText: { fontFamily: font.semibold, fontSize: 17, },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

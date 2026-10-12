@@ -12,6 +12,7 @@ import type { MobileCaseFile, CaseEvent } from "@/lib/types"
 import { ScreenHeader, EmptyState } from "@/components/primitives"
 import { useTheme } from "@/theme"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 /**
  * Derive a display label and phase dot from a raw session_event type.
@@ -186,17 +187,17 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   rowTitle: {
-    fontSize: 17,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 17,
+    
     lineHeight: 22,
   },
   rowSub: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     marginTop: 3,
   },
   rowTime: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 19,
   },
   empty: {
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
     paddingTop: 40,
   },
   note: {
-    fontSize: 13,
+    fontFamily: font.regular, fontSize: 13,
     lineHeight: 18,
     paddingHorizontal: 20,
     paddingBottom: 20,
@@ -216,6 +217,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   error: {
-    fontSize: 16,
+    fontFamily: font.regular, fontSize: 16,
   },
 })

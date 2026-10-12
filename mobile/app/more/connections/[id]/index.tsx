@@ -12,7 +12,8 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, KvRow, SectionHeader, ScreenHeader, EmptyState } from "@/components/primitives"
+import { Card, KvRow, SectionHeader, ScreenHeader, EmptyState, ScreenTitle } from "@/components/primitives"
+import { font } from "@/lib/fonts"
 
 // Fixed by the GitHub App's least-privilege scope described in docs/mobile-api.md:
 function grant(value: string | null): string {
@@ -54,7 +55,7 @@ export default function ConnectionDetailScreen() {
   if (!row) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
-        <ScreenHeader title="" back backLabel="Connections" />
+        <ScreenHeader back backLabel="Connections" />
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
@@ -81,14 +82,13 @@ export default function ConnectionDetailScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title={row.name} back backLabel="Connections" />
+      <ScreenHeader back backLabel="Connections" />
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.h1, { color: colors.foreground }]}>{row.name}</Text>
-        <Text style={[styles.hmeta, { color: colors.muted }]}>{row.fullName}</Text>
+        <ScreenTitle title={row.name} meta={row.fullName} metaBottom={24} />
 
         {/* Repository */}
         <SectionHeader title="Repository" chevron={false} />
@@ -116,7 +116,7 @@ export default function ConnectionDetailScreen() {
             testID="onboarding-row"
           >
             <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 56, paddingHorizontal: 18 }}>
-              <Text style={{ fontSize: 17, fontWeight: "500", color: colors.foreground }}>Onboarding</Text>
+              <Text style={{ fontFamily: font.medium, fontSize: 17, color: colors.foreground }}>Onboarding</Text>
               <Icon name="chev" size={18} stroke={colors.faint} />
             </View>
           </Pressable>
@@ -149,14 +149,14 @@ export default function ConnectionDetailScreen() {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 6, paddingBottom: 100 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
+  scrollContent: { paddingTop: 0, paddingBottom: 100 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
   card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
   policyCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10, marginBottom: 12 },
-  body: { fontSize: 17, lineHeight: 24, paddingHorizontal: 20, paddingTop: 16 },
-  code: { fontFamily: "GeistMono", fontSize: 13 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10, marginBottom: 12 },
+  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 24, paddingHorizontal: 20, paddingTop: 16 },
+  code: { fontFamily: font.mono, fontSize: 13 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

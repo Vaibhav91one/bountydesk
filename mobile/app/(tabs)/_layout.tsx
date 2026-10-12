@@ -17,8 +17,8 @@ import { View, Text, StyleSheet } from "react-native"
 import { api, ApiError } from "@/lib/api"
 import { useHandleApiError } from "@/lib/use-api-error"
 import type { HomeSummary } from "@/lib/types"
-import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
+import { font } from "@/lib/fonts"
 
 export default function TabsLayout() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -60,30 +60,29 @@ export default function TabsLayout() {
   return <TabsShell />
 }
 
+// Tab icons are SF Symbols: NativeTabs on iOS accepts a symbol name or an image, not a react-native-svg element.
+// house, tray and doc.text are the closest SF matches for the mockup's home, inbox-tray and document glyphs.
 function TabsShell() {
   const { colors } = useTheme()
   return (
     <NativeTabs
       backgroundColor={colors.glass}
-      iconColor={{ default: colors.muted, selected: colors.brand }}
-      tintColor={colors.brand}
-      labelStyle={{ fontSize: 12, fontWeight: "500" }}
-      screenListeners={{
-        focus: () => {},
-      }}
+      iconColor={{ default: colors.muted, selected: colors.foreground }}
+      tintColor={colors.foreground}
+      labelStyle={{ default: { fontFamily: font.medium, fontSize: 12, color: colors.muted }, selected: { fontFamily: font.medium, fontSize: 12, color: colors.foreground } }}
     >
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Icon src={<Icon name="home" size={24} />} />
+        <NativeTabs.Trigger.Icon sf="house" />
         <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="queue">
-        <NativeTabs.Trigger.Icon src={<Icon name="queue" size={24} />} />
+        <NativeTabs.Trigger.Icon sf="tray" />
         <NativeTabs.Trigger.Label>Queue</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="reports">
-        <NativeTabs.Trigger.Icon src={<Icon name="reports" size={24} />} />
+        <NativeTabs.Trigger.Icon sf="doc.text" />
         <NativeTabs.Trigger.Label>Reports</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
@@ -92,5 +91,5 @@ function TabsShell() {
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16, color: "#EF4444" },
+  error: { fontFamily: font.regular, fontSize: 16, color: "#EF4444" },
 })

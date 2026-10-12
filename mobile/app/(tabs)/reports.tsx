@@ -17,8 +17,9 @@ import { Icon } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
 import { TopBarPill } from "@/components/TopBarPill"
 import { ReviewFab } from "@/components/ReviewFab"
-import { PhasePill, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { PhasePill, ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 /** Reports list response from GET /reports. */
 interface ReportsResponse {
@@ -207,10 +208,7 @@ function ReportsScreenContent() {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={(
           <>
-            <Text style={[styles.h1, { color: colors.foreground }]}>Reports</Text>
-            <Text style={[styles.hmeta, { color: colors.muted }]}>
-              {shownCount} reports
-            </Text>
+            <ScreenTitle title="Reports" meta={`${shownCount} reports`} metaBottom={16} />
 
             {/* Search field (.search in c.css) */}
             <View style={[styles.searchContainer, { backgroundColor: colors.card, borderColor: colors["glass-edge"] }]}>
@@ -401,11 +399,11 @@ function ReportRow({ row, onPress, onLongPress, showDivider }: ReportRowProps) {
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 8 },
+  scrollContent: { paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16 },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
-  hmeta: { fontSize: 15, marginBottom: 8 },
+  error: { fontFamily: font.regular, fontSize: 16 },
+  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, marginBottom: 8 },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -419,7 +417,7 @@ const styles = StyleSheet.create({
   searchField: {
     flex: 1,
     minWidth: 0,
-    fontSize: 17,
+    fontFamily: font.regular, fontSize: 17,
     padding: 0,
     margin: 0,
     height: 48,
@@ -433,25 +431,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  fchipText: { fontSize: 14, fontWeight: "500", lineHeight: 18 },
+  fchipText: { fontFamily: font.medium, fontSize: 14, lineHeight: 18 },
   list: { marginHorizontal: 16 },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 18 },
   rowMain: { flex: 1, minWidth: 0 },
-  itemT: { fontSize: 17, fontWeight: "500", lineHeight: 20 },
-  itemS: { fontSize: 13, marginTop: 3 },
+  itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
+  itemS: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
   rowR: { flexShrink: 0, flexDirection: "column", alignItems: "flex-end", gap: 6 },
   rowPill: { marginTop: 0, marginBottom: 0 },
-  itemB: { fontSize: 13 },
-  shimmer: { fontSize: 13 },
-  note: { fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  itemB: { fontFamily: font.regular, fontSize: 13 },
+  shimmer: { fontFamily: font.regular, fontSize: 13 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
   noResult: {
     alignItems: "center",
     paddingVertical: 48,
     paddingHorizontal: 40,
   },
   noResultNoFilter: { paddingTop: 120 },
-  noResultH: { fontSize: 24, fontWeight: "700", letterSpacing: -0.5, lineHeight: 29, textAlign: "center", marginTop: 18 },
-  noResultP: { fontSize: 15, lineHeight: 23, textAlign: "center", maxWidth: 300, marginTop: 10 },
+  noResultH: { fontFamily: font.bold, fontSize: 24, letterSpacing: -0.5, lineHeight: 29, textAlign: "center", marginTop: 18 },
+  noResultP: { fontFamily: font.regular, fontSize: 15, lineHeight: 23, textAlign: "center", maxWidth: 300, marginTop: 10 },
   clearBtn: {
     minHeight: 52,
     paddingHorizontal: 22,
@@ -461,14 +459,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  clearBtnText: { fontSize: 17, fontWeight: "600" },
+  clearBtnText: { fontFamily: font.semibold, fontSize: 17, },
   loadError: {
     paddingVertical: 12,
     alignItems: "center",
     justifyContent: "center",
   },
   loadErrorText: {
-    fontSize: 15,
-    fontWeight: "500",
+    fontFamily: font.medium, fontSize: 15,
+    
   },
 })

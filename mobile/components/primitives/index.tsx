@@ -22,12 +22,15 @@ import {
   Animated,
   Easing,
 } from "react-native"
+import { LinearGradient } from "expo-linear-gradient"
+import { useRouter } from "expo-router"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
 import { useTheme } from "@/theme"
 import { phaseLabel, usePhaseColor, phaseTint } from "@/lib/phases"
 import type { PhaseKey } from "@/lib/phases"
+import { font } from "@/lib/fonts"
 
 const PRESS_OPACITY = 0.92
 
@@ -191,7 +194,7 @@ export function PrimaryButton({ title, onPress, variant = "primary", disabled, s
       ]}
     >
       {icon ? <Icon name={icon} size={20} stroke={fg} /> : null}
-      <Text style={[styles.btnText, { color: fg, fontSize: 17, fontWeight: "600" }, textStyle]}>{title}</Text>
+      <Text style={[styles.btnText, { color: fg, fontFamily: font.semibold, fontSize: 17, }, textStyle]}>{title}</Text>
     </Pressable>
   )
 }
@@ -203,40 +206,112 @@ export { Icon }
 export type { IconName }
 
 // ---------------------------------------------------------------
-// ScreenHeader (h1 28/700/-0.03em + round glass back button)
+// ScreenHeader (c.css .topbar + .h1 + .hmeta)
 // ---------------------------------------------------------------
-export interface ScreenHeaderProps {
+/** Distance from the top of the screen to the first line of content: c.css `--top` (54) + 62. */
+export const TOP_INSET = 116
+
+/** Fades the scroll content out under the status bar and the top buttons (c.css .fade-t, 124 high). */
+export function TopFade() {
+  const { colors } = useTheme()
+  return (
+    <LinearGradient
+      pointerEvents="none"
+      colors={[colors.background, colors.background, colors.background + "00"]}
+      locations={[0, 0.66, 1]}
+      style={styles.topFade}
+    />
+  )
+}
+
+/** The glass pill that holds the top buttons (c.css .topbar): 48 high, 1px edge, buttons 48 wide. */
+export function TopBar({ side, children, round }: { side: "left" | "right"; children: React.ReactNode; round?: boolean }) {
+  const { colors } = useTheme()
+  return (
+    <View
+      style={[
+        styles.topBar,
+        side === "left" ? { left: 16 } : { right: 16 },
+        round && { width: 48 },
+        { backgroundColor: colors.glass, borderColor: colors["glass-edge"] },
+      ]}
+    >
+      {children}
+    </View>
+  )
+}
+
+/** One 48pt icon button inside a TopBar (c.css .ib). */
+export function TopBarButton({ icon, onPress, label, size = 22, strokeWidth }: { icon: IconName; onPress?: () => void; label: string; size?: number; strokeWidth?: number }) {
+  const { colors } = useTheme()
+  return (
+    <Pressable onPress={onPress} accessibilityLabel={label} style={({ pressed }) => [styles.topBarBtn, pressed && { opacity: 0.7 }]}>
+      <Icon name={icon} size={size} strokeWidth={strokeWidth} stroke={colors.foreground} />
+    </Pressable>
+  )
+}
+
+export interface ScreenTitleProps {
   title: string
-  /** meta subtitle line, matches .hmeta */
-  meta?: string
-  /** show a round glass back button */
+  /** meta line under the title (c.css .hmeta); a node is laid out as a wrapping row */
+  meta?: React.ReactNode
+  /** space under the meta line, 28 by default (m6 uses 16, m8 20) */
+  metaBottom?: number
+  /** leading space down to TOP_INSET; false when the screen already pads for the top buttons */
+  inset?: boolean
+}
+
+/** The large title block, positioned as the mockups do: title at y 116, 28/700, then the meta line. Put it first inside the ScrollView. */
+export function ScreenTitle({ title, meta, metaBottom = 28, inset = true }: ScreenTitleProps) {
+  const { colors } = useTheme()
+  return (
+    <View style={inset ? { paddingTop: TOP_INSET } : undefined}>
+      <Text style={[styles.h1, { color: colors.foreground }]}>{title}</Text>
+      {meta != null && meta !== "" ? (
+        typeof meta === "string" ? (
+          <Text style={[styles.hmeta, { color: colors.muted, paddingBottom: metaBottom }]}>{meta}</Text>
+        ) : (
+          <View style={[styles.hmetaRow, { paddingBottom: metaBottom }]}>{meta}</View>
+        )
+      ) : (
+        <View style={{ height: metaBottom }} />
+      )}
+    </View>
+  )
+}
+
+export interface ScreenHeaderProps {
+  /** When set, the title block is laid out in flow under the buttons (use it when the screen body is not a ScrollView of its own). */
+  title?: string
+  meta?: React.ReactNode
+  /** show the round glass back button */
   back?: boolean
   onBack?: () => void
   backLabel?: string
+  /** buttons for the right pill, e.g. <TopBarButton/> */
   right?: React.ReactNode
 }
 
+/**
+ * Top chrome shared by detail screens: the round back button at the mockup's y (58), an optional
+ * right pill, and the fade under them. Nothing is a native nav-bar title. The screen's own
+ * ScrollView starts with <ScreenTitle>, so the title scrolls like the mockup's.
+ */
 export function ScreenHeader({ title, meta, back, onBack, backLabel, right }: ScreenHeaderProps) {
-  const { colors } = useTheme()
+  const router = useRouter()
   return (
-    <View style={styles.screenHeader}>
-      {back ? (
-        <Pressable
-          onPress={onBack}
-          style={({ pressed }) => [
-            styles.glassRoundBtn,
-            { backgroundColor: colors.glass, borderColor: colors["glass-edge"] },
-            pressed && { opacity: PRESS_OPACITY },
-          ]}
-          accessibilityLabel={backLabel ?? "Back"}
-        >
-          <Icon name="back" size={24} strokeWidth={2.2} stroke={colors.foreground} />
-        </Pressable>
-      ) : null}
-      <Text style={[styles.h1, { color: colors.foreground }]}>{title}</Text>
-      {meta ? <Text style={[styles.hmeta, { color: colors.muted }]}>{meta}</Text> : null}
-      {right ? <View style={styles.screenHeaderRight}>{right}</View> : null}
-    </View>
+    <>
+      {title ? <ScreenTitle title={title} meta={meta} /> : null}
+      <View pointerEvents="box-none" style={styles.chrome}>
+        <TopFade />
+        {back ? (
+          <TopBar side="left" round>
+            <TopBarButton icon="back" size={24} strokeWidth={2.2} label={backLabel ? `Back to ${backLabel}` : "Back"} onPress={onBack ?? (() => router.back())} />
+          </TopBar>
+        ) : null}
+        {right ? <TopBar side="right">{right}</TopBar> : null}
+      </View>
+    </>
   )
 }
 
@@ -457,32 +532,34 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   pill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 99 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
-  pillLabel: { fontSize: 13, fontWeight: "600", lineHeight: 14 },
+  pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 14 },
   card: { borderRadius: 24, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
   rowLeading: { paddingLeft: 0, paddingRight: 12 },
   rowMain: { flex: 1, minWidth: 0 },
   rowTrailing: { paddingLeft: 12, paddingRight: 0 },
   kv: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
-  kvLabel: { fontSize: 15, lineHeight: 20 },
-  kvValue: { fontSize: 15, lineHeight: 20, textAlign: "right", flexShrink: 1 },
-  kvValueMono: { fontFamily: "GeistMono", fontSize: 12 },
+  kvLabel: { fontFamily: font.regular, fontSize: 15, lineHeight: 20 },
+  kvValue: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, textAlign: "right", flexShrink: 1 },
+  kvValueMono: { fontFamily: font.mono, fontSize: 12 },
   glassPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderWidth: StyleSheet.hairlineWidth },
   btn: { alignItems: "center", justifyContent: "center", flexDirection: "row", paddingHorizontal: 22 },
-  btnText: { fontSize: 17, fontWeight: "600" },
-  screenHeader: { flexDirection: "row", alignItems: "center", gap: 16, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 12 },
-  glassRoundBtn: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: StyleSheet.hairlineWidth },
-  h1: { fontSize: 28, fontWeight: "700", letterSpacing: -0.03 * 28, lineHeight: 32 },
-  hmeta: { fontSize: 15, lineHeight: 20, position: "absolute", top: 52, left: 20 },
-  screenHeaderRight: { marginLeft: "auto" },
+  btnText: { fontFamily: font.semibold, fontSize: 17, },
+  chrome: { position: "absolute", top: 0, left: 0, right: 0, height: 124, zIndex: 30 },
+  topFade: { position: "absolute", top: 0, left: 0, right: 0, height: 124 },
+  topBar: { position: "absolute", top: 58, height: 48, borderRadius: 24, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", zIndex: 30 },
+  topBarBtn: { width: 48, height: 46, alignItems: "center", justifyContent: "center", borderRadius: 24 },
+  h1: { fontFamily: font.bold, fontSize: 28, lineHeight: 32.2, letterSpacing: -0.84, paddingTop: 8, paddingHorizontal: 20 },
+  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20.25, paddingTop: 14, paddingHorizontal: 20 },
+  hmetaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10, paddingTop: 14, paddingHorizontal: 20 },
   sh: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 20, paddingVertical: 12 },
-  shText: { fontSize: 20, fontWeight: "600", lineHeight: 24 },
-  shCount: { marginLeft: 4, fontSize: 20, fontWeight: "600", lineHeight: 24 },
+  shText: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
+  shCount: { marginLeft: 4, fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
   shMore: { marginLeft: "auto", paddingLeft: 8, paddingVertical: 4 },
   empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: 18, paddingBottom: 40 },
   emptyInline: { alignItems: "center", gap: 12, paddingVertical: 24 },
-  emptyH: { fontSize: 24, fontWeight: "700", letterSpacing: -0.5, lineHeight: 29, textAlign: "center" },
-  emptyP: { fontSize: 15, lineHeight: 23, textAlign: "center", maxWidth: 300 },
+  emptyH: { fontFamily: font.bold, fontSize: 24, letterSpacing: -0.5, lineHeight: 29, textAlign: "center" },
+  emptyP: { fontFamily: font.regular, fontSize: 15, lineHeight: 23, textAlign: "center", maxWidth: 300 },
   sheetScrims: { flex: 1, justifyContent: "flex-end", paddingBottom: 30, backgroundColor: "rgba(0,0,0,0.4)" },
   sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 20, paddingTop: 14, paddingBottom: 34, gap: 12, borderWidth: StyleSheet.hairlineWidth },
   sheetGrabber: { alignSelf: "center", paddingVertical: 6 },
@@ -490,13 +567,13 @@ const styles = StyleSheet.create({
   sheetSbtn: { position: "absolute", width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", zIndex: 1 },
   sheetSbtnX: { top: 14, left: 16 },
   sheetSbtnOk: { top: 14, right: 16, backgroundColor: "#6774F0", borderColor: "#6774F0" },
-  sheetTitle: { fontSize: 13, lineHeight: 20, textAlign: "center" },
-  sheetSubtitle: { fontSize: 13, lineHeight: 20, textAlign: "center" },
+  sheetTitle: { fontFamily: font.regular, fontSize: 13, lineHeight: 20, textAlign: "center" },
+  sheetSubtitle: { fontFamily: font.regular, fontSize: 13, lineHeight: 20, textAlign: "center" },
   sheetContent: { maxHeight: 360, paddingVertical: 8 },
   longPressMenu: { marginHorizontal: 16, marginBottom: 40, borderRadius: 20, overflow: "hidden", gap: 2 },
   longPressItem: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingVertical: 14 },
-  longPressLabel: { fontSize: 17, fontWeight: "600", lineHeight: 22 },
-  mono: { fontSize: 12 },
+  longPressLabel: { fontFamily: font.semibold, fontSize: 17, lineHeight: 22 },
+  mono: { fontFamily: font.regular, fontSize: 12 },
   toast: { position: "absolute", bottom: 80, left: "50%", transform: [{ translateX: -100 }], paddingHorizontal: 18, paddingVertical: 10, borderRadius: 99, minHeight: 40, alignItems: "center", justifyContent: "center", maxWidth: 280, borderWidth: StyleSheet.hairlineWidth },
-  toastText: { fontSize: 13, lineHeight: 18, textAlign: "center" },
+  toastText: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, textAlign: "center" },
 })
