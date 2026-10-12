@@ -35,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
 
   // One snapshot for both reads: a report that is awaiting at this moment must not also show up
   // in "earlier", and vice versa. Read-only so a serialisation failure is safe to surface as 500.
-  const { needsCards, earlierCards, allRows } = await db.transaction(
+  const { needsPage, earlierPage, extras, allRows } = await db.transaction(
     async (tx) => {
       const awaiting = await listAwaitingReview(tx);
       const allRows = await listAllReports(INDEX_LIMIT, tx);
@@ -72,19 +72,21 @@ export async function GET(request: Request): Promise<Response> {
         updatedAt: row.updatedAt,
       }));
 
-      return { needsCards, earlierCards, allRows };
+      // Page first, then one batched read of the extras for just the cards returned. It runs on
+      // tx so severity and failureReason come from the same snapshot as deliveryState.
+      const needsPage = paginate(needsCards, page);
+      const earlierPage = paginate(earlierCards, page);
+      const shown = [
+        ...(phase === "earlier" ? [] : needsPage.items),
+        ...(phase === "needs" ? [] : earlierPage.items),
+      ];
+      const extras = await readCardExtras(shown.map((card) => card.id), tx);
+
+      return { needsPage, earlierPage, extras, allRows };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
 
-  // Page first, then one batched read of the extras for just the cards returned.
-  const needsPage = paginate(needsCards, page);
-  const earlierPage = paginate(earlierCards, page);
-  const shown = [
-    ...(phase === "earlier" ? [] : needsPage.items),
-    ...(phase === "needs" ? [] : earlierPage.items),
-  ];
-  const extras = await readCardExtras(shown.map((card) => card.id));
   const decorate = (items: InboxCard[]) => items.map((card) => ({ ...card, ...extrasFor(extras, card.id) }));
   const truncated = allRows.length >= INDEX_LIMIT;
 
@@ -101,10 +103,10 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
   return json({
-    needsYou: { items: decorate(needsPage.items), total: needsCards.length, nextOffset: needsPage.nextOffset },
+    needsYou: { items: decorate(needsPage.items), total: needsPage.total, nextOffset: needsPage.nextOffset },
     earlier: {
       items: decorate(earlierPage.items),
-      total: earlierCards.length,
+      total: earlierPage.total,
       nextOffset: earlierPage.nextOffset,
       truncated,
     },
