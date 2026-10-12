@@ -3,7 +3,7 @@
  * no Clerk round trip; everywhere else this is Clerk's own hook. The flag is constant for the life
  * of a bundle, so the branch never changes between renders.
  */
-import { useAuth as useClerkAuth } from "@clerk/expo"
+import { useAuth as useClerkAuth, useSSO as useClerkSSO } from "@clerk/expo"
 
 import { fixturesEnabled } from "./fixtures"
 
@@ -18,4 +18,12 @@ const fixtureAuth = {
 export function useAuth(): ReturnType<typeof useClerkAuth> {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   return fixturesEnabled() ? (fixtureAuth as unknown as ReturnType<typeof useClerkAuth>) : useClerkAuth()
+}
+
+/** useSSO needs a ClerkProvider, which fixture mode does not mount; there the sign-in screen gets an inert flow. */
+export function useSSO(): ReturnType<typeof useClerkSSO> {
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return fixturesEnabled()
+    ? ({ startSSOFlow: async () => ({}) } as unknown as ReturnType<typeof useClerkSSO>)
+    : useClerkSSO()
 }

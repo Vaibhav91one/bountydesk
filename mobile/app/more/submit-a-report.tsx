@@ -15,7 +15,8 @@ import { useState } from "react"
 import { View, Text, ScrollView, StyleSheet, Pressable, TextInput } from "react-native"
 import { useRouter } from "expo-router"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, Card, Sheet, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, Card, PrimaryButton, Sheet, useToast } from "@/components/primitives"
+import { BottomFade, Note } from "@/components/CaseUi"
 import { Icon } from "@/components/icons"
 import { ApiError } from "@/lib/use-query"
 import { font } from "@/lib/fonts"
@@ -145,7 +146,7 @@ export default function SubmitReportScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader />
+      <ScreenHeader back backIcon="x" />
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -202,7 +203,7 @@ export default function SubmitReportScreen() {
                 style={({ pressed }) => [styles.item, { backgroundColor: colors.card }, pressed && { opacity: 0.92 }]}
               >
                 <View style={styles.rowLeading}>
-                  <Icon name="upload" size={20} stroke={colors["brand-soft"]} />
+                  <Icon name="upload" size={22} stroke={colors["brand-soft"]} />
                 </View>
                 <View style={styles.main}>
                   <Text style={[styles.itemT, { color: colors.foreground }]}>Add target material</Text>
@@ -224,7 +225,7 @@ export default function SubmitReportScreen() {
                 style={({ pressed }) => [styles.item, { backgroundColor: colors.card }, pressed && { opacity: 0.92 }]}
               >
                 <View style={styles.rowLeading}>
-                  <Icon name="upload" size={20} stroke={colors["brand-soft"]} />
+                  <Icon name="upload" size={22} stroke={colors["brand-soft"]} />
                 </View>
                 <View style={styles.main}>
                   <Text style={[styles.itemT, { color: colors.foreground }]}>
@@ -266,9 +267,7 @@ export default function SubmitReportScreen() {
           )}
         </View>
 
-        <Text style={[styles.note, { color: colors.muted }]}>
-          We email a one-time code to confirm you sent this report. Replies only go to a verified address.
-        </Text>
+        <Note>We email a one-time code to confirm you sent this report. Replies only go to a verified address.</Note>
 
         {/* Target material sheet */}
         <Sheet
@@ -309,20 +308,14 @@ export default function SubmitReportScreen() {
         </Sheet>
       </ScrollView>
 
-      {/* Floating submit bar */}
-      <View style={[styles.fbar, { backgroundColor: colors.background }]}>
-        <Pressable
+      <BottomFade />
+      <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+        <PrimaryButton
+          title="Submit report"
           onPress={handleSubmit}
           disabled={submitting || !title || !report || !email || !materialComplete()}
-          style={({ pressed }) => [
-            styles.fbarBtn,
-            { backgroundColor: colors.brand },
-            (submitting || !title || !report || !email || !materialComplete()) && { opacity: 0.4 },
-            pressed && !submitting && { opacity: 0.92 },
-          ]}
-        >
-          <Text style={[styles.fbarBtnText, { color: colors.foreground }]}>Submit report</Text>
-        </Pressable>
+          style={styles.fbarBtn}
+        />
       </View>
     </View>
   )
@@ -330,55 +323,35 @@ export default function SubmitReportScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 0,
-    paddingBottom: 80,
+    paddingBottom: 150,
   },
-  h1: {
-    fontFamily: font.bold, fontSize: 28,
-    
-    letterSpacing: -0.03 * 28,
-    lineHeight: 32,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  hmeta: {
-    fontFamily: font.regular, fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  form: {
-    gap: 16,
-  },
+  form: {},
   lbl: {
     fontFamily: font.semibold, fontSize: 15,
-    
-    lineHeight: 20,
-    paddingHorizontal: 16,
+    lineHeight: 15,
+    paddingTop: 20,
     paddingBottom: 10,
+    paddingHorizontal: 20,
   },
   field: {
     minHeight: 52,
     borderRadius: 20,
     paddingHorizontal: 16,
+    paddingVertical: 0, // single-line iOS inputs centre the text; lineHeight would push it down
     fontFamily: font.regular, fontSize: 17,
-    lineHeight: 23,
     marginHorizontal: 16,
-    marginBottom: 4,
   },
   textarea: {
     height: 132,
     minHeight: 132,
-    paddingTop: 14,
-    paddingBottom: 14,
+    paddingTop: 12,
+    lineHeight: 23.8,
   },
   list: {
     marginHorizontal: 16,
     borderRadius: 24,
     overflow: "hidden",
-    padding: 0,
-    marginTop: 4,
+    paddingVertical: 6,
   },
   item: {
     flexDirection: "row",
@@ -387,11 +360,10 @@ const styles = StyleSheet.create({
     minHeight: 56,
     paddingVertical: 10,
     paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowLeading: {
     paddingLeft: 0,
-    paddingRight: 12,
+    paddingRight: 0,
   },
   main: {
     flex: 1,
@@ -399,15 +371,15 @@ const styles = StyleSheet.create({
   },
   itemT: {
     fontFamily: font.medium, fontSize: 17,
-    
-    lineHeight: 20,
+    lineHeight: 21.25,
   },
   itemS: {
     fontFamily: font.regular, fontSize: 13,
+    lineHeight: 17.55,
     marginTop: 3,
   },
   rowTrailing: {
-    paddingLeft: 12,
+    paddingLeft: 0,
     paddingRight: 0,
   },
   pickerRow: {
@@ -443,33 +415,19 @@ const styles = StyleSheet.create({
     height: 14,
     borderRadius: 7,
   },
-  note: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 12,
-  },
   fbar: {
     position: "absolute",
     left: 16,
     right: 16,
-    bottom: 88,
+    bottom: 30,
     flexDirection: "row",
     gap: 6,
     padding: 6,
     borderRadius: 36,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
   fbarBtn: {
     flex: 1,
-    minHeight: 52,
-    borderRadius: 26,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  fbarBtnText: {
-    fontFamily: font.semibold, fontSize: 17,
-    
   },
   prebuiltInputs: {
     gap: 16,

@@ -289,6 +289,8 @@ export interface ScreenHeaderProps {
   meta?: React.ReactNode
   /** show the round glass back button */
   back?: boolean
+  /** "x" for screens opened as a modal flow (M20, M21), "back" otherwise */
+  backIcon?: "back" | "x"
   onBack?: () => void
   backLabel?: string
   /** buttons for the right pill, e.g. <TopBarButton/> */
@@ -300,7 +302,7 @@ export interface ScreenHeaderProps {
  * right pill, and the fade under them. Nothing is a native nav-bar title. The screen's own
  * ScrollView starts with <ScreenTitle>, so the title scrolls like the mockup's.
  */
-export function ScreenHeader({ title, meta, back, onBack, backLabel, right }: ScreenHeaderProps) {
+export function ScreenHeader({ title, meta, back, backIcon = "back", onBack, backLabel, right }: ScreenHeaderProps) {
   const router = useRouter()
   return (
     <>
@@ -309,7 +311,7 @@ export function ScreenHeader({ title, meta, back, onBack, backLabel, right }: Sc
         <TopFade />
         {back ? (
           <TopBar side="left" round>
-            <TopBarButton icon="back" size={24} strokeWidth={2.2} label={backLabel ? `Back to ${backLabel}` : "Back"} onPress={onBack ?? (() => router.back())} />
+            <TopBarButton icon={backIcon} size={24} strokeWidth={2.2} label={backIcon === "x" ? "Close" : backLabel ? `Back to ${backLabel}` : "Back"} onPress={onBack ?? (() => router.back())} />
           </TopBar>
         ) : null}
         {right ? <TopBar side="right">{right}</TopBar> : null}

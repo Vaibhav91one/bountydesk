@@ -13,6 +13,7 @@ import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, Keyboard } fr
 import { useRouter, useLocalSearchParams } from "expo-router"
 import { useTheme } from "@/theme"
 import { ScreenHeader, ScreenTitle, useToast } from "@/components/primitives"
+import { Note } from "@/components/CaseUi"
 import { SvgImage } from "@/components/SvgImage"
 import { font } from "@/lib/fonts"
 
@@ -154,9 +155,7 @@ export default function ContactVerifyScreen() {
               ))}
             </View>
 
-            <Text style={[styles.note, { color: colors.muted, textAlign: "center" }]}>
-              The code is only valid for this report and expires in 10 minutes.
-            </Text>
+            <Note center>The code is only valid for this report and expires in 10 minutes.</Note>
 
             <View style={styles.resendRow}>
               <Pressable onPress={handleResend} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.resendBtn]}>
@@ -164,9 +163,7 @@ export default function ContactVerifyScreen() {
               </Pressable>
             </View>
 
-            <Text style={[styles.note, { color: colors.muted }]}>
-              An unconfirmed contact is refused. Replies only go to a verified address.
-            </Text>
+            <Note>An unconfirmed contact is refused. Replies only go to a verified address.</Note>
           </>
         ) : (
           <View style={[styles.successCard, { backgroundColor: colors.card }]}>
@@ -184,51 +181,25 @@ export default function ContactVerifyScreen() {
 
 const styles = StyleSheet.create({
   scroll: {
-    paddingTop: 0,
-    paddingBottom: 80,
-    alignItems: "center",
-  },
-  h1: {
-    fontFamily: font.bold, fontSize: 28,
-    
-    letterSpacing: -0.03 * 28,
-    lineHeight: 32,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  hmeta: {
-    fontFamily: font.regular, fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 150,
   },
   otp: {
     flexDirection: "row",
     justifyContent: "center",
     gap: 8,
     paddingHorizontal: 16,
-    paddingTop: 0,
-    paddingBottom: 20,
+    paddingVertical: 8,
   },
   otpBox: {
     width: 48,
     height: 58,
     borderRadius: 16,
     fontFamily: font.semibold, fontSize: 24,
-    
-    lineHeight: 28,
     padding: 0,
-  },
-  note: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 12,
   },
   resendRow: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
   },
   resendBtn: {
     minHeight: 52,
