@@ -251,4 +251,18 @@ describe("M14 Connections", () => {
     expect(getByText("GitHub App installed · 1 repository")).toBeTruthy()
     expect(getByText(`GitHub App installed · ${rest} ${rest === 1 ? "repository" : "repositories"}`)).toBeTruthy()
   })
+
+  it("shows the branch for a repository without a target, and No target when the branch is missing", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: [
+        { ...mockData[1], branch: "main" },
+        { ...mockData[2], status: "admissible", fullName: "o/x", name: "x", branch: null, configured: false, target: null },
+      ],
+      error: null,
+    })
+    const { getByText } = await render(<ConnectionsScreen />)
+    expect(getByText("Public · main")).toBeTruthy()
+    expect(getByText("Private · No target")).toBeTruthy()
+  })
+
 })

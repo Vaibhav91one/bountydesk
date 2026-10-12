@@ -30,6 +30,7 @@ const repo = (over: Partial<ConnectionRow>): ConnectionRow => ({
   delivered: 0,
   lastReportAt: null,
   lastSyncedAt: ago(5),
+  branch: "main",
   manageUrl: null,
   onboarding: null,
   onboardingProgress: null,

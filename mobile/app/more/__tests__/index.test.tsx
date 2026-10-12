@@ -11,6 +11,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 const mockPush = jest.fn()
 const mockShow = jest.fn()
+let mockConnections: unknown = undefined
 
 jest.mock("expo-router", () => ({
   useRouter: () => ({ push: mockPush }),
@@ -58,7 +59,7 @@ jest.mock("@/components/primitives", () => {
 })
 
 jest.mock("@/lib/use-query", () => ({
-  useApiQuery: () => ({ data: undefined, error: null }),
+  useApiQuery: (path: string) => ({ data: path === "/connections" ? mockConnections : undefined, error: null }),
   ApiError: class ApiError extends Error {
     status: number
     constructor(status: number, message?: string) {
@@ -159,5 +160,31 @@ describe("M19 Settings notification switches", () => {
     expect(unregisterPush).not.toHaveBeenCalled()
     await pressSwitchByText(getByText, "Delivery receipts")
     await waitFor(() => expect(unregisterPush).toHaveBeenCalledTimes(1))
+  })
+})
+
+describe("M19 Settings target and scope row", () => {
+  beforeEach(() => {
+    jest.clearAllMocks()
+    mockConnections = undefined
+  })
+
+  it("shows the bound target and opens its connection page", async () => {
+    mockConnections = [
+      { repoId: 1002, name: "api-gateway", configured: false, target: null },
+      { repoId: 1001, name: "juice-shop", configured: true, target: "v17.3.0" },
+    ]
+    const { getByText } = await renderScreen()
+    expect(getByText("juice-shop v17.3.0")).toBeTruthy()
+    await fireEvent.press(getByText("Target and scope"))
+    expect(mockPush).toHaveBeenCalledWith("/more/connections/1001")
+  })
+
+  it("says Not set and opens the connections list when no repository has a target", async () => {
+    mockConnections = [{ repoId: 1002, name: "api-gateway", configured: false, target: null }]
+    const { getByText } = await renderScreen()
+    expect(getByText("Not set")).toBeTruthy()
+    await fireEvent.press(getByText("Target and scope"))
+    expect(mockPush).toHaveBeenCalledWith("/more/connections")
   })
 })

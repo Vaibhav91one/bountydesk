@@ -1,4 +1,4 @@
-import type { HomeSummary, InboxResponse, QueueCardView, QueueColumnView } from "../types"
+import type { Severity, HomeSummary, InboxResponse, QueueCardView, QueueColumnView } from "../types"
 import { ago, rid } from "./ids"
 
 /** The ten reports in the m4 to m6 mockups. `min` is the age of the last change in minutes. */
@@ -14,14 +14,14 @@ type Row = {
   awaiting?: boolean
   investigating?: boolean
   origin?: string
-  severity?: "high" | "medium" | "low"
+  severity?: Severity
   version?: string
 }
 
 export const ROWS: Row[] = [
-  { n: 1042, title: "Stored XSS in search results", state: "AWAITING_APPROVAL", min: 12, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "12m", awaiting: true, severity: "high" },
-  { n: 1044, title: "Missing rate limit on login", state: "AWAITING_APPROVAL", min: 34, outcome: "NOT_REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "34m", awaiting: true, severity: "medium" },
-  { n: 1043, title: "Directory listing exposes /ftp", state: "AWAITING_APPROVAL", min: 48, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "48m", awaiting: true, severity: "low" },
+  { n: 1042, title: "Stored XSS in search results", state: "AWAITING_APPROVAL", min: 12, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "12m", awaiting: true, severity: "High" },
+  { n: 1044, title: "Missing rate limit on login", state: "AWAITING_APPROVAL", min: 34, outcome: "NOT_REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "34m", awaiting: true, severity: "Medium" },
+  { n: 1043, title: "Directory listing exposes /ftp", state: "AWAITING_APPROVAL", min: 48, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "48m", awaiting: true, severity: "Low" },
   { n: 1047, title: "Open redirect on /login", state: "TRIAGING", min: 4, channel: "email", target: null, age: "4m" },
   { n: 1045, title: "SQL injection in search", state: "REPRODUCING", min: 2, target: "juice-shop", age: "2m", investigating: true },
   { n: 1041, title: "SQL injection in login", state: "REPRODUCING", min: 60, target: "juice-shop", age: "1h" },
@@ -124,6 +124,9 @@ export function inbox(): InboxResponse {
     state,
     awaitingVerdictId: state === "AWAITING_APPROVAL" ? verdictIdFor(n) : null,
     updatedAt: ago(min),
+    severity: (n === 1042 ? "High" : n === 1041 ? "Medium" : null) as Severity | null,
+    targetVersion: "v17.3.0",
+    failureReason: null,
     ...extra,
   })
   return {
@@ -136,7 +139,7 @@ export function inbox(): InboxResponse {
       items: [
         c(1033, "Reflected XSS in /search", "DELIVERED", 2880),
         c(1030, "CSRF on profile update", "DELIVERED", 7200, { channel: "email" }),
-        c(1039, "Open redirect on /redirect", "ANALYSIS_ONLY", 180, { deliveryState: "FAILED" }),
+        c(1039, "Open redirect on /redirect", "ANALYSIS_ONLY", 180, { deliveryState: "FAILED", failureReason: "Target did not start" }),
       ],
       total: 3,
       nextOffset: null,

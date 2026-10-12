@@ -15,6 +15,7 @@ import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { TopBarPill } from "@/components/TopBarPill"
 import { ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
@@ -252,7 +253,7 @@ function ReportsScreenContent() {
             </ListCard>
           ) : (
             <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
-              <SvgImage name="mascot/scanning" width={150} height={150} />
+              <AnimatedMascot name="scanning" size={150} float />
               <Text style={[styles.noResultH, { color: colors.foreground }]}>
                 No reports match {needle ? `"${search.trim()}"` : ""}
               </Text>

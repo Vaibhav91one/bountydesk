@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react"
 import { View, Text, StyleSheet, Animated, Easing } from "react-native"
 
 import { SvgImage } from "@/components/SvgImage"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { darkTheme } from "@/theme"
 import { font } from "@/lib/fonts"
 
@@ -39,7 +40,7 @@ export function SplashView() {
     <View style={[styles.container, { backgroundColor: t.colors.background }]}>
       <View style={styles.wrap}>
         <Animated.View style={{ transform: [{ translateY: floatAnim }] }}>
-          <SvgImage name="mascot/greeting" width={220} height={220} />
+          <AnimatedMascot name="greeting" size={220} />
         </Animated.View>
         <SvgImage name="logo-lockup" width={230} height={34.3} />
         <Text style={[styles.tagline, { color: t.colors.muted }]}>

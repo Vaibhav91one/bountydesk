@@ -259,8 +259,7 @@ describe("M19 Settings", () => {
     expect(queryByText("Theme")).toBeNull()
     expect(getByText("Connections")).toBeTruthy()
     expect(getByText("Integrations")).toBeTruthy()
-    // Target and scope is per report now, reached from the case file, not Settings.
-    expect(queryByText("Target and scope")).toBeNull()
+    expect(getByText("Target and scope")).toBeTruthy()
     expect(getAllByText("Privacy").length).toBeGreaterThan(0)
     expect(getAllByText("Terms").length).toBeGreaterThan(0)
     expect(getAllByText("Sign out").length).toBeGreaterThan(0)

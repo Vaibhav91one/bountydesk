@@ -58,8 +58,7 @@ function outcomeLabel(outcome: string | null): string {
   return "Analysis only"
 }
 
-const SEVERITY_LABEL = { high: "High", medium: "Medium", low: "Low" } as const
-const SEVERITY_RANK = { high: 0, medium: 1, low: 2 } as const
+const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 } as const
 
 type Sort = "newest" | "severity"
 type Card = QueueColumnView["cards"][number]
@@ -68,7 +67,7 @@ type Card = QueueColumnView["cards"][number]
 export function sortNeedsYou(cards: Card[], sort: Sort): Card[] {
   const byNewest = [...cards].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
   if (sort === "newest") return byNewest
-  const rank = (c: Card) => (c.severity ? SEVERITY_RANK[c.severity] : 3)
+  const rank = (c: Card) => (c.severity ? SEVERITY_RANK[c.severity] : 5)
   return byNewest.sort((a, b) => rank(a) - rank(b))
 }
 
@@ -208,7 +207,7 @@ function deliveredRows(deliveredCards: Card[], closedCards: Card[]) {
 
 function NeedYouCard({ card, onPress }: { card: Card; onPress: () => void }) {
   const { colors, phase } = useTheme()
-  const sevColor = card.severity === "high" ? colors.red : card.severity === "medium" ? phase.approval : colors.muted
+  const sevColor = card.severity === "Critical" || card.severity === "High" ? colors.red : card.severity === "Medium" ? phase.approval : colors.muted
   return (
     <Pressable
       onPress={onPress}
@@ -221,7 +220,7 @@ function NeedYouCard({ card, onPress }: { card: Card; onPress: () => void }) {
       <Text style={[styles.ncTitle, { color: colors.foreground }]} numberOfLines={2}>{card.title}</Text>
       <Text style={[styles.ncMeta, { color: colors.muted }]}>{card.sourceLabel} · {card.targetName ?? "No target"}{card.targetVersion ? ` ${card.targetVersion}` : ""}</Text>
       <View style={[styles.ncFoot, { borderTopColor: colors.line }]}>
-        <Text style={[styles.ncSev, { color: sevColor }]}>{card.severity ? SEVERITY_LABEL[card.severity] : ""}</Text>
+        <Text style={[styles.ncSev, { color: sevColor }]}>{card.severity ?? ""}</Text>
         <Text style={[styles.ncOutcome, { color: colors.muted }]}>{outcomeLabel(card.outcome)}</Text>
       </View>
     </Pressable>

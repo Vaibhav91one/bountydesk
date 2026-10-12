@@ -15,6 +15,7 @@ import { useTheme } from "@/theme"
 import { ScreenHeader, ScreenTitle, useToast } from "@/components/primitives"
 import { Note } from "@/components/CaseUi"
 import { SvgImage } from "@/components/SvgImage"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { font } from "@/lib/fonts"
 
 const OTP_LENGTH = 6
@@ -167,7 +168,7 @@ export default function ContactVerifyScreen() {
           </>
         ) : (
           <View style={[styles.successCard, { backgroundColor: colors.card }]}>
-            <SvgImage name="mascot/delivered" width={140} height={140} style={styles.mascot} />
+            <AnimatedMascot name="delivered" size={140} float style={styles.mascot} />
             <Text style={[styles.successTitle, { color: colors.foreground }]}>Report received</Text>
             <Text style={[styles.successBody, { color: colors.muted }]}>
               {reportId} is with the reviewer team. We will reply to {email} once a reviewer approves a response.

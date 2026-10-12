@@ -31,8 +31,8 @@ function pillForCard(card: InboxCard): Pill {
   return { phase: "analysis", label: card.state === "ANALYSIS_ONLY" ? "Analysis only" : "Analysis" }
 }
 
-// Subtitle: the report's short id and where it stands. The inbox view carries no failure
-// reason, so a failed row says only that delivery failed.
+// Subtitle: the report's short id and where it stands. A failed row names the reason when the
+// server sends one.
 function inboxSubtitle(card: InboxCard): string {
   const id = card.sourceLabel
   if (card.awaitingVerdictId || card.state === "AWAITING_APPROVAL") return `${id} · Approval needed`
@@ -42,7 +42,7 @@ function inboxSubtitle(card: InboxCard): string {
   if (card.state === "DELIVERING") {
     return card.deliveryState === "FAILED" ? `${id} · Delivery failed, retrying` : `${id} · Waiting for the receipt`
   }
-  if (card.deliveryState === "FAILED") return `${id} · Delivery failed`
+  if (card.deliveryState === "FAILED") return `${id} · ${card.failureReason ?? "Delivery failed"}`
   if (card.state === "ANALYSIS_ONLY") return `${id} · Analysis only`
   return `${id} · ${card.state.replace(/_/g, " ").toLowerCase()}`
 }

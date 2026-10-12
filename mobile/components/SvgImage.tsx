@@ -5,8 +5,7 @@
  * (configured in metro.config.js), so the real docs/site/assets source files
  * render directly through react-native-svg with no manual path copying.
  *
- * The `name` prop selects a known asset. For mascots use "mascot/<name>"
- * (mascot/greeting, mascot/out-of-scope, etc.), and for logos "logo-mark",
+ * The `name` prop selects a known asset: "logo-mark",
  * "logo-lockup", "logo-tick", "logo-small" and "trix".
  */
 import React from "react"
@@ -27,24 +26,6 @@ const Trix = require("../assets/brand/trix.svg").default as React.ComponentType<
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const AppIcon = require("../assets/brand/app-icon.svg").default as React.ComponentType<any>
 
-// Mascot assets share a directory, so they are lazy require'd by name.
-const MASCOT_MODULES: Record<string, React.ComponentType<any>> = {
-  "mascot/awaiting-approval": require("../assets/brand/mascot/awaiting-approval.svg").default,
-  "mascot/canary-found": require("../assets/brand/mascot/canary-found.svg").default,
-  "mascot/celebrating": require("../assets/brand/mascot/celebrating.svg").default,
-  "mascot/chilling": require("../assets/brand/mascot/chilling.svg").default,
-  "mascot/cowboy": require("../assets/brand/mascot/cowboy.svg").default,
-  "mascot/delivered": require("../assets/brand/mascot/delivered.svg").default,
-  "mascot/denied": require("../assets/brand/mascot/denied.svg").default,
-  "mascot/greeting": require("../assets/brand/mascot/greeting.svg").default,
-  "mascot/idle": require("../assets/brand/mascot/idle.svg").default,
-  "mascot/infra-hiccup": require("../assets/brand/mascot/infra-hiccup.svg").default,
-  "mascot/ingest": require("../assets/brand/mascot/ingest.svg").default,
-  "mascot/out-of-scope": require("../assets/brand/mascot/out-of-scope.svg").default,
-  "mascot/reproducing": require("../assets/brand/mascot/reproducing.svg").default,
-  "mascot/scanning": require("../assets/brand/mascot/scanning.svg").default,
-}
-
 // Static component map for the logos and icon.
 const ASSETS: Record<string, React.ComponentType<any>> = {
   "logo-mark": LogoMark,
@@ -53,13 +34,12 @@ const ASSETS: Record<string, React.ComponentType<any>> = {
   "logo-small": LogoSmall,
   trix: Trix,
   "app-icon": AppIcon,
-  ...MASCOT_MODULES,
 }
 
 export type SvgName = keyof typeof ASSETS
 
 export interface SvgImageProps {
-  /** Asset name, e.g. "logo-lockup", "mascot/greeting", "trix". */
+  /** Asset name, e.g. "logo-lockup", "trix". */
   name: SvgName
   width: number
   height: number

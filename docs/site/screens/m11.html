@@ -24,15 +24,16 @@
 </div>
 <div class="sheet" id="deny" role="dialog" aria-modal="true" aria-label="Deny report">
 <div class="grab"></div>
-<div class="shd"><button class="shd-b" type="button" data-sheet-close>Cancel</button><div class="st">Deny report</div><button class="shd-b r" type="button" data-sheet-confirm data-haptic="warning" data-toast="Denied. Nothing was sent" data-then="m4.html" data-kind="tab" disabled>Deny</button></div>
+<div class="shd"><div class="st">Deny report</div></div>
 <div class="ss">BD-1042 · Stored XSS in search results</div>
 <div class="card list" role="radiogroup" aria-label="Reason"><label class="item"><span class="main"><span class="t">Out of scope</span><span class="s">The target is not covered by the program</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Not reproduced</span><span class="s">The agent could not trigger the behavior</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Duplicate</span><span class="s">Matches an earlier report</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Insufficient detail</span><span class="s">Steps or payload are missing</span></span><input type="radio" name="r" class="rd"></label></div>
 <label class="lbl" for="note-m11">Note to reporter (optional)</label>
 <textarea class="field area" id="note-m11" placeholder="Sent with the denial"></textarea>
 <p class="note" style="padding:12px 4px 0">Nothing is sent to the reporter until you confirm. The report moves to Denied.</p>
+<div class="srow"><button class="btn sec" type="button" data-sheet-close>Cancel</button><button class="btn bad-fill" type="button" data-sheet-confirm data-haptic="warning" data-toast="Denied. Nothing was sent" data-then="m4.html" data-kind="tab" disabled>Deny</button></div>
 </div>
 </main>
-<script data-deny-enable>document.querySelectorAll('#deny .rd').forEach(r=>r.addEventListener('change',()=>{const b=document.querySelector('#deny .shd-b.r');if(b)b.disabled=false}))</script>
+<script data-deny-enable>document.querySelectorAll('#deny .rd').forEach(r=>r.addEventListener('change',()=>{const b=document.querySelector('#deny .btn.bad-fill');if(b)b.disabled=false}))</script>
 <script src="c.js"></script>
 </body>
 </html>

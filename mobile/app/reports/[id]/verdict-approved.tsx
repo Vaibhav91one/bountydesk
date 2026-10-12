@@ -3,7 +3,8 @@
  * state: DELIVERED shows the delivered receipt, DELIVERING the in-progress one, anything else says
  * there is no receipt yet. A report is DELIVERED only after the transport receipt (see AGENTS.md).
  */
-import { View, Text, ScrollView, StyleSheet, Image } from "react-native"
+import { View, Text, ScrollView, StyleSheet } from "react-native"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { useRouter, useLocalSearchParams } from "expo-router"
 
 import { deliveryLabel } from "@/lib/delivery-label"
@@ -59,7 +60,7 @@ export default function VerdictApprovedScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.top}>
-          <Image source={require("../../../assets/brand/mascot-png/celebrating.png")} style={styles.mascot} />
+          <AnimatedMascot name="celebrating" size={180} float />
           <Text style={[styles.h1, { color: colors.foreground }]}>{title}</Text>
           <Text style={[styles.hmeta, { color: colors.muted }]}>{cf.sourceLabel} · {cf.title}</Text>
         </View>
