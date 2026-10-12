@@ -71,6 +71,7 @@ const styles = StyleSheet.create({
   },
   empty: {
     alignItems: "center",
+    alignSelf: "stretch",
   },
   title: {
     fontSize: 24, // 1.5rem in c.css .empty h1
@@ -91,7 +92,9 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: "column",
     gap: 6,
-    width: 300,
+    // Full width up to the mockup's 300pt, so a 375pt phone still fits inside the 40pt gutters.
+    width: "100%",
+    maxWidth: 300,
     marginTop: 22,
   },
   btn: {
