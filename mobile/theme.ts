@@ -4,7 +4,6 @@
  * using the CSS Color 4 reference algorithm.
  * The design is dark by default (c.css uses color-scheme:dark as the root).
  */
-import { useColorScheme } from "react-native"
 
 export type ColorScheme = "light" | "dark"
 
@@ -173,70 +172,7 @@ export const darkTheme: Theme = {
   },
 }
 
-export const lightTheme: Theme = {
-  colors: {
-    page: oklchToHex(0.94, 0, 0),
-    background: oklchToHex(0.965, 0, 0),
-    card: "#ffffff",
-    raised: oklchToHex(0.94, 0, 0),
-    foreground: oklchToHex(0.145, 0, 0),
-    muted: oklchToHex(0.5, 0, 0),
-    faint: oklchToHex(0.62, 0, 0),
-    line: "rgba(0, 0, 0, 0.08)",
-    glass: "rgba(245, 245, 245, 0.68)",
-    "glass-edge": "rgba(0, 0, 0, 0.08)",
-    fill: "rgba(0, 0, 0, 0.06)",
-    selection: "rgba(0, 0, 0, 0.10)",
-    sheet: "rgba(245, 245, 245, 0.96)",
-    "sheet-card": "#ffffff",
-    hover: "rgba(0, 0, 0, 0.04)",
-    brand: oklchToHex(0.585, 0.233, 277.117),
-    "brand-soft": oklchToHex(0.457, 0.24, 277.023),
-    red: oklchToHex(0.577, 0.245, 27.325),
-  },
-  phase: {
-    triaging: oklchToHex(0.52, 0.17, 250),
-    reproducing: oklchToHex(0.55, 0.13, 195),
-    analysis: oklchToHex(0.53, 0.2, 330),
-    approval: oklchToHex(0.62, 0.15, 75),
-    delivered: oklchToHex(0.52, 0.15, 150),
-    closed: oklchToHex(0.55, 0, 0),
-  },
-  spacing: {
-    screenPadding: 20,
-    sectionGap: 28,
-    itemPadding: 18,
-    itemMinHeight: 56,
-    buttonMinHeight: 52,
-    touchTarget: 44,
-    cornerRadius: 24,
-    fieldRadius: 20,
-    tabBarHeight: 88,
-    topBarHeight: 54,
-  },
-  typography: {
-    fontFamily: "Inter_400Regular",
-    fontMono: "GeistMono_400Regular",
-    bodyFontSize: 17,
-    bodyLineHeight: 23,
-    h1FontSize: 28,
-    h1LineHeight: 32,
-    sectionHeaderFontSize: 20,
-    sectionHeaderLineHeight: 24,
-    noteFontSize: 13,
-    pillFontSize: 13,
-    h2FontSize: 24,
-  },
-  round: {
-    screenRadius: 55,
-    cardRadius: 24,
-    buttonRadius: 26,
-    fieldRadius: 20,
-    tabPillRadius: 32,
-  },
-}
-
+/** The app is dark only (docs/site c.css is dark-first), whatever the phone setting. */
 export function useTheme(): Theme {
-  const colorScheme = useColorScheme()
-  return colorScheme === "dark" ? darkTheme : lightTheme
+  return darkTheme
 }

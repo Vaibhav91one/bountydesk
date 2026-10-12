@@ -48,12 +48,14 @@ export interface ItemLineProps {
   /** the avatar before the text (c.css .av) */
   leading?: ReactNode
   divider?: boolean
+  /** a taller row than the 56 default (the Settings account row is 72) */
+  minHeight?: number
 }
 
 /** Lets a long token wrap at any character, as the design's `word-break: break-all` does; RN only breaks at spaces. */
 export const breakAnywhere = (text: string) => Array.from(text).join("\u200b")
 
-export function ItemLine({ title, subtitle, mono, monoSubtitle, trailing, leading, divider }: ItemLineProps) {
+export function ItemLine({ title, subtitle, mono, monoSubtitle, trailing, leading, divider, minHeight }: ItemLineProps) {
   const { colors } = useTheme()
   const t: TextStyle = mono ? { fontFamily: font.monoMedium, fontSize: 15, lineHeight: 18.6, letterSpacing: 0 } : {}
   const s: TextStyle = mono
@@ -62,7 +64,7 @@ export function ItemLine({ title, subtitle, mono, monoSubtitle, trailing, leadin
       ? { fontFamily: font.mono, fontSize: 13, lineHeight: 19.5, letterSpacing: 0, marginTop: 4 }
       : {}
   return (
-    <View style={styles.item}>
+    <View style={[styles.item, minHeight ? { minHeight } : null]}>
       {divider ? <Divider /> : null}
       {leading}
       <View style={styles.main}>
@@ -91,9 +93,9 @@ export function shortCommit(marker: string | null | undefined): string | null {
   return marker?.match(/[0-9a-f]{7,40}/)?.[0].slice(0, 7) ?? null
 }
 
-export function Note({ children }: { children: string }) {
+export function Note({ children, center }: { children: string; center?: boolean }) {
   const { colors } = useTheme()
-  return <Text style={[styles.note, { color: colors.muted }]}>{children}</Text>
+  return <Text style={[styles.note, { color: colors.muted }, center && { textAlign: "center" }]}>{children}</Text>
 }
 
 /** Fades the scroll content out above a bottom bar (c.css .fade-b, 150 high). */
@@ -117,7 +119,7 @@ const styles = StyleSheet.create({
   kvK: { fontFamily: font.medium, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187 },
   kvV: { fontFamily: font.regular, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187, textAlign: "right", flexShrink: 1 },
   item: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, paddingVertical: 10, paddingHorizontal: 18 },
-  main: { flex: 1, minWidth: 0 },
+  main: { flex: 1, minWidth: 0, top: -0.67 },
   itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 21.25, letterSpacing: -0.187 },
   itemS: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 3 },
   itemV: { fontFamily: font.regular, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187 },

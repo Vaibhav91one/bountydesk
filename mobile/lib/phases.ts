@@ -14,7 +14,6 @@
  * in `theme.phase`. We resolve by phase key here.
  */
 import { useTheme } from "@/theme"
-import { useColorScheme } from "react-native"
 
 export type PhaseKey = "triaging" | "reproducing" | "analysis" | "approval" | "delivered" | "closed"
 

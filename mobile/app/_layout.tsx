@@ -20,7 +20,6 @@ import { ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { routeForNotification } from "@/lib/push"
 import { darkTheme, useTheme } from "@/theme"
-import { restoreThemeMode } from "@/lib/theme-mode"
 import { fixturesEnabled } from "@/lib/fixtures"
 
 /**
@@ -54,11 +53,6 @@ export default function RootLayout() {
     }
   }, [router, showLoading])
 
-  // Apply the reviewer's saved Light/Dark choice before the first screen renders.
-  useEffect(() => {
-    restoreThemeMode()
-  }, [])
-
   useEffect(() => {
     if (fontsReady) {
       setShowLoading(false)
@@ -85,7 +79,7 @@ export default function RootLayout() {
               sheetGrabberVisible: true,
               sheetAllowedDetents: [0.96],
               sheetCornerRadius: 36,
-              contentStyle: { backgroundColor: colors.card === darkTheme.colors.card ? "#171717" : "#f5f5f5" },
+              contentStyle: { backgroundColor: "#171717" },
             }}
           />
         </Stack>

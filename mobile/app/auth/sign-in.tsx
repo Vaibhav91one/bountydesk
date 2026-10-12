@@ -8,12 +8,12 @@
  */
 import * as AuthSession from "expo-auth-session"
 import { useSSO } from "@clerk/expo"
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
 import Svg, { Path } from "react-native-svg"
 
 import { SvgImage } from "@/components/SvgImage"
 import { Icon } from "@/components/icons"
-import { darkTheme, lightTheme } from "@/theme"
+import { darkTheme } from "@/theme"
 import { font } from "@/lib/fonts"
 
 // maybeCompleteAuthSession() is called once in app/_layout.tsx at the top
@@ -34,8 +34,7 @@ const GOOGLE_COLORS = {
 
 export default function SignInScreen() {
   const { startSSOFlow } = useSSO()
-  const cs = useColorScheme()
-  const t = cs === "dark" ? darkTheme : lightTheme
+  const t = darkTheme
 
   const handleSSO = async (strategy: "google" | "github") => {
     try {

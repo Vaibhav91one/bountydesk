@@ -12,26 +12,22 @@ import { useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
 import type { EmailReviewer, MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, Card, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, PhasePill, useToast } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
+import { ageText } from "@/lib/age"
 import { Icon } from "@/components/icons"
 import { font } from "@/lib/fonts"
 
-// Maps role to the subtitle text shown in the reviewer row.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+// c.css/m17 subtitles: "Owner", "Verified 3 Oct", "Code sent 4 min ago". createdAt is when the
+// reviewer row was made, which is the closest the API gets to when the code went out.
 function reviewerSubtitle(reviewer: EmailReviewer): string {
   if (reviewer.role === "owner") return "Owner"
-  if (reviewer.verified) {
-    // c.css uses "Verified 3 Oct" style; we show the createdAt date if available.
-    return "Verified"
-  }
-  return "Pending"
-}
-
-// Status pill: Verified = c-delivered, Pending = c-approval.
-function reviewerPill(reviewer: EmailReviewer): { label: string; colorKey: "delivered" | "approval" } {
-  if (reviewer.verified) {
-    return { label: "Verified", colorKey: "delivered" }
-  }
-  return { label: "Pending", colorKey: "approval" }
+  const at = reviewer.createdAt ? new Date(reviewer.createdAt) : null
+  if (reviewer.verified) return at ? `Verified ${at.getDate()} ${MONTHS[at.getMonth()]}` : "Verified"
+  return reviewer.codeOutstanding && reviewer.createdAt ? `Code sent ${ageText(reviewer.createdAt, true)}` : "Pending"
 }
 
 function reviewerInitials(email: string): string {
@@ -39,8 +35,7 @@ function reviewerInitials(email: string): string {
 }
 
 export default function EmailAccessScreen() {
-  const theme = useTheme()
-  const { colors } = theme
+  const { colors } = useTheme()
   const router = useRouter()
   const { show } = useToast()
   const reviewers = useApiQuery<EmailReviewer[]>("/integrations/email")
@@ -98,63 +93,40 @@ export default function EmailAccessScreen() {
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScreenHeader back backLabel="Integrations" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <ScreenTitle title="Email access" meta="Reviewer allowlist" metaBottom={24} />
 
-        {/* Reviewers section */}
-        <View style={styles.section}>
-          <View style={styles.sh}>
-            <Text style={[styles.shText, { color: colors.foreground }]}>Reviewers</Text>
-          </View>
-          <Card style={styles.list}>
-            {(reviewers.data ?? []).map((reviewer) => {
-              const pill = reviewerPill(reviewer)
-              const isPending = !reviewer.verified
-              const pillColor = pill.colorKey === "delivered" ? theme.phase.delivered : theme.phase.approval
-              return (
-                <Pressable
-                  key={reviewer.email}
-                  onPress={() => {
-                    if (isPending) {
-                      handlePendingTap(reviewer)
-                    }
-                  }}
-                  style={[styles.item, { backgroundColor: colors.card }]}
-                >
-                  <View style={styles.rowLeading}>
-                    <View style={[styles.avatar, { backgroundColor: colors.brand + "29" }]}>
-                      <Text style={[styles.avatarText, { color: colors.brand }]}>{reviewerInitials(reviewer.email)}</Text>
+        {/* 27 not 28: three 61.8pt rows round up to the pixel grid by about a point, which this takes back. */}
+        <View style={[styles.sect, { marginBottom: 27 }]}>
+          <SectionHead title="Reviewers" />
+          <ListCard>
+            {(reviewers.data ?? []).map((reviewer, i) => (
+              <Pressable key={reviewer.email} disabled={reviewer.verified} onPress={() => handlePendingTap(reviewer)}>
+                <ItemLine
+                  divider={i > 0}
+                  title={reviewer.email}
+                  subtitle={reviewerSubtitle(reviewer)}
+                  leading={
+                    <View style={[styles.avatar, { backgroundColor: colors.brand + "38" }]}>
+                      <Text style={[styles.avatarText, { color: colors["brand-soft"] }]}>{reviewerInitials(reviewer.email)}</Text>
                     </View>
-                  </View>
-                  <View style={styles.main}>
-                    <Text style={[styles.itemT, { color: colors.foreground }]}>{reviewer.email}</Text>
-                    <Text style={[styles.itemS, { color: colors.muted }]}>{reviewerSubtitle(reviewer)}</Text>
-                  </View>
-                  <View style={styles.rowTrailing}>
-                    <View style={[styles.pill, { backgroundColor: pillColor + "29" }]}>
-                      <View style={[styles.pillDot, { backgroundColor: pillColor }]} />
-                      <Text style={[styles.pillLabel, { color: pillColor }]}>{pill.label}</Text>
-                    </View>
-                  </View>
-                </Pressable>
-              )
-            })}
-          </Card>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            Only a verified address can act as a reviewer. Tap a pending address to enter its code.
-          </Text>
+                  }
+                  trailing={<PhasePill phase={reviewer.verified ? "delivered" : "approval"} label={reviewer.verified ? "Verified" : "Pending"} />}
+                />
+              </Pressable>
+            ))}
+          </ListCard>
+          <Note>Only a verified address can act as a reviewer. Tap a pending address to enter its code.</Note>
         </View>
 
-        {/* Add reviewer section */}
-        <View style={styles.section}>
-          <View style={styles.sh}>
-            <Text style={[styles.shText, { color: colors.foreground }]}>Add reviewer</Text>
-          </View>
+        <View style={styles.sect}>
+          <SectionHead title="Add reviewer" />
           <View style={styles.addRow}>
             <TextInput
               style={[styles.field, { backgroundColor: colors.raised, color: colors.foreground }]}
               placeholder="name@example.com"
               placeholderTextColor={colors.faint}
+              accessibilityLabel="Reviewer email"
               value={newEmail}
               onChangeText={setNewEmail}
               keyboardType="email-address"
@@ -166,170 +138,38 @@ export default function EmailAccessScreen() {
               disabled={!isOwner || addMutation.isPending}
               style={[styles.addBtn, { backgroundColor: colors.brand, opacity: !isOwner || addMutation.isPending ? 0.4 : undefined }]}
             >
-              <Text style={[styles.addBtnText, { color: colors.foreground }]}>Add</Text>
+              <Text style={styles.addBtnText}>Add</Text>
             </Pressable>
           </View>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            We send a six digit code to the address. It stays pending until the code is entered.
-          </Text>
+          <Note>We send a six digit code to the address. It stays pending until the code is entered.</Note>
         </View>
 
-        {/* Verify with a code: opens the code screen for the first reviewer with a code
-            outstanding. The code screen needs an address, so the row is hidden when none waits. */}
-        <View style={styles.section}>
-          {awaitingCode ? (
-          <Card style={styles.list}>
-            <Pressable
-              onPress={() => handlePendingTap(awaitingCode)}
-              style={[styles.item, { backgroundColor: colors.card }]}
-            >
-              <View style={styles.main}>
-                <Text style={[styles.itemT, { color: colors.foreground }]}>Verify with a code</Text>
-                <Text style={[styles.itemS, { color: colors.muted }]}>{awaitingCode.email}</Text>
-              </View>
-              <View style={styles.rowTrailing}>
-                <Icon name="chev" size={18} stroke={colors.faint} />
-              </View>
+        {/* The code screen needs an address, so the row opens it for the first reviewer with a code outstanding. */}
+        <View style={styles.sect}>
+          <ListCard>
+            <Pressable onPress={() => (awaitingCode ? handlePendingTap(awaitingCode) : show("No address is waiting for a code"))}>
+              <ItemLine
+                title="Verify with a code"
+                subtitle="Open the verification step"
+                trailing={<Icon name="chev" size={18} stroke={colors.faint} />}
+              />
             </Pressable>
-          </Card>
-          ) : null}
-          <Text style={[styles.note, { color: colors.muted }]}>Only the owner can add or remove reviewers.</Text>
+          </ListCard>
+          <Note>Only the owner can add or remove reviewers.</Note>
         </View>
       </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  scroll: {
-    paddingTop: 0,
-    paddingBottom: 40,
-  },
-  h1: {
-    fontFamily: font.bold, fontSize: 28,
-    
-    letterSpacing: -0.03 * 28,
-    lineHeight: 32,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 4,
-  },
-  hmeta: {
-    fontFamily: font.regular, fontSize: 15,
-    lineHeight: 20,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  section: {
-    marginBottom: 28,
-  },
-  sh: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-  },
-  shText: {
-    fontFamily: font.semibold, fontSize: 20,
-    
-    lineHeight: 24,
-  },
-  list: {
-    marginHorizontal: 16,
-    borderRadius: 24,
-    overflow: "hidden",
-    padding: 0,
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  rowLeading: {
-    paddingLeft: 0,
-    paddingRight: 12,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 50,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarText: {
-    fontFamily: font.semibold, fontSize: 16,
-    
-  },
-  main: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemT: {
-    fontFamily: font.medium, fontSize: 17,
-    
-    lineHeight: 20,
-  },
-  itemS: {
-    fontFamily: font.regular, fontSize: 13,
-    marginTop: 3,
-  },
-  rowTrailing: {
-    paddingLeft: 12,
-    paddingRight: 0,
-  },
-  pill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 11,
-    paddingVertical: 6,
-    borderRadius: 99,
-  },
-  pillDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  pillLabel: {
-    fontFamily: font.semibold, fontSize: 13,
-    
-    lineHeight: 14,
-  },
-  addRow: {
-    flexDirection: "row",
-    gap: 8,
-    paddingHorizontal: 16,
-  },
-  field: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 52,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    fontFamily: font.regular, fontSize: 17,
-    lineHeight: 23,
-  },
-  addBtn: {
-    flex: 0,
-    minHeight: 52,
-    borderRadius: 26,
-    paddingHorizontal: 22,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addBtnText: {
-    fontFamily: font.semibold, fontSize: 17,
-    
-  },
-  note: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
+  scroll: { paddingBottom: 150 },
+  sect: { marginBottom: 28 },
+  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
+  avatarText: { fontFamily: font.semibold, fontSize: 14, lineHeight: 14 },
+  addRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16 },
+  field: { flex: 1, minWidth: 0, minHeight: 52, borderRadius: 20, paddingHorizontal: 16, fontFamily: font.regular, fontSize: 17, paddingVertical: 0 },
+  addBtn: { minHeight: 52, borderRadius: 26, paddingHorizontal: 22, alignItems: "center", justifyContent: "center" },
+  addBtnText: { fontFamily: font.semibold, fontSize: 17, lineHeight: 17, color: "#fff" },
 })

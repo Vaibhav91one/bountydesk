@@ -108,7 +108,8 @@ describe("M16 Integrations", () => {
     expect(getByText("Channels")).toBeTruthy()
     expect(getByText("1 reviewer verified")).toBeTruthy()
     expect(getByText("2 repositories, 1 accepting reports")).toBeTruthy()
-    expect(getAllByText("Connected")).toHaveLength(2)
+    expect(getByText("Active")).toBeTruthy()
+    expect(getByText("Connected")).toBeTruthy()
     expect(getByText("Not configured")).toBeTruthy()
   })
 
@@ -182,14 +183,16 @@ describe("M17 Email access", () => {
     expect(mockRouterPush).toHaveBeenCalledWith({ pathname: "/more/integrations/otp-verify", params: { email: "priya@example.com" } })
   })
 
-  it("hides Verify with a code when no reviewer has a code outstanding", async () => {
+  it("keeps Verify with a code visible but opens nothing when no reviewer has a code outstanding", async () => {
     mockQueryResult["/integrations/email"] = {
       data: [{ email: "alex@example.com", role: "owner", verified: true, codeOutstanding: false, addedByEmail: null, createdAt: null }],
       error: undefined,
       isPending: false,
     }
-    const { queryByText } = await renderWithClient(<EmailAccessScreen />)
-    expect(queryByText("Verify with a code")).toBeNull()
+    const { getByText } = await renderWithClient(<EmailAccessScreen />)
+    mockRouterPush.mockClear()
+    await fireEvent.press(getByText("Verify with a code"))
+    expect(mockRouterPush).not.toHaveBeenCalled()
   })
 
   it("renders empty state when no reviewers", async () => {
@@ -253,8 +256,7 @@ describe("M19 Settings", () => {
     const { getByText, getAllByText, queryByText } = await renderWithClient(<SettingsScreen />)
     expect(getByText("alex")).toBeTruthy()
     expect(getByText("alex@example.com")).toBeTruthy()
-    expect(getAllByText("Theme").length).toBeGreaterThan(0)
-    expect(getByText("System")).toBeTruthy()
+    expect(queryByText("Theme")).toBeNull()
     expect(getByText("Connections")).toBeTruthy()
     expect(getByText("Integrations")).toBeTruthy()
     // Target and scope is per report now, reached from the case file, not Settings.
@@ -366,8 +368,9 @@ describe("M23 Inbox", () => {
           items: [
             { id: "11111111-aaaa-bbbb-cccc-000000000002", title: "Reflected XSS", sourceLabel: "#470", channel: "github", targetName: "t", outcome: "REPRODUCED", verdictSuperseded: false, deliveryState: "SENT", state: "DELIVERED", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
             { id: "11111111-aaaa-bbbb-cccc-000000000003", title: "Open redirect", sourceLabel: "#465", channel: "email", targetName: null, outcome: null, verdictSuperseded: false, deliveryState: "SENT", state: "DELIVERING", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
+            { id: "11111111-aaaa-bbbb-cccc-000000000004", title: "CSRF", sourceLabel: "#460", channel: "email", targetName: null, outcome: null, verdictSuperseded: false, deliveryState: "FAILED", state: "ANALYSIS_ONLY", awaitingVerdictId: null, updatedAt: new Date().toISOString() },
           ],
-          total: 2,
+          total: 3,
           nextOffset: null,
           truncated: false,
         },
@@ -378,10 +381,11 @@ describe("M23 Inbox", () => {
     const { getByText, getAllByText } = await renderWithClient(<InboxScreen />)
     expect(getByText("1 need you")).toBeTruthy()
     expect(getByText("#482 · Approval needed")).toBeTruthy()
-    expect(getByText("#470 · Delivered")).toBeTruthy()
+    expect(getByText("#470 · Delivered to GitHub")).toBeTruthy()
     expect(getByText("#465 · Waiting for the receipt")).toBeTruthy()
     expect(getAllByText("Delivered").length).toBeGreaterThan(0)
     expect(getByText("Delivering")).toBeTruthy()
+    expect(getByText("Failed")).toBeTruthy()
   })
 
   it("shows an empty state and no sample cards when nothing needs you", async () => {

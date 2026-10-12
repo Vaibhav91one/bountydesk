@@ -43,12 +43,15 @@ export type { PhaseKey }
 export interface PhasePillProps {
   phase: PhaseKey
   label?: string
+  /** replaces the phase colour (the red Failed pill) */
+  color?: string
   style?: ViewStyle
   labelStyle?: TextStyle
 }
 
-export function PhasePill({ phase, label, style, labelStyle }: PhasePillProps) {
-  const color = usePhaseColor(phase)
+export function PhasePill({ phase, label, color: override, style, labelStyle }: PhasePillProps) {
+  const phaseColor = usePhaseColor(phase)
+  const color = override ?? phaseColor
   return (
     <View style={[styles.pill, { backgroundColor: phaseTint(color) }, style]}>
       <View style={[styles.pillDot, { backgroundColor: color }]} />

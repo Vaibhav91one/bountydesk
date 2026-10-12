@@ -5,19 +5,18 @@
  * and tagline. Advances to /auth/sign-in after 1600ms.
  */
 import { useEffect } from "react"
-import { View, Text, StyleSheet, Animated, Easing, useColorScheme } from "react-native"
+import { View, Text, StyleSheet, Animated, Easing } from "react-native"
 import { useRouter } from "expo-router"
 import { useAuth } from "@/lib/auth-hooks"
 
 import { SvgImage } from "@/components/SvgImage"
-import { darkTheme, lightTheme } from "@/theme"
+import { darkTheme } from "@/theme"
 import { font } from "@/lib/fonts"
 
 export default function SplashScreen() {
   const router = useRouter()
   const { isLoaded } = useAuth()
-  const cs = useColorScheme()
-  const t = cs === "dark" ? darkTheme : lightTheme
+  const t = darkTheme
   const floatAnim = new Animated.Value(0)
 
   useEffect(() => {

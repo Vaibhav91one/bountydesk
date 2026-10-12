@@ -60,6 +60,8 @@ export interface ReportRowProps {
   subtitle: string
   phase: PhaseKey
   pillLabel: string
+  /** overrides the phase colour, e.g. the red Failed pill */
+  pillColor?: string
   /** the age under the pill; ignored while running */
   age: string
   running?: boolean
@@ -69,7 +71,7 @@ export interface ReportRowProps {
   onLongPress?: () => void
 }
 
-export function ReportRow({ title, subtitle, phase, pillLabel, age, running, divider, onPress, onLongPress }: ReportRowProps) {
+export function ReportRow({ title, subtitle, phase, pillLabel, pillColor, age, running, divider, onPress, onLongPress }: ReportRowProps) {
   const { colors } = useTheme()
   return (
     <Pressable onPress={onPress} onLongPress={onLongPress} delayLongPress={450} style={({ pressed }) => [styles.item, pressed && { opacity: 0.92 }]}>
@@ -83,7 +85,7 @@ export function ReportRow({ title, subtitle, phase, pillLabel, age, running, div
         </Text>
       </View>
       <View style={styles.right}>
-        <PhasePill phase={phase} label={pillLabel} style={{ top: 1 }} />
+        <PhasePill phase={phase} label={pillLabel} color={pillColor} style={{ top: 1 }} />
         <Text style={[styles.itemB, { color: colors.muted }]}>{running ? "Running" : age}</Text>
       </View>
     </Pressable>
