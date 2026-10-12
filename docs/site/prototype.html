@@ -39,11 +39,7 @@
             box-shadow: 0 0 0 10px #1a1a1c, 0 0 0 11px #3a3a3c, 0 30px 60px rgba(0,0,0,.45); }
   .device.android { border-radius: 38px; box-shadow: 0 0 0 9px #1c1b1f, 0 0 0 10px #3a3940, 0 30px 60px rgba(0,0,0,.45); }
   .device.web { border-radius: 22px; box-shadow: 0 0 0 1px #3a3d45, 0 24px 50px rgba(0,0,0,.45); }
-  .plight .device { background: #fff; box-shadow: 0 0 0 10px #d1d1d6, 0 0 0 11px #aeaeb2, 0 30px 60px rgba(0,0,0,.18); }
-  .plight .device.android { box-shadow: 0 0 0 9px #cac4d0, 0 0 0 10px #938f99, 0 30px 60px rgba(0,0,0,.18); }
-  .plight .device.web { box-shadow: 0 0 0 1px #c4c8d0, 0 24px 50px rgba(0,0,0,.16); }
   .device iframe { position: absolute; inset: 0; width: 390px; height: 844px; border: 0; background: #0f0f10; will-change: transform; }
-  .plight .device iframe { background: #fff; }
   .device .shade { position: absolute; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 1; }
   .bar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; }
   .bar button { height: 36px; padding: 0 16px; border: 1px solid var(--border); border-radius: 18px; background: var(--card); color: var(--ink); font: 500 14px/1 var(--sans); display: flex; align-items: center; gap: 7px; cursor: pointer; }
@@ -66,7 +62,7 @@
 <body>
 <aside>
   <h1>Prototype</h1>
-  <p>Every mobile screen on iOS and Android, side by side and clickable, with each platform's motion. Tap in either phone and both follow. Haptics show as tags, and the gesture buttons play back swipe, sheet dismissal, pull to refresh, long press and a push notification. Switch on light theme, large text, a screen reader view or a touch target check. Scroll to go through the screens in journey order, or tap buttons, rows, tabs and back buttons to follow the flow.</p>
+  <p>Every mobile screen on iOS and Android, side by side and clickable, with each platform's motion. Tap in either phone and both follow. Haptics show as tags, and the gesture buttons play back swipe, sheet dismissal, pull to refresh, long press and a push notification. Switch on large text, a screen reader view or a touch target check. Scroll to go through the screens in journey order, or tap buttons, rows, tabs and back buttons to follow the flow.</p>
   <div id="list"></div>
 </aside>
 <main class="pane">
@@ -82,8 +78,6 @@
     <button id="replay"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.6M4 4v4.6h4.6"/></svg>Replay</button>
     <button id="hot" aria-pressed="false">Tap targets</button>
     <button id="guides" aria-pressed="false">Spacing guides</button>
-    <span class="sep"></span>
-    <button id="light" aria-pressed="false">Light</button>
   </div>
   <div class="bar"><span class="lbl">Access</span>
     <button id="ax" aria-pressed="false">Large text</button><button id="sr" aria-pressed="false">Screen reader</button><button id="targets" aria-pressed="false">Target check</button>
@@ -129,7 +123,7 @@ const GROUPS = [
     ['m18', 'OTP verify', 'Type six digits and the sixth verifies and opens Settings · Resend code shows a toast'],
   ]],
   ['Settings and public', [
-    ['m19', 'Settings', 'Switches flip · Theme cycles · Terms and Privacy policy open the legal pages · Sign out returns to Sign in · the tab bar switches tabs'],
+    ['m19', 'Settings', 'Switches flip · Terms and Privacy policy open the legal pages · Sign out returns to Sign in · the tab bar switches tabs'],
     ['m22', 'Target and scope', 'Read only · Back returns to Connection detail'],
     ['m23', 'Inbox', 'An Approval needed message opens Sign the verdict · the tab bar switches tabs'],
     ['m20', 'Submit a report', 'Submit report shows a toast and returns to Home · Cancel returns to Home'],
@@ -163,7 +157,7 @@ const INFO_C = {
   m16: 'Email opens Email access · GitHub opens Connections · Back returns to Settings',
   m17: 'Add reviewer appends a pending row · Verify with a code opens the code screen · Back returns to Integrations',
   m18: 'Type six digits and the sixth verifies, shows a toast and returns to Email access · Back returns to Email access',
-  m19: 'Switches flip · Theme cycles · Connections, Integrations and Target and scope open those screens · Privacy and Terms open the legal pages · Sign out returns to Sign in · Back returns to Home',
+  m19: 'Switches flip · Connections, Integrations and Target and scope open those screens · Privacy and Terms open the legal pages · Sign out returns to Sign in · Back returns to Home',
   m22: 'Read only · Back returns to wherever you came from',
   m23: 'A Needs you item opens Sign the verdict · a delivery receipt opens Verdict approved · Back returns to Home',
   m20: 'Fill the fields, pick target material in the sheet, then Submit opens Contact verify · X returns to Sign in',
@@ -180,7 +174,7 @@ const PFS = DEVICE ? [DEVICE] : ['ios', 'android'];
 const DEV = Object.fromEntries(PFS.map(p => [p, document.getElementById('dev-' + p)]));
 const devices = PFS.map(p => DEV[p]);
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const opts = { hot: false, guides: false, light: false, ax: false, sr: false, targets: false };
+const opts = { hot: false, guides: false, ax: false, sr: false, targets: false };
 // One design: the Variant C screens in screens/. INFO_C and DEMOS_BY keep their variant keys so a future variant can slot back in.
 const variant = 'c';
 const FOLDER = { c: 'screens' };
@@ -202,7 +196,7 @@ document.getElementById('list').innerHTML = GROUPS.map(([g, items]) => `<h2>${g}
 document.getElementById('list').onclick = e => { const b = e.target.closest('button'); if (b) jump(b.dataset.id); };
 
 let cur = null, busy = false, frames = [], stack = [], curKind = 'push';
-const src = (id, pf) => `${FOLDER[variant]}/${id}.html?embed&platform=${pf}${opts.guides ? '&guides' : ''}${opts.hot ? '&hot' : ''}${opts.light ? '&theme=light' : ''}${opts.ax ? '&text=large' : ''}${opts.sr ? '&sr' : ''}${opts.targets ? '&targets' : ''}`;
+const src = (id, pf) => `${FOLDER[variant]}/${id}.html?embed&platform=${pf}${opts.guides ? '&guides' : ''}${opts.hot ? '&hot' : ''}${opts.ax ? '&text=large' : ''}${opts.sr ? '&sr' : ''}${opts.targets ? '&targets' : ''}`;
 
 // One screen = two iframes (iOS, Android). They load together, then move in together, each with its own platform's transition.
 // kind comes from the tap: push | pop | tab | modal.
@@ -342,9 +336,8 @@ addEventListener('message', e => {
 document.getElementById('prev').onclick = () => step(-1);
 document.getElementById('next').onclick = () => step(1);
 document.getElementById('replay').onclick = () => frames.forEach((f, i) => f.src = src(cur, PFS[i]));
-for (const k of ['hot', 'guides', 'light', 'ax', 'sr', 'targets']) document.getElementById(k).onclick = e => {
+for (const k of ['hot', 'guides', 'ax', 'sr', 'targets']) document.getElementById(k).onclick = e => {
   opts[k] = !opts[k]; e.currentTarget.setAttribute('aria-pressed', opts[k]);
-  if (k === 'light') { e.currentTarget.textContent = opts.light ? 'Dark' : 'Light'; document.body.classList.toggle('plight', opts.light); }
   frames.forEach((f, i) => k === 'hot' ? f.contentWindow.postMessage({ showHot: opts.hot }, '*') : f.src = src(cur, PFS[i]));
 };
 addEventListener('keydown', e => {

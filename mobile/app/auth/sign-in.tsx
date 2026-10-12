@@ -7,13 +7,14 @@
  * Footer: "Not on the allowlist?" link, legal text with Terms and Privacy links.
  */
 import * as AuthSession from "expo-auth-session"
-import { useSSO } from "@clerk/expo"
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, useColorScheme } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
 import Svg, { Path } from "react-native-svg"
 
 import { SvgImage } from "@/components/SvgImage"
 import { Icon } from "@/components/icons"
-import { darkTheme, lightTheme } from "@/theme"
+import { darkTheme } from "@/theme"
+import { useSSO } from "@/lib/auth-hooks"
+import { font } from "@/lib/fonts"
 
 // maybeCompleteAuthSession() is called once in app/_layout.tsx at the top
 // level so the SSO redirect is resolved before any screen mounts.
@@ -33,8 +34,7 @@ const GOOGLE_COLORS = {
 
 export default function SignInScreen() {
   const { startSSOFlow } = useSSO()
-  const cs = useColorScheme()
-  const t = cs === "dark" ? darkTheme : lightTheme
+  const t = darkTheme
 
   const handleSSO = async (strategy: "google" | "github") => {
     try {
@@ -102,7 +102,7 @@ export default function SignInScreen() {
 
         {/* Google: secondary pill (.btn.sec = fill background, fg text) */}
         <TouchableOpacity
-          style={[styles.btn, styles.btnSec, { backgroundColor: t.colors.fill, borderColor: "rgba(255,255,255,0.20)" }]}
+          style={[styles.btn, { backgroundColor: t.colors.fill }]}
           onPress={() => handleSSO("google")}
           activeOpacity={0.9}
         >
@@ -136,13 +136,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     // m2-wrap: padding: calc(var(--top) + 8px) 20px calc(var(--dockb) + 18px)
     // --top = 62px (status bar + topbar), --dockb = 30px (dock bottom)
-    paddingTop: 70,
+    paddingTop: 62,
     paddingBottom: 48,
   },
   hero: {
     flex: 1,
     gap: 14,
     alignItems: "flex-start",
+    justifyContent: "center",
   },
   heroImg: {
     width: 72,
@@ -154,13 +155,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   title: {
-    fontSize: 32, // 2rem in c.css
-    fontWeight: "700",
-    letterSpacing: -0.5,
+    fontFamily: font.bold, fontSize: 32, // 2rem in c.css
+    
+    letterSpacing: -0.96,
+    lineHeight: 36.8,
+    marginTop: 10, // 24 from the logo mark in the mockup (14 gap + 10)
     padding: 0,
   },
   subtitle: {
-    fontSize: 17, // 1.0625rem
+    fontFamily: font.regular, fontSize: 17, // 1.0625rem
     lineHeight: 24,
     maxWidth: 336,
   },
@@ -180,17 +183,13 @@ const styles = StyleSheet.create({
   btnWhite: {
     backgroundColor: "#ffffff", // var(--fg) dark = near-white
   },
-  btnSec: {
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.20)",
-  },
   btnText: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   btnTextDark: {
-    fontSize: 17,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 17,
+    
   },
   quietLink: {
     marginTop: 6,
@@ -200,13 +199,15 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   quiet: {
-    fontSize: 15, // .9375rem
+    fontFamily: font.regular, fontSize: 15, // .9375rem
     letterSpacing: 0,
   },
   legal: {
-    marginTop: 18,
-    alignSelf: "center",
-    fontSize: 13, // .8125rem
+    paddingTop: 18,
+    paddingHorizontal: 8,
+    alignSelf: "stretch",
+    textAlign: "center",
+    fontFamily: font.regular, fontSize: 13, // .8125rem
     lineHeight: 20,
     letterSpacing: 0,
   },

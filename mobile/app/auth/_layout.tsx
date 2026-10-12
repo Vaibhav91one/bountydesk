@@ -6,10 +6,11 @@
  * bouncing them to /tabs would re-run /home, 403 again, and loop back here
  * forever. authRedirect keeps them on not-authorized.
  */
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 import { Redirect, Stack, useSegments } from "expo-router"
 
 import { authRedirect } from "@/lib/auth"
+import { fixturesEnabled } from "@/lib/fixtures"
 
 export default function AuthLayout() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -19,7 +20,8 @@ export default function AuthLayout() {
     return null
   }
 
-  const redirect = authRedirect(segments, !!isSignedIn)
+  // Fixture mode (dev only) is always signed in; it lets the auth screens be opened directly.
+  const redirect = fixturesEnabled() ? null : authRedirect(segments, !!isSignedIn)
   if (redirect) {
     return <Redirect href={redirect as "/(tabs)"} />
   }

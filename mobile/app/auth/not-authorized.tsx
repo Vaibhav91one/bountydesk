@@ -7,18 +7,18 @@
  *
  * m3-actions has a 22px gap, margin-top 22px, max-width 300px.
  */
-import { View, Text, TouchableOpacity, StyleSheet, useColorScheme, Alert, Image } from "react-native"
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { useRouter } from "expo-router"
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 
 import { signOutAndClear } from "@/lib/session"
-import { darkTheme, lightTheme } from "@/theme"
+import { darkTheme } from "@/theme"
 
 export default function NotAuthorizedScreen() {
   const router = useRouter()
   const { signOut } = useAuth()
-  const cs = useColorScheme()
-  const t = cs === "dark" ? darkTheme : lightTheme
+  const t = darkTheme
 
   const handleRequestAccess = () => {
     // In c.js: data-toast="Access requested"
@@ -33,7 +33,7 @@ export default function NotAuthorizedScreen() {
   return (
     <View style={[styles.container, { backgroundColor: t.colors.background }]}>
       <View style={styles.empty}>
-        <Image source={require("../../assets/brand/mascot-png/out-of-scope.png")} style={{ width: 200, height: 200, marginTop: -5, marginBottom: 5 }} />
+        <AnimatedMascot name="out-of-scope" size={200} float style={{ marginTop: -5, marginBottom: 5 }} />
         <Text style={[styles.title, { color: t.colors.foreground }]}>
           You are not on the reviewer allowlist
         </Text>

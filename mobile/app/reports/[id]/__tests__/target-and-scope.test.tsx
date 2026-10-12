@@ -59,11 +59,12 @@ jest.mock("@/theme", () => ({
 
 const mockCaseFile = {
   id: "BD-1042",
-  target: { id: "t1", name: "juice-shop", imageDigest: "sha256:abc123def456" },
+  targetVersion: "v17.3.0",
+  target: { id: "t1", name: "owner/juice-shop", imageDigest: "sha256:abc123def456" },
   targetScope: {
     imageDigest: "sha256:abc123def456",
     snapshotId: null,
-    buildMarker: null,
+    buildMarker: "bd-build-1867b92-ok",
     scopeRules: [{ allow: "localhost" }],
     readinessPath: "/",
     startCommand: null,
@@ -109,7 +110,7 @@ describe("M22 Target and scope", () => {
     expect(getByText("Egress")).toBeTruthy()
     expect(getByText("None")).toBeTruthy()
     // Meta from the case file target
-    expect(getByText("juice-shop · abc123def456")).toBeTruthy()
+    expect(getByText("juice-shop · v17.3.0 · 1867b92")).toBeTruthy()
   })
 
   it("shows 'No bound target' when targetScope is null", async () => {
@@ -132,4 +133,18 @@ describe("M22 Target and scope", () => {
     const { getByText } = await render(<TargetAndScopeScreen />)
     expect(getByText("Network failed")).toBeTruthy()
   })
+
+  it("reads the readiness port, falling back to the path when the server sends none", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: { ...mockCaseFile, targetScope: { ...mockCaseFile.targetScope, port: 3000 } },
+      error: null,
+    })
+    const first = await render(<TargetAndScopeScreen />)
+    expect(first.getByText("Answered on port 3000")).toBeTruthy()
+    first.unmount()
+    mockUseApiQuery.mockReturnValue({ data: mockCaseFile, error: null })
+    const second = await render(<TargetAndScopeScreen />)
+    expect(second.getByText("Answered at /")).toBeTruthy()
+  })
+
 })

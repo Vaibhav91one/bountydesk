@@ -444,21 +444,6 @@
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submit(); } });
   }
 
-  // ---------- theme row ----------
-  const themeRow = $('[data-theme-cycle]');
-  if (themeRow) {
-    const val = $('[data-theme-val]', themeRow), order = ['system', 'light', 'dark'], label = { system: 'System', light: 'Light', dark: 'Dark' };
-    let cur = q.get('theme') === 'light' ? 'light' : q.get('theme') === 'dark' ? 'dark' : 'system';
-    val.textContent = label[cur];
-    themeRow.addEventListener('click', () => {
-      cur = order[(order.indexOf(cur) + 1) % order.length];
-      val.textContent = label[cur]; root.classList.toggle('light', cur === 'light'); hap('selection');
-      const u = new URL(location.href);
-      if (cur === 'system') { u.searchParams.delete('theme'); q.delete('theme'); } else { u.searchParams.set('theme', cur); q.set('theme', cur); }
-      history.replaceState(null, '', u);
-    });
-  }
-
   // reduced motion can change at runtime; the sheet reads it on every open
   window.bdKit = { hap, toast, go, back };
 })();

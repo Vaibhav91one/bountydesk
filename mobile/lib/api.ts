@@ -1,3 +1,5 @@
+import { fixtureFor, fixturesEnabled } from "./fixtures"
+
 export type ApiResponse<T> = T
 
 export class ApiError extends Error {
@@ -47,6 +49,11 @@ export async function readError(response: Response): Promise<{ code?: string; me
  * on 403 the UI navigates to the not-authorized route.
  */
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  if (fixturesEnabled()) {
+    const body = fixtureFor(path, init)
+    if (body === undefined) throw new ApiError(404, "fixture_missing", `No fixture for ${path}`)
+    return body as T
+  }
   const token = clerkGetToken ? await clerkGetToken() : null
 
   const url = `${baseURL}/api/mobile/v1${path}`

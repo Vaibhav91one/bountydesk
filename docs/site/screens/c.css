@@ -60,6 +60,7 @@
    Overlays
    .toast            injected by c.js                    data-toast="Saved"
    .sheet            bottom sheet; .fit = height by content; children .grab .sbtn.x .sbtn.ok .st .ss
+                    or a header row: .shd (.st title only) then .ss, no floating .sbtn; actions are a bottom .srow of two .btn (.sec Cancel, .bad-fill Deny)
                      <div class="sheet" id="deny" role="dialog" aria-label="Deny report">...</div>
    .scrim            injected by c.js (tap to dismiss)
    .lp-hit .lift .menu   long press overlay, built by c.js from data-lp
@@ -94,7 +95,6 @@
    data-otp (+ data-otp-done="Verified" data-then="m17.html" data-kind="pop" | data-otp-show="#received")  six boxes, auto-advance, paste
    data-chat-thread, data-chat-input, data-chat-send   composer appends a bubble and an agent reply
    data-add-reviewer (button) + data-add-input + data-reviewer-list   appends a pending reviewer row
-   data-theme-cycle        row cycling System, Light, Dark; child [data-theme-val] shows the value
    data-auto-go="mN.html"  standalone only: navigate after data-auto-ms (default 1600); ignored in embed
    ============================================================ */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
@@ -345,6 +345,12 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .sbtn.x{left:16px}.sbtn.ok{right:16px}
 .sheet .st{padding-top:34px;text-align:center;font:600 1.0625rem/1.2 var(--font-sans);color:var(--muted)}
 .sheet .ss{text-align:center;font-size:.8125rem;color:var(--faint);margin:4px 0 18px;letter-spacing:0}
+.sheet .shd{display:flex;align-items:flex-start;padding-top:22px;margin:0 4px}
+.sheet .shd .st{flex:1;padding-top:0}
+.btn.bad-fill{background:var(--red);color:#fff}
+.sheet .srow{display:flex;gap:10px;padding-top:20px}
+.sheet .srow .btn{flex:1}
+.pf-android .sheet .srow .btn{min-height:40px;border-radius:20px;font:500 .875rem/1 var(--font-sans);letter-spacing:.1px}
 .sheet .item{min-height:4rem;padding:10px 18px}
 .sheet .item .s{white-space:normal}
 .sheet .list{margin:0}

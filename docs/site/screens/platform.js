@@ -1,9 +1,8 @@
-// Variant C: reads ?platform=ios|android|web and ?theme=light|dark, sets pf-* and light classes on <html>.
+// Variant C: reads ?platform=ios|android|web, sets the pf-* class on <html>. The mobile app is dark only, so ?theme is ignored.
 // Load synchronously in <head> so the classes exist before first paint. iOS (default) adds only an inert pf-ios class.
 const q = new URLSearchParams(location.search), r = document.documentElement, p = q.get('platform');
 const pf = p === 'android' || p === 'web' ? p : 'ios';
 r.classList.add('pf-' + pf);
-if (q.get('theme') === 'light') r.classList.add('light');
 if (q.get('text') === 'large') r.classList.add('text-large');   // type is in rem, so this scales the whole screen
 // ?embed: the prototype page draws the device, so the screen drops its own frame. Options come from the URL.
 if (q.has('embed')) {

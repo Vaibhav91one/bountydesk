@@ -1,5 +1,5 @@
 /**
- * Signed-in reviewer shell using the installed Expo native tabs.
+ * Signed-in reviewer shell: JS tabs with the hand-drawn <TabDock>.
  *
  * Per docs/site/native-ui.html the tab bar holds only Home, Queue, Reports.
  * Review next (m11) and the bell/more chrome are NOT tabs — they are overlaid
@@ -8,17 +8,17 @@
  * Auth gate: Clerk says "signed in", then GET /home checks the reviewer
  * allowlist. 403 -> not-authorized.
  */
-import { useAuth } from "@clerk/expo"
+import { useAuth } from "@/lib/auth-hooks"
 import { Redirect } from "expo-router"
-import { NativeTabs } from "expo-router/unstable-native-tabs"
+import { Tabs } from "expo-router/js-tabs"
 import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"
 
 import { api, ApiError } from "@/lib/api"
 import { useHandleApiError } from "@/lib/use-api-error"
 import type { HomeSummary } from "@/lib/types"
-import { Icon } from "@/components/icons"
-import { useTheme } from "@/theme"
+import { TabDock } from "@/components/TabDock"
+import { font } from "@/lib/fonts"
 
 export default function TabsLayout() {
   const { isLoaded, isSignedIn } = useAuth()
@@ -61,36 +61,16 @@ export default function TabsLayout() {
 }
 
 function TabsShell() {
-  const { colors } = useTheme()
   return (
-    <NativeTabs
-      backgroundColor={colors.glass}
-      iconColor={{ default: colors.muted, selected: colors.brand }}
-      tintColor={colors.brand}
-      labelStyle={{ fontSize: 12, fontWeight: "500" }}
-      screenListeners={{
-        focus: () => {},
-      }}
-    >
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Icon src={<Icon name="home" size={24} />} />
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="queue">
-        <NativeTabs.Trigger.Icon src={<Icon name="queue" size={24} />} />
-        <NativeTabs.Trigger.Label>Queue</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="reports">
-        <NativeTabs.Trigger.Icon src={<Icon name="reports" size={24} />} />
-        <NativeTabs.Trigger.Label>Reports</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <Tabs tabBar={(p) => <TabDock {...p} />} screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: "transparent" } }}>
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="queue" />
+      <Tabs.Screen name="reports" />
+    </Tabs>
   )
 }
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
-  error: { fontSize: 16, color: "#EF4444" },
+  error: { fontFamily: font.regular, fontSize: 16, color: "#EF4444" },
 })

@@ -4,6 +4,9 @@ import * as Haptics from "expo-haptics"
 
 const sampleCaseFile = {
   id: "BD-1042",
+  sourceLabel: "BD-1042",
+  state: "AWAITING_APPROVAL",
+  awaitingVerdictId: "v_abc123",
   title: "Stored XSS in search results",
   channel: "github",
   verdict: {
@@ -44,6 +47,7 @@ jest.mock("@/lib/api", () => ({
   api: mockApi,
 }))
 
+const mockParams: { value: Record<string, string> } = { value: { id: "BD-1042", verdictId: "v_abc123", contentHash: "9f2c61ab07d4e8135c0be7a4f6d2189a3b5e04c7d91f8a26e0b34c5d7f1a82e6" } }
 const mockRouter = {
   push: jest.fn(),
   replace: jest.fn(),
@@ -53,7 +57,7 @@ const mockRouter = {
 }
 jest.mock("expo-router", () => ({
   useRouter: () => mockRouter,
-  useLocalSearchParams: () => ({ id: "BD-1042" }),
+  useLocalSearchParams: () => mockParams.value,
 }))
 
 jest.mock("expo-local-authentication", () => ({
@@ -82,143 +86,114 @@ function setMockData(data: typeof sampleCaseFile | null, opts: { isError?: boole
   })
 }
 
-describe("M13 Deny verdict", () => {
+const posts = () => mockApi.mock.calls.filter((c: any) => c[0].includes("/deny"))
+
+describe("M13 Deny sheet", () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    jest.clearAllTimers()
     mockRefetch.mockResolvedValue({ data: sampleCaseFile, isError: false, status: "success" })
-    ;(LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(false)
-    ;(LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(false)
-  })
-
-  it("renders loading state when data is not yet available", async () => {
-    setMockData(null)
-    const { queryByText } = await render(<DenyVerdict />)
-    expect(queryByText("Loading")).toBeTruthy()
-  })
-
-  it("has no Approve button (M13 is deny-only)", async () => {
+    mockApi.mockResolvedValue({ ok: true })
     setMockData(sampleCaseFile)
-    const { queryByText } = await render(<DenyVerdict />)
-    expect(queryByText("Approve")).toBeFalsy()
   })
 
-  it("renders the sign-the-verdict content with the deny sheet open by default", async () => {
-    setMockData(sampleCaseFile)
-    const { queryByText, getAllByText } = await render(<DenyVerdict />)
-
-    // The M13 content mirrors M11
-    expect(queryByText("Sign the verdict")).toBeTruthy()
-    expect(getAllByText("BD-1042 · Stored XSS in search results").length).toBeGreaterThanOrEqual(1)
-    expect(queryByText("Reproduced")).toBeTruthy()
-    expect(queryByText("High")).toBeTruthy()
-    expect(queryByText("Comment on GitHub issue")).toBeTruthy()
-    expect(queryByText(/Found a stored XSS/)).toBeTruthy()
-    expect(queryByText("sha256:9f2c61ab07d4e8135c0be7a4f6d2189a3b5e04c7d91f8a26e0b34c5d7f1a82e6")).toBeTruthy()
-
-    // Deny sheet content (sheet is open by default in M13)
-    expect(queryByText("Out of scope")).toBeTruthy()
-    expect(queryByText("The target is not covered by the program")).toBeTruthy()
-    expect(queryByText("Not reproduced")).toBeTruthy()
-    expect(queryByText("The agent could not trigger the behavior")).toBeTruthy()
-    expect(queryByText("Duplicate")).toBeTruthy()
-    expect(queryByText("Insufficient detail")).toBeTruthy()
-    expect(queryByText("Note to reporter (optional)")).toBeTruthy()
+  it("has Cancel, the title with the report subtitle, Deny, the reasons, the note and the footnote", async () => {
+    const { queryByText, queryByLabelText } = await render(<DenyVerdict />)
+    expect(queryByLabelText("Cancel")).toBeTruthy()
+    expect(queryByText("Deny report")).toBeTruthy()
+    expect(queryByText("BD-1042 · Stored XSS in search results")).toBeTruthy()
+    expect(queryByLabelText("Deny report")).toBeTruthy()
+    expect(queryByLabelText("Deny report")!.props.accessibilityRole).toBe("button")
+    expect(queryByLabelText("Cancel")!.props.accessibilityRole).toBe("button")
+    for (const t of ["Out of scope", "Not reproduced", "Duplicate", "Insufficient detail", "Steps or payload are missing", "Note to reporter (optional)"]) {
+      expect(queryByText(t)).toBeTruthy()
+    }
+    expect(queryByText(/Nothing is sent to the reporter until you confirm/)).toBeTruthy()
   })
 
-  it("sends the exact contentHash received from the API with the deny POST", async () => {
-    setMockData(sampleCaseFile)
-    mockApi.mockResolvedValueOnce({ ok: true })
-
+  it("Cancel dismisses the sheet and sends nothing", async () => {
     const { getByLabelText } = await render(<DenyVerdict />)
-
-    await fireEvent.press(getByLabelText("Confirm"))
-    await new Promise((r) => setTimeout(r, 500))
-
-    const denyCall = mockApi.mock.calls.find((c: any) => c[0].includes("/deny"))
-    expect(denyCall).toBeTruthy()
-    const body = JSON.parse(denyCall[1].body)
-    expect(body.verdictId).toBe(sampleCaseFile.verdict.id)
-    expect(body.contentHash).toBe(sampleCaseFile.verdict.contentHash)
+    await fireEvent.press(getByLabelText("Cancel"))
+    expect(mockRouter.back).toHaveBeenCalled()
+    expect(mockRefetch).not.toHaveBeenCalled()
+    expect(mockApi).not.toHaveBeenCalled()
   })
 
-  it("does not call deny when refetch returns isError:true", async () => {
-    setMockData(sampleCaseFile)
-    mockRefetch.mockResolvedValueOnce({ data: null, isError: true, status: "error" })
-    mockApi.mockResolvedValue({ ok: true })
-
+  it("keeps Deny disabled until a reason is selected and posts nothing without one", async () => {
     const { getByLabelText } = await render(<DenyVerdict />)
-
-    await fireEvent.press(getByLabelText("Confirm"))
-    await new Promise((r) => setTimeout(r, 500))
-
-    const denyCall = mockApi.mock.calls.find((c: any) => c[0] && c[0].toString().includes("/deny"))
-    expect(denyCall).toBeFalsy()
+    expect(getByLabelText("Deny report").props.accessibilityState.disabled).toBe(true)
+    await fireEvent.press(getByLabelText("Deny report"))
+    expect(mockApi).not.toHaveBeenCalled()
   })
 
-  it("does not submit again after a 2xx response", async () => {
-    setMockData(sampleCaseFile)
-    mockApi.mockResolvedValue({ ok: true })
-
-    const { getByLabelText, queryByText } = await render(<DenyVerdict />)
-
-    const confirmBtn = await waitFor(() => getByLabelText("Confirm"))
-
-    await fireEvent.press(confirmBtn)
-    await new Promise((r) => setTimeout(r, 500))
-
-    // First confirm submitted once.
-    let denyCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/deny"))
-    expect(denyCalls.length).toBe(1)
-
-    // A second tap must NOT submit again — doneRef is true now.
-    fireEvent.press(confirmBtn)
-    await new Promise((r) => setTimeout(r, 500))
-
-    denyCalls = mockApi.mock.calls.filter((c: any) => c[0] && c[0].toString().includes("/deny"))
-    expect(denyCalls.length).toBe(1)
+  it("posts the reason, the optional note and the reviewed id and hash only after Deny", async () => {
+    const { getByLabelText, getByText, getByPlaceholderText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    await fireEvent.changeText(getByPlaceholderText("Sent with the denial"), "  Same as #12  ")
+    expect(posts().length).toBe(0)
+    await fireEvent.press(getByLabelText("Deny report"))
+    await waitFor(() => expect(posts().length).toBe(1))
+    expect(posts()[0][0]).toBe("/reports/BD-1042/deny")
+    expect(JSON.parse(posts()[0][1].body)).toEqual({
+      verdictId: "v_abc123",
+      contentHash: sampleCaseFile.verdict.contentHash,
+      reason: "Duplicate: Same as #12",
+    })
   })
 
-  it("re-enables the buttons when refetch throws", async () => {
-    setMockData(sampleCaseFile)
-    mockRefetch.mockRejectedValueOnce(new Error("network error"))
-    mockApi.mockResolvedValue({ ok: true })
+  it("posts the bare reason when there is no note", async () => {
+    const { getByLabelText, getByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Out of scope"))
+    await fireEvent.press(getByLabelText("Deny report"))
+    await waitFor(() => expect(posts().length).toBe(1))
+    expect(JSON.parse(posts()[0][1].body).reason).toBe("Out of scope")
+  })
 
-    const { getByLabelText, queryByText } = await render(<DenyVerdict />)
+  it("refuses to deny when the fresh verdict differs from the one M11 showed", async () => {
+    mockRefetch.mockResolvedValue({
+      data: { ...sampleCaseFile, verdict: { ...sampleCaseFile.verdict, contentHash: "b".repeat(64) } },
+      isError: false,
+      status: "success",
+    })
+    const { getByLabelText, getByText, queryByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    await fireEvent.press(getByLabelText("Deny report"))
+    await waitFor(() => expect(queryByText("This verdict changed")).toBeTruthy())
+    expect(mockApi).not.toHaveBeenCalled()
+  })
 
-    await fireEvent.press(getByLabelText("Confirm"))
-    // Let all pending microtasks settle before asserting.
+  it("does not post when the refetch fails", async () => {
+    mockRefetch.mockResolvedValue({ data: null, isError: true, status: "error" })
+    const { getByLabelText, getByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await new Promise((r) => setTimeout(r, 100))
-
-    await waitFor(() => {
-      expect(queryByText("Denied failed")).toBeTruthy()
-    })
-
-    // Buttons should be re-enabled (denying false again).
-    await waitFor(() => {
-      expect(queryByText("Deny")).toBeTruthy()
-    })
+    expect(mockApi).not.toHaveBeenCalled()
   })
 
-  it("does not auto-retry on 409 content_hash_mismatch and shows the refresh state", async () => {
-    setMockData(sampleCaseFile)
+  it("shows the refresh state on a 409 content_hash_mismatch", async () => {
     mockApi.mockRejectedValueOnce(new ApiError(409, "content_hash_mismatch", "mismatch"))
-
-    const { getByLabelText } = await render(<DenyVerdict />)
-
-    await fireEvent.press(getByLabelText("Confirm"))
-    await new Promise((r) => setTimeout(r, 500))
-
-    // refetch is called once (stale check inside handleDenyConfirm), but the
-    // 409 handler does NOT trigger an automatic retry.
-    expect(mockRefetch).toHaveBeenCalledTimes(1)
+    const { getByLabelText, getByText, queryByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    await fireEvent.press(getByLabelText("Deny report"))
+    await waitFor(() => expect(queryByText("This verdict changed")).toBeTruthy())
   })
-  it("returns to the tabs after a successful deny", async () => {
-    setMockData(sampleCaseFile)
-    mockApi.mockResolvedValueOnce({ ok: true })
-    const { getByLabelText } = await render(<DenyVerdict />)
-    await fireEvent.press(getByLabelText("Confirm"))
-    await new Promise((r) => setTimeout(r, 1400))
+
+  it("cannot deny a report that no longer awaits approval", async () => {
+    setMockData({ ...sampleCaseFile, state: "DELIVERED", awaitingVerdictId: null } as any)
+    const { getByLabelText, getByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    expect(getByLabelText("Deny report").props.accessibilityState.disabled).toBe(true)
+    await fireEvent.press(getByLabelText("Deny report"))
+    expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it("posts once on a double press and then returns to the tabs", async () => {
+    const { getByLabelText, getByText } = await render(<DenyVerdict />)
+    await fireEvent.press(getByText("Duplicate"))
+    fireEvent.press(getByLabelText("Deny report"))
+    fireEvent.press(getByLabelText("Deny report"))
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(posts().length).toBe(1)
     expect(mockRouter.dismissAll).toHaveBeenCalled()
     expect(mockRouter.replace).toHaveBeenCalledWith("/(tabs)")
   })

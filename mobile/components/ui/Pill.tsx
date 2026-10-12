@@ -5,6 +5,7 @@
  * the color with the card background at 16% opacity.
  */
 import { StyleSheet, View, Text, ViewStyle } from "react-native"
+import { font } from "@/lib/fonts"
 
 export function Pill({
   label,
@@ -42,8 +43,8 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   label: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.semibold, fontSize: 13,
+    
     lineHeight: 14,
   },
 })

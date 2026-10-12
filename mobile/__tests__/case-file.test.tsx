@@ -245,6 +245,28 @@ describe("M7 Case file", () => {
     expect(mockPush).not.toHaveBeenCalled()
   })
 
+  it("words the channel, the target version and short commit, and counts only tool calls", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: {
+        ...mockCaseFile,
+        targetVersion: "v17.3.0",
+        targetScope: { ...mockCaseFile.targetScope, buildMarker: "bd-build-1867b92-ok" },
+        toolCalls: [
+          ...mockCaseFile.toolCalls.slice(0, 5),
+          { seq: 99, type: "agent.scope_tool_denied", channel: "agent", at: "2025-01-01T10:12:00Z", toolName: "probe_target", argsPreview: null },
+        ],
+      },
+      error: undefined,
+      isError: false,
+      isFetching: false,
+    })
+
+    const { getByText } = await render(<CaseFileScreen />)
+    expect(getByText("GitHub issue")).toBeTruthy()
+    expect(getByText("v17.3.0 · 1867b92")).toBeTruthy()
+    expect(getByText("5 calls")).toBeTruthy()
+  })
+
   it("renders the Agent summary section", async () => {
     mockUseApiQuery.mockReturnValue({
       data: mockCaseFile,
