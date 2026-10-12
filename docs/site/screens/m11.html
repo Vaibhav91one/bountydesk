@@ -23,16 +23,16 @@
 <div class="fbar glass"><button class="btn sec" type="button" data-sheet-open="deny">Deny</button><button class="btn halo" type="button" data-haptic="success" data-toast="Approved. Sending to GitHub" data-then="m12.html">Approve</button></div>
 </div>
 <div class="sheet" id="deny" role="dialog" aria-modal="true" aria-label="Deny report">
-<button class="sbtn x" type="button" data-sheet-close aria-label="Cancel"><i data-icon="x" style="width:24px;height:24px"></i></button>
-<button class="sbtn ok" type="button" data-sheet-confirm data-haptic="warning" data-toast="Denied. Nothing was sent" data-then="m4.html" data-kind="tab" aria-label="Deny report"><i data-icon="check" style="width:26px;height:26px;stroke-width:2.4"></i></button>
 <div class="grab"></div>
-<div class="st">Deny report</div><div class="ss">BD-1042 · Stored XSS in search results</div>
-<div class="card list" role="radiogroup" aria-label="Reason"><label class="item"><span class="main"><span class="t">Out of scope</span><span class="s">The target is not covered by the program</span></span><input type="radio" name="r" class="rd" checked></label><label class="item"><span class="main"><span class="t">Not reproduced</span><span class="s">The agent could not trigger the behavior</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Duplicate</span><span class="s">Matches an earlier report</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Insufficient detail</span><span class="s">Steps or payload are missing</span></span><input type="radio" name="r" class="rd"></label></div>
+<div class="shd"><button class="shd-b" type="button" data-sheet-close>Cancel</button><div class="st">Deny report</div><button class="shd-b r" type="button" data-sheet-confirm data-haptic="warning" data-toast="Denied. Nothing was sent" data-then="m4.html" data-kind="tab" disabled>Deny</button></div>
+<div class="ss">BD-1042 · Stored XSS in search results</div>
+<div class="card list" role="radiogroup" aria-label="Reason"><label class="item"><span class="main"><span class="t">Out of scope</span><span class="s">The target is not covered by the program</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Not reproduced</span><span class="s">The agent could not trigger the behavior</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Duplicate</span><span class="s">Matches an earlier report</span></span><input type="radio" name="r" class="rd"></label><label class="item"><span class="main"><span class="t">Insufficient detail</span><span class="s">Steps or payload are missing</span></span><input type="radio" name="r" class="rd"></label></div>
 <label class="lbl" for="note-m11">Note to reporter (optional)</label>
 <textarea class="field area" id="note-m11" placeholder="Sent with the denial"></textarea>
 <p class="note" style="padding:12px 4px 0">Nothing is sent to the reporter until you confirm. The report moves to Denied.</p>
 </div>
 </main>
+<script data-deny-enable>document.querySelectorAll('#deny .rd').forEach(r=>r.addEventListener('change',()=>{const b=document.querySelector('#deny .shd-b.r');if(b)b.disabled=false}))</script>
 <script src="c.js"></script>
 </body>
 </html>

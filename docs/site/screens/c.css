@@ -350,6 +350,7 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .sheet .shd .st{flex:1;padding-top:0}
 .shd-b{width:72px;padding:2px 0 0;font:400 1.0625rem/22px var(--font-sans);letter-spacing:0;color:var(--fg);text-align:left;cursor:pointer}
 .shd-b.r{text-align:right;font-weight:600;color:var(--red)}
+.shd-b:disabled{opacity:.35;cursor:default}
 .pf-android .sheet .shd{padding-top:28px}
 .pf-android .shd-b{font:500 .875rem/22px var(--font-sans);letter-spacing:.1px;color:var(--brand-soft)}
 .pf-android .shd-b.r{color:var(--red)}
