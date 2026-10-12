@@ -16,21 +16,22 @@ function Divider({ dashed }: { dashed?: boolean }) {
   return <View style={[styles.divider, { backgroundColor: colors.line }]} />
 }
 
-export function KvLine({ label, value, mono, strong, divider, dashed, trailing }: { label: string; value?: string; mono?: boolean; strong?: boolean; divider?: boolean; /** receipt cards draw a dashed rule (c.css .receipt) */ dashed?: boolean; /** replaces the value text, e.g. a pill */ trailing?: ReactNode }) {
+export function KvLine({ label, value, mono, strong, divider, dashed, trailing, stacked }: { label: string; value?: string; mono?: boolean; strong?: boolean; divider?: boolean; /** receipt cards draw a dashed rule (c.css .receipt) */ dashed?: boolean; /** replaces the value text, e.g. a pill */ trailing?: ReactNode; /** the value under the label instead of beside it (a long digest) */ stacked?: boolean }) {
   const { colors } = useTheme()
   return (
-    <View style={styles.kv}>
+    <View style={[styles.kv, stacked && styles.kvStacked]}>
       {divider ? <Divider dashed={dashed} /> : null}
       <Text style={[styles.kvK, { color: colors.foreground }]}>{label}</Text>
       {trailing ?? <Text
         style={[
           styles.kvV,
           { color: colors.muted },
-          mono && { fontFamily: font.mono, fontSize: 14, letterSpacing: 0 },
+          mono && { fontFamily: font.mono, fontSize: 14, lineHeight: 21, letterSpacing: 0 },
+          stacked && styles.kvVStacked,
           strong && { fontFamily: font.semibold },
         ]}
       >
-        {value}
+        {stacked && mono && value ? breakAnywhere(value) : value}
       </Text>}
     </View>
   )
@@ -41,27 +42,36 @@ export interface ItemLineProps {
   subtitle?: string
   /** title and subtitle in Geist Mono (the tool-call rows) */
   mono?: boolean
+  /** only the subtitle in Geist Mono, wrapping at any character (a digest under a plain title) */
+  monoSubtitle?: boolean
   trailing?: ReactNode
+  /** the avatar before the text (c.css .av) */
+  leading?: ReactNode
   divider?: boolean
 }
 
 /** Lets a long token wrap at any character, as the design's `word-break: break-all` does; RN only breaks at spaces. */
 export const breakAnywhere = (text: string) => Array.from(text).join("\u200b")
 
-export function ItemLine({ title, subtitle, mono, trailing, divider }: ItemLineProps) {
+export function ItemLine({ title, subtitle, mono, monoSubtitle, trailing, leading, divider }: ItemLineProps) {
   const { colors } = useTheme()
   const t: TextStyle = mono ? { fontFamily: font.monoMedium, fontSize: 15, lineHeight: 18.6, letterSpacing: 0 } : {}
-  const s: TextStyle = mono ? { fontFamily: font.mono, fontSize: 12, lineHeight: 18, letterSpacing: 0 } : {}
+  const s: TextStyle = mono
+    ? { fontFamily: font.mono, fontSize: 12, lineHeight: 18, letterSpacing: 0 }
+    : monoSubtitle
+      ? { fontFamily: font.mono, fontSize: 13, lineHeight: 19.5, letterSpacing: 0, marginTop: 4 }
+      : {}
   return (
     <View style={styles.item}>
       {divider ? <Divider /> : null}
+      {leading}
       <View style={styles.main}>
         <Text style={[styles.itemT, { color: colors.foreground }, t]} numberOfLines={2}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={[styles.itemS, { color: colors.muted }, s]} numberOfLines={mono ? undefined : 1}>
-            {mono ? breakAnywhere(subtitle) : subtitle}
+          <Text style={[styles.itemS, { color: colors.muted }, s]} numberOfLines={mono || monoSubtitle ? undefined : 1}>
+            {mono || monoSubtitle ? breakAnywhere(subtitle) : subtitle}
           </Text>
         ) : null}
       </View>
@@ -74,6 +84,11 @@ export function ItemLine({ title, subtitle, mono, trailing, divider }: ItemLineP
 export function ItemValue({ children, strong }: { children: string; strong?: boolean }) {
   const { colors } = useTheme()
   return <Text style={[styles.itemV, { color: colors.muted }, strong && { fontFamily: font.semibold }]}>{children}</Text>
+}
+
+/** The short commit in a build marker, which is the source commit baked into the image. */
+export function shortCommit(marker: string | null | undefined): string | null {
+  return marker?.match(/[0-9a-f]{7,40}/)?.[0].slice(0, 7) ?? null
 }
 
 export function Note({ children }: { children: string }) {
@@ -97,6 +112,8 @@ export function BottomFade() {
 const styles = StyleSheet.create({
   divider: { position: "absolute", top: 0, left: 18, right: 18, height: 1 },
   kv: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 52, paddingVertical: 10, paddingHorizontal: 18 },
+  kvStacked: { flexDirection: "column", alignItems: "flex-start", justifyContent: "flex-start", gap: 4 },
+  kvVStacked: { alignSelf: "stretch" },
   kvK: { fontFamily: font.medium, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187 },
   kvV: { fontFamily: font.regular, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187, textAlign: "right", flexShrink: 1 },
   item: { flexDirection: "row", alignItems: "center", gap: 12, minHeight: 56, paddingVertical: 10, paddingHorizontal: 18 },

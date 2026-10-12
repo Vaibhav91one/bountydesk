@@ -51,8 +51,10 @@ export const connections = (): ConnectionRow[] => [
     delivered: 1,
     lastReportAt: ago(4),
     onboarding: { manifest: { startCommand: "npm start", scopeRules: [{ allow: "localhost" }] }, imageName: "ghcr.io/vaibhav91one/juice-shop", imageDigest: DIGEST },
+    // The bound target is live while a rebuild is in flight, which is the stage the mockup lights.
+    onboardingProgress: { state: "PENDING_BUILD", reason: null },
     onboardingDetail: {
-      state: "CONFIGURED",
+      state: "PENDING_BUILD",
       progressNote: null,
       reason: null,
       strategy: "dockerfile",

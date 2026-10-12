@@ -15,7 +15,7 @@ import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
-import { BottomFade, ItemLine, ItemValue, KvLine, Note } from "@/components/CaseUi"
+import { BottomFade, ItemLine, ItemValue, KvLine, Note, shortCommit } from "@/components/CaseUi"
 import { ageText } from "@/lib/age"
 import { toolCallsOnly } from "@/lib/toolCalls"
 import type { MobileCaseFile } from "@/lib/types"
@@ -97,11 +97,6 @@ const CHANNEL_LABEL: Record<string, string> = {
   advisory: "GitHub advisory",
   email: "Email",
   upload: "Upload",
-}
-
-/** The short commit in a build marker, which is the source commit baked into the image. */
-function shortCommit(marker: string | null | undefined): string | null {
-  return marker?.match(/[0-9a-f]{7,40}/)?.[0].slice(0, 7) ?? null
 }
 
 interface FindingView {

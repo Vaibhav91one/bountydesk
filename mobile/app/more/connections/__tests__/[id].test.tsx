@@ -106,6 +106,13 @@ describe("M15 Connection detail", () => {
     expect(toJSON()).not.toBeNull()
   })
 
+  it("shows no 'Connection not found' while the connections list is still loading", async () => {
+    mockUseApiQuery.mockReturnValue({ data: undefined, error: null })
+    const { queryByText, getByTestId } = await render(<ConnectionDetailScreen />)
+    expect(getByTestId("connection-loading")).toBeTruthy()
+    expect(queryByText("Connection not found")).toBeNull()
+  })
+
   it("renders repo name, visibility, clone, permissions and bound target from the row", async () => {
     mockUseApiQuery.mockReturnValue({ data: mockData, error: null })
     const { getByText, getAllByText } = await render(<ConnectionDetailScreen />)
@@ -128,9 +135,9 @@ describe("M15 Connection detail", () => {
     expect(getByText("Security advisories")).toBeTruthy()
     expect(getByText("Contents")).toBeTruthy()
     expect(getByText("Not granted")).toBeTruthy()
-    // Bound target shown inline as a plain KvRow
-    expect(getByText("Target")).toBeTruthy()
+    // Bound target card
     expect(getByText("v17.3.0")).toBeTruthy()
+    expect(getByText("Verified")).toBeTruthy()
   })
 
   it("renders Private visibility and installation-token clone for a private repo", async () => {

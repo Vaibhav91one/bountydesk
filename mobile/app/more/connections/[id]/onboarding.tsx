@@ -6,14 +6,15 @@
  * onboardingDetail.state. The Notes KvRows come from the row's real fields.
  */
 import { View, Text, ScrollView, StyleSheet } from "react-native"
-import Svg, { Path } from "react-native-svg"
 import { useLocalSearchParams } from "expo-router"
 
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, KvRow, SectionHeader, ScreenHeader, Mono, EmptyState, ScreenTitle } from "@/components/primitives"
+import { ScreenHeader, EmptyState, ScreenTitle } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, KvLine, Note, shortCommit } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
 
 type Stage = {
@@ -27,7 +28,7 @@ const STAGES: Stage[] = [
   {
     label: "Stage 1",
     title: "Connected repo",
-    detail: "Repository added to the GitHub App install",
+    detail: "{repo} at the pinned commit",
     icon: "github",
   },
   {
@@ -108,7 +109,16 @@ export default function OnboardingScreen() {
 
   if (error) return null
 
-  const row = rows ? rows.find((r) => String(r.repoId) === String(id)) : null
+  // Nothing to look up until the list arrives, so show the chrome only.
+  if (!rows) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back backLabel="Connections" />
+      </View>
+    )
+  }
+
+  const row = rows.find((r) => String(r.repoId) === String(id))
 
   if (!row) {
     return (
@@ -169,149 +179,94 @@ export default function OnboardingScreen() {
   const state = detail?.state ?? progress?.state ?? null
   const activeStep = stateToStep(state)
 
+  const commit = shortCommit(detail?.buildMarker)
+  const status = row.configured ? "Configured" : STATE_LABELS[state ?? ""] ?? "Not set"
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScreenHeader back backLabel="Connections" />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <ScreenTitle title="Onboarding" meta="How a repository becomes a bound target" metaBottom={24} />
 
-        {/* Seven-stage diagram */}
         <View style={styles.diagram}>
           {STAGES.map((stage, i) => {
             const step = i + 1
-            const isLast = step === STAGES.length
-            const hot = activeStep === step
             return (
-              <View key={stage.label} style={styles.diagramNodeRow}>
-                <View style={styles.diagramNode}>
-                  <View style={[styles.nodeIcon, { backgroundColor: colors.fill }]}>
-                    <Icon name={stage.icon as any} size={20} stroke={colors.foreground} />
-                  </View>
-                  <View style={styles.nodeMain}>
-                    <Text style={[styles.nodeLabel, { color: colors.muted }]}>{stage.label}</Text>
-                    <Text style={[styles.nodeTitle, { color: colors.foreground }]}>{stage.title}</Text>
-                    <Text style={[styles.nodeDetail, { color: colors.muted }]}>{stage.detail}</Text>
-                  </View>
-                  {hot && <View style={[styles.hotOutline, { borderColor: colors.brand }]} />}
-                </View>
-                {!isLast && <StageConnector />}
+              <View key={stage.label}>
+                <StageNode stage={stage} repo={row.fullName} hot={activeStep === step} />
+                {step < STAGES.length ? <StageConnector /> : null}
               </View>
             )
           })}
         </View>
 
-        {/* Notes */}
-        <View style={styles.section}>
-          <SectionHeader title="Notes" chevron={false} />
-          <Card style={styles.card}>
-            <KvRow label="Repository" value={row.fullName ?? "Not set"} />
-            <KvRow
-              label="Commit"
-              value={
-                detail?.buildMarker ? (
-                  <Mono style={{ color: colors.foreground }}>
-                    {detail.buildMarker.slice(0, 7)}
-                  </Mono>
-                ) : (
-                  "Not set"
-                )
-              }
-            />
-            <KvRow
-              label="Image"
-              value={
-                detail?.imageDigest ? (
-                  <Mono style={{ color: colors.foreground }}>
-                    {detail.imageDigest.slice(0, 12)}
-                  </Mono>
-                ) : (
-                  "Not set"
-                )
-              }
-            />
-            <KvRow label="Strategy" value={detail?.strategy ?? "Not set"} />
-            <KvRow label="Approved by" value={detail?.approvedBy ?? "Not set"} />
-          </Card>
+        <View style={styles.notes}>
+          <SectionHead title="Notes" />
+          <ListCard>
+            <KvLine label="Repository" value={row.name} />
+            <KvLine label="Commit" value={commit ?? "Not set"} mono={!!commit} divider />
+            <KvLine label="Status" value={status} divider />
+          </ListCard>
+          <Note>Reproduction later runs in a sandbox with no egress. The onboarding build is the only stage that reaches the network.</Note>
         </View>
-        <Text style={[styles.note, { color: colors.muted }]}>
-          Reproduction later runs in a sandbox with no egress. The onboarding build is the only stage
-          that reaches the network.
-        </Text>
       </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
-/** Vertical connector with a chevron arrow at the bottom, matching .conn in c.css. */
+const STATE_LABELS: Record<string, string> = {
+  PENDING_PLAN: "Classifying",
+  PENDING_BUILD: "Building",
+  PENDING_MANIFEST: "Proposing manifest",
+  AWAITING_APPROVAL: "Awaiting approval",
+  APPROVED: "Approved",
+  CONFIGURED: "Configured",
+}
+
+/** c.css .node: card surface, brand-tinted icon, a brand ring on the current stage. */
+function StageNode({ stage, repo, hot }: { stage: Stage; repo: string; hot: boolean }) {
+  const { colors } = useTheme()
+  return (
+    <View style={[styles.node, { backgroundColor: colors.card }, hot && { boxShadow: `0 0 0 1.5px ${colors.brand}` }]}>
+      <View style={[styles.nodeIcon, { backgroundColor: colors.brand + "29" }]}>
+        <Icon name={stage.icon as any} size={22} stroke={colors["brand-soft"]} />
+      </View>
+      <View style={styles.nodeMain}>
+        <Text style={[styles.nodeLabel, { color: colors.muted }]}>{stage.label}</Text>
+        <Text style={[styles.nodeTitle, { color: colors.foreground }]}>{stage.title}</Text>
+        <Text style={[styles.nodeDetail, { color: colors.muted }]}>{stage.detail.replace("{repo}", repo)}</Text>
+      </View>
+    </View>
+  )
+}
+
+/** c.css .conn: a 2 by 40 line with an arrow head at the bottom. */
 function StageConnector() {
   const { colors } = useTheme()
   return (
-    <View style={styles.conn}>
-      <Svg width={2} height={40} viewBox="0 0 2 40">
-        <Path
-          d="M1 0 V36 M1 36 L5 32 M1 36 L-3 32"
-          stroke={colors.faint}
-          strokeWidth={2}
-          fill="none"
-        />
-      </Svg>
+    <View style={[styles.conn, { backgroundColor: colors.faint }]}>
+      <View style={[styles.arrow, { borderColor: colors.faint }]} />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 0, paddingBottom: 100 },
+  scrollContent: { paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   error: { fontFamily: font.regular, fontSize: 16 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
-  diagram: { paddingHorizontal: 16, gap: 0 },
-  diagramNodeRow: { alignItems: "center" },
-  diagramNode: {
-    position: "relative",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderRadius: 20,
-    backgroundColor: "transparent",
-  },
-  nodeIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-  nodeMain: { flex: 1, minWidth: 0 },
-  nodeLabel: { fontFamily: font.semibold, fontSize: 11, letterSpacing: 0.08 * 11, textTransform: "uppercase", lineHeight: 14 },
-  nodeTitle: { fontFamily: font.semibold, fontSize: 17, lineHeight: 22, marginTop: 2 },
-  nodeDetail: { fontFamily: font.regular, fontSize: 13, marginTop: 2, lineHeight: 18 },
-  hotOutline: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    borderRadius: 20,
-    borderWidth: 1.5,
-    pointerEvents: "none",
-  },
-  conn: {
-    alignSelf: "center",
-    width: 2,
-    height: 40,
-    marginVertical: 0,
-  },
+  diagram: { paddingHorizontal: 16 },
+  node: { flexDirection: "row", alignItems: "center", gap: 14, paddingVertical: 14, paddingHorizontal: 16, borderRadius: 20 },
+  nodeIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  // Inter sits about half a point low in an RN line box compared with the browser; this evens the text out.
+  nodeMain: { flex: 1, minWidth: 0, marginTop: -0.6 },
+  nodeLabel: { fontFamily: font.semibold, fontSize: 11, lineHeight: 11, letterSpacing: 0.88, textTransform: "uppercase", marginBottom: 4 },
+  nodeTitle: { fontFamily: font.semibold, fontSize: 17, lineHeight: 21.25, letterSpacing: -0.187 },
+  nodeDetail: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 2 },
+  conn: { alignSelf: "center", width: 2, height: 40 },
+  arrow: { position: "absolute", bottom: -1, left: -3, width: 8, height: 8, borderRightWidth: 2, borderBottomWidth: 2, transform: [{ rotate: "45deg" }] },
+  notes: { marginTop: 28 },
   section: { marginBottom: 28 },
-  card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10 },
   failedReason: { fontFamily: font.regular, fontSize: 15, lineHeight: 22, paddingHorizontal: 20, textAlign: "center" },
 })

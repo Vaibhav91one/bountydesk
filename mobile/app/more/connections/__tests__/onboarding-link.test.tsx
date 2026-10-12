@@ -72,6 +72,7 @@ jest.mock("@/components/primitives", () => {
       ),
     SectionHeader: ({ title }: any) => React.createElement(Text, { "data-testid": `section-${title}` }, title),
     ScreenHeader: () => null,
+    PhasePill: ({ label }: any) => React.createElement(Text, {}, label),
     ScreenTitle: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
     Mono: ({ children }: any) => React.createElement(Text, {}, children),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),

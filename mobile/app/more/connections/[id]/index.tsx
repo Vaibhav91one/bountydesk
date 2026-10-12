@@ -2,8 +2,8 @@
  *
  * The screen reads its id from the route param and fetches the connections list
  * from GET /api/mobile/v1/connections, then finds the matching row by repoId.
- * M22 (target-and-scope) is opened from a report, not from here, so this screen
- * shows the bound target inline as a plain KvRow.
+ * The bound-target row opens the repository's onboarding (M27); M22 is per report
+ * and is opened from a report, not from here.
  */
 import { View, Text, ScrollView, StyleSheet, Pressable } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
@@ -12,7 +12,9 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { Card, KvRow, SectionHeader, ScreenHeader, EmptyState, ScreenTitle } from "@/components/primitives"
+import { PhasePill, ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, KvLine, Note } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
 
 // Fixed by the GitHub App's least-privilege scope described in docs/mobile-api.md:
@@ -50,21 +52,23 @@ export default function ConnectionDetailScreen() {
 
   if (error) return null
 
-  const row = rows ? rows.find((r) => String(r.repoId) === String(id)) : null
+  // While the list is still loading there is no row to find yet, so show the chrome only.
+  if (!rows) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }} testID="connection-loading">
+        <ScreenHeader back backLabel="Connections" />
+      </View>
+    )
+  }
+
+  const row = rows.find((r) => String(r.repoId) === String(id))
 
   if (!row) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <ScreenHeader back backLabel="Connections" />
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
-          showsVerticalScrollIndicator={false}
-        >
-          <EmptyState
-            heading="Connection not found"
-            inline
-          />
+        <ScrollView style={styles.scroll} contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]} showsVerticalScrollIndicator={false}>
+          <EmptyState heading="Connection not found" inline />
         </ScrollView>
       </View>
     )
@@ -77,86 +81,83 @@ export default function ConnectionDetailScreen() {
     : row.contentsPermission === "read" || row.contentsPermission === "write"
       ? "Installation token (Contents read)"
       : "Blocked: Contents not granted"
-  const bound = row.configured
-  const digest = row.target
+  const bound = row.configured && !!row.target
+  const detail = row.onboardingDetail
+  const title = bound ? [row.target, detail?.buildMarker].filter(Boolean).join(" · ") : "Not set"
+  const digest = detail?.imageDigest ?? row.onboarding?.imageDigest ?? undefined
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <ScreenHeader back backLabel="Connections" />
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <ScreenTitle title={row.name} meta={row.fullName} metaBottom={24} />
 
-        {/* Repository */}
-        <SectionHeader title="Repository" chevron={false} />
-        <Card style={styles.card}>
-          <KvRow label="Visibility" value={visibility} />
-          <KvRow label="Clone" value={clone} />
-        </Card>
+        <View style={styles.sect}>
+          <SectionHead title="Repository" />
+          <ListCard>
+            <KvLine label="Visibility" value={visibility} />
+            <KvLine label="Clone" value={clone} divider />
+          </ListCard>
+        </View>
 
-        {/* Granted permissions */}
-        <SectionHeader title="Granted permissions" chevron={false} />
-        <Card style={styles.card}>
-          {permissions(row).map((p) => (
-            <KvRow key={p.key} label={p.key} value={p.value} />
-          ))}
-        </Card>
-        <Text style={[styles.note, { color: colors.muted }]}>Contents is only needed for private repositories.</Text>
+        <View style={styles.sect}>
+          <SectionHead title="Granted permissions" />
+          <ListCard>
+            {permissions(row).map((p, i) => (
+              <KvLine key={p.key} label={p.key} value={p.value} divider={i > 0} />
+            ))}
+          </ListCard>
+          <Note>Contents is only needed for private repositories.</Note>
+        </View>
 
-        {/* Onboarding — navigates to the M27 onboarding screen for this repo. */}
-        <SectionHeader title="Onboarding" chevron={false} />
-        <Card style={styles.card}>
-          <Pressable
-            onPress={() => router.push(`/more/connections/${row.repoId}/onboarding`)}
-            style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-            accessibilityLabel="View onboarding"
-            testID="onboarding-row"
-          >
-            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 56, paddingHorizontal: 18 }}>
-              <Text style={{ fontFamily: font.medium, fontSize: 17, color: colors.foreground }}>Onboarding</Text>
-              <Icon name="chev" size={18} stroke={colors.faint} />
-            </View>
-          </Pressable>
-        </Card>
+        <View style={styles.sect}>
+          <SectionHead title="Bound target" />
+          <ListCard>
+            <Pressable
+              onPress={() => router.push(`/more/connections/${row.repoId}/onboarding`)}
+              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+              accessibilityLabel="View onboarding"
+              testID="onboarding-row"
+            >
+              <ItemLine
+                title={title}
+                subtitle={bound ? digest : undefined}
+                monoSubtitle
+                trailing={
+                  <>
+                    {bound ? <PhasePill phase="delivered" label="Verified" /> : null}
+                    <Icon name="chev" size={18} stroke={colors.faint} />
+                  </>
+                }
+              />
+            </Pressable>
+          </ListCard>
+          <Note>The target is held on the server. The agent cannot change it.</Note>
+        </View>
 
-        {/* Bound target — shown inline as a plain KvRow, no press-through. */}
-        <SectionHeader title="Bound target" chevron={false} />
-        <Card style={styles.card}>
-          <KvRow
-            label="Target"
-            value={bound && digest ? digest : "Not set"}
-          />
-        </Card>
-        <Text style={[styles.note, { color: colors.muted }]}>The target is held on the server. The agent cannot change it.</Text>
-
-        {/* Private repository policy */}
-        <SectionHeader title="Private repository policy" chevron={false} />
-        <Card style={styles.policyCard}>
-          <Text style={[styles.body, { color: colors.foreground }]}>
-            A private repository is accepted and triaged. Reproduction is refused with
-            <Text style={[styles.code, { color: colors["brand-soft"] }]}> POLICY_REFUSED </Text>
-            until Contents read is added and the owner accepts it. The clone uses a token
-            scoped to that one repository, revoked right after.
-          </Text>
-        </Card>
+        <View style={styles.sect}>
+          <SectionHead title="Private repository policy" />
+          <ListCard flush>
+            <Text style={[styles.body, { color: colors.foreground }]}>
+              A private repository is accepted and triaged. Reproduction is refused with{" "}
+              <Text style={[styles.code, { color: colors["brand-soft"] }]}>POLICY_REFUSED</Text>
+              {" "}until Contents read is added and the owner accepts it. The clone uses a token
+              scoped to that one repository, revoked right after.
+            </Text>
+          </ListCard>
+        </View>
       </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
 const styles = StyleSheet.create({
   scroll: { flex: 1 },
-  scrollContent: { paddingTop: 0, paddingBottom: 100 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, lineHeight: 32, paddingHorizontal: 20, paddingTop: 16 },
-  hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, paddingHorizontal: 20, marginBottom: 12 },
-  card: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  policyCard: { marginHorizontal: 16, borderRadius: 24, overflow: "hidden", marginBottom: 4 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 10, marginBottom: 12 },
-  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 24, paddingHorizontal: 20, paddingTop: 16 },
-  code: { fontFamily: font.mono, fontSize: 13 },
+  scrollContent: { paddingBottom: 150 },
+  sect: { marginBottom: 28 },
+  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 25.5, letterSpacing: -0.187, paddingVertical: 16, paddingHorizontal: 18 },
+  code: { fontFamily: font.mono, fontSize: 14.5 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   error: { fontFamily: font.regular, fontSize: 16 },
 })
