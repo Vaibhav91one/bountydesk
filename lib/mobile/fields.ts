@@ -58,7 +58,9 @@ export function targetPort(config: unknown): number | null {
 }
 
 /**
- * A short fixed reason for a delivery that ended FAILED, or null for any other state.
+ * A short fixed reason for a delivery that ended FAILED or is held for a human, or null otherwise.
+ * The hold is checked before the state because an email complaint sets requiresHumanReview and
+ * leaves the delivery SENT (lib/email/receipts.ts).
  *
  * outbound_delivery.last_error is free text that can carry hashes, repository names and provider
  * messages, so it is only ever classified here, never forwarded. Anything unrecognised is the
@@ -69,9 +71,10 @@ export function deliveryFailureReason(delivery: {
   lastError: string | null;
   requiresHumanReview: boolean | null;
 }): string | null {
+  if (delivery.requiresHumanReview) return "Held for human review";
   if (delivery.state !== "FAILED") return null;
   const error = delivery.lastError ?? "";
-  if (delivery.requiresHumanReview || /requires human review/i.test(error)) return "Held for human review";
+  if (/requires human review/i.test(error)) return "Held for human review";
   if (/no longer connected|verdict or repository is gone/i.test(error)) return "Repository no longer connected";
   if (/content hash mismatch|does not belong to report/i.test(error)) return "Approved text no longer matches";
   return "Delivery failed";

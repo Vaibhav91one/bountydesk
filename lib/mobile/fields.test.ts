@@ -41,4 +41,6 @@ test("deliveryFailureReason maps to a fixed set and never echoes the stored text
   assert.equal(f("x", true), "Held for human review");
   assert.equal(f("boom", false, "SENT"), null);
   assert.equal(f("boom", false, null), null);
+  // A complained email keeps its SENT state but is held, and the hold must still show.
+  assert.equal(f(null, true, "SENT"), "Held for human review");
 });
