@@ -60,7 +60,7 @@
    Overlays
    .toast            injected by c.js                    data-toast="Saved"
    .sheet            bottom sheet; .fit = height by content; children .grab .sbtn.x .sbtn.ok .st .ss
-                    or a header row: .shd (.shd-b Cancel, .st title, .shd-b.r action) then .ss, no floating .sbtn
+                    or a header row: .shd (.st title only) then .ss, no floating .sbtn; actions are a bottom .srow of two .btn (.sec Cancel, .bad-fill Deny)
                      <div class="sheet" id="deny" role="dialog" aria-label="Deny report">...</div>
    .scrim            injected by c.js (tap to dismiss)
    .lp-hit .lift .menu   long press overlay, built by c.js from data-lp
@@ -347,12 +347,10 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .sheet .ss{text-align:center;font-size:.8125rem;color:var(--faint);margin:4px 0 18px;letter-spacing:0}
 .sheet .shd{display:flex;align-items:flex-start;padding-top:22px;margin:0 4px}
 .sheet .shd .st{flex:1;padding-top:0}
-.shd-b{width:72px;padding:2px 0 0;font:400 1.0625rem/22px var(--font-sans);letter-spacing:0;color:var(--fg);text-align:left;cursor:pointer}
-.shd-b.r{text-align:right;font-weight:600;color:var(--red)}
-.shd-b:disabled{opacity:.35;cursor:default}
-.pf-android .sheet .shd{padding-top:28px}
-.pf-android .shd-b{font:500 .875rem/22px var(--font-sans);letter-spacing:.1px;color:var(--brand-soft)}
-.pf-android .shd-b.r{color:var(--red)}
+.btn.bad-fill{background:var(--red);color:#fff}
+.sheet .srow{display:flex;gap:10px;padding-top:20px}
+.sheet .srow .btn{flex:1}
+.pf-android .sheet .srow .btn{min-height:40px;border-radius:20px;font:500 .875rem/1 var(--font-sans);letter-spacing:.1px}
 .sheet .item{min-height:4rem;padding:10px 18px}
 .sheet .item .s{white-space:normal}
 .sheet .list{margin:0}

@@ -101,7 +101,9 @@ describe("M13 Deny sheet", () => {
     expect(queryByLabelText("Cancel")).toBeTruthy()
     expect(queryByText("Deny report")).toBeTruthy()
     expect(queryByText("BD-1042 · Stored XSS in search results")).toBeTruthy()
-    expect(queryByLabelText("Submit denial")).toBeTruthy()
+    expect(queryByLabelText("Deny report")).toBeTruthy()
+    expect(queryByLabelText("Deny report")!.props.accessibilityRole).toBe("button")
+    expect(queryByLabelText("Cancel")!.props.accessibilityRole).toBe("button")
     for (const t of ["Out of scope", "Not reproduced", "Duplicate", "Insufficient detail", "Steps or payload are missing", "Note to reporter (optional)"]) {
       expect(queryByText(t)).toBeTruthy()
     }
@@ -118,8 +120,8 @@ describe("M13 Deny sheet", () => {
 
   it("keeps Deny disabled until a reason is selected and posts nothing without one", async () => {
     const { getByLabelText } = await render(<DenyVerdict />)
-    expect(getByLabelText("Submit denial").props.accessibilityState.disabled).toBe(true)
-    await fireEvent.press(getByLabelText("Submit denial"))
+    expect(getByLabelText("Deny report").props.accessibilityState.disabled).toBe(true)
+    await fireEvent.press(getByLabelText("Deny report"))
     expect(mockApi).not.toHaveBeenCalled()
   })
 
@@ -128,7 +130,7 @@ describe("M13 Deny sheet", () => {
     await fireEvent.press(getByText("Duplicate"))
     await fireEvent.changeText(getByPlaceholderText("Sent with the denial"), "  Same as #12  ")
     expect(posts().length).toBe(0)
-    await fireEvent.press(getByLabelText("Submit denial"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await waitFor(() => expect(posts().length).toBe(1))
     expect(posts()[0][0]).toBe("/reports/BD-1042/deny")
     expect(JSON.parse(posts()[0][1].body)).toEqual({
@@ -141,7 +143,7 @@ describe("M13 Deny sheet", () => {
   it("posts the bare reason when there is no note", async () => {
     const { getByLabelText, getByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Out of scope"))
-    await fireEvent.press(getByLabelText("Submit denial"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await waitFor(() => expect(posts().length).toBe(1))
     expect(JSON.parse(posts()[0][1].body).reason).toBe("Out of scope")
   })
@@ -154,7 +156,7 @@ describe("M13 Deny sheet", () => {
     })
     const { getByLabelText, getByText, queryByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Duplicate"))
-    await fireEvent.press(getByLabelText("Submit denial"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await waitFor(() => expect(queryByText("This verdict changed")).toBeTruthy())
     expect(mockApi).not.toHaveBeenCalled()
   })
@@ -163,7 +165,7 @@ describe("M13 Deny sheet", () => {
     mockRefetch.mockResolvedValue({ data: null, isError: true, status: "error" })
     const { getByLabelText, getByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Duplicate"))
-    await fireEvent.press(getByLabelText("Submit denial"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await new Promise((r) => setTimeout(r, 100))
     expect(mockApi).not.toHaveBeenCalled()
   })
@@ -172,7 +174,7 @@ describe("M13 Deny sheet", () => {
     mockApi.mockRejectedValueOnce(new ApiError(409, "content_hash_mismatch", "mismatch"))
     const { getByLabelText, getByText, queryByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Duplicate"))
-    await fireEvent.press(getByLabelText("Submit denial"))
+    await fireEvent.press(getByLabelText("Deny report"))
     await waitFor(() => expect(queryByText("This verdict changed")).toBeTruthy())
   })
 
@@ -180,16 +182,16 @@ describe("M13 Deny sheet", () => {
     setMockData({ ...sampleCaseFile, state: "DELIVERED", awaitingVerdictId: null } as any)
     const { getByLabelText, getByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Duplicate"))
-    expect(getByLabelText("Submit denial").props.accessibilityState.disabled).toBe(true)
-    await fireEvent.press(getByLabelText("Submit denial"))
+    expect(getByLabelText("Deny report").props.accessibilityState.disabled).toBe(true)
+    await fireEvent.press(getByLabelText("Deny report"))
     expect(mockApi).not.toHaveBeenCalled()
   })
 
   it("posts once on a double press and then returns to the tabs", async () => {
     const { getByLabelText, getByText } = await render(<DenyVerdict />)
     await fireEvent.press(getByText("Duplicate"))
-    fireEvent.press(getByLabelText("Submit denial"))
-    fireEvent.press(getByLabelText("Submit denial"))
+    fireEvent.press(getByLabelText("Deny report"))
+    fireEvent.press(getByLabelText("Deny report"))
     await new Promise((r) => setTimeout(r, 1500))
     expect(posts().length).toBe(1)
     expect(mockRouter.dismissAll).toHaveBeenCalled()

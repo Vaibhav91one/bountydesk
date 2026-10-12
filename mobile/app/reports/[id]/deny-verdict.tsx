@@ -1,6 +1,6 @@
 /**
  * M13 Deny verdict: a native form sheet over M11 (presentation set in app/_layout.tsx). Cancel and
- * Deny live in the sheet's own header. Deny posts the reason and optional note only when pressed,
+ * Deny are a button row at the bottom of the sheet. Deny posts the reason and optional note only when pressed,
  * and only if a fresh fetch still holds the verdict M11 showed (its id and hash arrive as params).
  */
 import { useState, useCallback, useRef } from "react"
@@ -91,25 +91,7 @@ function DenySheet() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={10} accessibilityRole="button" accessibilityLabel="Cancel" style={styles.side}>
-          <Text style={[styles.action, { color: colors.foreground }]}>Cancel</Text>
-        </Pressable>
-        <View style={styles.center}>
-          <Text style={[styles.title, { color: colors.muted }]}>Deny report</Text>
-        </View>
-        <Pressable
-          onPress={submit}
-          disabled={!canSubmit}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityLabel="Submit denial"
-          accessibilityState={{ disabled: !canSubmit }}
-          style={[styles.side, styles.sideRight]}
-        >
-          <Text style={[styles.action, styles.submit, { color: colors.red }, !canSubmit && { opacity: 0.4 }]}>Deny</Text>
-        </Pressable>
-      </View>
+      <Text style={[styles.title, { color: colors.muted }]}>Deny report</Text>
       <Text style={[styles.sub, { color: colors.faint }]}>{cf ? `${cf.sourceLabel} · ${cf.title}` : ""}</Text>
 
       <View style={styles.body}>
@@ -150,6 +132,26 @@ function DenySheet() {
             <Text style={[styles.footnote, { color: colors.muted }]}>
               Nothing is sent to the reporter until you confirm. The report moves to Denied.
             </Text>
+            <View style={styles.actions}>
+              <Pressable
+                onPress={() => router.back()}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                style={({ pressed }) => [styles.btn, { backgroundColor: colors.fill }, pressed && { opacity: 0.85 }]}
+              >
+                <Text style={[styles.btnText, { color: colors.foreground }]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={submit}
+                disabled={!canSubmit}
+                accessibilityRole="button"
+                accessibilityLabel="Deny report"
+                accessibilityState={{ disabled: !canSubmit }}
+                style={({ pressed }) => [styles.btn, { backgroundColor: colors.red }, !canSubmit && { opacity: 0.4 }, pressed && canSubmit && { opacity: 0.85 }]}
+              >
+                <Text style={[styles.btnText, { color: "#ffffff" }]}>Deny</Text>
+              </Pressable>
+            </View>
           </>
         )}
       </View>
@@ -167,13 +169,7 @@ export default function DenyVerdictScreen() {
 
 const styles = StyleSheet.create({
   root: {},
-  header: { flexDirection: "row", alignItems: "flex-start", paddingTop: 22, paddingHorizontal: 20 },
-  side: { width: 72, paddingTop: 2 },
-  sideRight: { alignItems: "flex-end" },
-  action: { fontFamily: font.regular, fontSize: 17, lineHeight: 22 },
-  submit: { fontFamily: font.semibold },
-  center: { flex: 1, alignItems: "center" },
-  title: { fontFamily: font.semibold, fontSize: 17, lineHeight: 20.4 },
+  title: { fontFamily: font.semibold, fontSize: 17, lineHeight: 20.4, textAlign: "center", paddingTop: 22 },
   sub: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 4, marginBottom: 14, textAlign: "center", paddingHorizontal: 20 },
   body: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 40 },
   reasons: { borderRadius: 24, paddingVertical: 6, overflow: "hidden" },
@@ -187,6 +183,9 @@ const styles = StyleSheet.create({
   lbl: { fontFamily: font.semibold, fontSize: 15, lineHeight: 15, paddingTop: 20, paddingBottom: 10, paddingHorizontal: 4 },
   textarea: { height: 92, borderRadius: 20, paddingVertical: 14, paddingHorizontal: 16, fontFamily: font.regular, fontSize: 17, lineHeight: 23.8, textAlignVertical: "top" },
   footnote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingTop: 12, paddingHorizontal: 4 },
+  actions: { flexDirection: "row", gap: 10, paddingTop: 20 },
+  btn: { flex: 1, minHeight: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
+  btnText: { fontFamily: font.semibold, fontSize: 17, lineHeight: 17 },
   changed: { alignItems: "center", paddingVertical: 40 },
   changedTitle: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 8 },
   changedBody: { fontFamily: font.regular, fontSize: 15, lineHeight: 20, textAlign: "center" },
