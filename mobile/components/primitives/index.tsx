@@ -27,6 +27,7 @@ import { useRouter } from "expo-router"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
+import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
 import { phaseLabel, usePhaseColor, phaseTint } from "@/lib/phases"
@@ -368,7 +369,7 @@ export function EmptyState({ mascot = "greeting", heading, body, action, inline 
   const { colors } = useTheme()
   return (
     <View style={[inline ? styles.emptyInline : styles.empty, { backgroundColor: colors.background }]}>
-      <SvgImage name={`mascot/${mascot}`} width={inline ? 150 : 200} height={inline ? 150 : 200} />
+      <AnimatedMascot name={mascot} size={inline ? 150 : 200} float />
       <Text style={[styles.emptyH, { color: colors.foreground }]}>{heading}</Text>
       {body ? <Text style={[styles.emptyP, { color: colors.muted }]}>{body}</Text> : null}
       {action ? <PrimaryButton title={action.title} onPress={action.onPress} /> : null}
