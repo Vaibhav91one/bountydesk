@@ -19,11 +19,16 @@ jest.mock("@/lib/query", () => ({
   currentCacheKey: () => "tanstack-query:bountydesk:user_abc",
 }))
 
+jest.mock("@/lib/push", () => ({
+  unregisterPush: jest.fn().mockResolvedValue(undefined),
+}))
+
 jest.mock("@react-native-async-storage/async-storage", () => ({
   removeItem: (...args: unknown[]) => mockRemoveItem(...args),
 }))
 
 import { signOutAndClear } from "./session"
+import { unregisterPush } from "./push"
 
 describe("signOutAndClear", () => {
   beforeEach(() => {
@@ -57,5 +62,18 @@ describe("signOutAndClear", () => {
     await signOutAndClear(signOut)
     expect(mockRemoveItem).toHaveBeenCalledTimes(1)
     expect(mockRemoveItem).toHaveBeenCalledWith("tanstack-query:bountydesk:user_abc")
+  })
+
+  it("revokes the push token before signing out", async () => {
+    const signOut = jest.fn().mockResolvedValue(undefined)
+    await signOutAndClear(signOut)
+    expect(unregisterPush).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not block sign-out when push revocation rejects", async () => {
+    ;(unregisterPush as jest.Mock).mockRejectedValueOnce(new Error("network"))
+    const signOut = jest.fn().mockResolvedValue(undefined)
+    await signOutAndClear(signOut)
+    expect(signOut).toHaveBeenCalledTimes(1)
   })
 })

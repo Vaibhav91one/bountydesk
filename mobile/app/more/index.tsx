@@ -33,8 +33,8 @@ const ABOUT_ITEMS: { label: string; icon: IconName; route: string }[] = [
 ]
 
 const NOTIFICATION_TOGGLES = [
-  { key: "approvals", label: "Approvals needed", icon: "bell" as IconName, default: true },
-  { key: "delivery", label: "Delivery receipts", icon: "check" as IconName, default: true },
+  { key: "approvals", label: "Approvals needed", icon: "bell" as IconName, default: false },
+  { key: "delivery", label: "Delivery receipts", icon: "check" as IconName, default: false },
   { key: "repro", label: "Reproduction failures", icon: "info" as IconName, default: false },
 ]
 
@@ -90,8 +90,31 @@ export default function SettingsScreen() {
     saveThemeMode(next)
   }
 
-  const toggleNotif = (key: string) => {
-    setNotifToggles((prev) => ({ ...prev, [key]: !prev[key] }))
+  const toggleNotif = async (key: string) => {
+    const turningOn = !notifToggles[key]
+    setNotifToggles((prev) => ({ ...prev, [key]: turningOn }))
+    if (key !== "approvals" && key !== "delivery") return
+    // Lazy so the native push modules are only loaded when a switch is used, not on mount.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { registerForPush, unregisterPush } = require("@/lib/push")
+    if (turningOn) {
+      let reason: string | null = null
+      try {
+        const result = await registerForPush()
+        if (!result.ok) reason = result.reason
+      } catch (e) {
+        reason = e instanceof Error ? e.message : "Could not turn on notifications"
+      }
+      if (reason) {
+        show(reason)
+        setNotifToggles((prev) => ({ ...prev, [key]: false }))
+      }
+      return
+    }
+    // The server sends both kinds to every registered device, so the device only stops
+    // receiving pushes once both switches are off.
+    const other = key === "approvals" ? "delivery" : "approvals"
+    if (!notifToggles[other]) await unregisterPush().catch(() => {})
   }
 
   const handleSignOut = async () => {
@@ -202,6 +225,9 @@ export default function SettingsScreen() {
           </Card>
           <Text style={[styles.note, { color: colors.muted }]}>
             Push shows a report id and short title only, never the verdict text.
+          </Text>
+          <Text style={[styles.note, { color: colors.muted }]}>
+            Reproduction failures are not sent as pushes yet.
           </Text>
         </View>
 
