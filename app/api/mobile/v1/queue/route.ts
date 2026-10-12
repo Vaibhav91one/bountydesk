@@ -1,4 +1,5 @@
 import { json, jsonError, mobileAuth } from "@/lib/mobile/auth";
+import { extrasFor, readCardExtras } from "@/lib/mobile/card-extras";
 import { paginate, parsePage } from "@/lib/mobile/views";
 import { COLUMNS, listQueue } from "@/lib/reports/queue";
 import { queueColumnViews } from "@/lib/reports/queue-view";
@@ -29,5 +30,12 @@ export async function GET(request: Request): Promise<Response> {
       const { items, nextOffset } = paginate(column.cards, page);
       return { key: column.key, label: column.label, total: column.total, cards: items, nextOffset };
     });
-  return json({ columns });
+  // One batched read for the cards actually returned, not one per card.
+  const extras = await readCardExtras(columns.flatMap((column) => column.cards.map((card) => card.id)));
+  return json({
+    columns: columns.map((column) => ({
+      ...column,
+      cards: column.cards.map((card) => ({ ...card, ...extrasFor(extras, card.id) })),
+    })),
+  });
 }

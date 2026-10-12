@@ -91,6 +91,11 @@ export type CaseFile = {
     readinessPath: string;
     startCommand: string | null;
     egress: "none" | "narrow";
+    /** The port the readiness check answers on, from the profile's baseUrl. Optional like the
+     *  object itself, so fixtures that predate it still typecheck. */
+    port?: number | null;
+    /** The release label read from the profile (name suffix or snapshot tag), if it carries one. */
+    version?: string | null;
   } | null;
   /** The Daytona sandbox this session's investigation actually ran against, if one was
    * provisioned. Null when no target was bound or provisioning never happened, which is most

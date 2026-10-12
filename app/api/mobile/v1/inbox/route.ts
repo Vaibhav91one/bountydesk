@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { json, mobileAuth } from "@/lib/mobile/auth";
-import { paginate, parsePage, type InboxCard, type InboxSection } from "@/lib/mobile/views";
+import { extrasFor, readCardExtras } from "@/lib/mobile/card-extras";
+import { paginate, parsePage, type InboxCard } from "@/lib/mobile/views";
 import { INDEX_LIMIT, listAllReports, listAwaitingReview } from "@/lib/reports/queue";
 
 export const runtime = "nodejs";
@@ -34,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
 
   // One snapshot for both reads: a report that is awaiting at this moment must not also show up
   // in "earlier", and vice versa. Read-only so a serialisation failure is safe to surface as 500.
-  const { needsCards, earlierCards, allRows } = await db.transaction(
+  const { needsPage, earlierPage, extras, allRows } = await db.transaction(
     async (tx) => {
       const awaiting = await listAwaitingReview(tx);
       const allRows = await listAllReports(INDEX_LIMIT, tx);
@@ -71,32 +72,43 @@ export async function GET(request: Request): Promise<Response> {
         updatedAt: row.updatedAt,
       }));
 
-      return { needsCards, earlierCards, allRows };
+      // Page first, then one batched read of the extras for just the cards returned. It runs on
+      // tx so severity and failureReason come from the same snapshot as deliveryState.
+      const needsPage = paginate(needsCards, page);
+      const earlierPage = paginate(earlierCards, page);
+      const shown = [
+        ...(phase === "earlier" ? [] : needsPage.items),
+        ...(phase === "needs" ? [] : earlierPage.items),
+      ];
+      const extras = await readCardExtras(shown.map((card) => card.id), tx);
+
+      return { needsPage, earlierPage, extras, allRows };
     },
     { isolationLevel: "repeatable read", accessMode: "read only" },
   );
 
+  const decorate = (items: InboxCard[]) => items.map((card) => ({ ...card, ...extrasFor(extras, card.id) }));
+  const truncated = allRows.length >= INDEX_LIMIT;
+
   if (phase === "needs") {
-    const { items, total, nextOffset } = paginate(needsCards, page);
-    return json({ needsYou: { items, total, nextOffset }, earlier: null });
-  }
-  if (phase === "earlier") {
-    const { items, total, nextOffset } = paginate(earlierCards, page);
     return json({
-      needsYou: null,
-      earlier: { items, total, nextOffset, truncated: allRows.length >= INDEX_LIMIT } as InboxSection,
+      needsYou: { items: decorate(needsPage.items), total: needsPage.total, nextOffset: needsPage.nextOffset },
+      earlier: null,
     });
   }
-
-  const needsPage = paginate(needsCards, page);
-  const earlierPage = paginate(earlierCards, page);
+  if (phase === "earlier") {
+    return json({
+      needsYou: null,
+      earlier: { items: decorate(earlierPage.items), total: earlierPage.total, nextOffset: earlierPage.nextOffset, truncated },
+    });
+  }
   return json({
-    needsYou: { items: needsPage.items, total: needsCards.length, nextOffset: needsPage.nextOffset },
+    needsYou: { items: decorate(needsPage.items), total: needsPage.total, nextOffset: needsPage.nextOffset },
     earlier: {
-      items: earlierPage.items,
-      total: earlierCards.length,
+      items: decorate(earlierPage.items),
+      total: earlierPage.total,
       nextOffset: earlierPage.nextOffset,
-      truncated: allRows.length >= INDEX_LIMIT,
-    } as InboxSection,
+      truncated,
+    },
   });
 }

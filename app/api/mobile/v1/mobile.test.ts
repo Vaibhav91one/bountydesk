@@ -684,3 +684,165 @@ test("transportReceiptFor labels issue, advisory, and email delivery targets", a
   assert.equal(transportReceiptFor({ state: "SENT", target: "researcher@example.com" }), "email sent");
   assert.equal(transportReceiptFor({ state: "SENT", target: null }), null);
 });
+
+/** A report bound to a target, with one verdict carrying `evidence` and, optionally, a delivery. */
+async function seedCard(opts: {
+  state: "AWAITING_APPROVAL" | "DELIVERING";
+  targetName?: string;
+  baseUrl?: string;
+  evidence?: unknown;
+  delivery?: { state: "FAILED" | "SENT"; lastError: string | null; requiresHumanReview?: boolean };
+}) {
+  seq += 1;
+  let targetProfileId: string | undefined;
+  if (opts.targetName) {
+    const [profile] = await dbm.db
+      .insert(dbm.targetProfile)
+      .values({
+        name: opts.targetName,
+        imageName: "ghcr.io/example/card",
+        imageDigest: `sha256:${"b".repeat(64)}`,
+        config: { baseUrl: opts.baseUrl ?? "http://localhost:3000" },
+      })
+      .returning({ id: dbm.targetProfile.id });
+    targetProfileId = profile.id;
+  }
+  const [row] = await dbm.db
+    .insert(dbm.report)
+    .values({
+      channel: "manual",
+      sourceRef: `manual:card-${seq}`,
+      title: `Card report ${seq}`,
+      body: "body",
+      state: opts.state,
+      targetProfileId,
+    })
+    .returning({ id: dbm.report.id });
+  const verdictId = randomUUID();
+  const payload = `comment ${seq}\n\n<!-- bountydesk-delivery:${verdictId} -->`;
+  const contentHash = computeContentHash(payload);
+  await dbm.db.insert(dbm.verdict).values({
+    id: verdictId,
+    reportId: row.id,
+    outcome: "REPRODUCED",
+    summary: "s",
+    payload,
+    contentHash,
+    ...(opts.evidence !== undefined ? { evidence: opts.evidence } : {}),
+  });
+  if (opts.state === "AWAITING_APPROVAL") {
+    await dbm.db.insert(dbm.agentSession).values({
+      reportId: row.id,
+      capabilityToken: `cap-card-${seq}`,
+      sessionId: `sess-card-${seq}`,
+      pendingThreadId: `thread-${seq}`,
+      pendingToolCallId: `call-${seq}`,
+      pendingVerdictId: verdictId,
+      pendingApprovedContentHash: contentHash,
+    });
+  }
+  if (opts.delivery) {
+    await dbm.db.insert(dbm.outboundDelivery).values({
+      reportId: row.id,
+      verdictId,
+      state: opts.delivery.state,
+      idempotencyKey: `card-${seq}-${verdictId}`,
+      target: "github:1:issue:1",
+      approvedContentHash: contentHash,
+      lastError: opts.delivery.lastError,
+      requiresHumanReview: opts.delivery.requiresHumanReview ?? false,
+    });
+  }
+  return row.id;
+}
+
+type Extras = { id: string; severity: string | null; targetVersion: string | null; failureReason: string | null };
+
+test("queue and inbox cards carry the worst finding severity and the target version", async () => {
+  const withTarget = await seedCard({
+    state: "AWAITING_APPROVAL",
+    targetName: "juice-shop-v17.3.0",
+    evidence: { source: "agent-drafted", findings: [{ severity: "low" }, { severity: "critical" }, { severity: "bogus" }] },
+  });
+  const bare = await seedCard({ state: "AWAITING_APPROVAL" });
+  const oddEvidence = await seedCard({ state: "AWAITING_APPROVAL", evidence: "a bare reason string" });
+
+  const board = await (await queue.GET(get("?phase=awaiting-approval&limit=50"))).json();
+  const cards: Extras[] = board.columns[0].cards;
+  const byId = (id: string) => cards.find((card) => card.id === id);
+  assert.equal(byId(withTarget)?.severity, "Critical");
+  assert.equal(byId(withTarget)?.targetVersion, "v17.3.0");
+  assert.equal(byId(bare)?.severity, null);
+  assert.equal(byId(bare)?.targetVersion, null);
+  assert.equal(byId(oddEvidence)?.severity, null);
+
+  const needs = await (await inbox.GET(get("?phase=needs&limit=50"))).json();
+  const needsCard = needs.needsYou.items.find((card: Extras) => card.id === withTarget);
+  assert.equal(needsCard.severity, "Critical");
+  assert.equal(needsCard.targetVersion, "v17.3.0");
+  assert.equal(needsCard.failureReason, null);
+});
+
+test("inbox failureReason is a fixed human phrase and never the stored error text", async () => {
+  // The INDEX_LIMIT test leaves 210 future-dated rows that would fill the capped earlier list.
+  await dbm.db.delete(dbm.report).where(dbm.sql`${dbm.report.sourceRef} like 'email:cap-%'`);
+  const leaky = await seedCard({
+    state: "DELIVERING",
+    delivery: { state: "FAILED", lastError: "POST https://api.github.com/x 500 ghp_SECRET123 at Object.<anonymous> (/app/lib/delivery.ts:42)" },
+  });
+  const gone = await seedCard({ state: "DELIVERING", delivery: { state: "FAILED", lastError: "acme/app is no longer connected" } });
+  const hash = await seedCard({ state: "DELIVERING", delivery: { state: "FAILED", lastError: "content hash mismatch for verdict abc" } });
+  const held = await seedCard({ state: "DELIVERING", delivery: { state: "FAILED", lastError: "bounce; requires human review", requiresHumanReview: true } });
+  const sent = await seedCard({ state: "DELIVERING", delivery: { state: "SENT", lastError: "transient 500 earlier" } });
+  const none = await seedCard({ state: "DELIVERING" });
+
+  const body = await (await inbox.GET(get("?phase=earlier&limit=50"))).json();
+  const reasonOf = (id: string) => body.earlier.items.find((card: Extras) => card.id === id)?.failureReason;
+  assert.equal(reasonOf(leaky), "Delivery failed");
+  assert.equal(reasonOf(gone), "Repository no longer connected");
+  assert.equal(reasonOf(hash), "Approved text no longer matches");
+  assert.equal(reasonOf(held), "Held for human review");
+  assert.equal(reasonOf(sent), null);
+  assert.equal(reasonOf(none), null);
+  const text = JSON.stringify(body);
+  for (const secret of ["ghp_SECRET123", "api.github.com", "Object.<anonymous>", "delivery.ts"]) {
+    assert.ok(!text.includes(secret), `${secret} leaked`);
+  }
+});
+
+test("the case file reports targetVersion and the readiness port, null without a target", async () => {
+  const bound = await seedCard({ state: "AWAITING_APPROVAL", targetName: "dvwa-v1.9", baseUrl: "http://localhost:8080" });
+  const file = await (await reportCase.GET(get(), ctx(bound))).json();
+  assert.equal(file.targetVersion, "v1.9");
+  assert.equal(file.targetScope.port, 8080);
+  assert.equal("version" in file.targetScope, false);
+
+  const unversioned = await seedCard({ state: "AWAITING_APPROVAL", targetName: "plain-target", baseUrl: "https://example.test" });
+  const plain = await (await reportCase.GET(get(), ctx(unversioned))).json();
+  assert.equal(plain.targetVersion, null);
+  assert.equal(plain.targetScope.port, 443);
+
+  const { reportId } = await seedPendingReport();
+  const bare = await (await reportCase.GET(get(), ctx(reportId))).json();
+  assert.equal(bare.targetVersion, null);
+  assert.equal(bare.targetScope, null);
+});
+
+test("connections rows carry the stored default branch, null until a push was seen", async () => {
+  const [installation] = await dbm.db
+    .insert(dbm.githubInstallation)
+    .values({ installationId: 777001, accountLogin: "acme", accountId: 777001 })
+    .returning({ id: dbm.githubInstallation.id });
+  const [withBranch] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({ installationId: installation.id, repoId: 880001, fullName: "acme/with-branch", latestPushedBranch: "main" })
+    .returning({ id: dbm.connectedRepository.id });
+  const [noBranch] = await dbm.db
+    .insert(dbm.connectedRepository)
+    .values({ installationId: installation.id, repoId: 880002, fullName: "acme/no-branch" })
+    .returning({ id: dbm.connectedRepository.id });
+
+  const rows: { id: string; branch: string | null }[] = await (await connections.GET()).json();
+  assert.equal(rows.find((row) => row.id === `repo-${withBranch.id}`)?.branch, "main");
+  assert.equal(rows.find((row) => row.id === `repo-${noBranch.id}`)?.branch, null);
+});
