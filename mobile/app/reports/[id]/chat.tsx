@@ -26,7 +26,8 @@ import {
 } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
-import { ScreenHeader, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
 import { useRef, useState, useEffect, useCallback } from "react"
 import type { MobileCaseFile } from "@/lib/types"
@@ -88,7 +89,8 @@ function formatDayStamp(date: Date): string {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const yesterday = new Date(today.getTime() - 86400000)
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-  const hh = String(date.getHours()).padStart(2, "0")
+  // The design writes the hour unpadded: "Today 9:38".
+  const hh = String(date.getHours())
   const mm = String(date.getMinutes()).padStart(2, "0")
   if (d.getTime() === today.getTime()) return `Today ${hh}:${mm}`
   if (d.getTime() === yesterday.getTime()) return `Yesterday ${hh}:${mm}`
@@ -104,7 +106,7 @@ function activeThread(status: ChatStatus | undefined): ChatThread | undefined {
 export default function ChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { colors, typography, round } = useTheme()
+  const { colors } = useTheme()
   const [input, setInput] = useState("")
   const flatListRef = useRef<FlatList>(null)
   // Reused across send attempts for the same body so a retry (onError then a
@@ -202,10 +204,8 @@ export default function ChatScreen() {
     )
   }
 
-  // Meta line: report id · report title
-  const reportTitle = report?.title ?? ""
-  const reportId = status?.reportId ?? id ?? ""
-  const meta = `${reportId} · ${reportTitle}`
+  // Meta line: the report's label (BD-1042) · its title
+  const meta = `${report?.sourceLabel ?? ""} · ${report?.title ?? ""}`
 
   const handleSend = () => {
     const body = input.trim()
@@ -236,28 +236,21 @@ export default function ChatScreen() {
     )
   }
 
-  const renderBubble = ({ item }: ListRenderItemInfo<ChatMessage>) => (
-    <ChatBubble
-      message={item}
-      colors={colors}
-      mono={typography.fontMono}
-    />
+  const sameDay = (a: string, b: string) => new Date(a).toDateString() === new Date(b).toDateString()
+  const renderBubble = ({ item, index }: ListRenderItemInfo<ChatMessage>) => (
+    <View style={styles.msg}>
+      {index === 0 || !sameDay(messages[index - 1].createdAt, item.createdAt) ? (
+        <Text style={[styles.dayText, { color: colors.muted }]}>{formatDayStamp(new Date(item.createdAt))}</Text>
+      ) : null}
+      <ChatBubble message={item} colors={colors} />
+    </View>
   )
 
-  const renderSeparator = () => {
-    if (messages.length === 0) return null
-    const lastDate = new Date(messages[messages.length - 1].createdAt)
-    const dayStamp = formatDayStamp(lastDate)
-    return (
-      <View style={styles.dayStamp}>
-        <Text style={[styles.dayText, { color: colors.muted }]}>{dayStamp}</Text>
-      </View>
-    )
-  }
+  const canSend = input.trim().length > 0 && !mutation.isPending
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader title="Ask the agent" meta={meta} back backLabel="Case file" onBack={() => router.back()} />
+      <ScreenHeader back backLabel="Case file" onBack={() => router.back()} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.select({ ios: "padding", android: undefined })}
@@ -268,58 +261,59 @@ export default function ChatScreen() {
           data={messages}
           keyExtractor={(item) => item.id}
           renderItem={renderBubble}
+          ItemSeparatorComponent={Gap}
           contentContainerStyle={styles.chatList}
+          showsVerticalScrollIndicator={false}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-          ListHeaderComponent={renderSeparator}
+          ListHeaderComponent={<ScreenTitle title="Ask the agent" meta={meta} metaBottom={12} />}
           ListEmptyComponent={
             <View style={styles.empty}>
               <EmptyState heading="No messages yet" body="Ask about this report to start." inline />
             </View>
           }
+          ListFooterComponent={
+            <View style={styles.footer}>
+              <SuggestionChips onPress={(chip) => setInput(chip)} colors={colors} hasMessages={messages.length > 0} />
+              {replyFailed ? (
+                <Text style={[styles.typingText, { color: colors.red }]}>The agent could not answer. Try again.</Text>
+              ) : null}
+              {!replyFailed && (isPolling || isAgentWorking || mutation.isPending) ? (
+                <View style={styles.typingRow}>
+                  <Text style={[styles.typingDots, { color: colors.faint }]}>{"\u2022\u2022\u2022"}</Text>
+                  <Text style={[styles.typingText, { color: colors.muted }]}>Agent Bounty is thinking…</Text>
+                </View>
+              ) : null}
+            </View>
+          }
         />
-        {replyFailed ? (
-          <View style={styles.typingRow}>
-            <Text style={[styles.typingText, { color: colors.red }]}>The agent could not answer. Try again.</Text>
-          </View>
-        ) : null}
-        {!replyFailed && (isPolling || isAgentWorking || mutation.isPending) ? (
-          <View style={styles.typingRow}>
-            <Text style={[styles.typingDots, { color: colors.faint }]}>{"\u2022\u2022\u2022"}</Text>
-            <Text style={[styles.typingText, { color: colors.muted }]}>Agent Bounty is thinking…</Text>
-          </View>
-        ) : null}
-        <View style={styles.composerWrap}>
-          <SuggestionChips
-            onPress={(chip) => setInput(chip)}
-            colors={colors}
-            hasMessages={messages.length > 0}
-            typography={typography}
+        <View style={[styles.composer, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
+          <TextInput
+            style={[styles.field, { color: colors.foreground }]}
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask about this report"
+            placeholderTextColor={colors.faint}
+            onSubmitEditing={handleSend}
+            returnKeyType="send"
+            blurOnSubmit={false}
+            accessibilityLabel="Message"
           />
-          <View style={[styles.composer, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
-            <TextInput
-              style={[styles.field, { color: colors.foreground, fontFamily: typography.fontMono }]}
-              value={input}
-              onChangeText={setInput}
-              placeholder="Ask about this report"
-              placeholderTextColor={colors.faint}
-              onSubmitEditing={handleSend}
-              returnKeyType="send"
-              blurOnSubmit={false}
-            />
-            <Pressable
-              onPress={handleSend}
-              disabled={!input.trim() || mutation.isPending}
-              style={[styles.send, { opacity: !input.trim() || mutation.isPending ? 0.4 : 1, backgroundColor: colors.brand }]}
-              accessibilityLabel="Send"
-            >
-              <Text style={[styles.sendIcon, { color: colors.brand }]}>{"\u2191"}</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={handleSend}
+            disabled={!canSend}
+            style={[styles.send, { backgroundColor: colors.brand }]}
+            accessibilityLabel="Send"
+            accessibilityState={{ disabled: !canSend }}
+          >
+            <Icon name="arrowup" size={22} strokeWidth={2.4} stroke="#ffffff" />
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </View>
   )
 }
+
+const Gap = () => <View style={{ height: 8 }} />
 
 const SUGGESTION_CHIPS = ["Show the probes", "Re-check"]
 
@@ -327,51 +321,39 @@ function SuggestionChips({
   onPress,
   colors,
   hasMessages,
-  typography,
 }: {
   onPress: (text: string) => void
   colors: ReturnType<typeof useTheme>["colors"]
   hasMessages: boolean
-  typography: ReturnType<typeof useTheme>["typography"]
 }) {
   if (!hasMessages) return null
   return (
     <View style={styles.sugg}>
       {SUGGESTION_CHIPS.map((chip) => (
-        <Pressable
-          key={chip}
-          onPress={() => onPress(chip)}
-          style={[styles.fchip, { backgroundColor: colors.card }]}
-        >
-          <Text style={[styles.fchipText, { color: colors.foreground, fontFamily: typography.fontFamily }]}>{chip}</Text>
+        <Pressable key={chip} onPress={() => onPress(chip)} style={[styles.fchip, { backgroundColor: colors.card }]}>
+          <Text style={[styles.fchipText, { color: colors.foreground }]}>{chip}</Text>
         </Pressable>
       ))}
     </View>
   )
 }
 
-interface ChatBubbleProps {
-  message: ChatMessage
-  colors: ReturnType<typeof useTheme>["colors"]
-  mono: string
-}
-
-function ChatBubble({ message, colors, mono }: ChatBubbleProps) {
+function ChatBubble({ message, colors }: { message: ChatMessage; colors: ReturnType<typeof useTheme>["colors"] }) {
   const isMe = message.sender === "REVIEWER"
-  const align = isMe ? "flex-end" : "flex-start"
-  const bg = isMe ? colors.brand : colors.card
-  const fg = isMe ? colors.page : colors.foreground
-
   return (
-    <View>
+    <View style={styles.bubbleGroup}>
       {!isMe ? <Text style={[styles.who, { color: colors.muted }]}>Agent Bounty</Text> : null}
-      <View style={[styles.bubble, { alignSelf: align, backgroundColor: bg, borderColor: colors["glass-edge"] }]}>
+      <View
+        style={[
+          styles.bubble,
+          isMe ? styles.bubbleMe : styles.bubbleAgent,
+          { backgroundColor: isMe ? colors.brand : colors.card },
+        ]}
+      >
         {message.sender === "SYSTEM" ? (
-          <Text style={[styles.typingDots, { color: colors.faint }]}>
-            {"\u2022\u2022\u2022"}
-          </Text>
+          <Text style={[styles.typingDots, { color: colors.faint }]}>{"\u2022\u2022\u2022"}</Text>
         ) : (
-          <Text style={[styles.bubbleText, { color: fg, fontFamily: mono }]}>{message.body}</Text>
+          <Text style={[styles.bubbleText, { color: isMe ? "#ffffff" : colors.foreground }]}>{message.body}</Text>
         )}
       </View>
     </View>
@@ -379,119 +361,52 @@ function ChatBubble({ message, colors, mono }: ChatBubbleProps) {
 }
 
 const styles = StyleSheet.create({
-  chatList: {
-    paddingTop: 12,
-    paddingBottom: 16,
-    gap: 8,
-  },
-  dayStamp: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
+  chatList: { paddingBottom: 16 },
+  msg: { gap: 8, paddingHorizontal: 16 },
+  bubbleGroup: { gap: 8 },
   dayText: {
-    fontFamily: font.semibold, fontSize: 13,
-    
-    lineHeight: 18,
-  },
-  empty: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 20,
-  },
-  typingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 20,
-    paddingBottom: 6,
-  },
-  who: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-    color: "rgba(175,175,190,1)",
-    paddingHorizontal: 4,
-    marginBottom: 2,
-  },
-  bubble: {
-    maxWidth: "82%",
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    paddingVertical: 11,
-    borderBottomLeftRadius: 6,
-    borderBottomRightRadius: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  typingDots: {
-    fontFamily: font.regular, fontSize: 20,
-    lineHeight: 20,
-    letterSpacing: -2,
-  },
-  typingText: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-  },
-  bubbleText: {
-    fontFamily: font.regular, fontSize: 17,
-    lineHeight: 1.35 * 17,
-  },
-  sugg: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  fchip: {
-    minHeight: 44,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 22,
-  },
-  fchipText: {
-    fontFamily: font.medium, fontSize: 15,
-    
-    lineHeight: 20,
-  },
-  composerWrap: {
+    alignSelf: "center",
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 17.55,
+    paddingTop: 4,
     paddingBottom: 8,
   },
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 20 },
+  footer: { paddingTop: 8, paddingHorizontal: 16, gap: 8 },
+  typingRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4 },
+  who: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, paddingTop: 6, paddingHorizontal: 4 },
+  bubble: { maxWidth: "82%", borderRadius: 20, paddingHorizontal: 15, paddingVertical: 11 },
+  bubbleMe: { alignSelf: "flex-end", borderBottomRightRadius: 6 },
+  bubbleAgent: { alignSelf: "flex-start", borderBottomLeftRadius: 6 },
+  typingDots: { fontFamily: font.regular, fontSize: 20, lineHeight: 20, letterSpacing: -2 },
+  typingText: { fontFamily: font.regular, fontSize: 13, lineHeight: 18 },
+  bubbleText: { fontFamily: font.regular, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187 },
+  sugg: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingTop: 8 },
+  fchip: { minHeight: 44, paddingHorizontal: 18, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  fchipText: { fontFamily: font.medium, fontSize: 15, lineHeight: 15 },
   composer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     marginHorizontal: 16,
-    paddingHorizontal: 18,
+    marginBottom: 30,
     paddingVertical: 6,
+    paddingLeft: 18,
+    paddingRight: 6,
     borderRadius: 32,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
   field: {
     flex: 1,
     minWidth: 0,
     minHeight: 48,
-    fontFamily: font.regular, fontSize: 17,
-    lineHeight: 1.4 * 17,
-    backgroundColor: "transparent",
-    outlineWidth: 0,
+    fontFamily: font.regular,
+    fontSize: 17,
+    letterSpacing: -0.187,
+    paddingVertical: 0,
   },
-  send: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sendIcon: {
-    fontFamily: font.bold, fontSize: 20,
-    
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  error: {
-    fontFamily: font.regular, fontSize: 16,
-  },
+  send: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center" },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

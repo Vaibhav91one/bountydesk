@@ -13,7 +13,11 @@ import { useRouter, useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { KvRow, PhasePill, Card, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
+import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, ItemValue, KvLine, Note } from "@/components/CaseUi"
+import { ageText } from "@/lib/age"
+import { toolCallsOnly } from "@/lib/toolCalls"
 import type { MobileCaseFile } from "@/lib/types"
 import type { PhaseKey } from "@/lib/phases"
 import { font } from "@/lib/fonts"
@@ -82,23 +86,22 @@ function reportSeverity(findings: Finding[]): string | null {
   return severityLabel(top.severity)
 }
 
-/** Map a finding severity to its display colour using theme tokens.
- * critical/high → red, medium → approval, low/info → closed (gray). */
-function severityColor(sev: string, colors: { red: string; approval: string; closed: string }): string {
-  const s = sev.toLowerCase()
-  if (s === "critical" || s === "high") return colors.red
-  if (s === "medium") return colors.approval
-  return colors.closed
+/** The design's label for a finding: an informational one is a confirmation. */
+function findingLabel(sev: string): string {
+  return sev.toLowerCase() === "info" ? "Confirmed" : severityLabel(sev)
 }
 
-/** Relative age label, matching c.css ageLabelFor. */
-function ageLabelFor(iso: string): string {
-  const minutes = Math.floor((Date.now() - new Date(iso).getTime()) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes} min`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} h`
-  return `${Math.floor(hours / 24)} d`
+/** Channel as the case file words it. */
+const CHANNEL_LABEL: Record<string, string> = {
+  github: "GitHub issue",
+  advisory: "GitHub advisory",
+  email: "Email",
+  upload: "Upload",
+}
+
+/** The short commit in a build marker, which is the source commit baked into the image. */
+function shortCommit(marker: string | null | undefined): string | null {
+  return marker?.match(/[0-9a-f]{7,40}/)?.[0].slice(0, 7) ?? null
 }
 
 interface FindingView {
@@ -121,20 +124,22 @@ function TileNav({ icon, label, sub, onPress }: TileNavProps) {
       onPress={onPress}
       style={({ pressed }) => [
         styles.tile,
-        { backgroundColor: colors.card, borderColor: colors["glass-edge"] },
+        { backgroundColor: colors.card, boxShadow: `0 0 0 1px ${colors["glass-edge"]}` },
         pressed && { opacity: 0.92 },
       ]}
     >
       <Icon name={icon as any} size={22} stroke={colors["brand-soft"]} />
-      <Text style={[styles.tileLabel, { color: colors.foreground }]}>{label}</Text>
-      <Text style={[styles.tileSub, { color: colors.muted }]}>{sub}</Text>
+      <View>
+        <Text style={[styles.tileLabel, { color: colors.foreground }]}>{label}</Text>
+        <Text style={[styles.tileSub, { color: colors.muted }]}>{sub}</Text>
+      </View>
     </Pressable>
   )
 }
 
 export default function CaseFileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { colors, phase: phaseColors } = useTheme()
+  const { colors } = useTheme()
   const router = useRouter()
   const { data: file, error } = useApiQuery<CaseFileView>(`/reports/${id}`)
   // The same id Queue and Reports show, and the one Reports search matches.
@@ -168,11 +173,11 @@ export default function CaseFileScreen() {
   }))
   const sev = reportSeverity(findings)
 
-  const targetSubtitle = file.targetScope?.buildMarker
-    ? `${file.targetScope.buildMarker} · ${file.targetScope.imageDigest?.slice(0, 7) ?? ""}`
-    : file.target?.imageDigest
-      ? file.target.imageDigest.slice(0, 7)
-      : ""
+  const targetSubtitle = [file.targetVersion, shortCommit(file.targetScope?.buildMarker)]
+    .filter(Boolean)
+    .join(" · ")
+  const channel = file.channel ?? file.deliveryChannel
+  const callCount = toolCallsOnly(file.toolCalls ?? []).length
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -209,104 +214,66 @@ export default function CaseFileScreen() {
                 style={isApproval ? styles.approvalHalo : undefined}
               />
               <Text style={[styles.hmetaText, { color: colors.muted }]}>
-                {reportIdLabel} · opened {ageLabelFor(file.createdAt)}
+                {reportIdLabel} · opened {ageText(file.createdAt, true)}
               </Text>
             </>
           }
         />
 
-        {/* Report section: KvRows */}
         <View style={styles.section}>
-          <Text style={[styles.shPlain, { color: colors.foreground }]}>Report</Text>
-          <Card style={styles.cardList}>
-            <KvRow label="Severity" value={sev ?? "Not assessed"} />
-            <KvRow label="Channel" value={file.channel ?? file.deliveryChannel ?? "—"} />
-            <KvRow label="Reporter" value={file.reporterHandle ?? "Anonymous"} />
-          </Card>
+          <SectionHead title="Report" />
+          <ListCard>
+            <KvLine label="Severity" value={sev ?? "Not assessed"} strong={sev != null} />
+            <KvLine label="Channel" value={channel ? (CHANNEL_LABEL[channel] ?? channel) : "—"} divider />
+            <KvLine label="Reporter" value={file.reporterHandle ?? "Anonymous"} divider />
+          </ListCard>
         </View>
 
-        {/* Bound target section */}
         <View style={styles.section}>
-          <Text style={[styles.shPlain, { color: colors.foreground }]}>Bound target</Text>
-          <Card style={styles.cardList}>
-            {file.target ? (
-              <Pressable
-                onPress={() => router.push(`/reports/${file.id}/target-and-scope`)}
-                style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
-              >
-                <View style={styles.targetRow}>
-                  <View style={styles.targetMain}>
-                    <Text style={[styles.targetTitle, { color: colors.foreground }]} numberOfLines={1}>
-                      {file.target?.name ?? file.repositoryFullName ?? "No target bound"}
-                    </Text>
-                    {targetSubtitle ? (
-                      <Text style={[styles.targetSubtitle, { color: colors.muted }]} numberOfLines={1}>
-                        {targetSubtitle}
-                      </Text>
-                    ) : null}
-                  </View>
-                  <PhasePill phase="delivered" label="Verified" style={styles.targetPill} />
-                </View>
-              </Pressable>
-            ) : (
-              <View style={styles.targetRow}>
-                <View style={styles.targetMain}>
-                  <Text style={[styles.targetTitle, { color: colors.foreground }]} numberOfLines={1}>
-                    No target bound
-                  </Text>
-                </View>
-              </View>
-            )}
-          </Card>
-          <Text style={[styles.note, { color: colors.muted }]}>
-            Reproduction ran against this pinned snapshot only.
-          </Text>
+          <SectionHead title="Bound target" />
+          <ListCard>
+            <Pressable
+              disabled={!file.target}
+              onPress={() => router.push(`/reports/${file.id}/target-and-scope`)}
+              style={({ pressed }) => [{ opacity: pressed ? 0.92 : 1 }]}
+            >
+              <ItemLine
+                title={file.target ? (file.target.name ?? file.repositoryFullName ?? "Bound target") : "No target bound"}
+                subtitle={file.target ? targetSubtitle : undefined}
+                trailing={file.target ? <PhasePill phase="delivered" label="Verified" /> : undefined}
+              />
+            </Pressable>
+          </ListCard>
+          <Note>Reproduction ran against this pinned snapshot only.</Note>
         </View>
 
-        {/* Agent summary section */}
         <View style={styles.section}>
-          <Text style={[styles.shPlain, { color: colors.foreground }]}>Agent summary</Text>
-          <Card style={styles.summaryCard}>
-            <Text style={[styles.body, { color: colors.foreground }]}>
-              {file.summary ?? "No summary available."}
-            </Text>
-          </Card>
+          <SectionHead title="Agent summary" />
+          <ListCard flush>
+            <Text style={[styles.body, { color: colors.foreground }]}>{file.summary ?? "No summary available."}</Text>
+          </ListCard>
         </View>
 
-        {/* Findings section */}
         {findingViews.length > 0 ? (
           <View style={styles.section}>
-            <Text style={[styles.shPlain, { color: colors.foreground }]}>Findings</Text>
-            <Card style={styles.cardList}>
+            <SectionHead title="Findings" />
+            <ListCard>
               {findingViews.map((f, i) => (
-                <View
+                <ItemLine
                   key={f.title}
-                  style={[
-                    styles.findItem,
-                    i < findingViews.length - 1 && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-                  ]}
-                >
-                  <View style={styles.findMain}>
-                    <Text style={[styles.findTitle, { color: colors.foreground }]} numberOfLines={1}>
-                      {f.title}
-                    </Text>
-                    <Text style={[styles.findSub, { color: colors.muted }]} numberOfLines={1}>
-                      {f.evidenceRef}
-                    </Text>
-                  </View>
-                  <Text style={[styles.findSev, { color: severityColor(f.severity, { red: colors.red, approval: phaseColors.approval, closed: phaseColors.closed }) }]}>
-                    {severityLabel(f.severity)}
-                  </Text>
-                </View>
+                  title={f.title}
+                  subtitle={f.evidenceRef}
+                  divider={i > 0}
+                  trailing={<ItemValue strong={f.severity.toLowerCase() !== "info"}>{findingLabel(f.severity)}</ItemValue>}
+                />
               ))}
-            </Card>
+            </ListCard>
           </View>
         ) : null}
 
-        {/* Explore section: quick-link tiles */}
         <View style={styles.section}>
-          <Text style={[styles.shPlain, { color: colors.foreground }]}>Explore</Text>
-          <View style={styles.tiles}>
+          <SectionHead title="Explore" />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tiles}>
             <TileNav
               icon="clock"
               label="Timeline"
@@ -316,7 +283,7 @@ export default function CaseFileScreen() {
             <TileNav
               icon="terminal"
               label="Tool calls"
-              sub={`${file.toolCalls?.length ?? 0} calls`}
+              sub={`${callCount} calls`}
               onPress={() => router.push(`/reports/${file.id}/tool-calls`)}
             />
             <TileNav
@@ -331,19 +298,15 @@ export default function CaseFileScreen() {
               sub="Reviewer"
               onPress={() => router.push(`/reports/${file.id}/chat`)}
             />
-          </View>
+          </ScrollView>
         </View>
       </ScrollView>
 
-      {/* Floating bar: chat icon + Open verdict */}
+      <BottomFade />
       <View style={[styles.fbar, { backgroundColor: colors.glass, borderColor: colors["glass-edge"] }]}>
         <Pressable
           onPress={() => router.push(`/reports/${file.id}/chat`)}
-          style={({ pressed }) => [
-            styles.fbarChat,
-            { backgroundColor: colors.fill },
-            pressed && { opacity: 0.7 },
-          ]}
+          style={({ pressed }) => [styles.fbarChat, { backgroundColor: colors.fill }, pressed && { opacity: 0.7 }]}
           accessibilityLabel="Open reviewer chat"
         >
           <Icon name="chat" size={22} stroke={colors.foreground} />
@@ -364,57 +327,26 @@ const styles = StyleSheet.create({
   meta: { fontFamily: font.regular, fontSize: 16 },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 150 },
-  hmetaText: { fontFamily: font.regular, fontSize: 15 },
+  hmetaText: { fontFamily: font.regular, fontSize: 15, lineHeight: 20.25 },
   approvalHalo: { alignSelf: "center" },
-  section: { marginBottom: 28, paddingHorizontal: 16 },
-  shPlain: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24, marginBottom: 12, paddingHorizontal: 4 },
-  cardList: { marginHorizontal: 0, borderRadius: 24, overflow: "hidden" },
-  summaryCard: { marginHorizontal: 0, borderRadius: 24, overflow: "hidden", padding: 0 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 4, marginTop: 8 },
-  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 24, padding: 18 },
-  targetRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 18 },
-  targetMain: { flex: 1, minWidth: 0 },
-  targetTitle: { fontFamily: font.medium, fontSize: 16, lineHeight: 20 },
-  targetSubtitle: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
-  targetPill: { alignSelf: "center" },
-  findItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10, paddingHorizontal: 18, minHeight: 56 },
-  findMain: { flex: 1, minWidth: 0, marginRight: 12 },
-  findTitle: { fontFamily: font.medium, fontSize: 16, lineHeight: 20 },
-  findSub: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
-  findSev: { fontFamily: font.semibold, fontSize: 13, },
-  tiles: { flexDirection: "row", gap: 12, flexWrap: "wrap" },
-  tile: {
-    flex: 1,
-    minWidth: 120,
-    minHeight: 100,
-    borderRadius: 24,
-    padding: 16,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  tileLabel: { fontFamily: font.semibold, fontSize: 15, lineHeight: 20 },
-  tileSub: { fontFamily: font.regular, fontSize: 12, lineHeight: 16 },
+  section: { marginBottom: 28 },
+  body: { fontFamily: font.regular, fontSize: 17, lineHeight: 25.5, letterSpacing: -0.187, paddingVertical: 16, paddingHorizontal: 18 },
+  tiles: { gap: 12, paddingHorizontal: 16 },
+  tile: { width: 112, minHeight: 104, borderRadius: 24, paddingVertical: 14, paddingHorizontal: 16, justifyContent: "space-between", gap: 10 },
+  tileLabel: { fontFamily: font.semibold, fontSize: 17, lineHeight: 22.95, letterSpacing: -0.187 },
+  tileSub: { fontFamily: font.regular, fontSize: 13, lineHeight: 17.55, marginTop: 2 },
   fbar: {
     position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
+    left: 16,
+    right: 16,
+    bottom: 30,
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 6,
+    padding: 6,
+    borderRadius: 36,
+    borderWidth: 1,
   },
-  fbarChat: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 0,
-  },
+  fbarChat: { width: 52, height: 52, borderRadius: 26, alignItems: "center", justifyContent: "center" },
   fbarBtn: { flex: 1 },
 })

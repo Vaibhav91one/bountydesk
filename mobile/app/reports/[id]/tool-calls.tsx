@@ -5,14 +5,16 @@
  * allowlisted argument preview in mono, and a status pill. Data comes from
  * GET /reports/[id].toolCalls (the filtered event list where toolName is set).
  */
-import { View, Text, FlatList, StyleSheet } from "react-native"
+import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile, CaseEvent } from "@/lib/types"
-import { ScreenHeader, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState, PhasePill } from "@/components/primitives"
 import { Pill } from "@/components/ui/Pill"
+import { ListCard, SectionHead } from "@/components/ReportList"
+import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
+import { toolCallsOnly } from "@/lib/toolCalls"
 import { useTheme } from "@/theme"
-import type { PhaseKey } from "@/lib/phases"
 import { font } from "@/lib/fonts"
 
 type ToolCallStatus = "Pass" | "Allowed" | "Denied" | "Gated"
@@ -33,10 +35,6 @@ type ToolCallStatus = "Pass" | "Allowed" | "Denied" | "Gated"
  * view drops eventKey (the call id), so the denial reason is not accessible and
  * matching is by toolName + sequence proximity only.
  */
-function isToolCall(call: CaseEvent): boolean {
-  return !call.type.startsWith("agent.scope_tool_denied")
-}
-
 /** Find a scope_tool_denied event for the same toolName that comes after call.seq
  *  but before the next tool_call event for the same toolName. This pairs each
  *  actual call with its own scope-guard denial, not a different call's. */
@@ -66,14 +64,8 @@ function deriveStatus(call: CaseEvent, events: CaseEvent[]): ToolCallStatus {
   return "Allowed"
 }
 
-function statusPhaseKey(status: ToolCallStatus): PhaseKey {
-  if (status === "Denied") return "closed"
-  if (status === "Gated") return "approval"
-  return "delivered"
-}
-
 function splitSections(toolCalls: CaseEvent[]): { investigation: CaseEvent[]; humanGate: CaseEvent[] } {
-  const actualCalls = toolCalls.filter(isToolCall)
+  const actualCalls = toolCallsOnly(toolCalls)
   const investigation: CaseEvent[] = []
   const humanGate: CaseEvent[] = []
   for (const call of actualCalls) {
@@ -89,7 +81,7 @@ function splitSections(toolCalls: CaseEvent[]): { investigation: CaseEvent[]; hu
 export default function ToolCallsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
-  const { colors, phase, typography } = useTheme()
+  const { colors } = useTheme()
   const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
@@ -103,178 +95,72 @@ export default function ToolCallsScreen() {
   }
 
   const toolCalls = report?.toolCalls ?? []
+  // A denial is mirrored in both lists; either may be the one that carries it.
+  const allEvents = [...(report?.events ?? []), ...toolCalls]
   const { investigation, humanGate } = splitSections(toolCalls)
   const renderedCount = investigation.length + humanGate.length
-  const meta = `${report?.id ?? ""} · ${renderedCount} calls`
+  const meta = `${report?.sourceLabel ?? ""} · ${renderedCount} calls`
+  const sections = [
+    {
+      key: "investigation",
+      title: "Investigation",
+      calls: investigation,
+      note: "The target comes from the server-held profile, never from text the agent wrote. A call outside it is refused.",
+    },
+    {
+      key: "human-gate",
+      title: "Human gate",
+      calls: humanGate,
+      note: "publish_verdict waits for a reviewer to approve the exact drafted comment.",
+    },
+  ].filter((s) => s.calls.length > 0)
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <ScreenHeader
-        title="Tool calls"
-        meta={meta}
-        back
-        backLabel="Case file"
-        onBack={() => router.back()}
-      />
-
-      {toolCalls.length === 0 ? (
-        <View style={styles.empty}>
-          <EmptyState heading="No tool calls" body="No investigation tools have been called yet." inline />
-        </View>
-      ) : (
-        <FlatList
-          data={[
-            { key: "investigation", title: "Investigation", calls: investigation },
-            { key: "human-gate", title: "Human gate", calls: humanGate },
-          ].filter((s) => s.calls.length > 0)}
-          keyExtractor={(item) => item.key}
-          renderItem={({ item }) => (
-            <Section
-              title={item.title}
-              calls={item.calls}
-              events={report?.events ?? []}
-              colors={colors}
-              phase={phase}
-              mono={typography.fontMono}
-            />
-          )}
-          contentContainerStyle={styles.list}
-        />
-      )}
-
-      <Text style={[styles.note, { color: colors.muted, fontFamily: typography.fontFamily }]}>
-        The target comes from the server-held profile, never from text the agent wrote. A call outside it is refused.
-      </Text>
+      <ScreenHeader back backLabel="Case file" onBack={() => router.back()} />
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScreenTitle title="Tool calls" meta={meta} metaBottom={20} />
+        {toolCalls.length === 0 ? (
+          <View style={styles.empty}>
+            <EmptyState heading="No tool calls" body="No investigation tools have been called yet." inline />
+          </View>
+        ) : (
+          sections.map((s) => (
+            <View key={s.key} style={styles.section}>
+              <SectionHead title={s.title} />
+              <ListCard>
+                {s.calls.map((call, i) => (
+                  <ItemLine
+                    key={call.seq}
+                    mono
+                    divider={i > 0}
+                    title={call.toolName ?? "unknown"}
+                    subtitle={call.argsPreview ?? undefined}
+                    trailing={<StatusPill status={deriveStatus(call, allEvents)} />}
+                  />
+                ))}
+              </ListCard>
+              <Note>{s.note}</Note>
+            </View>
+          ))
+        )}
+      </ScrollView>
+      <BottomFade />
     </View>
   )
 }
 
-interface SectionProps {
-  title: string
-  calls: CaseEvent[]
-  events: CaseEvent[]
-  colors: ReturnType<typeof useTheme>["colors"]
-  phase: ReturnType<typeof useTheme>["phase"]
-  mono: string
-}
-
-function Section({ title, calls, events, colors, phase, mono }: SectionProps) {
-  if (calls.length === 0) return null
-  return (
-    <View style={styles.section}>
-      <Text style={[styles.sectionHeader, { color: colors.foreground }]}>{title}</Text>
-      <View style={[styles.card, { backgroundColor: colors.card }]}>
-        {calls.map((call) => {
-          const status = deriveStatus(call, events)
-          const statusPhase = statusPhaseKey(status)
-          return (
-            <ToolCallRow
-              key={call.seq}
-              call={call}
-              status={status}
-              statusPhase={statusPhase}
-              colors={colors}
-              phase={phase}
-              mono={mono}
-            />
-          )
-        })}
-      </View>
-    </View>
-  )
-}
-
-interface ToolCallRowProps {
-  call: CaseEvent
-  status: ToolCallStatus
-  statusPhase: PhaseKey
-  colors: ReturnType<typeof useTheme>["colors"]
-  phase: ReturnType<typeof useTheme>["phase"]
-  mono: string
-}
-
-function ToolCallRow({ call, status, statusPhase, colors, phase, mono }: ToolCallRowProps) {
-  const toolName = call.toolName ?? "unknown"
-  const argsPreview = call.argsPreview ?? ""
-  return (
-    <View style={styles.item}>
-      <View style={styles.itemMain}>
-        <Text style={[styles.toolName, { color: colors.foreground, fontFamily: mono }]}>{toolName}</Text>
-        {argsPreview ? (
-          <Text style={[styles.argsPreview, { color: colors.muted, fontFamily: mono }]}>{argsPreview}</Text>
-        ) : null}
-      </View>
-      <Pill
-        label={status}
-        color={phase[statusPhase]}
-        style={styles.pill}
-      />
-    </View>
-  )
+/** Pass, Allowed and Denied read as the phase pills do; Denied is red, which no phase is. */
+function StatusPill({ status }: { status: ToolCallStatus }) {
+  const { colors } = useTheme()
+  if (status === "Denied") return <Pill label={status} color={colors.red} />
+  return <PhasePill phase={status === "Gated" ? "approval" : "delivered"} label={status} />
 }
 
 const styles = StyleSheet.create({
-  list: {
-    paddingTop: 8,
-  },
-  section: {
-    marginBottom: 28,
-  },
-  sectionHeader: {
-    fontFamily: font.semibold, fontSize: 20,
-    
-    lineHeight: 24,
-    marginHorizontal: 20,
-    marginBottom: 10,
-  },
-  card: {
-    marginHorizontal: 16,
-    borderRadius: 24,
-    overflow: "hidden",
-  },
-  item: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    minHeight: 56,
-    paddingHorizontal: 18,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(255,255,255,0.08)",
-  },
-  itemMain: {
-    flex: 1,
-    minWidth: 0,
-  },
-  toolName: {
-    fontFamily: font.medium, fontSize: 15,
-    
-    lineHeight: 20,
-  },
-  argsPreview: {
-    fontFamily: font.regular, fontSize: 12,
-    lineHeight: 18,
-    marginTop: 3,
-  },
-  pill: {
-    marginLeft: 12,
-  },
-  empty: {
-    paddingHorizontal: 20,
-    paddingTop: 40,
-  },
-  note: {
-    fontFamily: font.regular, fontSize: 13,
-    lineHeight: 18,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-    textAlign: "center",
-  },
-  centered: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  error: {
-    fontFamily: font.regular, fontSize: 16,
-  },
+  scroll: { paddingBottom: 150 },
+  section: { marginBottom: 28 },
+  empty: { paddingHorizontal: 20, paddingTop: 40 },
+  centered: { flex: 1, alignItems: "center", justifyContent: "center" },
+  error: { fontFamily: font.regular, fontSize: 16 },
 })

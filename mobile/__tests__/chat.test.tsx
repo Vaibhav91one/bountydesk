@@ -85,8 +85,9 @@ jest.mock("@/theme", () => ({
 jest.mock("@/components/primitives", () => {
   const { View: RNView, Text: RNText } = require("react-native")
   return {
-    ScreenHeader: ({ title, meta, back }: { title: string; meta?: string; back?: boolean }) => (
-      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}{back ? <RNText>Back</RNText> : null}</RNView>
+    ScreenHeader: ({ back }: { back?: boolean }) => <RNView>{back ? <RNText>Back</RNText> : null}</RNView>,
+    ScreenTitle: ({ title, meta }: { title: string; meta?: string }) => (
+      <RNView><RNText>{title}</RNText>{meta ? <RNText>{meta}</RNText> : null}</RNView>
     ),
     EmptyState: ({ heading, body }: { heading: string; body?: string }) => (
       <RNView><RNText>{heading}</RNText>{body ? <RNText>{body}</RNText> : null}</RNView>
@@ -147,7 +148,7 @@ describe("M10 Reviewer chat", () => {
     expect(getByText("Back")).toBeTruthy()
   })
 
-  const REPORT_META = { data: { id: "report-1", title: "Stored XSS in search results" } }
+  const REPORT_META = { data: { id: "report-1", sourceLabel: "BD-1042", title: "Stored XSS in search results" } }
 
   it("renders chat bubbles for reviewer and agent messages", async () => {
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
@@ -163,7 +164,7 @@ describe("M10 Reviewer chat", () => {
     mockQueryData["/reports/report-1/chat"] = { data: CHAT_STATUS }
     mockQueryData["/reports/report-1"] = REPORT_META
     const { getByText } = await render(<ChatScreen />)
-    expect(getByText(/report-1 · Stored XSS in search results/)).toBeTruthy()
+    expect(getByText("BD-1042 · Stored XSS in search results")).toBeTruthy()
   })
 
   it("renders suggestion chips when there are messages", async () => {

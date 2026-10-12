@@ -206,6 +206,8 @@ export type MobileCaseFile = {
     name: string
     imageDigest: string
   } | null
+  /** the pinned target version, e.g. "v17.3.0"; the case file shows it beside the short commit */
+  targetVersion?: string | null
   summary: string | null
   destination: string
   verdict: {

@@ -81,6 +81,7 @@ export function caseFile(id: string): MobileCaseFileWithScope | null {
     investigating: r.investigating ?? false,
     failed: false,
     target: { id: rid(9001), name: "Vaibhav91one/juice-shop", imageDigest: DIGEST },
+    targetVersion: r.version ?? null,
     summary: SUMMARY,
     destination: "github:1:issue:214",
     verdict: hasVerdict
