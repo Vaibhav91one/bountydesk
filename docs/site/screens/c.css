@@ -95,7 +95,6 @@
    data-otp (+ data-otp-done="Verified" data-then="m17.html" data-kind="pop" | data-otp-show="#received")  six boxes, auto-advance, paste
    data-chat-thread, data-chat-input, data-chat-send   composer appends a bubble and an agent reply
    data-add-reviewer (button) + data-add-input + data-reviewer-list   appends a pending reviewer row
-   data-theme-cycle        row cycling System, Light, Dark; child [data-theme-val] shows the value
    data-auto-go="mN.html"  standalone only: navigate after data-auto-ms (default 1600); ignored in embed
    ============================================================ */
 @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap");
