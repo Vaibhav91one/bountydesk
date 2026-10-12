@@ -11,7 +11,7 @@ import { useRouter } from "expo-router"
 import { useAuth } from "@/lib/auth-hooks"
 import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useApiQuery, ApiError } from "@/lib/use-query"
-import type { MobileMe } from "@/lib/types"
+import type { ConnectionRow, MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { ScreenHeader, ScreenTitle, PhasePill, useToast } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
@@ -66,6 +66,8 @@ export default function SettingsScreen() {
   const { show } = useToast()
   const { signOut } = useAuth()
   const me = useApiQuery<MobileMe>("/me")
+  const connections = useApiQuery<ConnectionRow[]>("/connections")
+  const boundRepo = connections.data?.find((r) => r.configured && r.target)
 
   const [notifToggles, setNotifToggles] = useState<Record<string, boolean>>({})
 
@@ -191,6 +193,18 @@ export default function SettingsScreen() {
                 <ItemLine divider={i > 0} title={item.label} subtitle={item.subtitle} leading={lead(item.icon)} trailing={chev} />
               </Pressable>
             ))}
+            <Pressable
+              onPress={() => handlePress(boundRepo ? `/more/connections/${boundRepo.repoId}` : "/more/connections")}
+              style={({ pressed }) => pressed && { opacity: 0.92 }}
+            >
+              <ItemLine
+                divider
+                title="Target and scope"
+                subtitle={boundRepo ? `${boundRepo.name} ${boundRepo.target}` : "Not set"}
+                leading={lead("target")}
+                trailing={chev}
+              />
+            </Pressable>
           </ListCard>
         </View>
 
