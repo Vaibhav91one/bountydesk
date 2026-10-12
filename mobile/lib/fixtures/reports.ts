@@ -14,12 +14,14 @@ type Row = {
   awaiting?: boolean
   investigating?: boolean
   origin?: string
+  severity?: "high" | "medium" | "low"
+  version?: string
 }
 
 export const ROWS: Row[] = [
-  { n: 1042, title: "Stored XSS in search results", state: "AWAITING_APPROVAL", min: 12, outcome: "REPRODUCED", target: "juice-shop v17.3.0", age: "12m", awaiting: true },
-  { n: 1044, title: "Missing rate limit on login", state: "AWAITING_APPROVAL", min: 34, outcome: "NOT_REPRODUCED", target: "juice-shop v17.3.0", age: "34m", awaiting: true },
-  { n: 1043, title: "Directory listing exposes /ftp", state: "AWAITING_APPROVAL", min: 48, outcome: "REPRODUCED", target: "juice-shop v17.3.0", age: "48m", awaiting: true },
+  { n: 1042, title: "Stored XSS in search results", state: "AWAITING_APPROVAL", min: 12, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "12m", awaiting: true, severity: "high" },
+  { n: 1044, title: "Missing rate limit on login", state: "AWAITING_APPROVAL", min: 34, outcome: "NOT_REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "34m", awaiting: true, severity: "medium" },
+  { n: 1043, title: "Directory listing exposes /ftp", state: "AWAITING_APPROVAL", min: 48, outcome: "REPRODUCED", target: "juice-shop", version: "v17.3.0", age: "48m", awaiting: true, severity: "low" },
   { n: 1047, title: "Open redirect on /login", state: "TRIAGING", min: 4, channel: "email", target: null, age: "4m" },
   { n: 1045, title: "SQL injection in search", state: "REPRODUCING", min: 2, target: "juice-shop", age: "2m", investigating: true },
   { n: 1041, title: "SQL injection in login", state: "REPRODUCING", min: 60, target: "juice-shop", age: "1h" },
@@ -50,6 +52,8 @@ function card(r: Row): QueueCardView {
     updatedAt: ago(r.min),
     awaitingVerdictId: r.awaiting ? verdictIdFor(r.n) : null,
     investigating: r.investigating ?? false,
+    severity: r.severity ?? null,
+    targetVersion: r.version ?? null,
     ageLabel: r.age,
   }
 }

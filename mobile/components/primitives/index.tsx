@@ -532,7 +532,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 const styles = StyleSheet.create({
   pill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 99 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
-  pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 14 },
+  pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 13 },
   card: { borderRadius: 24, overflow: "hidden" },
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
   rowLeading: { paddingLeft: 0, paddingRight: 12 },

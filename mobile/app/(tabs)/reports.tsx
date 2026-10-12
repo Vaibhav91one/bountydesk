@@ -6,7 +6,7 @@
  * nothing matches. Data: GET /api/mobile/v1/reports.
  */
 import React, { useState, useEffect } from "react"
-import { View, Text, ScrollView, FlatList, StyleSheet, Pressable, TextInput, ActivityIndicator, Share } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, TextInput, ActivityIndicator, Share } from "react-native"
 import { useRouter } from "expo-router"
 import * as Clipboard from "expo-clipboard"
 import { useApiQuery, ApiError } from "@/lib/use-query"
@@ -16,9 +16,10 @@ import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
 import { TopBarPill } from "@/components/TopBarPill"
-import { ReviewFab } from "@/components/ReviewFab"
-import { PhasePill, ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
+import { ListCard, ReportRow } from "@/components/ReportList"
+import { ageText } from "@/lib/age"
 import { font } from "@/lib/fonts"
 
 /** Reports list response from GET /reports. */
@@ -35,14 +36,6 @@ interface ReportRow extends QueueCard {
 /** Display a report id using sourceLabel per the mockup. */
 function idLabel(row: ReportRow): string {
   return row.sourceLabel ?? row.id
-}
-
-/** Map internal channel names to the labels shown in the mockups. */
-const CHANNEL_LABELS: Record<string, string> = {
-  github: "GitHub issue",
-  email: "Email",
-  upload: "Upload",
-  advisory: "Security advisory",
 }
 
 /** Map report state to the PhaseKey used by PhasePill and chip filter. */
@@ -80,16 +73,6 @@ const PHASE_CHIPS: { value: PhaseKey; label: string }[] = [
   { value: "delivered", label: "Delivered" },
   { value: "closed", label: "Closed" },
 ]
-
-/** Compute a relative age label from an ISO timestamp, matching c.css ageLabel. */
-function ageLabelFor(updatedAt: string): string {
-  const minutes = Math.floor((Date.now() - new Date(updatedAt).getTime()) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h`
-  return `${Math.floor(hours / 24)}d`
-}
 
 function ReportsScreenContent() {
   const { colors } = useTheme()
@@ -171,7 +154,6 @@ function ReportsScreenContent() {
       <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator color={colors.brand} size="large" />
         <TopBarPill />
-        <ReviewFab />
       </View>
     )
   }
@@ -190,29 +172,20 @@ function ReportsScreenContent() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
-      <FlatList
+      <ScrollView
         testID="reports-list"
-        data={filtered}
-        keyExtractor={(r) => r.id}
-        renderItem={({ item, index }) => (
-          <ReportRow
-            row={item}
-            onPress={() => router.push(`/reports/${item.id}`)}
-            onLongPress={() => setLpReportId(item.id)}
-            showDivider={index < filtered.length - 1}
-          />
-        )}
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
+        onScroll={({ nativeEvent: e }) => {
+          if (e.contentOffset.y + e.layoutMeasurement.height > e.contentSize.height - 600) loadMore()
+        }}
+        scrollEventThrottle={100}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={(
-          <>
+      >
             <ScreenTitle title="Reports" meta={`${shownCount} reports`} metaBottom={16} />
 
             {/* Search field (.search in c.css) */}
-            <View style={[styles.searchContainer, { backgroundColor: colors.card, borderColor: colors["glass-edge"] }]}>
-              <Icon name="search" size={20} stroke={colors.muted} />
+            <View style={[styles.searchContainer, { backgroundColor: colors.card }]}>
+              <Icon name="search" size={22} stroke={colors.muted} />
               <TextInput
                 style={[styles.searchField, { color: colors.foreground }]}
                 placeholder="Search reports"
@@ -263,53 +236,54 @@ function ReportsScreenContent() {
                 )
               })}
             </ScrollView>
-          </>
-        )}
-        ListFooterComponent={(
-          <>
-            {loadError ? (
-              <Pressable onPress={() => { setLoadError(null); loadMore() }} style={styles.loadError}>
-                <Text style={[styles.loadErrorText, { color: colors.red }]}>Could not load more. Tap to retry</Text>
-              </Pressable>
-            ) : null}
-            {!loadError && hasMore && !hasFilter ? (
-              <ActivityIndicator color={colors.brand} />
-            ) : null}
-            <Text style={[styles.note, { color: colors.muted }]}>
-              Every report keeps its full history, including closed and denied ones.
-            </Text>
-          </>
-        )}
-        ListEmptyComponent={(
-          <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
-            <SvgImage name="mascot/scanning" width={150} height={150} />
-            <Text style={[styles.noResultH, { color: colors.foreground }]}>
-              No reports match {needle ? `"${search.trim()}"` : ""}
-            </Text>
-            <Text style={[styles.noResultP, { color: colors.muted }]}>
-              Check the spelling, try a report id, or remove a filter.
-            </Text>
-            {hasFilter ? (
-              <Pressable
-                onPress={() => {
-                  setSearch("")
-                  setActiveChip("all")
-                }}
-                style={({ pressed }) => [
-                  styles.clearBtn,
-                  { backgroundColor: colors.fill },
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <Text style={[styles.clearBtnText, { color: colors.foreground }]}>Clear search</Text>
-              </Pressable>
-            ) : null}
-          </View>
-        )}
-      />
 
+        <View style={styles.listSection}>
+          {filtered.length > 0 ? (
+            <ListCard>
+              {filtered.map((item, index) => (
+                <ReportRowItem
+                  key={item.id}
+                  row={item}
+                  onPress={() => router.push(`/reports/${item.id}`)}
+                  onLongPress={() => setLpReportId(item.id)}
+                  showDivider={index > 0}
+                />
+              ))}
+            </ListCard>
+          ) : (
+            <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
+              <SvgImage name="mascot/scanning" width={150} height={150} />
+              <Text style={[styles.noResultH, { color: colors.foreground }]}>
+                No reports match {needle ? `"${search.trim()}"` : ""}
+              </Text>
+              <Text style={[styles.noResultP, { color: colors.muted }]}>
+                Check the spelling, try a report id, or remove a filter.
+              </Text>
+              {hasFilter ? (
+                <Pressable
+                  onPress={() => {
+                    setSearch("")
+                    setActiveChip("all")
+                  }}
+                  style={({ pressed }) => [styles.clearBtn, { backgroundColor: colors.fill }, pressed && { opacity: 0.7 }]}
+                >
+                  <Text style={[styles.clearBtnText, { color: colors.foreground }]}>Clear search</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+          {loadError ? (
+            <Pressable onPress={() => { setLoadError(null); loadMore() }} style={styles.loadError}>
+              <Text style={[styles.loadErrorText, { color: colors.red }]}>Could not load more. Tap to retry</Text>
+            </Pressable>
+          ) : null}
+          {!loadError && hasMore && !hasFilter ? <ActivityIndicator color={colors.brand} /> : null}
+          <Text style={[styles.note, { color: colors.muted }]}>
+            Every report keeps its full history, including closed and denied ones.
+          </Text>
+        </View>
+      </ScrollView>
       <TopBarPill />
-      <ReviewFab />
 
       {lpReportId && (() => {
         const card = allReports.find((r) => r.id === lpReportId)
@@ -347,53 +321,28 @@ export default function ReportsScreen() {
   )
 }
 
-interface ReportRowProps {
+interface ReportRowItemProps {
   row: ReportRow
   onPress: () => void
   onLongPress: () => void
   showDivider: boolean
 }
 
-function ReportRow({ row, onPress, onLongPress, showDivider }: ReportRowProps) {
-  const { colors, spacing } = useTheme()
+function ReportRowItem({ row, onPress, onLongPress, showDivider }: ReportRowItemProps) {
   const phase = phaseForRow(row)
-  const channelLabel = CHANNEL_LABELS[row.channel] ?? row.channel
-  const subtitle = row.targetName ? `${idLabel(row)} · ${row.targetName}` : `${idLabel(row)} · ${channelLabel}`
-  const timeLabel = row.investigating ? "Running" : `${ageLabelFor(row.updatedAt)} ago`
-
+  const subtitle = row.targetName ? `${idLabel(row)} · ${row.targetName}` : `${idLabel(row)} · ${row.channel}`
   return (
-    <Pressable
+    <ReportRow
+      title={row.title}
+      subtitle={subtitle}
+      phase={phase}
+      pillLabel={pillLabel(phase)}
+      age={ageText(row.updatedAt, true)}
+      running={row.investigating}
+      divider={showDivider}
       onPress={onPress}
       onLongPress={onLongPress}
-      delayLongPress={450}
-      style={({ pressed }) => [
-        styles.row,
-        {
-          minHeight: spacing.itemMinHeight,
-          backgroundColor: colors.card,
-          paddingLeft: 20,
-          opacity: pressed ? 0.92 : 1,
-        },
-        showDivider && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-      ]}
-    >
-      <View style={styles.rowMain}>
-        <Text style={[styles.itemT, { color: colors.foreground }]} numberOfLines={2}>
-          {row.title}
-        </Text>
-        <Text style={[styles.itemS, { color: colors.muted }]} numberOfLines={1}>
-          {subtitle}
-        </Text>
-      </View>
-      <View style={styles.rowR}>
-        <PhasePill phase={phase} label={pillLabel(phase)} style={styles.rowPill} />
-        {row.investigating ? (
-          <Text style={[styles.shimmer, { color: colors.muted }]}>Running</Text>
-        ) : (
-          <Text style={[styles.itemB, { color: colors.muted }]}>{timeLabel}</Text>
-        )}
-      </View>
-    </Pressable>
+    />
   )
 }
 
@@ -402,17 +351,14 @@ const styles = StyleSheet.create({
   scrollContent: { paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   error: { fontFamily: font.regular, fontSize: 16 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
-  hmeta: { fontFamily: font.regular, fontSize: 15, marginBottom: 8 },
   searchContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
     marginHorizontal: 16,
-    minHeight: 48,
+    height: 48,
     paddingHorizontal: 16,
     borderRadius: 24,
-    marginBottom: 12,
   },
   searchField: {
     flex: 1,
@@ -423,7 +369,7 @@ const styles = StyleSheet.create({
     height: 48,
     backgroundColor: "transparent",
   },
-  chipsContent: { gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
+  chipsContent: { gap: 8, paddingHorizontal: 16, paddingTop: 12 },
   fchip: {
     height: 44,
     paddingHorizontal: 18,
@@ -431,17 +377,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  fchipText: { fontFamily: font.medium, fontSize: 14, lineHeight: 18 },
-  list: { marginHorizontal: 16 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 18 },
-  rowMain: { flex: 1, minWidth: 0 },
-  itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  itemS: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
-  rowR: { flexShrink: 0, flexDirection: "column", alignItems: "flex-end", gap: 6 },
-  rowPill: { marginTop: 0, marginBottom: 0 },
-  itemB: { fontFamily: font.regular, fontSize: 13 },
-  shimmer: { fontFamily: font.regular, fontSize: 13 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  fchipText: { fontFamily: font.medium, fontSize: 15, lineHeight: 15, top: 1 },
+  listSection: { marginTop: 20 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingHorizontal: 20, paddingTop: 10 },
   noResult: {
     alignItems: "center",
     paddingVertical: 48,

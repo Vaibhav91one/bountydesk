@@ -5,7 +5,7 @@
  * bar that opens the sign screen for the next report waiting on a decision. The badge is the
  * number of reports awaiting approval, read from the same /home and /queue queries the tabs use.
  *
- * Rendered above the native tab bar on the three tab screens only.
+ * Rendered by <TabDock> beside the tab pill, so it shows on the three tab screens only.
  */
 import { View, Text, StyleSheet, Pressable } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"

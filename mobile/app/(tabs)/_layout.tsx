@@ -1,5 +1,5 @@
 /**
- * Signed-in reviewer shell using the installed Expo native tabs.
+ * Signed-in reviewer shell: JS tabs with the hand-drawn <TabDock>.
  *
  * Per docs/site/native-ui.html the tab bar holds only Home, Queue, Reports.
  * Review next (m11) and the bell/more chrome are NOT tabs — they are overlaid
@@ -10,14 +10,14 @@
  */
 import { useAuth } from "@/lib/auth-hooks"
 import { Redirect } from "expo-router"
-import { NativeTabs } from "expo-router/unstable-native-tabs"
+import { Tabs } from "expo-router/js-tabs"
 import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"
 
 import { api, ApiError } from "@/lib/api"
 import { useHandleApiError } from "@/lib/use-api-error"
 import type { HomeSummary } from "@/lib/types"
-import { useTheme } from "@/theme"
+import { TabDock } from "@/components/TabDock"
 import { font } from "@/lib/fonts"
 
 export default function TabsLayout() {
@@ -60,32 +60,13 @@ export default function TabsLayout() {
   return <TabsShell />
 }
 
-// Tab icons are SF Symbols: NativeTabs on iOS accepts a symbol name or an image, not a react-native-svg element.
-// house, tray and doc.text are the closest SF matches for the mockup's home, inbox-tray and document glyphs.
 function TabsShell() {
-  const { colors } = useTheme()
   return (
-    <NativeTabs
-      backgroundColor={colors.glass}
-      iconColor={{ default: colors.muted, selected: colors.foreground }}
-      tintColor={colors.foreground}
-      labelStyle={{ default: { fontFamily: font.medium, fontSize: 12, color: colors.muted }, selected: { fontFamily: font.medium, fontSize: 12, color: colors.foreground } }}
-    >
-      <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Icon sf="house" />
-        <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="queue">
-        <NativeTabs.Trigger.Icon sf="tray" />
-        <NativeTabs.Trigger.Label>Queue</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger name="reports">
-        <NativeTabs.Trigger.Icon sf="doc.text" />
-        <NativeTabs.Trigger.Label>Reports</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+    <Tabs tabBar={(p) => <TabDock {...p} />} screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: "transparent" } }}>
+      <Tabs.Screen name="index" />
+      <Tabs.Screen name="queue" />
+      <Tabs.Screen name="reports" />
+    </Tabs>
   )
 }
 

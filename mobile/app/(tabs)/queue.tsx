@@ -16,9 +16,10 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { TopBarPill } from "@/components/TopBarPill"
-import { ReviewFab } from "@/components/ReviewFab"
-import { PhasePill, ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
+import { ListCard, ReportRow, SectionHead } from "@/components/ReportList"
+import { ageText } from "@/lib/age"
 import { font } from "@/lib/fonts"
 
 interface QueueColumnView {
@@ -36,14 +37,6 @@ interface QueueCardView extends QueueCard {
 /** Display a report id using sourceLabel per the mockup. */
 function idLabel(card: QueueCardView): string {
   return card.sourceLabel ?? card.id
-}
-
-/** Map internal channel names to the labels shown in the mockups. */
-const CHANNEL_LABELS: Record<string, string> = {
-  github: "GitHub issue",
-  email: "Email",
-  upload: "Upload",
-  advisory: "Security advisory",
 }
 
 interface QueueResponse {
@@ -139,7 +132,6 @@ function QueueScreenContent() {
       <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
         <ActivityIndicator color={colors.brand} size="large" />
         <TopBarPill />
-        <ReviewFab />
       </View>
     )
   }
@@ -153,34 +145,32 @@ function QueueScreenContent() {
       >
         <ScreenTitle title="Queue" meta={`${openCount} open reports`} />
 
-        {sections.map((s) => (
+        {sections.map((s, si) => (
           <View key={s.key} style={styles.section}>
-            <View style={styles.sh}>
-              <Text style={[styles.shText, { color: colors.foreground }]}>{s.label}</Text>
-              <Text style={[styles.shCount, { color: colors.muted }]}>{s.count}</Text>
-            </View>
-            <View style={[styles.list, { backgroundColor: colors.card, borderRadius: 24, overflow: "hidden" }]}>
+            <SectionHead title={s.label} count={s.count} />
+            <ListCard>
               {s.cards.map((card, i) => (
                 <QueueRow
                   key={card.id}
                   card={card}
                   onPress={() => router.push(`/reports/${card.id}`)}
                   onLongPress={() => setLpReportId(card.id)}
-                  showDivider={i < s.cards.length - 1}
+                  showDivider={i > 0}
                 />
               ))}
-            </View>
+            </ListCard>
             {s.note ? <Text style={[styles.sectionNote, { color: colors.muted }]}>{s.note}</Text> : null}
+            {si === sections.length - 1 ? (
+              <Text style={[styles.note, { color: colors.muted }]}>
+                Reports wait at each phase until the agent or a reviewer moves them on.
+              </Text>
+            ) : null}
           </View>
         ))}
 
-        <Text style={[styles.note, { color: colors.muted }]}>
-          Reports wait at each phase until the agent or a reviewer moves them on.
-        </Text>
       </ScrollView>
 
       <TopBarPill />
-      <ReviewFab />
 
       {lpReportId && (() => {
         const card = cols.flatMap((c) => c.cards).find((c) => c.id === lpReportId)
@@ -229,44 +219,20 @@ interface QueueRowProps {
 }
 
 function QueueRow({ card, onPress, onLongPress, showDivider }: QueueRowProps) {
-  const { colors, spacing } = useTheme()
   const phase = phaseForCard(card)
-  const channelLabel = CHANNEL_LABELS[card.channel] ?? card.channel
-  const subtitle = card.targetName ? `${idLabel(card)} · ${card.targetName}` : `${idLabel(card)} · ${channelLabel}`
-
+  const subtitle = card.targetName ? `${idLabel(card)} · ${card.targetName}` : `${idLabel(card)} · ${card.channel}`
   return (
-    <Pressable
+    <ReportRow
+      title={card.title}
+      subtitle={subtitle}
+      phase={phase}
+      pillLabel={pillLabel(phase)}
+      age={ageText(card.updatedAt)}
+      running={card.investigating}
+      divider={showDivider}
       onPress={onPress}
       onLongPress={onLongPress}
-      delayLongPress={450}
-      style={({ pressed }) => [
-        styles.row,
-        {
-          minHeight: spacing.itemMinHeight,
-          backgroundColor: colors.card,
-          paddingLeft: 20,
-          opacity: pressed ? 0.92 : 1,
-        },
-        showDivider && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.line },
-      ]}
-    >
-      <View style={styles.rowMain}>
-        <Text style={[styles.itemT, { color: colors.foreground }]} numberOfLines={2}>
-          {card.title}
-        </Text>
-        <Text style={[styles.itemS, { color: colors.muted }]} numberOfLines={1}>
-          {subtitle}
-        </Text>
-      </View>
-      <View style={styles.rowR}>
-        <PhasePill phase={phase} label={pillLabel(phase)} style={styles.rowPill} />
-        {card.investigating ? (
-          <Text style={[styles.shimmer, { color: colors.muted }]}>Running</Text>
-        ) : (
-          <Text style={[styles.itemB, { color: colors.muted }]}>{card.ageLabel}</Text>
-        )}
-      </View>
-    </Pressable>
+    />
   )
 }
 
@@ -275,21 +241,7 @@ const styles = StyleSheet.create({
   scrollContent: { paddingBottom: 150 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
   error: { fontFamily: font.regular, fontSize: 16 },
-  h1: { fontFamily: font.bold, fontSize: 28, letterSpacing: -0.03 * 28, marginTop: 8, marginBottom: 4 },
-  hmeta: { fontFamily: font.regular, fontSize: 15, marginBottom: 8 },
   section: { marginBottom: 28 },
-  sh: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 20, paddingTop: 0, paddingBottom: 12 },
-  shText: { fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
-  shCount: { marginLeft: 4, fontFamily: font.semibold, fontSize: 20, lineHeight: 24 },
-  list: { marginHorizontal: 16 },
-  row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 18 },
-  rowMain: { flex: 1, minWidth: 0 },
-  itemT: { fontFamily: font.medium, fontSize: 17, lineHeight: 20 },
-  itemS: { fontFamily: font.regular, fontSize: 13, marginTop: 3 },
-  rowR: { flexShrink: 0, flexDirection: "column", alignItems: "flex-end", gap: 6 },
-  rowPill: { marginTop: 0, marginBottom: 0 },
-  itemB: { fontFamily: font.regular, fontSize: 13 },
-  shimmer: { fontFamily: font.regular, fontSize: 13 },
-  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 12, marginBottom: 60 },
+  note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingHorizontal: 20, paddingTop: 10 },
   sectionNote: { fontFamily: font.regular, fontSize: 13, lineHeight: 18, paddingHorizontal: 20, marginTop: 8 },
 })

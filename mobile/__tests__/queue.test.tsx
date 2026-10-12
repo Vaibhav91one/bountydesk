@@ -258,7 +258,7 @@ describe("M5 Queue", () => {
     expect(getByText("Open redirect on /redirect")).toBeTruthy()
   })
 
-  it("renders channel labels per mockup", async () => {
+  it("falls back to the channel name when a report has no target", async () => {
     mockUseApiQuery.mockReturnValue({
       data: mockQueueData,
       error: undefined,
@@ -268,7 +268,7 @@ describe("M5 Queue", () => {
 
     const { getByText } = await render(<QueueScreen />)
 
-    expect(getByText("BD-1047 · Email")).toBeTruthy()
+    expect(getByText("BD-1047 · email")).toBeTruthy()
     expect(getByText("#479 · juice-shop")).toBeTruthy()
   })
 
