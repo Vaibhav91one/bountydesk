@@ -45,6 +45,8 @@ export type HomeSummary = {
   phases: HomePhase[]
 }
 
+export type Severity = "Critical" | "High" | "Medium" | "Low" | "Info"
+
 /**
  * One report card in the queue or reports list.
  */
@@ -66,8 +68,8 @@ export type QueueCard = {
   updatedAt: string
   awaitingVerdictId: string | null
   investigating: boolean
-  /** triage severity of the drafted verdict; absent until the server sends it */
-  severity?: "high" | "medium" | "low" | null
+  /** triage severity of the drafted verdict; absent on older servers */
+  severity?: Severity | null
   /** the pinned target version, e.g. "v17.3.0"; the home card appends it to the target name */
   targetVersion?: string | null
 }
@@ -165,6 +167,10 @@ export type InboxCard = {
   state: string
   awaitingVerdictId: string | null
   updatedAt: string
+  severity?: Severity | null
+  targetVersion?: string | null
+  /** why the delivery failed; only set for FAILED deliveries */
+  failureReason?: string | null
 }
 
 /**
@@ -265,6 +271,8 @@ export type ConnectionRow = {
   delivered: number
   lastReportAt: string | null
   lastSyncedAt: string
+  /** default branch; absent on older servers */
+  branch?: string | null
   manageUrl: string | null
   onboarding: OnboardingProposal | null
   onboardingProgress: OnboardingProgress | null
@@ -339,6 +347,8 @@ export type TargetScope = {
   buildMarker: string | null
   scopeRules: unknown[]
   readinessPath: string
+  /** the port the health check answered on; absent on older servers */
+  port?: number | null
   startCommand: string | null
   egress: "none"
 }

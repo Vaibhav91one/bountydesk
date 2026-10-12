@@ -182,7 +182,7 @@ function repoStatusHint(row: ConnectionRow): string {
       if (row.configured && row.target) {
         return `${visibility} · ${row.target}`
       }
-      return `${visibility} · No target`
+      return `${visibility} · ${row.branch ?? "No target"}`
   }
 }
 

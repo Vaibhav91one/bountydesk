@@ -296,6 +296,22 @@ describe("M4 Home", () => {
     expect(queryByText("Home")).toBeNull()
   })
 
+  it("shows the server severity and target version on the needs-you card", async () => {
+    const withExtras = QUEUE_DATA.map((c) =>
+      c.key === "awaiting-approval" ? { ...c, cards: c.cards.map((x) => ({ ...x, severity: "High", targetVersion: "v17.3.0" })) } : c,
+    )
+    mockQueryData["/queue?limit=50"] = { data: { columns: withExtras } }
+    const first = await render(<HomeScreen />)
+    expect(first.getByText("High")).toBeTruthy()
+    expect(first.getByText("#481 · juice-shop v17.3.0")).toBeTruthy()
+  })
+
+  it("omits severity and version on the needs-you card when the server sends none", async () => {
+    const second = await render(<HomeScreen />)
+    expect(second.queryByText("High")).toBeNull()
+    expect(second.getByText("#481 · juice-shop")).toBeTruthy()
+  })
+
   it("renders the awaiting needs-you card with title and Not reproduced pill", async () => {
     const { getByText } = await render(<HomeScreen />)
     expect(getByText("Missing rate limit on login")).toBeTruthy()
@@ -386,10 +402,10 @@ describe("home ordering", () => {
 
   it("sorts needs-you by severity, newest first within a severity", () => {
     const cards = [
-      card("low", "AWAITING_APPROVAL", "2026-08-26T11:50:00Z", { severity: "low" }),
+      card("low", "AWAITING_APPROVAL", "2026-08-26T11:50:00Z", { severity: "Low" }),
       card("none", "AWAITING_APPROVAL", "2026-08-26T11:59:00Z"),
-      card("high-old", "AWAITING_APPROVAL", "2026-08-26T10:00:00Z", { severity: "high" }),
-      card("high-new", "AWAITING_APPROVAL", "2026-08-26T11:00:00Z", { severity: "high" }),
+      card("high-old", "AWAITING_APPROVAL", "2026-08-26T10:00:00Z", { severity: "High" }),
+      card("high-new", "AWAITING_APPROVAL", "2026-08-26T11:00:00Z", { severity: "High" }),
     ]
     expect(sortNeedsYou(cards, "severity").map((c: { id: string }) => c.id)).toEqual(["high-new", "high-old", "low", "none"])
     expect(sortNeedsYou(cards, "newest").map((c: { id: string }) => c.id)).toEqual(["none", "low", "high-new", "high-old"])

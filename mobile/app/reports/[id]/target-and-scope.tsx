@@ -92,7 +92,7 @@ export default function TargetAndScopeScreen() {
         <View style={styles.sect}>
           <SectionHead title="Readiness" />
           <ListCard>
-            <ItemLine title="Health check" subtitle={`Answered at ${scope.readinessPath}`} trailing={<PhasePill phase="delivered" label="Ready" />} />
+            <ItemLine title="Health check" subtitle={scope.port ? `Answered on port ${scope.port}` : `Answered at ${scope.readinessPath}`} trailing={<PhasePill phase="delivered" label="Ready" />} />
           </ListCard>
           <Note>This profile is held on the server. The agent cannot change it, scope is never taken from agent text, and a sandbox status file reports readiness only.</Note>
         </View>

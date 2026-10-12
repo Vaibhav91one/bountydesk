@@ -133,4 +133,18 @@ describe("M22 Target and scope", () => {
     const { getByText } = await render(<TargetAndScopeScreen />)
     expect(getByText("Network failed")).toBeTruthy()
   })
+
+  it("reads the readiness port, falling back to the path when the server sends none", async () => {
+    mockUseApiQuery.mockReturnValue({
+      data: { ...mockCaseFile, targetScope: { ...mockCaseFile.targetScope, port: 3000 } },
+      error: null,
+    })
+    const first = await render(<TargetAndScopeScreen />)
+    expect(first.getByText("Answered on port 3000")).toBeTruthy()
+    first.unmount()
+    mockUseApiQuery.mockReturnValue({ data: mockCaseFile, error: null })
+    const second = await render(<TargetAndScopeScreen />)
+    expect(second.getByText("Answered at /")).toBeTruthy()
+  })
+
 })

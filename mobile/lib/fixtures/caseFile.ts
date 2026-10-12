@@ -113,6 +113,7 @@ export function caseFile(id: string, asReceipt = false): MobileCaseFileWithScope
       buildMarker: "bd-build-1867b92-ok",
       scopeRules: [{ allow: "localhost" }],
       readinessPath: "/",
+      port: 3000,
       startCommand: "npm start",
       egress: "none",
     },
