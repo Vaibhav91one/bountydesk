@@ -75,5 +75,5 @@ clears a suggestion that was already shown.
 - `app/(app)/reports/[id]/page.tsx`: calls `readPushSuggestion` and passes it to the panel.
 - `scripts/run-worker-daemon.ts`: calls `reconcilePushSuggestions` after
   `reconcileGitHubAccess` on each reconcile tick.
-- `drizzle/0056_retest_push_suggestion.sql`: adds `latest_pushed_commit_sha` and
+- `drizzle/0057_retest_push_suggestion.sql`: adds `latest_pushed_commit_sha` and
   `latest_pushed_branch` to `connected_repository`.
