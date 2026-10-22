@@ -1294,3 +1294,175 @@ test("negativeControlAcceptedStatuses also widens the exploit's own dispatch whe
   );
   assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
+
+// Setup steps: an access-control recipe (IDOR) needs per-run principals and a resource id before
+// its control and exploit legs can be written, so the fixture alone (one request, canary only) is
+// not enough. Captured values are substituted as {{name}} into later requests.
+
+const TOKEN_A = "tok-A.part_1-x";
+
+function jsonField(body: string, field: string): string | undefined {
+  try {
+    const value = (JSON.parse(body) as Record<string, unknown>)[field];
+    return typeof value === "string" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const idorRecipe: ReproductionRecipe = {
+  id: "test-idor",
+  title: "a test IDOR recipe",
+  keywords: ["idor"],
+  fixture: { request: { method: "POST", path: "/fixture", body: { email: "{{canary}}" } } },
+  setup: [
+    {
+      request: { method: "POST", path: "/login-a", body: { who: "a" } },
+      capture: { tokenA: (response) => jsonField(response.body, "token") },
+    },
+    {
+      request: { method: "POST", path: "/seed-b", body: { note: "{{canary}}" } },
+      capture: { resourceId: (response) => jsonField(response.body, "id") },
+    },
+  ],
+  negativeControl: { method: "GET", path: "/own", headers: { Authorization: "Bearer {{tokenA}}" } },
+  exploit: { method: "GET", path: "/resource/{{resourceId}}", headers: { Authorization: "Bearer {{tokenA}}" } },
+  oracleCheck: (response, canary) => response.body.includes(canary),
+};
+
+function setupFetchStub(
+  calls: FetchCall[],
+  opts: { loginStatus?: number; loginBody?: string; seedBody?: string; resourceBodyFor?: (auth: string | null) => string } = {},
+): typeof fetch {
+  let canary: string | null = null;
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    if (url.includes("/ports/") && url.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ sandboxId: FAKE_SANDBOX.id, url: PREVIEW_URL, token: PREVIEW_TOKEN }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    calls.push({ url, init, canary });
+    const parsed = new URL(url);
+    const auth = new Headers(init?.headers).get("authorization");
+    if (parsed.pathname === "/fixture") {
+      canary = (JSON.parse(String(init?.body)) as { email: string }).email;
+      return new Response("{}", { status: 201 });
+    }
+    if (parsed.pathname === "/login-a") {
+      return new Response(opts.loginBody ?? JSON.stringify({ token: TOKEN_A }), { status: opts.loginStatus ?? 200 });
+    }
+    if (parsed.pathname === "/seed-b") {
+      return new Response(opts.seedBody ?? JSON.stringify({ id: "res-42" }), { status: 201 });
+    }
+    if (parsed.pathname === "/own") return new Response("{}", { status: 200 });
+    if (parsed.pathname === "/resource/res-42") {
+      const body = (opts.resourceBodyFor ?? ((a) => (a === `Bearer ${TOKEN_A}` ? JSON.stringify({ note: canary }) : "{}")))(auth);
+      return new Response(body, { status: 200 });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  }) as typeof fetch;
+}
+
+function withIdorAuthorization(recipeOverride: ReproductionRecipe = idorRecipe) {
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return authorizedTarget({ recipe: recipeOverride });
+  };
+}
+
+test("setup: captured values reach later requests, so another principal's resource is reproduced as an IDOR", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls), () => reproduce(reproduceInput({ recipe: idorRecipe })));
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  const exploit = calls.find((c) => new URL(c.url).pathname === "/resource/res-42");
+  assert.ok(exploit, "the exploit path must carry the captured resource id");
+  assert.equal(new Headers(exploit.init?.headers).get("authorization"), `Bearer ${TOKEN_A}`);
+  const control = calls.find((c) => new URL(c.url).pathname === "/own");
+  assert.equal(new Headers(control?.init?.headers).get("authorization"), `Bearer ${TOKEN_A}`);
+});
+
+test("setup: a control that already shows the canary is never trusted, and the exploit never runs", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+  const leakyControl: ReproductionRecipe = { ...idorRecipe, oracleCheck: () => true };
+  withIdorAuthorization(leakyControl);
+
+  const outcome = await withFetch(setupFetchStub(calls), () => reproduce(reproduceInput({ recipe: leakyControl })));
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(!calls.some((c) => new URL(c.url).pathname.startsWith("/resource/")));
+});
+
+test("setup: an endpoint that denies the other principal is NOT_REPRODUCED", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { resourceBodyFor: () => "{}" }), () =>
+    reproduce(reproduceInput({ recipe: idorRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "NOT_REPRODUCED");
+});
+
+test("setup: a failing setup step stops the run before the control or exploit, as ANALYSIS_ONLY", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { loginStatus: 500 }), () =>
+    reproduce(reproduceInput({ recipe: idorRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  const paths = calls.map((c) => new URL(c.url).pathname);
+  assert.ok(!paths.includes("/own") && !paths.some((p) => p.startsWith("/resource/")));
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("setup: a capture that finds nothing is an incomplete run, never a guessed verdict", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { loginBody: "{}" }), () =>
+    reproduce(reproduceInput({ recipe: idorRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(!calls.some((c) => new URL(c.url).pathname === "/own"));
+});
+
+test("setup: a captured value with header or path control characters is refused before it is sent", async () => {
+  for (const hostile of ["tok\r\nX-Evil: 1", "../../etc/passwd", "a b", ""]) {
+    resetSpies();
+    withIdorAuthorization();
+    const calls: FetchCall[] = [];
+
+    const outcome = await withFetch(setupFetchStub(calls, { loginBody: JSON.stringify({ token: hostile }) }), () =>
+      reproduce(reproduceInput({ recipe: idorRecipe })),
+    );
+
+    assert.equal(outcome.outcome, "ANALYSIS_ONLY", JSON.stringify(hostile));
+    assert.ok(!calls.some((c) => new URL(c.url).pathname === "/own"), "nothing after setup may be sent");
+  }
+});
+
+test("setup: captured values are never written into the evidence", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls), () => reproduce(reproduceInput({ recipe: idorRecipe })));
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(!JSON.stringify(outcome).includes(TOKEN_A));
+  assert.ok(!JSON.stringify(outcome).includes("res-42"));
+});

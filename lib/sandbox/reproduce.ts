@@ -80,6 +80,53 @@ function substituteCanary(value: unknown, canary: string): unknown {
   return value;
 }
 
+type CapturedVars = Record<string, string>;
+
+/** What a captured value may contain. It came out of a response the target controls and goes into
+ * a URL path and header values, so anything that could end a header line, climb a path or smuggle
+ * a second parameter is refused rather than escaped. Tokens, uuids and numeric ids all fit. */
+const SAFE_CAPTURED_VALUE = /^[A-Za-z0-9._~-]{1,2048}$/;
+const CAPTURE_NAME = /^[a-z][A-Za-z0-9]*$/;
+
+/** Replace `{{name}}` for each captured name, anywhere in a JSON-serializable value. `{{canary}}`
+ * is not handled here and keeps its own substitution, so a recipe with no setup behaves exactly as
+ * it did before setup existed. */
+function substituteVars(value: unknown, vars: CapturedVars): unknown {
+  if (typeof value === "string") {
+    return Object.entries(vars).reduce((text, [name, captured]) => text.split(`{{${name}}}`).join(captured), value);
+  }
+  if (Array.isArray(value)) return value.map((item) => substituteVars(item, vars));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, substituteVars(item, vars)]),
+    );
+  }
+  return value;
+}
+
+/** Run the recipe's setup steps in order. Returns undefined when any step is not a 2xx, a capture
+ * finds nothing, a value is outside the safe set, or a name is reserved or malformed: all of those
+ * mean the per-run state the control and exploit depend on does not exist. */
+async function runSetup(
+  preview: PortPreviewUrl,
+  steps: NonNullable<ReproductionRecipe["setup"]>,
+  canary: string,
+  signal?: AbortSignal,
+): Promise<CapturedVars | undefined> {
+  const vars: CapturedVars = {};
+  for (const step of steps) {
+    const sent = await sendToSandbox(preview, step.request, canary, signal, vars);
+    if (sent.probe.status < 200 || sent.probe.status >= 300) return undefined;
+    for (const [name, capture] of Object.entries(step.capture ?? {})) {
+      if (name === "canary" || !CAPTURE_NAME.test(name)) return undefined;
+      const value = capture(sent.probe);
+      if (value === undefined || !SAFE_CAPTURED_VALUE.test(value)) return undefined;
+      vars[name] = value;
+    }
+  }
+  return vars;
+}
+
 // getPortPreviewUrl, timeoutSignal, abortReason, throwIfAborted, rethrowIfAborted,
 // waitForAppReady, verifyNoEgress and readLimitedText all moved to ./provision.ts as part of
 // extracting provisionTarget() (see that file's own doc comment). verifyNoEgress in
@@ -98,14 +145,21 @@ async function sendToSandbox(
   request: ReproductionRequest,
   canary: string,
   signal?: AbortSignal,
+  vars: CapturedVars = {},
 ): Promise<SentRequest> {
-  const body = request.body === undefined ? undefined : substituteCanary(request.body, canary);
+  const withCanary = request.body === undefined ? undefined : substituteCanary(request.body, canary);
+  const body = withCanary === undefined ? undefined : substituteVars(withCanary, vars);
   const bodyText = body === undefined ? undefined : JSON.stringify(body);
-  const url = `${preview.url.replace(/\/$/, "")}${request.path}`;
+  const path = substituteVars(request.path, vars) as string;
+  const url = `${preview.url.replace(/\/$/, "")}${path}`;
 
   const response = await fetch(url, {
     method: request.method,
-    headers: sandboxRequestHeaders(request.headers, preview.token, bodyText !== undefined),
+    headers: sandboxRequestHeaders(
+      request.headers && (substituteVars(request.headers, vars) as Record<string, string>),
+      preview.token,
+      bodyText !== undefined,
+    ),
     body: bodyText,
     redirect: "manual",
     signal: timeoutSignal(signal),
@@ -172,11 +226,12 @@ async function runLeg(
   oracleCheck: (response: ReproductionProbeResult, canary: string) => Promise<boolean> | boolean,
   signal?: AbortSignal,
   isAcceptableStatus: (status: number) => boolean = defaultIsAcceptableStatus,
+  vars: CapturedVars = {},
 ): Promise<LegResult> {
   const at = new Date().toISOString();
   let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
   try {
-    const sent = await sendToSandbox(preview, request, canary, signal);
+    const sent = await sendToSandbox(preview, request, canary, signal, vars);
     bodyEvidence = sent.bodyEvidence;
     if (!isAcceptableStatus(sent.probe.status)) {
       return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
@@ -214,11 +269,12 @@ async function runExploitWithFollowUp(
   canary: string,
   signal?: AbortSignal,
   isAcceptableStatus: (status: number) => boolean = defaultIsAcceptableStatus,
+  vars: CapturedVars = {},
 ): Promise<LegResult> {
   const at = new Date().toISOString();
   let bodyEvidence: RequestBodyEvidence = { dispatched: false, sha256: null };
   try {
-    const sentExploit = await sendToSandbox(preview, exploitRequest, canary, signal);
+    const sentExploit = await sendToSandbox(preview, exploitRequest, canary, signal, vars);
     bodyEvidence = sentExploit.bodyEvidence;
     if (!isAcceptableStatus(sentExploit.probe.status)) {
       return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
@@ -229,7 +285,7 @@ async function runExploitWithFollowUp(
       return { ranToCompletion: true, canaryFound: false, at, bodyEvidence };
     }
 
-    const sentFollowUp = await sendToSandbox(preview, followUpRequest, canary, signal);
+    const sentFollowUp = await sendToSandbox(preview, followUpRequest, canary, signal, vars);
     if (!defaultIsAcceptableStatus(sentFollowUp.probe.status)) {
       return { ranToCompletion: false, canaryFound: false, at, bodyEvidence };
     }
@@ -398,6 +454,21 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
 
     throwIfAborted(opts?.signal);
 
+    // Setup steps belong to the fixture: they build the per-run state (a second principal's token,
+    // the id of a resource seeded with the canary) the control and exploit read. Any failure leaves
+    // the fixture incomplete, the same fail-closed path as a rejected fixture request.
+    let capturedVars: CapturedVars = {};
+    if (fixtureCompleted && recipe.setup?.length) {
+      try {
+        const vars = await runSetup(preview, recipe.setup, canary, opts?.signal);
+        if (vars) capturedVars = vars;
+        else fixtureCompleted = false;
+      } catch (error) {
+        rethrowIfAborted(error, opts?.signal);
+        fixtureCompleted = false;
+      }
+    }
+
     // Negative control next, always, per Q3 -- but only if the fixture actually seeded a
     // canary, and the exploit only if the negative control both completed and stayed clean.
     // Anything short-circuited here is recorded as never having run, not guessed at.
@@ -417,6 +488,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
         recipe.oracleCheck,
         opts?.signal,
         negativeControlIsAcceptable,
+        capturedVars,
       );
 
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
@@ -428,8 +500,9 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
               canary,
               opts?.signal,
               negativeControlIsAcceptable,
+              capturedVars,
             )
-          : await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal);
+          : await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal, undefined, capturedVars);
       }
     }
 
