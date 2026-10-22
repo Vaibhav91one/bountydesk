@@ -85,7 +85,9 @@ type CapturedVars = Record<string, string>;
 /** What a captured value may contain. It came out of a response the target controls and goes into
  * a URL path and header values, so anything that could end a header line, climb a path or smuggle
  * a second parameter is refused rather than escaped. Tokens, uuids and numeric ids all fit. */
-const SAFE_CAPTURED_VALUE = /^[A-Za-z0-9._~-]{1,2048}$/;
+// A value made only of dots is excluded too: `fetch()` collapses a `/..` path segment while parsing
+// the URL, which would send the request to a different endpoint than the recipe names.
+const SAFE_CAPTURED_VALUE = /^(?!\.{1,2}$)[A-Za-z0-9._~-]{1,2048}$/;
 const CAPTURE_NAME = /^[a-z][A-Za-z0-9]*$/;
 
 /** Replace `{{name}}` for each captured name, anywhere in a JSON-serializable value. `{{canary}}`

@@ -1519,3 +1519,18 @@ test("setup: a recipe with no setup steps records no setup evidence", async () =
   if (outcome.outcome !== "REPRODUCED") return;
   assert.equal(outcome.evidence.setup, undefined);
 });
+
+test("setup: a captured value that is a dot segment is refused, since the URL parser would collapse it into another path", async () => {
+  for (const hostile of [".", ".."]) {
+    resetSpies();
+    withIdorAuthorization();
+    const calls: FetchCall[] = [];
+
+    const outcome = await withFetch(setupFetchStub(calls, { seedBody: JSON.stringify({ id: hostile }) }), () =>
+      reproduce(reproduceInput({ recipe: idorRecipe })),
+    );
+
+    assert.equal(outcome.outcome, "ANALYSIS_ONLY", JSON.stringify(hostile));
+    assert.ok(!calls.some((c) => new URL(c.url).pathname === "/own"), "nothing after setup may be sent");
+  }
+});
