@@ -458,16 +458,19 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // the id of a resource seeded with the canary) the control and exploit read. Any failure leaves
     // the fixture incomplete, the same fail-closed path as a rejected fixture request.
     let capturedVars: CapturedVars = {};
+    let setupCompleted = true;
     if (fixtureCompleted && recipe.setup?.length) {
       try {
         const vars = await runSetup(preview, recipe.setup, canary, opts?.signal);
         if (vars) capturedVars = vars;
-        else fixtureCompleted = false;
+        else setupCompleted = false;
       } catch (error) {
         rethrowIfAborted(error, opts?.signal);
-        fixtureCompleted = false;
+        setupCompleted = false;
       }
     }
+    // The control and exploit need both the seeded canary and the setup state.
+    const legsCanRun = fixtureCompleted && setupCompleted;
 
     // Negative control next, always, per Q3 -- but only if the fixture actually seeded a
     // canary, and the exploit only if the negative control both completed and stayed clean.
@@ -475,7 +478,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     let negativeControl = notRun(fixtureAt);
     let exploit = notRun(fixtureAt);
 
-    if (fixtureCompleted) {
+    if (legsCanRun) {
       const negativeControlIsAcceptable = recipe.negativeControlAcceptedStatuses
         ? (status: number) =>
             defaultIsAcceptableStatus(status) || recipe.negativeControlAcceptedStatuses!.includes(status)
@@ -507,7 +510,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     }
 
     const decision = decideOutcome({
-      fixtureCompleted,
+      fixtureCompleted: legsCanRun,
       negativeControlCompleted: negativeControl.ranToCompletion,
       negativeControlCanaryFound: negativeControl.canaryFound,
       exploitCompleted: exploit.ranToCompletion,
@@ -518,6 +521,8 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       recipeId,
       sandboxId,
       fixture: { ranToCompletion: fixtureCompleted, at: fixtureAt },
+      // Recorded only when the recipe has setup steps and the fixture got far enough to run them.
+      ...(fixtureCompleted && recipe.setup?.length ? { setup: { ranToCompletion: setupCompleted } } : {}),
       negativeControl: {
         ranToCompletion: negativeControl.ranToCompletion,
         canaryFound: negativeControl.canaryFound,

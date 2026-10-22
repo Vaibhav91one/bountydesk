@@ -1466,3 +1466,56 @@ test("setup: captured values are never written into the evidence", async () => {
   assert.ok(!JSON.stringify(outcome).includes(TOKEN_A));
   assert.ok(!JSON.stringify(outcome).includes("res-42"));
 });
+
+test("setup: a failed setup step is recorded as a setup failure, not as a fixture that never seeded the canary", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { loginStatus: 500 }), () =>
+    reproduce(reproduceInput({ recipe: idorRecipe })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome !== "ANALYSIS_ONLY") return;
+  // The fixture request itself returned 2xx, and verdict evidence cannot be edited later.
+  assert.equal(outcome.evidence?.fixture?.ranToCompletion, true);
+  assert.equal(outcome.evidence?.setup?.ranToCompletion, false);
+  assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+});
+
+test("setup: a rejected fixture request still reports the fixture failure and skips setup entirely", async () => {
+  resetSpies();
+  withIdorAuthorization();
+  const calls: FetchCall[] = [];
+  const stub = setupFetchStub(calls);
+  const rejectingFixture = (async (input: string | URL | Request, init?: RequestInit) => {
+    if (new URL(String(input)).pathname === "/fixture") return new Response("{}", { status: 500 });
+    return stub(input, init);
+  }) as typeof fetch;
+
+  const outcome = await withFetch(rejectingFixture, () => reproduce(reproduceInput({ recipe: idorRecipe })));
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome !== "ANALYSIS_ONLY") return;
+  assert.equal(outcome.evidence?.fixture?.ranToCompletion, false);
+  assert.equal(outcome.evidence?.setup, undefined, "setup never ran, so there is nothing to record");
+  assert.equal(outcome.reason, "TARGET_UNAVAILABLE");
+});
+
+test("setup: a recipe with no setup steps records no setup evidence", async () => {
+  resetSpies();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    fetchStub(calls, {
+      negativeControlBody: () => JSON.stringify({ data: [] }),
+      exploitBody: (canary) => JSON.stringify({ data: [{ name: canary }] }),
+    }),
+    () => reproduce(reproduceInput()),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  if (outcome.outcome !== "REPRODUCED") return;
+  assert.equal(outcome.evidence.setup, undefined);
+});

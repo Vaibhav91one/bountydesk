@@ -194,6 +194,10 @@ export type ReproductionEvidence = {
    * the target returned a 2xx: a fixture that errored never created a canary to look for, so a
    * false value here forces ANALYSIS_ONLY regardless of what the other two legs found. */
   fixture: { ranToCompletion: boolean; at: string };
+  /** Present only when the recipe has `setup` steps. `ranToCompletion` is false when any step was
+   * not a 2xx, a capture found nothing, or a captured value was refused. It is separate from
+   * `fixture` so a setup failure is not recorded as a canary that was never seeded. */
+  setup?: { ranToCompletion: boolean };
   negativeControl: { ranToCompletion: boolean; canaryFound: boolean; at: string };
   exploit: { ranToCompletion: boolean; canaryFound: boolean; at: string };
   /** sha256 hex of the raw canary value. Never the value itself. */
