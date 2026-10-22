@@ -42,6 +42,7 @@ export function ReviewFab({ count }: { count?: number }) {
       <Pressable
         onPress={handlePress}
         style={[styles.fab, { backgroundColor: colors.brand, shadowColor: colors.brand }]}
+        accessibilityRole="button"
         accessibilityLabel={`Review next verdict${waiting > 0 ? `, ${waiting} waiting` : ""}`}
       >
         <Icon name="check" size={28} stroke="#ffffff" strokeWidth={2.2} />
