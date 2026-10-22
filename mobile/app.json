@@ -9,7 +9,10 @@
     "userInterfaceStyle": "dark",
     "ios": {
       "bundleIdentifier": "dev.bountydesk.mobile",
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.png",
+      "associatedDomains": [
+        "applinks:app.bountydesk.vaibhav.quest"
+      ]
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +20,29 @@
         "foregroundImage": "./assets/images/icon.png"
       },
       "package": "dev.bountydesk.mobile",
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "app.bountydesk.vaibhav.quest",
+              "pathPrefix": "/reports"
+            },
+            {
+              "scheme": "https",
+              "host": "app.bountydesk.vaibhav.quest",
+              "pathPrefix": "/inbox"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
     },
     "plugins": [
       "expo-router",
@@ -43,6 +68,9 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
     }
   }
 }
