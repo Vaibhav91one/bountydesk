@@ -30,7 +30,7 @@ export type ReproductionRequest =
       body?: never;
     }
   | {
-      method: "POST";
+      method: "POST" | "PUT";
       path: string;
       headers?: Record<string, string>;
       /** May contain the literal string "{{canary}}", substituted by the orchestrator with a

