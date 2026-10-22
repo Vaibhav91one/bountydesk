@@ -101,6 +101,22 @@ Metrics:
 and `bench/corpus.test.ts` (unique ids, required fields, and structural invariants for the 120-case
 corpus); neither touches the database or the corpus file at runtime.
 
+## Vulnerability classes
+
+Every case carries a `vulnClass` (`injection`, `xss`, `idor`, `csrf`, `path-traversal`,
+`broken-auth`, `info-disclosure`, `business-logic`, `other`) so the scorecard can show where the
+oracle is weak instead of one blended number. Positives are labelled by hand. A negative takes the
+class of the bug it describes or imitates, assigned by title keywords in `bench/gen_corpus.py`
+(`NEGATIVE_CLASS_RULES`), so those labels are a heuristic: fix a mislabelled case in the generator
+and regenerate rather than editing `corpus.json`. Classes with very few cases (`csrf`,
+`business-logic`) give noisy rates; read them as a pointer, not a measurement.
+
+`npm run bench:score` is offline and read-only. It joins a results file to the corpus by case id and
+fails on an id the corpus does not know.
+
+The runner refuses any `DATABASE_URL` that is not loopback, so a benchmark run cannot write to
+production; `bench/run.hermetic.test.ts` pins that.
+
 ## The sample-size caveat
 
 Read any FPR or invalid-recall number from this corpus as a rough signal, not a certified rate.
@@ -130,12 +146,8 @@ npm run worker:daemon # left running
 # 3. collect the agent's own drafted verdict per report into bench/.runs/<runId>.results.json
 npm run bench:run -- collect --run=<runId>
 
-# 4. score it (ad hoc, from a results file shaped { results: [{ id, expected, actual }] }):
-node --import tsx -e '
-  import { score } from "./bench/score.ts";
-  const { results } = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-  console.log(JSON.stringify(score(results), null, 2));
-' bench/.runs/<runId>.results.json
+# 4. score it: overall plus one row per vulnerability class (FPR, FNR, abstention)
+npm run bench:score -- bench/.runs/<runId>.results.json
 
 # 5. cleanup: cancel every report the run filed (never approves or delivers anything).
 #    Dry run without --commit.

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { aggregate, score, type CaseResult } from "./score";
+import { aggregate, score, scoreByGroup, type CaseResult } from "./score";
 
 function results(pairs: Array<[CaseResult["expected"], CaseResult["actual"]]>): CaseResult[] {
   return pairs.map(([expected, actual], i) => ({ id: `c${i}`, expected, actual }));
@@ -105,4 +105,25 @@ test("aggregate: reports mean and min/max across repeated runs", () => {
 
 test("aggregate: throws on no scorecards", () => {
   assert.throws(() => aggregate([]));
+});
+
+test("scoreByGroup: each group is scored on its own cases so one weak class is not averaged away", () => {
+  const cards = scoreByGroup([
+    { id: "a1", group: "sqli", expected: "REPRODUCED", actual: "REPRODUCED" },
+    { id: "a2", group: "sqli", expected: "NOT_REPRODUCED", actual: "NOT_REPRODUCED" },
+    { id: "b1", group: "xss", expected: "REPRODUCED", actual: "ANALYSIS_ONLY" },
+    { id: "b2", group: "xss", expected: "NOT_REPRODUCED", actual: "REPRODUCED" },
+  ]);
+
+  assert.deepEqual(Object.keys(cards).sort(), ["sqli", "xss"]);
+  assert.equal(cards.sqli.total, 2);
+  assert.equal(cards.sqli.falsePositiveRate, 0);
+  assert.equal(cards.sqli.falseNegativeRate, 0);
+  assert.equal(cards.xss.total, 2);
+  assert.equal(cards.xss.falsePositiveRate, 1);
+  assert.equal(cards.xss.falseNegativeRate, 1);
+});
+
+test("scoreByGroup: refuses an empty run like score does", () => {
+  assert.throws(() => scoreByGroup([]), /no results/);
 });

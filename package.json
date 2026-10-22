@@ -32,6 +32,7 @@
     "worker:healthcheck": "node --env-file-if-exists=.env.local scripts/worker-healthcheck.mjs",
     "trueforge:proxy": "node --env-file-if-exists=.env.local scripts/run-trueforge-proxy.mjs",
     "bench:run": "node --env-file-if-exists=.env.local --import tsx bench/run.ts",
+    "bench:score": "node --import tsx bench/scorecard.ts",
     "test": "node --env-file-if-exists=.env.local --import tsx --experimental-test-module-mocks --test-concurrency=1 --test \"lib/**/*.test.ts\" \"app/**/*.test.ts\" \"scripts/**/*.test.mjs\" \"bench/**/*.test.ts\""
   },
   "dependencies": {
