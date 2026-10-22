@@ -144,6 +144,45 @@ out = {
     "cases": C
 }
 
+# === VULNERABILITY CLASS (issue #346 per-class scorecard) ===
+# Positives are labelled by hand. Negatives take the class of the bug they describe or imitate,
+# read from the title, so a class's false-positive rate is measured on reports about that class.
+POSITIVE_CLASS = {
+    "p-sqli-login": "injection", "p-sqli-exfil": "injection", "p-nosql-reviews": "injection",
+    "p-idor-basket": "idor", "p-review-author-spoof": "idor",
+    "p-dom-xss-search": "xss", "p-reflected-xss": "xss", "p-csrf-profile-name": "csrf",
+    "p-ftp-listing": "path-traversal", "p-poison-nullbyte": "path-traversal",
+    "p-ftp-backup-package": "path-traversal",
+    "p-default-admin-creds": "broken-auth", "p-forgot-password-weak-question": "broken-auth",
+    "p-register-admin-role": "broken-auth", "p-empty-user-registration": "broken-auth",
+    "p-stacktrace-disclosure": "info-disclosure", "p-score-board": "info-disclosure",
+    "p-metrics-exposed": "info-disclosure", "p-bjoern-cat-photo": "info-disclosure",
+    "p-negative-order": "business-logic",
+}
+# First match wins, so the specific bug classes come before the broad disclosure fallback.
+NEGATIVE_CLASS_RULES = [
+    ("injection", ("sql", "union", "commenting out", "$where")),
+    ("xss", ("xss", "script tag")),
+    ("csrf", ("csrf",)),
+    ("idor", ("idor", "basket", "viewing basket", "another user")),
+    ("path-traversal", ("directory listing", "directory traversal", ".git directory", "/ftp", "/backup")),
+    ("info-disclosure", ("leaks", "exposes", "exposed", "returns", "lists", "serves", "reveals", "dump", "in user profile")),
+    ("broken-auth", ("password", "login", "admin", "jwt", "token", "credential", "security question", "access control")),
+    ("business-logic", ("negative", "coupon", "deluxe", "checkout")),
+]
+
+def vuln_class(c):
+    if c["kind"] == "positive":
+        return POSITIVE_CLASS[c["id"]]
+    title = c["title"].lower()
+    for cls, words in NEGATIVE_CLASS_RULES:
+        if any(w in title for w in words):
+            return cls
+    return "info-disclosure" if c.get("negativeType") == "informative" else "other"
+
+for c in C:
+    c["vulnClass"] = vuln_class(c)
+
 # Validation
 ids = [c["id"] for c in C]
 assert len(set(ids)) == len(ids), "Duplicate ids"

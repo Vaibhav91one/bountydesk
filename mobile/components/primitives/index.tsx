@@ -251,7 +251,7 @@ export function TopBar({ side, children, round }: { side: "left" | "right"; chil
 export function TopBarButton({ icon, onPress, label, size = 22, strokeWidth }: { icon: IconName; onPress?: () => void; label: string; size?: number; strokeWidth?: number }) {
   const { colors } = useTheme()
   return (
-    <Pressable onPress={onPress} accessibilityLabel={label} style={({ pressed }) => [styles.topBarBtn, pressed && { opacity: 0.7 }]}>
+    <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} style={({ pressed }) => [styles.topBarBtn, pressed && { opacity: 0.7 }]}>
       <Icon name={icon} size={size} strokeWidth={strokeWidth} stroke={colors.foreground} />
     </Pressable>
   )
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
   chrome: { position: "absolute", top: 0, left: 0, right: 0, height: 124, zIndex: 30 },
   topFade: { position: "absolute", top: 0, left: 0, right: 0, height: 124 },
   topBar: { position: "absolute", top: 58, height: 48, borderRadius: 24, borderWidth: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", zIndex: 30 },
-  topBarBtn: { width: 48, height: 46, alignItems: "center", justifyContent: "center", borderRadius: 24 },
+  topBarBtn: { width: 48, height: 48, alignItems: "center", justifyContent: "center", borderRadius: 24 },
   h1: { fontFamily: font.bold, fontSize: 28, lineHeight: 32.2, letterSpacing: -0.84, paddingTop: 8, paddingHorizontal: 20 },
   hmeta: { fontFamily: font.regular, fontSize: 15, lineHeight: 20.25, paddingTop: 14, paddingHorizontal: 20 },
   hmetaRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 10, paddingTop: 14, paddingHorizontal: 20 },

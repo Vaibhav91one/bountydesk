@@ -46,7 +46,7 @@ export function TopBarPill() {
         <Pressable style={styles.scrims} onPress={() => setOpen(false)}>
           <View style={[styles.menu, { backgroundColor: colors.sheet, borderColor: colors["glass-edge"] }]}>
             {MENU_ITEMS.map((it) => (
-              <Pressable key={it.route} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.item]} onPress={() => go(it.route)}>
+              <Pressable key={it.route} accessibilityRole="button" accessibilityLabel={it.label} style={({ pressed }) => [{ opacity: pressed ? 0.7 : 1 }, styles.item]} onPress={() => go(it.route)}>
                 <Icon name={it.icon} size={20} stroke={colors.muted} />
                 <Text style={[styles.label, { color: colors.foreground }]}>{it.label}</Text>
               </Pressable>

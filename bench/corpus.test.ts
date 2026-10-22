@@ -12,6 +12,7 @@ type CorpusCase = {
   body: string;
   rationale: string;
   source: string;
+  vulnClass?: string;
   negativeType?: "nonexistent" | "wrong-payload" | "informative" | "duplicate" | "unbound";
 };
 
@@ -25,6 +26,18 @@ const VALID_SPLITS = ["dev", "test"] as const;
 const VALID_KINDS = ["positive", "negative"] as const;
 const VALID_EXPECTED = ["REPRODUCED", "NOT_REPRODUCED", "ANALYSIS_ONLY"] as const;
 const VALID_NEGATIVE_TYPES = ["nonexistent", "wrong-payload", "informative", "duplicate", "unbound"] as const;
+
+const VALID_VULN_CLASSES = [
+  "injection",
+  "xss",
+  "idor",
+  "csrf",
+  "info-disclosure",
+  "broken-auth",
+  "path-traversal",
+  "business-logic",
+  "other",
+] as const;
 
 function loadCorpus(): Corpus {
   return JSON.parse(
@@ -196,5 +209,25 @@ test("corpus: original 30 reviewed cases keep their original split and expected"
     assert.ok(c, `original case ${orig.id} is missing from corpus`);
     assert.equal(c!.split, orig.split, `original case ${orig.id} changed split: expected ${orig.split}, got ${c!.split}`);
     assert.equal(c!.expected, orig.expected, `original case ${orig.id} changed expected: expected ${orig.expected}, got ${c!.expected}`);
+  }
+});
+
+test("corpus: every case names a vulnerability class from the fixed list so the scorecard can break results down by class", () => {
+  for (const c of loadCorpus().cases) {
+    assert.ok(
+      (VALID_VULN_CLASSES as readonly string[]).includes(c.vulnClass ?? ""),
+      `${c.id} has vulnClass ${JSON.stringify(c.vulnClass)}`,
+    );
+  }
+});
+
+test("corpus: every class that has a positive case also has a negative case, so a class cannot score on positives alone", () => {
+  const cases = loadCorpus().cases;
+  const positiveClasses = new Set(cases.filter((c) => c.kind === "positive").map((c) => c.vulnClass));
+  for (const cls of positiveClasses) {
+    assert.ok(
+      cases.some((c) => c.kind === "negative" && c.vulnClass === cls),
+      `class ${cls} has positives but no negatives`,
+    );
   }
 });

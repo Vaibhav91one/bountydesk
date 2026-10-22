@@ -105,6 +105,23 @@ export function score(results: readonly CaseResult[]): Scorecard {
   };
 }
 
+export type GroupedCaseResult = CaseResult & { group: string };
+
+/**
+ * Score each group (a vulnerability class, a negative type) on its own cases. An overall rate hides
+ * a class the oracle is weak on behind the classes it is strong on, so the per-group cards are what
+ * the scorecard reports next to the overall one.
+ */
+export function scoreByGroup(results: readonly GroupedCaseResult[]): Record<string, Scorecard> {
+  if (results.length === 0) throw new Error("scoreByGroup: no results to score");
+
+  const byGroup = new Map<string, CaseResult[]>();
+  for (const { group, ...result } of results) {
+    byGroup.set(group, [...(byGroup.get(group) ?? []), result]);
+  }
+  return Object.fromEntries([...byGroup].map(([group, rows]) => [group, score(rows)]));
+}
+
 export type AggregateMetric = { mean: number; min: number; max: number };
 
 export type AggregateScorecard = {
