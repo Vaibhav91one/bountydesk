@@ -156,6 +156,16 @@ export type ReproductionRecipe = {
    * isolation argument this rests on, and docs/browser-probe.md for the threat model.
    */
   browserExploit?: BrowserExploitLeg;
+  /**
+   * Out-of-band (OOB) HTTP callback oracle for SSRF. When present, the orchestrator provisions an
+   * isolated, internet-blocked listener sandbox link-joined to the target sandbox, binds its
+   * private link URL (`http://<listener-sandbox-id>:<port>`) to `{{oobUrl}}` across setup,
+   * negativeControl and exploit requests, and decides each leg by whether the listener recorded a
+   * request containing this run's unpredictable `canary` value.
+   */
+  oobListener?: {
+    port?: number;
+  };
 };
 
 /** Where an executed client-side payload leaves the run's canary for BountyDesk to read. `title`
