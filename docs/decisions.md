@@ -1146,8 +1146,9 @@ re-pin the original target. The retest is the agent's own investigation, run on 
   archive digest, so the same fix is not retested twice for one verdict.
 
 Still open: oracle-backed comparison once #343 exists. Private repositories and upload/non-GitHub
-targets are now built. The migration (`0055_retest_material_kind`) and the
-`0057_retest_push_suggestion` migration are run by hand on production after merge.
+targets are now built. The upload-material migration (`0056_melodic_silver_samurai`, which adds
+`retest.material_kind` and makes `commit_sha` nullable) and the `0057_retest_push_suggestion`
+migration are run by hand on production after merge.
 
 The default-branch commit trigger from issue #344 was implemented as SUGGEST ONLY via
 polling: the reconcile tick reads the default branch head from the public GitHub REST API
