@@ -47,6 +47,13 @@ export type RequestBodyEvidence =
   | { dispatched: false; sha256: null }
   | { dispatched: true; sha256: string | null };
 
+/** One call in a recipe's `setup`, plus the values to keep from its response. Capture names are
+ * lower-camel identifiers and cannot be `canary`, which keeps its own substitution. */
+export type SetupStep = {
+  request: ReproductionRequest;
+  capture?: Record<string, (response: ReproductionProbeResult) => string | undefined>;
+};
+
 /**
  * One frozen reproduction scenario against a bound TargetProfile. Recipes are code, not data:
  * `oracleCheck` cannot live in a jsonb column, so recipes are looked up by target name in
@@ -80,6 +87,17 @@ export type ReproductionRecipe = {
    * never actually seeded, so the orchestrator must treat that as incomplete, not proceed to the
    * oracle legs, and never emit a definitive verdict for this run. */
   fixture: { request: ReproductionRequest };
+  /**
+   * Extra trusted calls run once after the fixture and before the negative control, for a scenario
+   * that needs per-run state the single fixture request cannot produce: the second principal's
+   * token, or the id of a resource seeded with the canary (an IDOR needs both). Each step's
+   * `capture` functions read the controller's own response, never sandbox-exec output, and the
+   * captured string is substituted for `{{name}}` in the path, header values and JSON body of every
+   * later request. A step that does not return 2xx, or a capture that finds nothing or finds a
+   * value outside the safe character set, makes the whole fixture incomplete, so the run is
+   * ANALYSIS_ONLY with no control or exploit sent. Captured values are never written to evidence.
+   */
+  setup?: SetupStep[];
   /** Must NOT trip the oracle. Run before the exploit, and must complete and stay clean before
    * the exploit leg is attempted at all: see decideOutcome below. */
   negativeControl: ReproductionRequest;
@@ -176,6 +194,10 @@ export type ReproductionEvidence = {
    * the target returned a 2xx: a fixture that errored never created a canary to look for, so a
    * false value here forces ANALYSIS_ONLY regardless of what the other two legs found. */
   fixture: { ranToCompletion: boolean; at: string };
+  /** Present only when the recipe has `setup` steps. `ranToCompletion` is false when any step was
+   * not a 2xx, a capture found nothing, or a captured value was refused. It is separate from
+   * `fixture` so a setup failure is not recorded as a canary that was never seeded. */
+  setup?: { ranToCompletion: boolean };
   negativeControl: { ranToCompletion: boolean; canaryFound: boolean; at: string };
   exploit: { ranToCompletion: boolean; canaryFound: boolean; at: string };
   /** sha256 hex of the raw canary value. Never the value itself. */
