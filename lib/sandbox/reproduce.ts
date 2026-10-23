@@ -45,6 +45,7 @@ import {
   type PortPreviewUrl,
 } from "./provision";
 import { runBrowserOracle } from "./browser-probe";
+import { startOobListener, type OobListenerSession } from "./ssrf-listener";
 import { authorizeReproductionTarget } from "../targets/authorize-reproduction";
 
 export { positiveIntegerEnv };
@@ -67,7 +68,15 @@ function generateCanary(): string {
  * so this walks the whole structure rather than assuming a fixed shape.
  */
 function substituteCanary(value: unknown, canary: string): unknown {
-  if (typeof value === "string") return value.split("{{canary}}").join(canary);
+  if (typeof value === "string") {
+    return value
+      .split("{{canary}}")
+      .join(canary)
+      .split("%7B%7Bcanary%7D%7D")
+      .join(canary)
+      .split("%7b%7bcanary%7d%7d")
+      .join(canary);
+  }
   if (Array.isArray(value)) return value.map((item) => substituteCanary(item, canary));
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
@@ -114,13 +123,14 @@ async function runSetup(
   steps: NonNullable<ReproductionRecipe["setup"]>,
   canary: string,
   signal?: AbortSignal,
+  initialVars: CapturedVars = {},
 ): Promise<CapturedVars | undefined> {
-  const vars: CapturedVars = {};
+  const vars: CapturedVars = { ...initialVars };
   for (const step of steps) {
     const sent = await sendToSandbox(preview, step.request, canary, signal, vars);
     if (sent.probe.status < 200 || sent.probe.status >= 300) return undefined;
     for (const [name, capture] of Object.entries(step.capture ?? {})) {
-      if (name === "canary" || !CAPTURE_NAME.test(name)) return undefined;
+      if (name === "canary" || name === "oobUrl" || !CAPTURE_NAME.test(name)) return undefined;
       const value = capture(sent.probe);
       if (value === undefined || !SAFE_CAPTURED_VALUE.test(value)) return undefined;
       vars[name] = value;
@@ -152,13 +162,14 @@ async function sendToSandbox(
   const withCanary = request.body === undefined ? undefined : substituteCanary(request.body, canary);
   const body = withCanary === undefined ? undefined : substituteVars(withCanary, vars);
   const bodyText = body === undefined ? undefined : JSON.stringify(body);
-  const path = substituteVars(request.path, vars) as string;
+  const path = substituteVars(substituteCanary(request.path, canary), vars) as string;
   const url = `${preview.url.replace(/\/$/, "")}${path}`;
 
   const response = await fetch(url, {
     method: request.method,
     headers: sandboxRequestHeaders(
-      request.headers && (substituteVars(request.headers, vars) as Record<string, string>),
+      request.headers &&
+        (substituteVars(substituteCanary(request.headers, canary), vars) as Record<string, string>),
       preview.token,
       bodyText !== undefined,
     ),
@@ -323,6 +334,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
   return async (input, opts) => {
   const recipeId = input.recipe.id;
   let sandboxId: string | undefined;
+  let oobSession: OobListenerSession | undefined;
   let cancellationInFlight = false;
 
   try {
@@ -461,9 +473,21 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // the fixture incomplete, the same fail-closed path as a rejected fixture request.
     let capturedVars: CapturedVars = {};
     let setupCompleted = true;
-    if (fixtureCompleted && recipe.setup?.length) {
+    if (fixtureCompleted && recipe.oobListener) {
+      const started = await startOobListener(sandboxId, recipe.oobListener.port, {
+        signal: opts?.signal,
+      });
+      if (started.ok) {
+        oobSession = started.session;
+        capturedVars = { oobUrl: started.session.callbackUrl };
+      } else {
+        setupCompleted = false;
+      }
+      throwIfAborted(opts?.signal);
+    }
+    if (fixtureCompleted && setupCompleted && recipe.setup?.length) {
       try {
-        const vars = await runSetup(preview, recipe.setup, canary, opts?.signal);
+        const vars = await runSetup(preview, recipe.setup, canary, opts?.signal, capturedVars);
         if (vars) capturedVars = vars;
         else setupCompleted = false;
       } catch (error) {
@@ -485,29 +509,48 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
         ? (status: number) =>
             defaultIsAcceptableStatus(status) || recipe.negativeControlAcceptedStatuses!.includes(status)
         : undefined;
+      const activeOob = oobSession;
+      const legOracleCheck: ReproductionRecipe["oracleCheck"] = activeOob
+        ? async (_response, legCanary) => {
+            const seen = await activeOob.sawCanary(legCanary, opts?.signal);
+            if (!seen.ok) throw new Error("OOB listener log read failed");
+            return seen.found;
+          }
+        : recipe.oracleCheck;
 
       negativeControl = await runLeg(
         preview,
         recipe.negativeControl,
         canary,
-        recipe.oracleCheck,
+        legOracleCheck,
         opts?.signal,
         negativeControlIsAcceptable,
         capturedVars,
       );
 
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
-        exploit = recipe.exploitFollowUp
-          ? await runExploitWithFollowUp(
-              preview,
-              recipe.exploit,
-              recipe.exploitFollowUp,
-              canary,
-              opts?.signal,
-              negativeControlIsAcceptable,
-              capturedVars,
-            )
-          : await runLeg(preview, recipe.exploit, canary, recipe.oracleCheck, opts?.signal, undefined, capturedVars);
+        const readyForExploit = activeOob ? await activeOob.clearLog(opts?.signal) : true;
+        if (readyForExploit) {
+          exploit = recipe.exploitFollowUp
+            ? await runExploitWithFollowUp(
+                preview,
+                recipe.exploit,
+                recipe.exploitFollowUp,
+                canary,
+                opts?.signal,
+                negativeControlIsAcceptable,
+                capturedVars,
+              )
+            : await runLeg(
+                preview,
+                recipe.exploit,
+                canary,
+                legOracleCheck,
+                opts?.signal,
+                activeOob ? negativeControlIsAcceptable : undefined,
+                capturedVars,
+              );
+        }
       }
     }
 
@@ -523,8 +566,10 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       recipeId,
       sandboxId,
       fixture: { ranToCompletion: fixtureCompleted, at: fixtureAt },
-      // Recorded only when the recipe has setup steps and the fixture got far enough to run them.
-      ...(fixtureCompleted && recipe.setup?.length ? { setup: { ranToCompletion: setupCompleted } } : {}),
+      // Recorded only when the recipe has setup steps (or an OOB listener) and the fixture got far enough to run them.
+      ...(fixtureCompleted && (recipe.setup?.length || recipe.oobListener)
+        ? { setup: { ranToCompletion: setupCompleted } }
+        : {}),
       negativeControl: {
         ranToCompletion: negativeControl.ranToCompletion,
         canaryFound: negativeControl.canaryFound,
@@ -559,6 +604,13 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // guessed verdict.
     return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
   } finally {
+    if (oobSession) {
+      await oobSession.close(cancellationInFlight).catch((error) => {
+        console.error(
+          `failed to close OOB listener sandbox: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+    }
     if (sandboxId) {
       await teardownSandbox(sandboxId, cancellationInFlight);
     }
