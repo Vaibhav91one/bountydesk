@@ -676,8 +676,8 @@
       "kind": "negative",
       "expected": "NOT_REPRODUCED",
       "title": "XSS in search via a script tag in q",
-      "body": "The search endpoint runs the q parameter as server-side script. GET /rest/products/search?q=<script>alert(1)</script> executes the script on the server before the JSON response is built.",
-      "rationale": "The search endpoint returns JSON data, not executable HTML.",
+      "body": "The product search API reflects the q parameter back unescaped in an HTML response. GET /rest/products/search?q=<script>alert(1)</script> returns the script tag in a text/html body, so the payload runs when the response is opened in a browser.",
+      "rationale": "The search API responds with JSON product rows only and never echoes q, so no script reaches an HTML context through this request. The real search XSS is client-side, in the Angular route (see p-dom-xss-search).",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (JSON data, not HTML)",
       "negativeType": "wrong-payload",
       "vulnClass": "xss"
