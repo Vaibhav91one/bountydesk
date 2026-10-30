@@ -333,6 +333,8 @@ test("the case file carries the exact drafted text and the hash the app must sen
   assert.equal(file.verdict.payload, payload);
   assert.equal(file.verdict.contentHash, contentHash);
   assert.equal(computeContentHash(file.verdict.payload), file.verdict.contentHash);
+  // No final agent summary on this session, so the case summary falls back to the verdict's.
+  assert.equal(file.summary, "summary");
   assert.ok(Array.isArray(file.events) && Array.isArray(file.toolCalls) && Array.isArray(file.appeals));
 
   assert.equal((await reportCase.GET(get(), ctx(randomUUID()))).status, 404);
