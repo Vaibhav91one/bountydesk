@@ -477,13 +477,13 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
       const started = await startOobListener(sandboxId, recipe.oobListener.port, {
         signal: opts?.signal,
       });
-      throwIfAborted(opts?.signal);
       if (started.ok) {
         oobSession = started.session;
         capturedVars = { oobUrl: started.session.callbackUrl };
       } else {
         setupCompleted = false;
       }
+      throwIfAborted(opts?.signal);
     }
     if (fixtureCompleted && setupCompleted && recipe.setup?.length) {
       try {
@@ -604,18 +604,16 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
     // guessed verdict.
     return analysisOnly("TARGET_UNAVAILABLE", { recipeId });
   } finally {
-    let oobCloseError: unknown;
     if (oobSession) {
-      try {
-        await oobSession.close(cancellationInFlight);
-      } catch (error) {
-        oobCloseError = error;
-      }
+      await oobSession.close(cancellationInFlight).catch((error) => {
+        console.error(
+          `failed to close OOB listener sandbox: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     }
     if (sandboxId) {
       await teardownSandbox(sandboxId, cancellationInFlight);
     }
-    if (oobCloseError) throw oobCloseError;
   }
   };
 }
