@@ -303,6 +303,11 @@ function canaryInBasketProducts(body: string, canary: string): boolean {
  * control has A read A's own basket (`attackerBasketId`), which is empty and does not contain the
  * canary; the exploit has A read B's basket (`victimBasketId`) using A's own Bearer token, which
  * discloses B's canary-tagged basket item.
+ *
+ * The additional control reads B's basket with no Authorization header at all. Juice Shop answers
+ * that with 401, which that control alone accepts. If the endpoint served anyone, the same canary
+ * would come back to a principal-free request, so the run is ANALYSIS_ONLY instead of a
+ * cross-principal IDOR: an endpoint open to everyone is not an IDOR.
  */
 function idorBasketRecipe(config: JuiceShopConfig): ReproductionRecipe {
   const secondPrincipalEmail = `second-${CANARY_PLACEHOLDER}`;
@@ -372,6 +377,9 @@ function idorBasketRecipe(config: JuiceShopConfig): ReproductionRecipe {
       path: `${BASKET_REST_PATH}/{{attackerBasketId}}`,
       headers: { Authorization: "Bearer {{attackerToken}}" },
     },
+    additionalNegativeControls: [
+      { request: { method: "GET", path: `${BASKET_REST_PATH}/{{victimBasketId}}` }, acceptedStatuses: [401] },
+    ],
     exploit: {
       method: "GET",
       path: `${BASKET_REST_PATH}/{{victimBasketId}}`,
