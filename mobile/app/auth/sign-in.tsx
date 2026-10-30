@@ -6,7 +6,9 @@
  * 2. Google  — dark pill (.btn.sec, fill background) with Google colored SVG
  * Footer: "Not on the allowlist?" link, legal text with Terms and Privacy links.
  */
+import { useRef } from "react"
 import * as AuthSession from "expo-auth-session"
+import * as WebBrowser from "expo-web-browser"
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from "react-native"
 import Svg, { Path } from "react-native-svg"
 
@@ -36,8 +38,15 @@ export default function SignInScreen() {
   const { startSSOFlow } = useSSO()
   const t = darkTheme
 
+  // One SSO flow at a time: a second tap while the auth browser is open throws
+  // WebBrowserAlreadyOpenException, and a session left over from an abandoned flow does the same.
+  const inFlight = useRef(false)
+
   const handleSSO = async (strategy: "google" | "github") => {
+    if (inFlight.current) return
+    inFlight.current = true
     try {
+      WebBrowser.dismissAuthSession()
       const { createdSessionId, setActive } = await startSSOFlow({
         strategy: `oauth_${strategy}`,
         redirectUrl,
@@ -47,6 +56,8 @@ export default function SignInScreen() {
       }
     } catch (err: any) {
       console.error("Sign in failed:", err.message)
+    } finally {
+      inFlight.current = false
     }
   }
 
