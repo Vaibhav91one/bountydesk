@@ -1534,3 +1534,154 @@ test("setup: a captured value that is a dot segment is refused, since the URL pa
     assert.ok(!calls.some((c) => new URL(c.url).pathname === "/own"), "nothing after setup may be sent");
   }
 });
+
+test("substituteCanary replaces {{canary}} and percent-encoded {{canary}} in request paths and headers", async () => {
+  resetSpies();
+  const pathAndHeaderRecipe: ReproductionRecipe = {
+    id: "path-and-header-canary",
+    title: "Canary in GET query and header",
+    keywords: [],
+    fixture: { request: { method: "GET", path: "/fixture?seed={{canary}}" } },
+    negativeControl: { method: "GET", path: "/search?id=1", headers: { "X-Probe": "baseline" } },
+    exploit: {
+      method: "GET",
+      path: `/search?id=${encodeURIComponent("2 UNION SELECT '{{canary}}'")}`,
+      headers: { "X-Probe": "probe-{{canary}}" },
+    },
+    oracleCheck: (response, canary) => response.status === 200 && response.body.includes(canary),
+  };
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return authorizedTarget({ recipe: pathAndHeaderRecipe });
+  };
+
+  const seenUrls: string[] = [];
+  const seenProbeHeaders: Array<string | null> = [];
+  let seededCanary = "";
+
+  const stub = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ url: "https://3000-sandbox.example", token: "tok" }), { status: 200 });
+    }
+    seenUrls.push(url);
+    const headers = new Headers(init?.headers);
+    seenProbeHeaders.push(headers.get("x-probe"));
+    const parsed = new URL(url);
+    if (parsed.pathname === "/fixture") {
+      seededCanary = parsed.searchParams.get("seed") ?? "";
+      return new Response("ok", { status: 200 });
+    }
+    if (parsed.searchParams.get("id")?.includes(seededCanary) && headers.get("x-probe") === `probe-${seededCanary}`) {
+      return new Response(`row: ${seededCanary}`, { status: 200 });
+    }
+    return new Response("row: admin", { status: 200 });
+  }) as typeof fetch;
+
+  const outcome = await withFetch(stub, () => reproduce(reproduceInput({ recipe: pathAndHeaderRecipe })));
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(seededCanary.length > 0 && !seededCanary.includes("{{canary}}"));
+  assert.ok(seenUrls.every((u) => !u.includes("{{canary}}") && !u.toLowerCase().includes("%7b%7bcanary%7d%7d")));
+});
+
+test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and reproduces when the listener records the canary", async () => {
+  resetSpies();
+  process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT = "snap";
+  process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF = "ghcr.io/vaibhav91one/juice-shop@sha256:" + "a".repeat(64);
+  process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop:test-oob";
+
+  const oobRecipe: ReproductionRecipe = {
+    id: "ssrf-oob-test",
+    title: "SSRF OOB callback",
+    keywords: [],
+    fixture: { request: { method: "POST", path: "/fixture", body: { email: "{{canary}}" } } },
+    oobListener: { port: 8080 },
+    setup: [
+      {
+        request: { method: "POST", path: "/login", body: { email: "{{canary}}" } },
+        capture: { userToken: () => "tok-ssrf" },
+      },
+    ],
+    negativeControl: {
+      method: "GET",
+      path: "/profile",
+      headers: { Cookie: "token={{userToken}}" },
+    },
+    negativeControlAcceptedStatuses: [302],
+    exploit: {
+      method: "POST",
+      path: "/profile/image/url",
+      headers: { Cookie: "token={{userToken}}" },
+      body: { imageUrl: "{{oobUrl}}/{{canary}}.jpg" },
+    },
+    oracleCheck: () => false,
+  };
+
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return authorizedTarget({ recipe: oobRecipe });
+  };
+
+  let createdCount = 0;
+  let listenerLog = "";
+  createSandboxImpl = async (spec, snapshotImageRefOverride) => {
+    createSandboxCalls.push(spec);
+    createSandboxImageOverrides.push(snapshotImageRefOverride);
+    createdCount += 1;
+    return createdCount === 1 ? FAKE_SANDBOX : { ...FAKE_SANDBOX, id: "oob-listener-peer" };
+  };
+  getSandboxImpl = async (id) => (id === "oob-listener-peer" ? { ...FAKE_SANDBOX, id: "oob-listener-peer" } : FAKE_SANDBOX);
+  executeImpl = async (sb, command) => {
+    executeCalls.push(`${sb.id}:${command}`);
+    if (sb.id === "oob-listener-peer" && command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
+      return { exitCode: 0, result: "browser-out-1\n" };
+    }
+    if (command.includes("bountydesk-oob-server.js")) {
+      return { exitCode: 0, result: "BOUNTYDESK_OOB_LISTENER_READY\n" };
+    }
+    if (command.includes("BOUNTYDESK_OOB_CLEARED")) {
+      listenerLog = "";
+      return { exitCode: 0, result: "BOUNTYDESK_OOB_CLEARED\n" };
+    }
+    if (command.includes("BOUNTYDESK_OOB_LOG_BEGIN")) {
+      return { exitCode: 0, result: `BOUNTYDESK_OOB_LOG_BEGIN\n${listenerLog}\nBOUNTYDESK_OOB_LOG_END\n` };
+    }
+    return defaultExecuteResult(command);
+  };
+
+  const stub = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (url.endsWith("/preview-url")) {
+      return new Response(JSON.stringify({ url: "https://3000-sandbox.example", token: "tok" }), { status: 200 });
+    }
+    const parsed = new URL(url);
+    if (parsed.pathname === "/fixture" || parsed.pathname === "/login") {
+      return new Response("{}", { status: 200 });
+    }
+    if (parsed.pathname === "/profile") {
+      return new Response("", { status: 302 });
+    }
+    if (parsed.pathname === "/profile/image/url") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { imageUrl?: string };
+      // Target makes the SSRF request to the listener peer URL when exploited.
+      listenerLog = JSON.stringify({ method: "GET", url: body.imageUrl });
+      return new Response("", { status: 302 });
+    }
+    return new Response("", { status: 404 });
+  }) as typeof fetch;
+
+  try {
+    const outcome = await withFetch(stub, () => reproduce(reproduceInput({ recipe: oobRecipe })));
+    assert.equal(outcome.outcome, "REPRODUCED");
+    if (outcome.outcome !== "REPRODUCED") return;
+    assert.ok(listenerLog.includes("http://oob-listener-peer:8080/"));
+    assert.ok(!JSON.stringify(outcome).includes("http://oob-listener-peer:8080"));
+    assert.deepEqual(deleteSandboxCalls, ["oob-listener-peer", FAKE_SANDBOX.id]);
+  } finally {
+    delete process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT;
+    delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF;
+    delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME;
+  }
+});
+
+
