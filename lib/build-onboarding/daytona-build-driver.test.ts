@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { createHash } from "node:crypto";
 
-import type { Sandbox } from "@/lib/sandbox/daytona";
+import { DaytonaError, type ExecResult, type Sandbox } from "@/lib/sandbox/daytona";
 
 import { onboardingSnapshotImageRef, type BuildInput, type BuildSource } from "./build-driver";
 import {
@@ -17,6 +17,7 @@ import {
   injectProxyTrust,
   repoSlug,
   resolveBuildSource,
+  runDetached,
   prebuiltImageDockerfile,
   registryHostOf,
   stageSource,
@@ -379,4 +380,53 @@ test("shouldMintToken gates token mintage on a git source matching the connected
   assert.equal(shouldMintToken(gitWithGit, "acme/app"), true, "canonical .git clone URL matches");
   assert.equal(shouldMintToken(archive, "acme/app"), false, "non-git sources never mint a token");
   assert.equal(shouldMintToken({ kind: "git" as const, cloneUrl: "https://gitlab.com/acme/app", resolvedCommitSha: "b".repeat(40) }, "acme/app"), false, "a different host never mints a token");
+});
+
+/**
+ * A fake for runDetached. `polls` answers each exit-code poll in order (an Error throws), and once it
+ * runs out the command has not finished. The clock only moves when the driver sleeps, so the 40 minute
+ * deadline is reached without waiting.
+ */
+function fakeDetached(polls: Array<string | Error>, logText = "build log") {
+  let clock = 0;
+  const queue = [...polls];
+  return {
+    now: () => clock,
+    sleep: async (ms: number) => {
+      clock += ms;
+    },
+    execute: async (_sandbox: Sandbox, command: string): Promise<ExecResult> => {
+      if (command.startsWith("sh -lc")) return { exitCode: 0, result: "" };
+      if (command.startsWith("cat ")) {
+        const next = queue.shift();
+        if (next instanceof Error) throw next;
+        return { exitCode: 0, result: next ?? "" };
+      }
+      return { exitCode: 0, result: logText };
+    },
+  };
+}
+
+test("a detached build resolves with its log once the exit code file lands", async () => {
+  const io = fakeDetached(["", "0"], "built ok");
+  assert.deepEqual(await runDetached(SANDBOX, "docker build .", io), { exitCode: 0, result: "built ok" });
+});
+
+test("a detached build that exits non-zero throws with its exit code and log tail", async () => {
+  const io = fakeDetached(["2"], "step 3 failed");
+  await assert.rejects(runDetached(SANDBOX, "docker build .", io), /build command failed \(exit 2\): step 3 failed/);
+});
+
+test("a detached build that never writes an exit code times out after 40 minutes", async () => {
+  const io = fakeDetached([], "still compiling");
+  await assert.rejects(
+    runDetached(SANDBOX, "docker build .", io),
+    (error: unknown) =>
+      error instanceof Error && error.message === "build command timed out after 40m: still compiling",
+  );
+});
+
+test("two failed polls are retried, and the third poll's exit code is used", async () => {
+  const io = fakeDetached([new DaytonaError("execute -> 408", 408), new DaytonaError("execute -> 502", 502), "0"]);
+  assert.deepEqual(await runDetached(SANDBOX, "docker build .", io), { exitCode: 0, result: "build log" });
 });
