@@ -273,7 +273,7 @@ export async function buildUploadOnce({
   } catch (error) {
     // A shutdown mid-build leaves the row BUILDING; its lease expires and another claim resumes it.
     if (signal?.aborted) throw error;
-    const reason = safeErrorText(error, 500);
+    const reason = safeErrorText(error, 500, { fromEnd: true });
     console.error(`upload build ${upload.id} failed: ${reason}`);
     // A retest child is a one-shot fix-verification: a failed build is conclusive, so it goes
     // straight to FAILED instead of PENDING, which would let the loop retry and then wait on a

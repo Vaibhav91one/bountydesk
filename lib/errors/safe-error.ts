@@ -13,8 +13,13 @@ function boundedLength(max: number): number {
   return Number.isFinite(max) && max >= 0 ? Math.floor(max) : DEFAULT_MAX_LENGTH;
 }
 
-/** Keep external error text useful without retaining response bodies or credential-shaped data. */
-export function safeErrorText(error: unknown, max = DEFAULT_MAX_LENGTH): string {
+/**
+ * Keep external error text useful without retaining response bodies or credential-shaped data.
+ * `fromEnd` is for our own build-log tails, whose real error is last: it keeps the last `max`
+ * characters and skips the response-body cut, which stops at the first `{` and would drop exactly
+ * that tail. Credential redaction still runs on the whole text before truncation.
+ */
+export function safeErrorText(error: unknown, max = DEFAULT_MAX_LENGTH, { fromEnd = false } = {}): string {
   const limit = boundedLength(max);
   let value: string;
   try {
@@ -24,8 +29,8 @@ export function safeErrorText(error: unknown, max = DEFAULT_MAX_LENGTH): string 
   }
 
   try {
-    const text = redactReviewerText(withoutResponseBody(value)).replace(/\s+/g, " ").trim();
-    return text.slice(0, limit);
+    const text = redactReviewerText(fromEnd ? value : withoutResponseBody(value)).replace(/\s+/g, " ").trim();
+    return fromEnd ? (limit === 0 ? "" : text.slice(-limit)) : text.slice(0, limit);
   } catch {
     return "unknown error".slice(0, limit);
   }
