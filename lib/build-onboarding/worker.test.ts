@@ -822,7 +822,7 @@ test("a finished upload profile's snapshots are reclaimable, a live or repo one 
   const bound = async (targetProfileId: string, state: string, updatedAt: Date) =>
     dbm.db.execute(
       dbm.sql`insert into report (channel, source_ref, title, body, state, target_profile_id, updated_at)
-        values ('upload', ${`up:${crypto.randomUUID()}`}, 't', 'b', ${state}, ${targetProfileId}, ${updatedAt})`,
+        values ('upload', ${`up:${crypto.randomUUID()}`}, 't', 'b', ${state}, ${targetProfileId}, ${updatedAt.toISOString()})`,
     );
 
   const done = await profile("upload-done", "ru-done", "connectionless");
