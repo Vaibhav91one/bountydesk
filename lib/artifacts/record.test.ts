@@ -170,28 +170,75 @@ test("a retried draft does not double the artifact rows", async () => {
   assert.equal(rows.length, 2, "the unique (verdict_id, kind) index makes the retry a no-op");
 });
 
-test("an artifact row cannot be updated or deleted", async () => {
+const isAppendOnly = (err: unknown) =>
+  /append-only/.test(
+    `${(err as { message?: string }).message ?? ""} ${(err as { cause?: { message?: string } }).cause?.message ?? ""}`,
+  );
+
+async function oneNullRow() {
   const { reportId, verdictId } = await seedVerdictWithEvents();
   await record.recordVerdictArtifacts(reportId, verdictId);
-
   const [row] = await dbm.db
-    .select({ id: dbm.artifact.id })
+    .select()
     .from(dbm.artifact)
     .where(dbm.eq(dbm.artifact.reportId, reportId))
     .limit(1);
+  assert.equal(row.storagePath, null);
+  return { reportId, verdictId, row };
+}
 
-  // drizzle wraps the Postgres error, so the trigger's "append-only" message is on the cause.
-  const isAppendOnly = (err: unknown) =>
-    /append-only/.test(`${(err as { message?: string }).message ?? ""} ${(err as { cause?: { message?: string } }).cause?.message ?? ""}`);
+test("an artifact row can only be backfilled, never edited or deleted", async () => {
+  const { row } = await oneNullRow();
+  const byId = dbm.eq(dbm.artifact.id, row.id);
 
+  // The hash, kind and every other column are frozen, even while storage_path is still null.
+  await assert.rejects(dbm.db.update(dbm.artifact).set({ sha256: "0".repeat(64) }).where(byId), isAppendOnly);
+  await assert.rejects(dbm.db.update(dbm.artifact).set({ kind: "other-kind" }).where(byId), isAppendOnly);
   await assert.rejects(
-    dbm.db.update(dbm.artifact).set({ storagePath: "sneaky" }).where(dbm.eq(dbm.artifact.id, row.id)),
+    dbm.db.update(dbm.artifact).set({ storagePath: "p", sha256: "0".repeat(64) }).where(byId),
     isAppendOnly,
   );
-  await assert.rejects(
-    dbm.db.delete(dbm.artifact).where(dbm.eq(dbm.artifact.id, row.id)),
-    isAppendOnly,
-  );
+  await assert.rejects(dbm.db.update(dbm.artifact).set({ storagePath: null }).where(byId), isAppendOnly);
+
+  // null -> value is the one allowed transition.
+  await dbm.db.update(dbm.artifact).set({ storagePath: "first/path" }).where(byId);
+  const [filled] = await dbm.db.select().from(dbm.artifact).where(byId);
+  assert.equal(filled.storagePath, "first/path");
+  assert.equal(filled.sha256, row.sha256);
+
+  // value -> other value and value -> null are rejected, and so is DELETE.
+  await assert.rejects(dbm.db.update(dbm.artifact).set({ storagePath: "other/path" }).where(byId), isAppendOnly);
+  await assert.rejects(dbm.db.update(dbm.artifact).set({ storagePath: null }).where(byId), isAppendOnly);
+  await assert.rejects(dbm.db.delete(dbm.artifact).where(byId), isAppendOnly);
+});
+
+test("a retry whose upload succeeds fills the null storage_path left by a failed one", async () => {
+  const { reportId, verdictId, row } = await oneNullRow();
+
+  const realFetch = globalThis.fetch;
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "http://storage.test";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "test-key";
+  globalThis.fetch = (async () => new Response("{}", { status: 200 })) as typeof fetch;
+  try {
+    await record.recordVerdictArtifacts(reportId, verdictId);
+  } finally {
+    globalThis.fetch = realFetch;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
+
+  const rows = await dbm.db.select().from(dbm.artifact).where(dbm.eq(dbm.artifact.reportId, reportId));
+  assert.equal(rows.length, 2, "the retry fills rows in place, it does not add any");
+  for (const r of rows) {
+    assert.equal(r.storagePath, `${reportId}/${verdictId}/${r.kind}.md`);
+  }
+  const filled = rows.find((r) => r.id === row.id);
+  assert.equal(filled?.sha256, row.sha256, "the attested hash is untouched");
+
+  // A later failed upload leaves a stored row alone.
+  await record.recordVerdictArtifacts(reportId, verdictId);
+  const again = await dbm.db.select().from(dbm.artifact).where(dbm.eq(dbm.artifact.reportId, reportId));
+  assert.deepEqual(again.map((r) => r.storagePath).sort(), rows.map((r) => r.storagePath).sort());
 });
 
 test("a run with findings records them as a file a reviewer can download", async () => {

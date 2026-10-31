@@ -414,6 +414,13 @@
       "when": 1791754418593,
       "tag": "0058_push_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1793482031625,
+      "tag": "0059_artifact_backfill_storage_path",
+      "breakpoints": true
     }
   ]
 }
