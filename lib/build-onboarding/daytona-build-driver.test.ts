@@ -15,6 +15,7 @@ import {
   egressAllowList,
   imageNameFromRef,
   injectProxyTrust,
+  markerLayer,
   repoSlug,
   resolveBuildSource,
   runDetached,
@@ -439,4 +440,19 @@ test("a finished build is not failed by an error reading its log", async () => {
     return execute(sandbox, command);
   };
   assert.deepEqual(await runDetached(SANDBOX, "docker build .", io), { exitCode: 0, result: "" });
+});
+
+test("the marker layer needs no shell in the image, so a distroless final stage still builds", () => {
+  const layer = markerLayer("abc123");
+  const lines = layer.trim().split("\n");
+  assert.equal(lines[0], "USER root");
+  assert.match(lines[1], /^COPY --from=busybox:[\w.-]+ \/bin\/busybox \/\.bountydesk\/busybox$/);
+  // Exec form: Docker runs the binary directly instead of handing the line to /bin/sh.
+  assert.ok(lines[2].startsWith("RUN ["), "the marker RUN must be exec form");
+  const argv = JSON.parse(lines[2].slice("RUN ".length)) as string[];
+  assert.deepEqual(argv.slice(0, 3), ["/.bountydesk/busybox", "sh", "-c"]);
+  assert.ok(argv[3].includes("echo 'abc123' > /etc/bountydesk-build-marker"));
+  // Applets are linked only into an image that has no shell of its own.
+  assert.ok(argv[3].startsWith("[ -e /bin/sh ] ||"));
+  assert.ok(!/^RUN (?!\[)/m.test(layer), "no shell-form RUN may remain in the layer");
 });
