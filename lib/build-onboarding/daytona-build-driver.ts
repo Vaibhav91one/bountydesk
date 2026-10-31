@@ -127,6 +127,10 @@ export function dockerEnvLine(env: Record<string, string> | undefined): string {
   return "ENV " + entries.map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(" ") + "\n";
 }
 
+const MARKER_BUSYBOX_IMAGE = "busybox:1.37.0-musl";
+// Busybox picks its applet from argv[0], so the file must keep the name "busybox".
+const MARKER_BUSYBOX_PATH = "/.bountydesk/busybox";
+
 /**
  * verifyNoEgress and waitForAppReady probe each node from inside with curl or wget. Minimal base
  * images (python:slim, and datastore images like postgres) ship neither, so a mesh built on them
@@ -134,8 +138,10 @@ export function dockerEnvLine(env: Record<string, string> | undefined): string {
  * time, best-effort across the common package managers; the build egress already allows the distro
  * mirrors. Meant to run as root (callers set USER root first).
  */
-const ENSURE_PROBE_TOOL =
-  "RUN if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then " +
+const PROBE_TOOL_SCRIPT =
+  // Same busybox the marker layer uses: link its applets when the image has no shell, so wget exists.
+  `if [ ! -e /bin/sh ]; then ${MARKER_BUSYBOX_PATH} --install -s /bin; fi; ` +
+  "if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then " +
   // A datastore image adds a vendor apt repo (postgres uses PGDG, mariadb/mysql and mongodb their
   // own) whose host is not on the build egress allow-list, so apt-get update fails on it and curl
   // never installs. Drop every vendor .list in sources.list.d so the update runs against the base
@@ -144,6 +150,9 @@ const ENSURE_PROBE_TOOL =
   "rm -f /etc/apt/sources.list.d/*.list 2>/dev/null || true; " +
   "(apt-get update && apt-get install -y --no-install-recommends curl) || (apk add --no-cache curl) || " +
   "(microdnf install -y curl) || (dnf install -y curl) || (yum install -y curl) || true; fi";
+// Exec form through busybox: a shell-form RUN needs /bin/sh, which a distroless image lacks.
+const PROBE_TOOL_RUN = `RUN ${JSON.stringify([MARKER_BUSYBOX_PATH, "sh", "-c", PROBE_TOOL_SCRIPT])}`;
+export const ENSURE_PROBE_TOOL = `COPY --from=${MARKER_BUSYBOX_IMAGE} /bin/busybox ${MARKER_BUSYBOX_PATH}\n${PROBE_TOOL_RUN}`;
 
 function numEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -503,7 +512,7 @@ export async function buildMesh(
       const original = (await runtime.run(sandbox, `cat /work/source/${context}/${dockerfile}`)).result;
       const dfText =
         injectProxyTrust(original) +
-        `\nUSER root\n${ENSURE_PROBE_TOOL}\n${dockerEnvLine(svc.env)}RUN mkdir -p /etc && echo ${shArgDockerfile(ctx.buildMarker)} > ${MARKER_PATH}\n`;
+        `\n${markerLayer(ctx.buildMarker)}${PROBE_TOOL_RUN}\n${dockerEnvLine(svc.env)}`;
       const prepared = Buffer.from(dfText, "utf8").toString("base64");
       await runtime.run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
       const log = (
@@ -1047,10 +1056,6 @@ function shellArg(value: string): string {
 function shArgDockerfile(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
-
-const MARKER_BUSYBOX_IMAGE = "busybox:1.37.0-musl";
-// Busybox picks its applet from argv[0], so the file must keep the name "busybox".
-const MARKER_BUSYBOX_PATH = "/.bountydesk/busybox";
 
 /**
  * The layer appended to a target's own Dockerfile: root, then the build marker.
