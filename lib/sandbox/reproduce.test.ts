@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test, { before, mock } from "node:test";
 
 import type { ReproduceFn, ReproductionRecipe } from "@/lib/reproduction/types";
+import { getRecipesForTarget } from "@/lib/targets/recipes";
 import { JUICE_SHOP_EXPECTED_BUILD_MARKER } from "@/lib/targets/registry";
 
 import type { ExecResult, Sandbox, SandboxSpec, SnapshotInfo } from "./daytona";
@@ -1332,7 +1333,14 @@ const idorRecipe: ReproductionRecipe = {
 
 function setupFetchStub(
   calls: FetchCall[],
-  opts: { loginStatus?: number; loginBody?: string; seedBody?: string; resourceBodyFor?: (auth: string | null) => string } = {},
+  opts: {
+    loginStatus?: number;
+    loginBody?: string;
+    seedBody?: string;
+    resourceBodyFor?: (auth: string | null) => string;
+    openStatus?: number;
+    ownStatus?: number;
+  } = {},
 ): typeof fetch {
   let canary: string | null = null;
   return (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1356,10 +1364,16 @@ function setupFetchStub(
     if (parsed.pathname === "/seed-b") {
       return new Response(opts.seedBody ?? JSON.stringify({ id: "res-42" }), { status: 201 });
     }
-    if (parsed.pathname === "/own") return new Response("{}", { status: 200 });
+    if (parsed.pathname === "/own") return new Response("{}", { status: opts.ownStatus ?? 200 });
     if (parsed.pathname === "/resource/res-42") {
       const body = (opts.resourceBodyFor ?? ((a) => (a === `Bearer ${TOKEN_A}` ? JSON.stringify({ note: canary }) : "{}")))(auth);
       return new Response(body, { status: 200 });
+    }
+    // The principal-free control. Juice Shop answers 401 to a request with no token. An endpoint
+    // open to everyone answers 200 with the canary, which is the case the control exists to catch.
+    if (parsed.pathname === "/open/res-42") {
+      const status = opts.openStatus ?? 401;
+      return new Response(status === 200 ? JSON.stringify({ note: canary }) : "{}", { status });
     }
     throw new Error(`unexpected fetch to ${url}`);
   }) as typeof fetch;
@@ -1535,6 +1549,74 @@ test("setup: a captured value that is a dot segment is refused, since the URL pa
   }
 });
 
+const idorWithOpenControl: ReproductionRecipe = {
+  ...idorRecipe,
+  additionalNegativeControls: [{ request: { method: "GET", path: "/open/{{resourceId}}" }, acceptedStatuses: [401] }],
+};
+
+test("additionalNegativeControls: an IDOR whose principal-free control is 401 reproduces, and the control was sent with no credentials", async () => {
+  resetSpies();
+  withIdorAuthorization(idorWithOpenControl);
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls), () =>
+    reproduce(reproduceInput({ recipe: idorWithOpenControl })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  const open = calls.find((c) => new URL(c.url).pathname === "/open/res-42");
+  assert.ok(open, "the principal-free control must be sent");
+  assert.equal(new Headers(open.init?.headers).get("authorization"), null);
+  assert.ok(calls.some((c) => new URL(c.url).pathname === "/resource/res-42"), "the exploit runs once the folded control is clean");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("additionalNegativeControls: an endpoint open to everyone discloses the canary to the principal-free control, so the run is ANALYSIS_ONLY and the exploit never fires", async () => {
+  resetSpies();
+  withIdorAuthorization(idorWithOpenControl);
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { openStatus: 200 }), () =>
+    reproduce(reproduceInput({ recipe: idorWithOpenControl })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  if (outcome.outcome === "ANALYSIS_ONLY") {
+    assert.equal(outcome.reason, "NO_APPROVED_ORACLE");
+    assert.equal(outcome.evidence?.negativeControl?.canaryFound, true);
+  }
+  assert.ok(!calls.some((c) => new URL(c.url).pathname.startsWith("/resource/")), "the exploit must not be sent");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("additionalNegativeControls: a principal-free control that answers 500 is not an accepted status, so the run is never REPRODUCED", async () => {
+  resetSpies();
+  withIdorAuthorization(idorWithOpenControl);
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { openStatus: 500 }), () =>
+    reproduce(reproduceInput({ recipe: idorWithOpenControl })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(!calls.some((c) => new URL(c.url).pathname.startsWith("/resource/")), "the exploit must not be sent");
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("additionalNegativeControls: a status one extra control accepts does not loosen the primary control", async () => {
+  resetSpies();
+  withIdorAuthorization(idorWithOpenControl);
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(setupFetchStub(calls, { ownStatus: 401 }), () =>
+    reproduce(reproduceInput({ recipe: idorWithOpenControl })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(!calls.some((c) => new URL(c.url).pathname.startsWith("/open/")), "no extra control after an incomplete primary");
+  assert.ok(!calls.some((c) => new URL(c.url).pathname.startsWith("/resource/")), "the exploit must not be sent");
+});
+
 test("substituteCanary replaces {{canary}} and percent-encoded {{canary}} in request paths and headers", async () => {
   resetSpies();
   const pathAndHeaderRecipe: ReproductionRecipe = {
@@ -1682,6 +1764,133 @@ test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and repro
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF;
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME;
   }
+});
+
+// Product tampering (juice-shop-product-tampering-unauth): the real recipe, not a stand-in. Its
+// control is a PUT to /api/Users/1 and its exploit and follow-up are PUT and GET on /api/Products/1,
+// so the stub routes on method and path together, which fetchStub above does not.
+
+function productTamperingRecipe(): ReproductionRecipe {
+  const found = getRecipesForTarget({
+    name: "juice-shop-v17.3.0",
+    config: {
+      baseUrl: "http://localhost:3000",
+      searchPath: "/rest/products/search",
+      canaryRegistrationPath: "/api/Users/",
+    },
+  }).find((r) => r.id === "juice-shop-product-tampering-unauth");
+  assert.ok(found);
+  return found;
+}
+
+function withProductTamperingAuthorization() {
+  const target = productTamperingRecipe();
+  authorizeImpl = async (input) => {
+    authorizeCalls.push(input);
+    return authorizedTarget({ recipe: target });
+  };
+}
+
+function productTamperingStub(
+  calls: FetchCall[],
+  responses: {
+    negativeControlStatus: number;
+    negativeControlBody: (canary: string) => string;
+    exploitStatus: number;
+    exploitBody: (canary: string) => string;
+    followUpBody: (canary: string) => string;
+  },
+): typeof fetch {
+  let lastCanary: string | null = null;
+
+  return (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+
+    if (url.includes("/ports/") && url.endsWith("/preview-url")) {
+      calls.push({ url, init, canary: null });
+      return new Response(
+        JSON.stringify({ sandboxId: FAKE_SANDBOX.id, url: PREVIEW_URL, token: PREVIEW_TOKEN }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }
+
+    const headers = new Headers(init?.headers);
+    assert.equal(headers.get(CANARY_HEADER), PREVIEW_TOKEN, "every sandbox-facing call must carry the preview token");
+
+    const { pathname } = new URL(url);
+    const method = init?.method ?? "GET";
+    calls.push({ url, init, canary: lastCanary });
+
+    if (method === "POST" && pathname === "/api/Users/") {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { email?: string };
+      lastCanary = body.email ?? null;
+      return new Response(JSON.stringify({ status: "success" }), { status: 201 });
+    }
+    if (method === "PUT" && pathname === "/api/Users/1") {
+      return new Response(responses.negativeControlBody(lastCanary ?? ""), {
+        status: responses.negativeControlStatus,
+      });
+    }
+    if (method === "PUT" && pathname === "/api/Products/1") {
+      return new Response(responses.exploitBody(lastCanary ?? ""), { status: responses.exploitStatus });
+    }
+    if (method === "GET" && pathname === "/api/Products/1") {
+      return new Response(responses.followUpBody(lastCanary ?? ""), { status: 200 });
+    }
+
+    throw new Error(`unexpected fetch to ${method} ${url}`);
+  }) as typeof fetch;
+}
+
+test("product tampering: an unauthenticated PUT whose canary persists in the product reproduces", async () => {
+  resetSpies();
+  withProductTamperingAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    productTamperingStub(calls, {
+      negativeControlStatus: 401,
+      negativeControlBody: () => "Unauthorized",
+      exploitStatus: 200,
+      exploitBody: (canary) => JSON.stringify({ status: "success", data: { id: 1, description: canary } }),
+      followUpBody: (canary) => JSON.stringify({ status: "success", data: { id: 1, description: canary } }),
+    }),
+    () => reproduce(reproduceInput({ recipe: productTamperingRecipe() })),
+  );
+
+  assert.equal(outcome.outcome, "REPRODUCED");
+  const exploit = calls.find((c) => c.init?.method === "PUT" && new URL(c.url).pathname === "/api/Products/1");
+  assert.ok(exploit, "the exploit PUT must be dispatched");
+  assert.equal(new Headers(exploit.init?.headers).get("authorization"), null, "the exploit carries no credentials");
+  assert.ok(
+    calls.some((c) => c.init?.method === "GET" && new URL(c.url).pathname === "/api/Products/1"),
+    "the follow-up GET must be dispatched to prove the write persisted",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
+});
+
+test("product tampering: a dirty negative control (protected PUT echoes the canary) is never trusted, and the exploit never runs", async () => {
+  resetSpies();
+  withProductTamperingAuthorization();
+  const calls: FetchCall[] = [];
+
+  const outcome = await withFetch(
+    productTamperingStub(calls, {
+      negativeControlStatus: 200,
+      negativeControlBody: (canary) => JSON.stringify({ status: "success", data: { id: 1, email: canary } }),
+      exploitStatus: 200,
+      exploitBody: (canary) => JSON.stringify({ status: "success", data: { id: 1, description: canary } }),
+      followUpBody: (canary) => JSON.stringify({ status: "success", data: { id: 1, description: canary } }),
+    }),
+    () => reproduce(reproduceInput({ recipe: productTamperingRecipe() })),
+  );
+
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(
+    !calls.some((c) => c.init?.method === "PUT" && new URL(c.url).pathname === "/api/Products/1"),
+    "a dirty negative control must stop the run before the exploit is attempted at all",
+  );
+  assert.deepEqual(deleteSandboxCalls, [FAKE_SANDBOX.id]);
 });
 
 
