@@ -1051,8 +1051,14 @@ const MARKER_BUSYBOX_PATH = "/.bountydesk/busybox";
  * shell is left alone apart from the one extra binary.
  */
 export function markerLayer(buildMarker: string): string {
+  // Distroless Node keeps its runtime at /nodejs/bin/node, off PATH (its ENTRYPOINT names it by
+  // absolute path), and Daytona replaces the entrypoint, so a start command that runs `node` would
+  // find nothing. Linked only in the shell-less branch, so an image with its own node is untouched.
+  // ponytail: Node is the only distroless runtime off PATH today; add another here if one appears.
   const script =
-    `[ -e /bin/sh ] || ${MARKER_BUSYBOX_PATH} --install -s /bin; ` +
+    `if [ ! -e /bin/sh ]; then ${MARKER_BUSYBOX_PATH} --install -s /bin; ` +
+    `if [ -x /nodejs/bin/node ] && ! command -v node >/dev/null; then ` +
+    `mkdir -p /usr/local/bin && ln -s /nodejs/bin/node /usr/local/bin/node; fi; fi; ` +
     `mkdir -p /etc && echo ${shArgDockerfile(buildMarker)} > ${MARKER_PATH}`;
   return [
     "USER root",

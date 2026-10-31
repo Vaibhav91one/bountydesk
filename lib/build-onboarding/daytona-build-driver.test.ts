@@ -453,6 +453,8 @@ test("the marker layer needs no shell in the image, so a distroless final stage 
   assert.deepEqual(argv.slice(0, 3), ["/.bountydesk/busybox", "sh", "-c"]);
   assert.ok(argv[3].includes("echo 'abc123' > /etc/bountydesk-build-marker"));
   // Applets are linked only into an image that has no shell of its own.
-  assert.ok(argv[3].startsWith("[ -e /bin/sh ] ||"));
+  assert.ok(argv[3].startsWith("if [ ! -e /bin/sh ]; then"));
+  // Distroless Node's runtime is off PATH, and start commands call `node` by name.
+  assert.ok(argv[3].includes("ln -s /nodejs/bin/node /usr/local/bin/node"));
   assert.ok(!/^RUN (?!\[)/m.test(layer), "no shell-form RUN may remain in the layer");
 });
