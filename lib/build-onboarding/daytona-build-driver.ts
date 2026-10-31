@@ -239,7 +239,8 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         if (plan.strategy === "compose-mesh" && source.kind !== "image") {
           const mesh = await buildMesh(sandbox, plan, {
             registry,
-            slug,
+            // Same reason as the single-image path below: each service snapshot is named from this.
+            slug: snapshotSlug(slug, input.sourceRef),
             buildMarker,
             ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
             ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
