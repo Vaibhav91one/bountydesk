@@ -4,7 +4,7 @@ export const metadata = { title: "Privacy · BountyDesk" };
 
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy policy" updated="September 2026">
+    <LegalPage title="Privacy policy" updated="October 2026">
       <p>
         BountyDesk is a demonstration project with no company behind it. This page describes the
         data it handles as it runs today. It does not sell data, and it shares nothing beyond the
@@ -35,8 +35,22 @@ export default function PrivacyPage() {
         <p>
           Through the GitHub App, BountyDesk asks for the least access it needs: read access to
           repository metadata and read and write access to issues, so it can read a report and
-          post an approved verdict back. A connected public repository is cloned anonymously.
-          When an installation is suspended or removed, intake and delivery stop.
+          post an approved verdict back. Two permissions are optional and only used when an
+          owner grants them: read and write access to repository security advisories, to take a
+          report filed as an advisory and write the approved verdict onto it, and read access to
+          contents, so a private repository can be cloned for reproduction. A connected public
+          repository is cloned anonymously. When an installation is suspended or removed, intake
+          and delivery stop.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="Mobile notifications">
+        <p>
+          If you turn on notifications in the BountyDesk mobile app, it stores your device&rsquo;s
+          push token and platform, linked to your reviewer account, and sends it through Expo&rsquo;s
+          push service. A notification carries only ids and a short title, never verdict text or
+          report content, and BountyDesk keeps a record of each one it sends. Turning
+          notifications off or signing out revokes the token.
         </p>
       </LegalSection>
 
