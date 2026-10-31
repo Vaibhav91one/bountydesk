@@ -304,6 +304,12 @@ test("idor-basket setup captures two principals, seeds a canary-tagged basket it
     path: "/rest/basket/{{victimBasketId}}",
     headers: { Authorization: "Bearer {{attackerToken}}" },
   });
+
+  // The principal-free control: B's basket with no Authorization header. Juice Shop answers 401.
+  assert.deepEqual(recipe.additionalNegativeControls, [
+    { request: { method: "GET", path: "/rest/basket/{{victimBasketId}}" }, acceptedStatuses: [401] },
+  ]);
+  assert.equal(recipe.negativeControlAcceptedStatuses, undefined);
 });
 
 test("idor-basket oracle: canary in a returned basket product description is true; empty or other-field is false", async () => {
