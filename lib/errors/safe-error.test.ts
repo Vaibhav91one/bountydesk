@@ -29,6 +29,13 @@ test("fromEnd redacts before truncating", () => {
   assert.equal(out, "[REDACTED] tail".slice(-10));
 });
 
+test("fromEnd keeps a log tail past an early brace", () => {
+  const log = 'npm warn {"name":"pkg"}\n' + "y".repeat(40) + "\nError: cannot find module x";
+  assert.equal(safeErrorText(new Error(log), 27, { fromEnd: true }), "Error: cannot find module x");
+  // The default still cuts at the first brace.
+  assert.equal(safeErrorText(new Error(log)), "npm warn");
+});
+
 test("default keeps the head", () => {
   assert.equal(safeErrorText("abcdef", 3), "abc");
 });
