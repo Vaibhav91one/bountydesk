@@ -189,7 +189,9 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         source.kind === "image" ? registryHostOf(source.imageRef) : source.kind === "git" ? cloneHostOf(source.cloneUrl) : undefined,
       );
 
-      const slug = repoSlug(input.repoFullName);
+      // Upload-aware (see snapshotSlug): the image tag, the mesh names and the snapshot name all
+      // come from this, so a retest never shares one with the repository's own onboarding build.
+      const slug = snapshotSlug(repoSlug(input.repoFullName), input.sourceRef);
       const imageName = `${registry.namespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
 
@@ -239,8 +241,7 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         if (plan.strategy === "compose-mesh" && source.kind !== "image") {
           const mesh = await buildMesh(sandbox, plan, {
             registry,
-            // Same reason as the single-image path below: each service snapshot is named from this.
-            slug: snapshotSlug(slug, input.sourceRef),
+            slug,
             buildMarker,
             ...(resolvedCommitSha ? { resolvedCommitSha } : {}),
             ...(sourceArchiveDigest ? { sourceArchiveDigest } : {}),
@@ -260,7 +261,7 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         // A rebuild of the same target reuses this deterministic name and replaces the prior
         // snapshot; registerServiceSnapshot also rides out Daytona's lagging delete (a 409 on the name).
         const snapshot = {
-          id: await registerServiceSnapshot(snapshotSlug(slug, input.sourceRef), pullableTag, liveMeshRuntime),
+          id: await registerServiceSnapshot(slug, pullableTag, liveMeshRuntime),
         };
 
         // Daytona materialises the snapshot's image at registration, so the origin registry tag is no
