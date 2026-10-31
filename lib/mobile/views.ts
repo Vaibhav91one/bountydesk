@@ -134,7 +134,8 @@ export function mobileCaseView(
     targetScope: file.targetScope ? { ...scope, port: scope.port ?? null } : null,
     /** The bound target's release label, null when there is no target or its profile names none. */
     targetVersion: version ?? null,
-    summary: live.finalSummary,
+    // A run that ended without a final agent summary still has the verdict's own summary to show.
+    summary: live.finalSummary ?? verdict?.summary ?? null,
     destination: live.destination,
 
     verdict: verdict && {
