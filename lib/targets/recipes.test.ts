@@ -28,7 +28,7 @@ test("a recognized target name with an unrecognized config shape gets no recipes
   assert.deepEqual(getRecipesForTarget({ name: "juice-shop-v17.3.0", config: "nope" }), []);
 });
 
-test("juice-shop-v17.3.0 returns the five HTTP/OOB recipes and the DOM XSS recipe", () => {
+test("juice-shop-v17.3.0 returns the six HTTP/OOB recipes and the DOM XSS recipe", () => {
   const recipes = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG });
   assert.deepEqual(
     recipes.map((r) => r.id),
@@ -36,6 +36,7 @@ test("juice-shop-v17.3.0 returns the five HTTP/OOB recipes and the DOM XSS recip
       "juice-shop-sqli-search",
       "juice-shop-login-bypass",
       "juice-shop-idor-basket",
+      "juice-shop-product-tampering-unauth",
       "juice-shop-ftp-poison-null-byte",
       "juice-shop-ssrf-profile-image",
       "juice-shop-dom-xss-search",
@@ -303,6 +304,12 @@ test("idor-basket setup captures two principals, seeds a canary-tagged basket it
     path: "/rest/basket/{{victimBasketId}}",
     headers: { Authorization: "Bearer {{attackerToken}}" },
   });
+
+  // The principal-free control: B's basket with no Authorization header. Juice Shop answers 401.
+  assert.deepEqual(recipe.additionalNegativeControls, [
+    { request: { method: "GET", path: "/rest/basket/{{victimBasketId}}" }, acceptedStatuses: [401] },
+  ]);
+  assert.equal(recipe.negativeControlAcceptedStatuses, undefined);
 });
 
 test("idor-basket oracle: canary in a returned basket product description is true; empty or other-field is false", async () => {
@@ -331,6 +338,81 @@ test("idor-basket oracle: canary in a returned basket product description is tru
   });
   assert.equal(await recipe.oracleCheck({ status: 200, body: coincidentalBody }, canary), false);
   assert.equal(await recipe.oracleCheck({ status: 500, body: victimBasketBody }, canary), false);
+});
+
+function productTamperingRecipe() {
+  const recipe = getRecipesForTarget({ name: "juice-shop-v17.3.0", config: CONFIG }).find(
+    (r) => r.id === "juice-shop-product-tampering-unauth",
+  );
+  assert.ok(recipe);
+  return recipe;
+}
+
+test("product-tampering is registered, oracle-ready, and carries the auth-bypass keywords and endpoint path", () => {
+  const recipe = productTamperingRecipe();
+  assert.equal(recipeOracleReady(recipe), true);
+  for (const keyword of ["auth bypass", "broken access control", "missing authentication", "/api/Products"]) {
+    assert.ok(recipe.keywords.includes(keyword), `keywords include ${keyword}`);
+  }
+  // Must not take the SQLi login recipe's own endpoint or class keywords.
+  assert.equal(recipe.keywords.includes("sql injection"), false);
+  assert.equal(recipe.keywords.includes("/rest/user/login"), false);
+});
+
+test("product-tampering exploit is an unauthenticated PUT to product 1; the control is an unauthenticated PUT to a denyAll route", () => {
+  const recipe = productTamperingRecipe();
+
+  assert.deepEqual(recipe.exploit, {
+    method: "PUT",
+    path: "/api/Products/1",
+    body: { description: "{{canary}}" },
+  });
+  assert.equal(recipe.exploit.headers, undefined, "the exploit sends no Authorization header");
+
+  assert.deepEqual(recipe.negativeControl, {
+    method: "PUT",
+    path: "/api/Users/1",
+    body: { email: "{{canary}}" },
+  });
+  assert.deepEqual(recipe.negativeControlAcceptedStatuses, [401]);
+});
+
+test("product-tampering follow-up is an unauthenticated GET of the same product", () => {
+  const recipe = productTamperingRecipe();
+  const exploitResponse = { status: 200, body: JSON.stringify({ status: "success", data: { id: 1 } }) };
+
+  assert.deepEqual(recipe.exploitFollowUp?.buildRequest(exploitResponse), {
+    method: "GET",
+    path: "/api/Products/1",
+  });
+});
+
+test("product-tampering oracle: a response carrying the canary is true, without it is false, and a non-2xx is false", () => {
+  const recipe = productTamperingRecipe();
+  const canary = freshCanary();
+
+  assert.equal(recipe.oracleCheck({ status: 200, body: JSON.stringify({ data: { description: canary } }) }, canary), true);
+  assert.equal(recipe.oracleCheck({ status: 200, body: JSON.stringify({ data: { description: "x" } }) }, canary), false);
+  assert.equal(recipe.oracleCheck({ status: 401, body: canary }, canary), false);
+});
+
+test("product-tampering follow-up oracle: this run's canary as the product description is true; otherwise false", async () => {
+  const recipe = productTamperingRecipe();
+  const canary = freshCanary();
+  const persisted = JSON.stringify({ status: "success", data: { id: 1, name: "Apple Juice", description: canary } });
+  const bare = JSON.stringify({ id: 1, name: "Apple Juice", description: canary });
+  const untouched = JSON.stringify({ status: "success", data: { id: 1, name: "Apple Juice", description: "Apple juice" } });
+
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: persisted }, canary), true);
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: bare }, canary), true);
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: untouched }, canary), false);
+  // A canary echoed outside the description is not the product's own content.
+  assert.equal(
+    await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: JSON.stringify({ data: { id: 1, name: canary } }) }, canary),
+    false,
+  );
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 403, body: persisted }, canary), false);
+  assert.equal(await recipe.exploitFollowUp?.oracleCheck({ status: 200, body: "<html>nope</html>" }, canary), false);
 });
 
 function ftpPoisonNullByteRecipe() {
