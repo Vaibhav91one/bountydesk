@@ -788,3 +788,19 @@ test("sweepTrialSnapshots reclaims per-upload snapshots, keeps a repo snapshot, 
   assert.deepEqual(deleted, ["up1", "up3"], "a failed delete is not reported as deleted");
   assert.deepEqual(kept, ["repo"]);
 });
+
+test("the live sweep counts a DELETE answered with 200 and an empty body as deleted", async () => {
+  const methods: string[] = [];
+  await withFetch(
+    (async (_url: string | URL | Request, init?: RequestInit) => {
+      methods.push(init?.method ?? "GET");
+      if (init?.method === "DELETE") return new Response("", { status: 200 });
+      return json({ items: [{ id: "snap-1", name: "onboarding-acme-0123456789" }] });
+    }) as typeof fetch,
+    async () => {
+      const result = await sweepTrialSnapshots(new Set());
+      assert.deepEqual(result.deleted, ["snap-1"]);
+    },
+  );
+  assert.deepEqual(methods, ["GET", "DELETE"]);
+});

@@ -228,7 +228,9 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new DaytonaError(`${init.method ?? "GET"} ${path} -> ${response.status} ${body.slice(0, 300)}`, response.status);
   }
 
-  return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+  // Daytona answers some calls (a snapshot DELETE among them) with 200 and an empty body, not 204.
+  const text = await response.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /**
