@@ -356,12 +356,7 @@ export async function stageSource(
  * /etc and the offline target then runs as root, fine for a test target.
  */
 export function prebuiltImageDockerfile(source: Extract<BuildSource, { kind: "image" }>): string {
-  return [
-    `FROM ${imageNameFromRef(source.imageRef)}@${source.imageDigest}`,
-    "USER root",
-    `RUN mkdir -p /etc && echo ${shArgDockerfile(source.imageDigest)} > ${MARKER_PATH}`,
-    "",
-  ].join("\n");
+  return `FROM ${imageNameFromRef(source.imageRef)}@${source.imageDigest}\n${markerLayer(source.imageDigest)}`;
 }
 
 async function buildPrebuiltImage(
@@ -668,14 +663,11 @@ async function buildImage(
     // via a base64 pipe (arbitrary text, intact), append the marker layer pinned to root (the agent's
     // Dockerfile may end on a non-root USER), then build.
     const context = plan.buildContext;
-    const b64 = Buffer.from(injectProxyTrust(plan.dockerfileText), "utf8").toString("base64");
+    const prepared = `${injectProxyTrust(plan.dockerfileText)}\n${markerLayer(buildMarker)}`;
+    const b64 = Buffer.from(prepared, "utf8").toString("base64");
     await run(
       sandbox,
       `echo ${shellArg(b64)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`,
-    );
-    await run(
-      sandbox,
-      `printf 'USER root\\nRUN mkdir -p /etc && echo %s > ${MARKER_PATH}\\n' ${shellArg(buildMarker)} >> /work/source/${context}/Dockerfile.bountydesk`,
     );
     const dockerfileText = (await run(sandbox, `cat /work/source/${context}/Dockerfile.bountydesk`)).result;
     await dockerBuild(
@@ -692,9 +684,7 @@ async function buildImage(
     // the offline target then runs as root, fine for a test target. Build from a derived Dockerfile
     // so the customer's file on disk is left untouched.
     const original = (await run(sandbox, `cat /work/source/${context}/${dockerfilePath}`)).result;
-    const dockerfileText =
-      injectProxyTrust(original) +
-      `\nUSER root\nRUN mkdir -p /etc && echo ${shArgDockerfile(buildMarker)} > ${MARKER_PATH}\n`;
+    const dockerfileText = `${injectProxyTrust(original)}\n${markerLayer(buildMarker)}`;
     const prepared = Buffer.from(dockerfileText, "utf8").toString("base64");
     await run(sandbox, `echo ${shellArg(prepared)} | base64 -d > /work/source/${context}/Dockerfile.bountydesk`);
     const buildArgs = renderBuildArgs(plan.buildArgs);
@@ -705,12 +695,7 @@ async function buildImage(
   }
 
   if (plan.strategy === "image") {
-    const dockerfile = [
-      `FROM ${plan.baseImage}`,
-      "USER root",
-      `RUN mkdir -p /etc && echo ${shArgDockerfile(buildMarker)} > ${MARKER_PATH}`,
-      "",
-    ].join("\n");
+    const dockerfile = `FROM ${plan.baseImage}\n${markerLayer(buildMarker)}`;
     await writeGenDockerfile(sandbox, dockerfile);
     await dockerBuild(`cd /work/gen && docker build ${PROXY_BUILD_ARGS} -t ${imageRef} .`);
     return { dockerfileText: dockerfile, ...captured() };
@@ -1049,4 +1034,30 @@ function shellArg(value: string): string {
 /** Escape a value to sit inside a single-quoted token in a generated Dockerfile RUN line. */
 function shArgDockerfile(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+const MARKER_BUSYBOX_IMAGE = "busybox:1.37.0-musl";
+// Busybox picks its applet from argv[0], so the file must keep the name "busybox".
+const MARKER_BUSYBOX_PATH = "/.bountydesk/busybox";
+
+/**
+ * The layer appended to a target's own Dockerfile: root, then the build marker.
+ *
+ * A shell-form RUN needs /bin/sh, and a distroless final stage (Juice Shop's, among others) has
+ * none, so the marker write failed the whole build. The static busybox arrives by COPY and the RUN
+ * is exec form, so neither needs a shell in the image. When the image has no /bin/sh, busybox's
+ * applets are linked into /bin as well: the reproduction sandbox reads the marker back with `cat`
+ * and probes readiness with wget, and both need a shell there too. An image that already has a
+ * shell is left alone apart from the one extra binary.
+ */
+export function markerLayer(buildMarker: string): string {
+  const script =
+    `[ -e /bin/sh ] || ${MARKER_BUSYBOX_PATH} --install -s /bin; ` +
+    `mkdir -p /etc && echo ${shArgDockerfile(buildMarker)} > ${MARKER_PATH}`;
+  return [
+    "USER root",
+    `COPY --from=${MARKER_BUSYBOX_IMAGE} /bin/busybox ${MARKER_BUSYBOX_PATH}`,
+    `RUN ${JSON.stringify([MARKER_BUSYBOX_PATH, "sh", "-c", script])}`,
+    "",
+  ].join("\n");
 }
