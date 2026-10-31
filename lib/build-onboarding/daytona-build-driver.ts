@@ -189,7 +189,9 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         source.kind === "image" ? registryHostOf(source.imageRef) : source.kind === "git" ? cloneHostOf(source.cloneUrl) : undefined,
       );
 
-      const slug = repoSlug(input.repoFullName);
+      // Upload-aware (see snapshotSlug): the image tag, the mesh names and the snapshot name all
+      // come from this, so a retest never shares one with the repository's own onboarding build.
+      const slug = snapshotSlug(repoSlug(input.repoFullName), input.sourceRef);
       const imageName = `${registry.namespace}/${slug}`;
       const imageRef = onboardingSnapshotImageRef(imageName);
 
@@ -256,16 +258,11 @@ export function createDaytonaBuildDriver(deps: DaytonaBuildDriverDeps = {}): Bui
         // after, so the untrusted build ran with no reusable token in the sandbox.
         const { pullableTag, digest } = await registry.push(sandbox, imageRef, run);
 
-        // A rebuild of the same target reuses this deterministic name, and Daytona refuses a create
-        // that collides with an existing snapshot. Replace the prior one rather than fail on it.
-        await deleteSnapshotByName(`onboarding-${slug}`);
-        const snapshot = await createSnapshot({
-          name: `onboarding-${slug}`,
-          image: pullableTag,
-          cpu: BUILD_CPU,
-          memoryGb: BUILD_MEMORY_GB,
-          diskGb: BUILD_DISK_GB,
-        });
+        // A rebuild of the same target reuses this deterministic name and replaces the prior
+        // snapshot; registerServiceSnapshot also rides out Daytona's lagging delete (a 409 on the name).
+        const snapshot = {
+          id: await registerServiceSnapshot(slug, pullableTag, liveMeshRuntime),
+        };
 
         // Daytona materialises the snapshot's image at registration, so the origin registry tag is no
         // longer needed to boot the target once the snapshot is active. Reclaim it, best-effort.
@@ -612,6 +609,21 @@ async function reclaimOriginImage(
   } catch (error) {
     console.warn(`could not reclaim origin image ${pullableTag}: ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+/**
+ * The slug a build's snapshot is named from. An upload build (a retest included) carries
+ * `upload:<reportId>` as its source ref, and a git retest of a connected repository uses that
+ * repository's own name, so a bare repo slug would match the repository's onboarding snapshot and
+ * the retest would delete the snapshot the onboarded target boots from. Suffixing the source ref's
+ * hash keeps each upload build on its own name; an onboarding rebuild keeps the shared one it is
+ * meant to replace.
+ * ponytail: per-upload snapshots are not reclaimed here; the trial-snapshot sweep in
+ * docs/onboarding-follow-ups.md is where that belongs.
+ */
+export function snapshotSlug(repoSlugValue: string, sourceRef: string): string {
+  if (!sourceRef.startsWith("upload:")) return repoSlugValue;
+  return `${repoSlugValue}-${createHash("sha256").update(sourceRef).digest("hex").slice(0, 10)}`;
 }
 
 /** Register (or replace) a Daytona snapshot for one mesh service under a deterministic name. Daytona's
