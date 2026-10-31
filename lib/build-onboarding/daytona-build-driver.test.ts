@@ -16,6 +16,7 @@ import {
   egressAllowList,
   imageNameFromRef,
   injectProxyTrust,
+  ENSURE_PROBE_TOOL,
   markerLayer,
   repoSlug,
   resolveBuildSource,
@@ -458,6 +459,22 @@ test("the marker layer needs no shell in the image, so a distroless final stage 
   // Distroless Node's runtime is off PATH, and start commands call `node` by name.
   assert.ok(argv[3].includes("ln -s /nodejs/bin/node /usr/local/bin/node"));
   assert.ok(!/^RUN (?!\[)/m.test(layer), "no shell-form RUN may remain in the layer");
+});
+
+test("the mesh probe-tool install is exec form, so a distroless service image still builds", () => {
+  const lines = ENSURE_PROBE_TOOL.split("\n");
+  assert.match(lines[0], /^COPY --from=busybox:[\w.-]+ \/bin\/busybox \/\.bountydesk\/busybox$/);
+  assert.equal(lines.length, 2);
+  assert.ok(lines[1].startsWith("RUN ["), "the probe RUN must be exec form");
+  const argv = JSON.parse(lines[1].slice("RUN ".length)) as string[];
+  assert.deepEqual(argv.slice(0, 3), ["/.bountydesk/busybox", "sh", "-c"]);
+  // Applets are linked on a shell-less image; the curl install is unchanged on a normal one.
+  assert.ok(argv[3].startsWith("if [ ! -e /bin/sh ]; then /.bountydesk/busybox --install -s /bin; fi;"));
+  assert.ok(argv[3].includes("apt-get install -y --no-install-recommends curl"));
+  assert.ok(argv[3].includes("apk add --no-cache curl"));
+  // The app-service Dockerfile is markerLayer then the probe RUN: every RUN is exec form.
+  const app = `${markerLayer("m")}${lines[1]}\nENV A="b"\n`;
+  assert.ok(!/^RUN (?!\[)/m.test(app), "no shell-form RUN may remain");
 });
 
 test("an upload build gets its own snapshot name, so a retest cannot replace the onboarded target's", () => {
