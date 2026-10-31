@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { artifact, db, eq, report, sessionEvent, targetProfile, verdict } from "@/lib/db";
+import { and, artifact, db, eq, isNotNull, report, sessionEvent, targetProfile, verdict } from "@/lib/db";
 import { buildRemediationPatch } from "@/lib/remediation/patch";
 import type { Finding } from "@/lib/mcp/verdict-draft";
 import { verdictFindings } from "@/lib/reports/case-facts";
@@ -154,6 +154,20 @@ async function recordOne(
     .onConflictDoNothing({ target: [artifact.verdictId, artifact.kind] });
 }
 
+/**
+ * Kinds already uploaded for this verdict. Artifact rows are append-only and keyed by
+ * (verdict_id, kind), so a stored file is final: rebuilding and re-uploading it on a retried
+ * poll only repeats the work. Rows with a null storage_path are not in this set, so they are
+ * still attempted.
+ */
+async function storedKinds(verdictId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ kind: artifact.kind })
+    .from(artifact)
+    .where(and(eq(artifact.verdictId, verdictId), isNotNull(artifact.storagePath)));
+  return new Set(rows.map((row) => row.kind));
+}
+
 export async function recordVerdictArtifacts(reportId: string, verdictId: string): Promise<void> {
   try {
     const [verdictRow] = await db
@@ -163,14 +177,19 @@ export async function recordVerdictArtifacts(reportId: string, verdictId: string
       .limit(1);
     if (!verdictRow) return;
 
-    const transcript = await buildTranscript(reportId, verdictId);
-    await recordOne(reportId, verdictId, "investigation-transcript", transcript);
-    await recordOne(reportId, verdictId, "verdict-payload", verdictRow.payload);
+    const stored = await storedKinds(verdictId);
+    if (!stored.has("investigation-transcript")) {
+      const transcript = await buildTranscript(reportId, verdictId);
+      await recordOne(reportId, verdictId, "investigation-transcript", transcript);
+    }
+    if (!stored.has("verdict-payload")) {
+      await recordOne(reportId, verdictId, "verdict-payload", verdictRow.payload);
+    }
 
     // Only when there is something to write. A verdict with no findings would otherwise leave an
     // empty file the case file has to offer and a reviewer has to open to learn nothing.
     const findings = verdictFindings(verdictRow.evidence);
-    if (findings.length > 0) {
+    if (findings.length > 0 && !stored.has("findings-evidence")) {
       await recordOne(
         reportId,
         verdictId,
@@ -189,13 +208,13 @@ export async function recordVerdictArtifacts(reportId: string, verdictId: string
       .leftJoin(targetProfile, eq(report.targetProfileId, targetProfile.id))
       .where(eq(report.id, reportId))
       .limit(1);
-    if (targetRow?.dockerfileText) {
+    if (targetRow?.dockerfileText && !stored.has("target-dockerfile")) {
       await recordOne(reportId, verdictId, "target-dockerfile", targetRow.dockerfileText);
     }
 
     // Remediation advice exists only for a reproduced finding on a bound target; anything else
     // records nothing, even if the agent attached a diff.
-    if (verdictRow.outcome === "REPRODUCED" && targetRow?.targetProfileId) {
+    if (verdictRow.outcome === "REPRODUCED" && targetRow?.targetProfileId && !stored.has("remediation-patch")) {
       const patch = buildRemediationPatch(findings);
       if (patch) {
         await recordOne(reportId, verdictId, "remediation-patch", patch, {
