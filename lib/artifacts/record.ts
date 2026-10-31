@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, artifact, db, eq, isNotNull, report, sessionEvent, targetProfile, verdict } from "@/lib/db";
+import { and, artifact, db, eq, isNotNull, report, sessionEvent, sql, targetProfile, verdict } from "@/lib/db";
 import { buildRemediationPatch } from "@/lib/remediation/patch";
 import type { Finding } from "@/lib/mcp/verdict-draft";
 import { verdictFindings } from "@/lib/reports/case-facts";
@@ -138,20 +138,31 @@ async function recordOne(
   // of "produced, not stored" when Storage is off or the upload failed.
   const storagePath = await uploadArtifact(path, bytes, file.contentType);
 
-  await db
-    .insert(artifact)
-    .values({
-      reportId,
-      verdictId,
-      kind,
-      storagePath,
-      sha256: digest,
-      bytes: bytes.byteLength,
-      contentType: file.contentType,
-    })
-    // A retried verdict draft reuses the same (verdict_id, kind); the first write wins and the
-    // retry is a no-op, matching how ensureInitialVerdict treats the verdict itself.
-    .onConflictDoNothing({ target: [artifact.verdictId, artifact.kind] });
+  const insert = db.insert(artifact).values({
+    reportId,
+    verdictId,
+    kind,
+    storagePath,
+    sha256: digest,
+    bytes: bytes.byteLength,
+    contentType: file.contentType,
+  });
+  const target = [artifact.verdictId, artifact.kind];
+
+  if (storagePath === null) {
+    // Nothing to add: a failed upload never touches an existing row, so no write at all.
+    await insert.onConflictDoNothing({ target });
+    return;
+  }
+  // A retried draft reuses the same (verdict_id, kind). A row stored earlier is left alone; a
+  // row an earlier failed upload left with a null storage_path gets its path filled in. The
+  // sha256 check keeps this to the same bytes the row already attests to, and the
+  // artifact_is_append_only trigger (0059) permits exactly this one transition.
+  await insert.onConflictDoUpdate({
+    target,
+    set: { storagePath: sql`excluded.storage_path` },
+    setWhere: sql`${artifact.storagePath} is null and ${artifact.sha256} = excluded.sha256`,
+  });
 }
 
 /**
