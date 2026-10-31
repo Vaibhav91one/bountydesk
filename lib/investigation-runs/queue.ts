@@ -215,14 +215,20 @@ async function failRecheckRun(lease: RecheckRunLease, reason: string): Promise<v
         updatedAt: new Date(),
       })
       .where(heldBy(lease))
-      .returning({ id: investigationRun.id, reportId: investigationRun.reportId, runNumber: investigationRun.runNumber });
+      .returning({
+        id: investigationRun.id,
+        reportId: investigationRun.reportId,
+        runNumber: investigationRun.runNumber,
+        startedAt: investigationRun.startedAt,
+      });
     if (!updated) throw new RecheckLeaseLostError(lease.runId);
 
+    // A retry resets the run and clears startedAt, so each failure generation gets its own key.
     await recordEvent(
       updated.reportId,
       RECHECK_FAILURE_EVENT,
       { runId: updated.id, runNumber: updated.runNumber, reason },
-      { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${updated.id}`, tx },
+      { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${updated.id}:${updated.startedAt?.toISOString() ?? "unclaimed"}`, tx },
     );
   });
 }
@@ -231,7 +237,7 @@ export type RecheckSweepCandidate = {
   reason: string;
   status: string;
   attempts: number;
-  createdAt: Date;
+  updatedAt: Date;
   leaseOwner: string | null;
   leaseExpiresAt: Date | null;
 };
@@ -246,7 +252,7 @@ export function recheckSweepReason(
       candidate.attempts === 0 &&
       candidate.leaseOwner === null &&
       candidate.leaseExpiresAt === null &&
-      now.getTime() - candidate.createdAt.getTime() >= RECHECK_PENDING_TIMEOUT_MS
+      now.getTime() - candidate.updatedAt.getTime() >= RECHECK_PENDING_TIMEOUT_MS
     ) {
       return "pending re-check was not claimed before its timeout";
     }
@@ -301,7 +307,7 @@ export async function sweepRecheckRuns(now = new Date()): Promise<{ released: nu
              and ${investigationRun.attempts} = 0
              and ${investigationRun.leaseOwner} is null
              and ${investigationRun.leaseExpiresAt} is null
-             and ${investigationRun.createdAt} <= ${pendingCutoffIso}::timestamptz
+             and ${investigationRun.updatedAt} <= ${pendingCutoffIso}::timestamptz
            )
            or (
              ${investigationRun.status} = 'PENDING'
@@ -323,7 +329,7 @@ export async function sweepRecheckRuns(now = new Date()): Promise<{ released: nu
         row.report_id,
         RECHECK_FAILURE_EVENT,
         { runId: row.id, runNumber: row.run_number, reason: "re-check was abandoned by the sweeper" },
-        { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${row.id}`, tx },
+        { idempotencyKey: `${RECHECK_FAILURE_EVENT}:${row.id}:${nowIso}`, tx },
       );
     }
     return { released: released.length, failed: rows.length };
