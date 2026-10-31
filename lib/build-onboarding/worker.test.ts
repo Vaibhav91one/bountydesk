@@ -810,6 +810,41 @@ test("collectProtectedSnapshotIds protects live profiles, mesh services, and in-
   assert.equal(ids.has("failed-snap"), false, "a terminal onboarding row's snapshot is not protected");
 });
 
+test("a finished upload profile's snapshots are reclaimable, a live or repo one never is", async () => {
+  const old = new Date(Date.now() - 3 * 24 * 60 * 60_000);
+  const profile = async (name: string, snapshotId: string, origin: string | null) =>
+    (
+      await dbm.db
+        .insert(dbm.targetProfile)
+        .values({ name, imageDigest: `sha256:${"d".repeat(64)}`, snapshotId, origin, config: {} })
+        .returning({ id: dbm.targetProfile.id })
+    )[0].id;
+  const bound = async (targetProfileId: string, state: string, updatedAt: Date) =>
+    dbm.db.execute(
+      dbm.sql`insert into report (channel, source_ref, title, body, state, target_profile_id, updated_at)
+        values ('upload', ${`up:${crypto.randomUUID()}`}, 't', 'b', ${state}, ${targetProfileId}, ${updatedAt})`,
+    );
+
+  const done = await profile("upload-done", "ru-done", "connectionless");
+  await bound(done, "DELIVERED", old);
+  const recent = await profile("upload-recent", "ru-recent", "connectionless");
+  await bound(recent, "DELIVERED", new Date());
+  const live = await profile("upload-live", "ru-live", "connectionless");
+  await bound(live, "AWAITING_APPROVAL", old);
+  const mixed = await profile("upload-mixed", "ru-mixed", "connectionless");
+  await bound(mixed, "DELIVERED", old);
+  await bound(mixed, "REPRODUCING", old);
+  await profile("upload-unbound", "ru-unbound", "connectionless");
+  const repo = await profile("acme-widget", "ru-repo", "github");
+  await bound(repo, "DELIVERED", old);
+
+  const ids = await worker.collectProtectedSnapshotIds();
+  assert.equal(ids.has("ru-done"), false, "terminal and old: reclaimable");
+  for (const kept of ["ru-recent", "ru-live", "ru-mixed", "ru-unbound", "ru-repo"]) {
+    assert.ok(ids.has(kept), `${kept} stays protected`);
+  }
+});
+
 test("the snapshot sweep deletes an unprotected trial snapshot and never a protected one", async () => {
   // An earlier test can leave a row mid-build, which would (correctly) make this pass skip.
   await dbm.db

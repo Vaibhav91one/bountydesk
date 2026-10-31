@@ -1,4 +1,5 @@
-import { connectedRepository, db, eq, inArray, targetOnboarding, targetProfile, uploadIntake } from "@/lib/db";
+import { connectedRepository, db, eq, inArray, sql, targetOnboarding, targetProfile, uploadIntake } from "@/lib/db";
+import { TERMINAL_STATES } from "@/lib/reports/states";
 import { configureTarget, rotateTarget, TargetProfileExistsError } from "@/lib/targets/configure";
 import { profileAppPort } from "@/lib/targets/authorize-reproduction";
 import { parseTargetManifest, validateStartCommand } from "@/lib/targets/manifest";
@@ -604,8 +605,33 @@ function meshSnapshotIds(value: unknown): string[] {
 }
 
 /**
+ * SQL predicate: this upload-built profile can never start a sandbox again, so its snapshots can be
+ * reclaimed. An upload profile is named `upload-<reportId>` and bound to that one report (and, for a
+ * retest, to its own child report), and a rebuild of the same upload reuses the profile, not a new
+ * one. It is done when it has at least one bound report, every bound report is terminal (a terminal
+ * report has no legal move back to REPRODUCING, see lib/reports/states.ts) and untouched for a day,
+ * and no investigation run on it is still live. A profile with no bound report is kept: the bind
+ * may not have happened yet. Repository onboarding profiles never match (origin and name).
+ */
+function uploadProfileIsDone() {
+  const terminal = sql.join(TERMINAL_STATES.map((state) => sql`${state}`), sql`, `);
+  return sql`coalesce(${targetProfile.origin}, '') = 'connectionless'
+    and ${targetProfile.name} like 'upload-%'
+    and exists (select 1 from report r where r.target_profile_id = ${targetProfile.id})
+    and not exists (
+      select 1 from report r
+      where r.target_profile_id = ${targetProfile.id}
+        and (r.state::text not in (${terminal}) or r.updated_at > now() - interval '1 day'))
+    and not exists (
+      select 1 from investigation_run ir
+      where ir.target_profile_id = ${targetProfile.id}
+        and ir.status in ('PENDING', 'RUNNING', 'AWAITING_APPROVAL'))`;
+}
+
+/**
  * Every snapshot id a live target boots from or an in-flight onboarding still holds: every target
- * profile's snapshot (single-image and each mesh service), plus every non-terminal onboarding row's
+ * profile's snapshot (single-image and each mesh service) except finished upload profiles
+ * (uploadProfileIsDone), plus every non-terminal onboarding row's
  * built snapshot. sweepTrialSnapshots never deletes one of these, so an onboarding whose snapshot is
  * built but whose row is not yet approved is safe from the sweep.
  */
@@ -613,7 +639,8 @@ export async function collectProtectedSnapshotIds(): Promise<Set<string>> {
   const ids = new Set<string>();
   const profiles = await db
     .select({ snapshotId: targetProfile.snapshotId, config: targetProfile.config })
-    .from(targetProfile);
+    .from(targetProfile)
+    .where(sql`not (${uploadProfileIsDone()})`);
   for (const profile of profiles) {
     if (profile.snapshotId) ids.add(profile.snapshotId);
     for (const id of meshSnapshotIds(profile.config)) ids.add(id);

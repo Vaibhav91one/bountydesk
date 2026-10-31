@@ -768,3 +768,23 @@ test("sweepTrialSnapshots deletes orphan onboarding snapshots but never a refere
   assert.deepEqual(deletedIds, ["s2"]);
   assert.deepEqual([...kept].sort(), ["s1", "s4"], "referenced snapshots are kept, whatever their name");
 });
+
+test("sweepTrialSnapshots reclaims per-upload snapshots, keeps a repo snapshot, and swallows delete errors", async () => {
+  const mk = (id: string, name: string): SnapshotInfo => ({ id, name, imageName: null, state: "active", cpu: 2, mem: 4, disk: 10 });
+  const attempted: string[] = [];
+  const { deleted, kept } = await sweepTrialSnapshots(new Set(["repo"]), {
+    list: async () => [
+      mk("repo", "onboarding-acme-app"), // repository onboarding snapshot, still pinned by its profile
+      mk("up1", "onboarding-acme-app-0123456789"),
+      mk("up2", "onboarding-acme-app-0123456789-db"),
+      mk("up3", "onboarding-acme-app-abcdef0123"),
+    ],
+    deleteById: async (id) => {
+      attempted.push(id);
+      if (id === "up2") throw new Error("daytona 500");
+    },
+  });
+  assert.deepEqual(attempted, ["up1", "up2", "up3"], "the repo snapshot is never passed to delete, and one failure does not stop the rest");
+  assert.deepEqual(deleted, ["up1", "up3"], "a failed delete is not reported as deleted");
+  assert.deepEqual(kept, ["repo"]);
+});

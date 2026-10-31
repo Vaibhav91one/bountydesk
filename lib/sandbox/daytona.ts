@@ -796,8 +796,13 @@ export async function sweepTrialSnapshots(
       kept.push(snapshot.id);
       continue;
     }
-    await ops.deleteById(snapshot.id);
-    deleted.push(snapshot.id);
+    try {
+      await ops.deleteById(snapshot.id);
+      deleted.push(snapshot.id);
+    } catch (error) {
+      // Best effort: a failed delete stays listed and is retried on the next sweep.
+      console.warn(`could not delete snapshot ${snapshot.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return { deleted, kept };
 }
