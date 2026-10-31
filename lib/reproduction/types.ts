@@ -111,6 +111,18 @@ export type ReproductionRecipe = {
    * legitimately succeeds with 2xx (the search-SQLi recipe), which leaves that recipe's
    * behaviour in the orchestrator's runLeg exactly as it is today. */
   negativeControlAcceptedStatuses?: number[];
+  /**
+   * Further negative controls, run in order after `negativeControl` when that control completes
+   * clean. Each one uses the same canary, captured vars and oracleCheck as `negativeControl`, but
+   * only its own `acceptedStatuses` (on top of 2xx), so a status a principal-free request is meant
+   * to get, such as 401, never loosens the primary control. The orchestrator folds them into that
+   * one control's result: the control
+   * counts as completed only if every entry completed, and as dirty if any entry found the canary.
+   * The exploit runs only when the folded control is clean. Use this for a request that must not
+   * disclose the canary under any principal, such as the same resource fetched with no credentials
+   * at all: an endpoint that is open to everyone would otherwise look like a cross-principal IDOR.
+   */
+  additionalNegativeControls?: { request: ReproductionRequest; acceptedStatuses?: number[] }[];
   exploit: ReproductionRequest;
   /**
    * Evaluates a response the controller received directly from the target -- never sandbox-exec
