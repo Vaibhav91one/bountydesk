@@ -627,8 +627,8 @@ async function reclaimOriginImage(
  * the retest would delete the snapshot the onboarded target boots from. Suffixing the source ref's
  * hash keeps each upload build on its own name; an onboarding rebuild keeps the shared one it is
  * meant to replace.
- * ponytail: per-upload snapshots are not reclaimed here; the trial-snapshot sweep in
- * docs/onboarding-follow-ups.md is where that belongs.
+ * Per-upload snapshots are reclaimed by the snapshot sweep once the upload's reports are finished
+ * (uploadProfileIsDone in worker.ts).
  */
 export function snapshotSlug(repoSlugValue: string, sourceRef: string): string {
   if (!sourceRef.startsWith("upload:")) return repoSlugValue;
