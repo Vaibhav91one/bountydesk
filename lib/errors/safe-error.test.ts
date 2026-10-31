@@ -16,6 +16,30 @@ test("bounds error text", () => {
   assert.equal(safeErrorText(new Error("x".repeat(20)), 7), "xxxxxxx");
 });
 
+test("fromEnd keeps the tail of the text", () => {
+  assert.equal(safeErrorText(new Error("head " + "x".repeat(20) + " real error"), 12, { fromEnd: true }), "x real error");
+  assert.equal(safeErrorText("short", 500, { fromEnd: true }), "short");
+  assert.equal(safeErrorText("abc", 0, { fromEnd: true }), "");
+  assert.equal(safeErrorText("", 5, { fromEnd: true }), "");
+});
+
+test("fromEnd redacts before truncating", () => {
+  const out = safeErrorText(new Error("Authorization: Bearer secret-token-abcdef tail"), 10, { fromEnd: true });
+  assert.doesNotMatch(out, /secret|token|abcdef/);
+  assert.equal(out, "[REDACTED] tail".slice(-10));
+});
+
+test("fromEnd keeps a log tail past an early brace", () => {
+  const log = 'npm warn {"name":"pkg"}\n' + "y".repeat(40) + "\nError: cannot find module x";
+  assert.equal(safeErrorText(new Error(log), 27, { fromEnd: true }), "Error: cannot find module x");
+  // The default still cuts at the first brace.
+  assert.equal(safeErrorText(new Error(log)), "npm warn");
+});
+
+test("default keeps the head", () => {
+  assert.equal(safeErrorText("abcdef", 3), "abc");
+});
+
 test("handles non-Error input", () => {
   assert.equal(safeErrorText("plain failure"), "plain failure");
 });
