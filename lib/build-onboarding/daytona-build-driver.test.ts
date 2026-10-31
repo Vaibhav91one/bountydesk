@@ -10,6 +10,7 @@ import {
   cloneHostOf,
   cloneUrlsMatch,
   shouldMintToken,
+  snapshotSlug,
   createDaytonaBuildDriver,
   dockerEnvLine,
   egressAllowList,
@@ -457,4 +458,14 @@ test("the marker layer needs no shell in the image, so a distroless final stage 
   // Distroless Node's runtime is off PATH, and start commands call `node` by name.
   assert.ok(argv[3].includes("ln -s /nodejs/bin/node /usr/local/bin/node"));
   assert.ok(!/^RUN (?!\[)/m.test(layer), "no shell-form RUN may remain in the layer");
+});
+
+test("an upload build gets its own snapshot name, so a retest cannot replace the onboarded target's", () => {
+  // Onboarding keeps the shared, deterministic name it is meant to replace on a rebuild.
+  assert.equal(snapshotSlug("acme-app", "github:acme/app@abc"), "acme-app");
+  const retest = snapshotSlug("acme-app", "upload:11111111-1111-4111-8111-111111111111");
+  assert.match(retest, /^acme-app-[0-9a-f]{10}$/);
+  // Two uploads of the same repository do not collide with each other either.
+  assert.notEqual(retest, snapshotSlug("acme-app", "upload:22222222-2222-4222-8222-222222222222"));
+  assert.equal(retest, snapshotSlug("acme-app", "upload:11111111-1111-4111-8111-111111111111"));
 });
