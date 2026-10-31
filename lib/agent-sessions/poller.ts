@@ -51,6 +51,9 @@ const MIN_HEARTBEAT_INTERVAL_MS = 50;
  * worker has had a chance to act; a retried poll before then is a safe no-op (see below) but
  * there is no point spinning on it. */
 const AWAITING_APPROVAL_POLL_MS = 30_000;
+// Approval wakes the session itself (the approval-submission worker sets nextPollAt to now), so
+// this idle poll only exists to notice a lost harness session.
+const AWAITING_APPROVAL_IDLE_POLL_MS = 10 * 60_000;
 const TURN_TIMEOUT_REASON = "The investigation did not finish within 30 minutes.";
 
 function inFuture(ms: number): Date {
@@ -685,6 +688,19 @@ async function handleAwaitingApproval(
       outerSignal,
       requestDeadlineMs,
     );
+  }
+
+  // The call was already recorded on an earlier poll. Verdict rows are immutable, and a denial or
+  // re-check replaces the turn, so re-drafting, re-recording artifacts and tearing down sandboxes
+  // on every poll only repeats finished work.
+  if (
+    lease.turnStatus === "AWAITING_APPROVAL_HARNESS" &&
+    lease.pendingVerdictId &&
+    lease.pendingThreadId === call.threadId &&
+    lease.pendingToolCallId === call.toolCallId
+  ) {
+    await release(lease, { nextPollAt: inFuture(AWAITING_APPROVAL_IDLE_POLL_MS) });
+    return lease.id;
   }
 
   // Today's tool schema and turn message only ever hand back {capability}; a full draft is

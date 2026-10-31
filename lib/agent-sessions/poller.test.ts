@@ -790,6 +790,67 @@ test("a retried poll on a report already at AWAITING_APPROVAL is a safe no-op", 
   assert.equal(row.pendingVerdictId, fixture.verdictId);
 });
 
+test("a recorded pending call re-polls on the idle interval instead of re-drafting the verdict", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  const client = fakeClient({
+    status: "awaiting_approval",
+    pending: [publishVerdictCall(fixture.capabilityToken)],
+  });
+
+  await poller.pollOnce("w-idle-first", { client });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ nextPollAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+
+  await poller.pollOnce("w-idle-second", { client });
+
+  const [row] = await dbm.db
+    .select({
+      turnStatus: dbm.agentSession.turnStatus,
+      pendingVerdictId: dbm.agentSession.pendingVerdictId,
+      nextPollAt: dbm.agentSession.nextPollAt,
+    })
+    .from(dbm.agentSession)
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+  // The 30 second approval poll would land well inside this window; only the short-circuit
+  // pushes the next poll out to the idle interval.
+  assert.equal(row.turnStatus, "AWAITING_APPROVAL_HARNESS");
+  assert.equal(row.pendingVerdictId, fixture.verdictId);
+  assert.ok(
+    row.nextPollAt.getTime() - Date.now() > 9 * 60_000,
+    "a recorded pending call should wait about ten minutes before the next poll",
+  );
+});
+
+test("a pending call with a different tool call id still takes the full verification path", async () => {
+  await drainOthers();
+  const fixture = await seedSession();
+  await poller.pollOnce("w-recorded-call", {
+    client: fakeClient({
+      status: "awaiting_approval",
+      pending: [publishVerdictCall(fixture.capabilityToken)],
+    }),
+  });
+  await dbm.db
+    .update(dbm.agentSession)
+    .set({ nextPollAt: new Date(Date.now() - 1000) })
+    .where(dbm.eq(dbm.agentSession.id, fixture.agentSessionId));
+
+  await poller.pollOnce("w-other-call", {
+    client: fakeClient({
+      status: "awaiting_approval",
+      pending: [publishVerdictCall(fixture.capabilityToken, { toolCallId: "call-other" })],
+    }),
+  });
+
+  // Not the short-circuit: the mismatch is caught by the existing pending-call check.
+  const row = await sessionRow(fixture.agentSessionId);
+  assert.equal(row.turnStatus, "ERROR");
+  assert.match(row.lastError ?? "", /does not match/);
+});
+
 test("a different pending call cannot replace the call already shown for approval", async () => {
   await drainOthers();
   const fixture = await seedSession();
