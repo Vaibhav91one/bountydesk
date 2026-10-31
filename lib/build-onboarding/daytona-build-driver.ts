@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { requireEnv } from "@/lib/env";
 import {
@@ -61,7 +61,12 @@ const BUILD_CPU = numEnv("BUILD_CPU", 2);
 const BUILD_MEMORY_GB = numEnv("BUILD_MEMORY_GB", 4);
 const BUILD_DISK_GB = numEnv("BUILD_DISK_GB", 10);
 const BUILD_TTL_MINUTES = numEnv("BUILD_TTL_MINUTES", 30);
-const BUILD_TIMEOUT_S = 300;
+// The sandbox TTL is a hard wall-clock ceiling with no renewal, so a command's deadline has to end
+// before it does, or the poll loop fails against a sandbox that is already gone.
+const BUILD_DEADLINE_MINUTES = Math.max(1, BUILD_TTL_MINUTES - 2);
+const BUILD_DEADLINE_MS = BUILD_DEADLINE_MINUTES * 60_000;
+const POLL_INTERVAL_MS = 10_000;
+const MAX_POLL_FAILURES = 3;
 
 const APP_STAGE_TAG = "bountydesk-app-stage";
 const MARKER_PATH = "/etc/bountydesk-build-marker";
@@ -959,11 +964,70 @@ function buildRecipeDigest(
 
 /** Run a build command and fail loudly on a non-zero exit, keeping the log tail where the failure is. */
 async function run(sandbox: Sandbox, command: string): Promise<ExecResult> {
-  const result = await execute(sandbox, `sh -lc ${shellArg(command)}`, BUILD_TIMEOUT_S);
-  if (result.exitCode !== 0) {
-    throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(-2000)}`);
+  return runDetached(sandbox, command);
+}
+
+type DetachedIo = {
+  execute: typeof execute;
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+};
+
+/**
+ * Run a build command detached and poll for its exit code. A synchronous execute is capped at 300s
+ * and answers 408 on a long docker build, so the command writes its exit code to a file and this
+ * waits for that file. The io parameter is for tests; production always uses the defaults.
+ */
+export async function runDetached(
+  sandbox: Sandbox,
+  command: string,
+  io: DetachedIo = {
+    execute,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    now: () => Date.now(),
+  },
+): Promise<ExecResult> {
+  const id = randomUUID();
+  const logPath = `/tmp/bd-${id}.log`;
+  const rcPath = `/tmp/bd-${id}.rc`;
+  const detached = `(nohup sh -lc ${shellArg(command)} >${logPath} 2>&1; echo $? >${rcPath}) >/dev/null 2>&1 &`;
+  await io.execute(sandbox, `sh -lc ${shellArg(detached)}`, 30);
+
+  const readTail = () =>
+    io.execute(sandbox, `tail -c 200000 ${logPath}`, 30).then((r) => r.result, () => "");
+
+  const deadline = io.now() + BUILD_DEADLINE_MS;
+  let failures = 0;
+  // Most build steps (mkdir, clone, tag) finish in a second, so the first look is quick.
+  let wait = 1000;
+  for (;;) {
+    await io.sleep(wait);
+    wait = POLL_INTERVAL_MS;
+    let rc: string;
+    try {
+      rc = (await io.execute(sandbox, `cat ${rcPath} 2>/dev/null || true`, 30)).result.trim();
+      failures = 0;
+    } catch (error) {
+      failures += 1;
+      if (failures >= MAX_POLL_FAILURES) throw error;
+      continue;
+    }
+    if (rc !== "") {
+      const result = {
+        exitCode: Number(rc),
+        // The command already finished, so a transient error reading its log must not fail it.
+        result: await readTail(),
+      };
+      if (result.exitCode !== 0) {
+        throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(-2000)}`);
+      }
+      return result;
+    }
+    if (io.now() >= deadline) {
+      const tail = await readTail();
+      throw new Error(`build command timed out after ${BUILD_DEADLINE_MINUTES}m: ${tail.slice(-2000)}`);
+    }
   }
-  return result;
 }
 
 async function startDockerDaemon(sandbox: Sandbox): Promise<void> {
