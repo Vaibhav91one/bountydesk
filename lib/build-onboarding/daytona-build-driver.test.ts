@@ -384,7 +384,7 @@ test("shouldMintToken gates token mintage on a git source matching the connected
 
 /**
  * A fake for runDetached. `polls` answers each exit-code poll in order (an Error throws), and once it
- * runs out the command has not finished. The clock only moves when the driver sleeps, so the 40 minute
+ * runs out the command has not finished. The clock only moves when the driver sleeps, so the 28 minute
  * deadline is reached without waiting.
  */
 function fakeDetached(polls: Array<string | Error>, logText = "build log") {
@@ -417,16 +417,26 @@ test("a detached build that exits non-zero throws with its exit code and log tai
   await assert.rejects(runDetached(SANDBOX, "docker build .", io), /build command failed \(exit 2\): step 3 failed/);
 });
 
-test("a detached build that never writes an exit code times out after 40 minutes", async () => {
+test("a detached build that never writes an exit code times out before the sandbox TTL", async () => {
   const io = fakeDetached([], "still compiling");
   await assert.rejects(
     runDetached(SANDBOX, "docker build .", io),
     (error: unknown) =>
-      error instanceof Error && error.message === "build command timed out after 40m: still compiling",
+      error instanceof Error && error.message === "build command timed out after 28m: still compiling",
   );
 });
 
 test("two failed polls are retried, and the third poll's exit code is used", async () => {
   const io = fakeDetached([new DaytonaError("execute -> 408", 408), new DaytonaError("execute -> 502", 502), "0"]);
   assert.deepEqual(await runDetached(SANDBOX, "docker build .", io), { exitCode: 0, result: "build log" });
+});
+
+test("a finished build is not failed by an error reading its log", async () => {
+  const io = fakeDetached(["0"]);
+  const execute = io.execute;
+  io.execute = async (sandbox, command) => {
+    if (command.startsWith("tail ")) throw new DaytonaError("execute -> 502", 502);
+    return execute(sandbox, command);
+  };
+  assert.deepEqual(await runDetached(SANDBOX, "docker build .", io), { exitCode: 0, result: "" });
 });

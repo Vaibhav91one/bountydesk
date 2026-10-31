@@ -61,7 +61,10 @@ const BUILD_CPU = numEnv("BUILD_CPU", 2);
 const BUILD_MEMORY_GB = numEnv("BUILD_MEMORY_GB", 4);
 const BUILD_DISK_GB = numEnv("BUILD_DISK_GB", 10);
 const BUILD_TTL_MINUTES = numEnv("BUILD_TTL_MINUTES", 30);
-const BUILD_DEADLINE_MS = 40 * 60_000;
+// The sandbox TTL is a hard wall-clock ceiling with no renewal, so a command's deadline has to end
+// before it does, or the poll loop fails against a sandbox that is already gone.
+const BUILD_DEADLINE_MINUTES = Math.max(1, BUILD_TTL_MINUTES - 2);
+const BUILD_DEADLINE_MS = BUILD_DEADLINE_MINUTES * 60_000;
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_FAILURES = 3;
 
@@ -990,6 +993,9 @@ export async function runDetached(
   const detached = `(nohup sh -lc ${shellArg(command)} >${logPath} 2>&1; echo $? >${rcPath}) >/dev/null 2>&1 &`;
   await io.execute(sandbox, `sh -lc ${shellArg(detached)}`, 30);
 
+  const readTail = () =>
+    io.execute(sandbox, `tail -c 200000 ${logPath}`, 30).then((r) => r.result, () => "");
+
   const deadline = io.now() + BUILD_DEADLINE_MS;
   let failures = 0;
   // Most build steps (mkdir, clone, tag) finish in a second, so the first look is quick.
@@ -1009,7 +1015,8 @@ export async function runDetached(
     if (rc !== "") {
       const result = {
         exitCode: Number(rc),
-        result: (await io.execute(sandbox, `tail -c 200000 ${logPath}`, 30)).result,
+        // The command already finished, so a transient error reading its log must not fail it.
+        result: await readTail(),
       };
       if (result.exitCode !== 0) {
         throw new Error(`build command failed (exit ${result.exitCode}): ${result.result.slice(-2000)}`);
@@ -1017,10 +1024,8 @@ export async function runDetached(
       return result;
     }
     if (io.now() >= deadline) {
-      const tail = await io
-        .execute(sandbox, `tail -c 200000 ${logPath}`, 30)
-        .then((r) => r.result, () => "");
-      throw new Error(`build command timed out after 40m: ${tail.slice(-2000)}`);
+      const tail = await readTail();
+      throw new Error(`build command timed out after ${BUILD_DEADLINE_MINUTES}m: ${tail.slice(-2000)}`);
     }
   }
 }
