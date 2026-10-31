@@ -769,7 +769,8 @@ const liveSweepOps: SnapshotSweepOps = {
     return Array.isArray(listed) ? listed : (listed.items ?? []);
   },
   async deleteById(id) {
-    await call(`/snapshots/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => undefined);
+    // Let a failed delete throw: the sweep logs it and the snapshot stays listed for the next pass.
+    await call(`/snapshots/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 };
 
