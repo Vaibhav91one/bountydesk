@@ -18,7 +18,7 @@ test("a never claimed pending run past its timeout is swept", async () => {
         reason: "REVIEWER_GUIDANCE",
         status: "PENDING",
         attempts: 0,
-        createdAt: new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS - 1000),
+        updatedAt: new Date(now.getTime() - RECHECK_PENDING_TIMEOUT_MS - 1000),
         leaseOwner: null,
         leaseExpiresAt: null,
       },
@@ -26,6 +26,24 @@ test("a never claimed pending run past its timeout is swept", async () => {
     ),
     "pending re-check was not claimed before its timeout",
   );
+});
+
+test("a retried run is not swept by its old createdAt", async () => {
+  const { RECHECK_PENDING_TIMEOUT_MS, recheckSweepReason } = await import("./queue");
+  const now = new Date("2026-09-21T10:00:00Z");
+  // retryRecheck resets the run to PENDING with a fresh updatedAt but keeps the original createdAt.
+  const retried = {
+    reason: "REVIEWER_GUIDANCE",
+    status: "PENDING",
+    attempts: 0,
+    createdAt: new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(now.getTime() - 1000),
+    leaseOwner: null,
+    leaseExpiresAt: null,
+  };
+
+  assert.ok(now.getTime() - retried.updatedAt.getTime() < RECHECK_PENDING_TIMEOUT_MS);
+  assert.equal(recheckSweepReason(retried, now), null);
 });
 
 test("a fresh pending run is left alone", async () => {
@@ -38,7 +56,7 @@ test("a fresh pending run is left alone", async () => {
         reason: "REVIEWER_GUIDANCE",
         status: "PENDING",
         attempts: 0,
-        createdAt: now,
+        updatedAt: now,
         leaseOwner: null,
         leaseExpiresAt: null,
       },
@@ -58,7 +76,7 @@ test("a pending run that spent its claim budget is swept", async () => {
         reason: "REVIEWER_GUIDANCE",
         status: "PENDING",
         attempts: RECHECK_MAX_ATTEMPTS,
-        createdAt: now,
+        updatedAt: now,
         leaseOwner: null,
         leaseExpiresAt: null,
       },
@@ -78,7 +96,7 @@ test("an expired running run at its budget is swept", async () => {
         reason: "REVIEWER_GUIDANCE",
         status: "RUNNING",
         attempts: RECHECK_MAX_ATTEMPTS,
-        createdAt: new Date(now.getTime() - 60_000),
+        updatedAt: new Date(now.getTime() - 60_000),
         leaseOwner: "worker-a",
         leaseExpiresAt: new Date(now.getTime() - 1000),
       },
@@ -98,7 +116,7 @@ test("a running run with budget left or a live lease is left alone", async () =>
         reason: "REVIEWER_GUIDANCE",
         status: "RUNNING",
         attempts: 1,
-        createdAt: new Date(now.getTime() - 60_000),
+        updatedAt: new Date(now.getTime() - 60_000),
         leaseOwner: "worker-a",
         leaseExpiresAt: new Date(now.getTime() - 1000),
       },
@@ -112,7 +130,7 @@ test("a running run with budget left or a live lease is left alone", async () =>
         reason: "REVIEWER_GUIDANCE",
         status: "RUNNING",
         attempts: RECHECK_MAX_ATTEMPTS,
-        createdAt: new Date(now.getTime() - 60_000),
+        updatedAt: new Date(now.getTime() - 60_000),
         leaseOwner: "worker-a",
         leaseExpiresAt: new Date(now.getTime() + 60_000),
       },
@@ -132,7 +150,7 @@ test("other reasons and finished states are never swept", async () => {
         reason: "INITIAL",
         status: "PENDING",
         attempts: 99,
-        createdAt: new Date(0),
+        updatedAt: new Date(0),
         leaseOwner: null,
         leaseExpiresAt: null,
       },
@@ -146,7 +164,7 @@ test("other reasons and finished states are never swept", async () => {
         reason: "REVIEWER_GUIDANCE",
         status: "DONE",
         attempts: 99,
-        createdAt: new Date(0),
+        updatedAt: new Date(0),
         leaseOwner: null,
         leaseExpiresAt: null,
       },
