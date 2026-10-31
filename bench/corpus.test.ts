@@ -133,7 +133,9 @@ test("corpus: unbound cases have expected ANALYSIS_ONLY", () => {
   }
 });
 
-test("corpus: each negativeType has at least 20 cases", () => {
+test("corpus: each negativeType has its reviewed case count", () => {
+  // Not 20 per type after the #346 label corrections moved cases between types.
+  const expected: Record<string, number> = { nonexistent: 26, "wrong-payload": 22, informative: 10, duplicate: 22, unbound: 20 };
   const corpus = loadCorpus();
   const counts: Record<string, number> = {};
   for (const c of corpus.cases) {
@@ -142,7 +144,7 @@ test("corpus: each negativeType has at least 20 cases", () => {
     }
   }
   for (const type of VALID_NEGATIVE_TYPES) {
-    assert.ok(counts[type] >= 20, `negativeType ${type} has only ${counts[type] ?? 0} cases, expected >= 20`);
+    assert.equal(counts[type] ?? 0, expected[type], `negativeType ${type} has ${counts[type] ?? 0} cases, expected ${expected[type]}`);
   }
 });
 

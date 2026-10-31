@@ -528,6 +528,29 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
         capturedVars,
       );
 
+      // Additional controls run only after the primary one is clean, in order. Their results fold
+      // into that same negativeControl result, so decideOutcome still sees one control leg, and the
+      // exploit gate below sees the folded result.
+      if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
+        for (const extra of recipe.additionalNegativeControls ?? []) {
+          const accepted = extra.acceptedStatuses;
+          const more = await runLeg(
+            preview,
+            extra.request,
+            canary,
+            legOracleCheck,
+            opts?.signal,
+            accepted ? (status: number) => defaultIsAcceptableStatus(status) || accepted.includes(status) : undefined,
+            capturedVars,
+          );
+          negativeControl = {
+            ...negativeControl,
+            ranToCompletion: negativeControl.ranToCompletion && more.ranToCompletion,
+            canaryFound: negativeControl.canaryFound || more.canaryFound,
+          };
+        }
+      }
+
       if (negativeControl.ranToCompletion && !negativeControl.canaryFound) {
         const readyForExploit = activeOob ? await activeOob.clearLog(opts?.signal) : true;
         if (readyForExploit) {

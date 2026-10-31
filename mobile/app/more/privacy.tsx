@@ -17,7 +17,7 @@ export default function PrivacyScreen() {
       <ScreenHeader back backLabel="Settings" />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <ScreenTitle title="Privacy" meta="Last updated September 2026" metaBottom={21.3} />
+        <ScreenTitle title="Privacy" meta="Last updated October 2026" metaBottom={21.3} />
 
         <View style={styles.article}>
           <Text style={[styles.lead, { color: colors.foreground }]}>
@@ -36,7 +36,12 @@ export default function PrivacyScreen() {
 
           <Text style={[styles.h2, { color: colors.foreground }]}>GitHub access</Text>
           <Text style={[styles.p, { color: colors.foreground }]}>
-            Through the GitHub App, BountyDesk asks for the least access it needs: read access to repository metadata and read and write access to issues, so it can read a report and post an approved verdict back. A connected public repository is cloned anonymously. When an installation is suspended or removed, intake and delivery stop.
+            Through the GitHub App, BountyDesk asks for the least access it needs: read access to repository metadata and read and write access to issues, so it can read a report and post an approved verdict back. Two permissions are optional and only used when an owner grants them: read and write access to repository security advisories, to take a report filed as an advisory and write the approved verdict onto it, and read access to contents, so a private repository can be cloned for reproduction. A connected public repository is cloned anonymously. When an installation is suspended or removed, intake and delivery stop.
+          </Text>
+
+          <Text style={[styles.h2, { color: colors.foreground }]}>Mobile notifications</Text>
+          <Text style={[styles.p, { color: colors.foreground }]}>
+            If you turn on notifications in this app, BountyDesk stores your device’s push token and platform, linked to your reviewer account, and sends it through Expo’s push service. A notification carries only ids and a short title, never verdict text or report content, and BountyDesk keeps a record of each one it sends. Turning notifications off or signing out revokes the token.
           </Text>
 
           <Text style={[styles.h2, { color: colors.foreground }]}>Retention</Text>

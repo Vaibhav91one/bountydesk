@@ -50,7 +50,9 @@ included because it is a known-hard case for an HTTP-only probe (see
 already see would not tell us anything about that gap.
 
 Negatives (`expected: "NOT_REPRODUCED"` or, for `unbound`, `"ANALYSIS_ONLY"`) are one hundred cases
-across five labelled types, twenty of each:
+across five labelled types. The counts are not balanced: nonexistent 26, wrong-payload 22,
+duplicate 22, unbound 20, informative 10. The #346 label corrections moved cases between types,
+and the corpus test pins these exact counts.
 
 - **nonexistent**: the report describes an endpoint or behavior that does not exist in the pinned build (an invented route, or a real bug class described through behavior, credentials, or codes that do not actually trigger it).
 - **wrong-payload**: a real endpoint and a real bug class, but the payload targets the wrong

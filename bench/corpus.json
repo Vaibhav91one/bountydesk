@@ -406,7 +406,7 @@
       "kind": "positive",
       "expected": "REPRODUCED",
       "title": "Poison null byte bypasses the file-type filter on the FTP download endpoint",
-      "body": "GET /ftp/coupons_2013.md.bak%2500.adoc returns the contents of coupons_2013.md.bak, bypassing the endpoint's allowlist.",
+      "body": "GET /ftp/coupons_2013.md.bak%2500.md returns the contents of coupons_2013.md.bak, bypassing the endpoint's allowlist.",
       "rationale": "A classic poison-null-byte bypass that lets an attacker download files the allowlist was meant to block.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_bypass_a_security_control_with_a_poison_null_byte",
       "vulnClass": "path-traversal"
@@ -417,7 +417,7 @@
       "kind": "positive",
       "expected": "REPRODUCED",
       "title": "Developer backup file accessible via FTP null-byte bypass",
-      "body": "GET /ftp/package.json.bak%2500.adoc returns the contents of package.json.bak, exposing build configuration.",
+      "body": "GET /ftp/package.json.bak%2500.md returns the contents of package.json.bak, exposing build configuration.",
       "rationale": "A real forgotten-backup-file disclosure reachable through the /ftp/:file handler.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_developers_forgotten_backup_file",
       "vulnClass": "path-traversal"
@@ -462,7 +462,7 @@
       "expected": "REPRODUCED",
       "title": "Bjoern's cat photo is reachable via a URL with encoded hash fragments",
       "body": "The photo wall entry references an image whose filename contains hash characters. URL-encoding them yields the actual image file.",
-      "rationale": "A real file-disclosure-by-URL-encoding finding on the user-photo upload path.",
+      "rationale": "The photo wall links an image whose file name contains an unencoded # character (the missingEncodingChallenge). Encoding the # reaches the file. It is not a user-photo upload path.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_retrieve_the_photo_of_bjoerns_cat_in_melee_combat_mode",
       "vulnClass": "info-disclosure"
     },
@@ -497,9 +497,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "API docs at /api-docs expose every route",
       "body": "The Swagger UI at /api-docs lists all internal REST routes.",
-      "rationale": "Swagger documentation is not served from this build.",
-      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no /api-docs route)",
-      "negativeType": "nonexistent",
+      "rationale": "Swagger UI exists at /api-docs, but it documents only the B2B /orders API, not every internal route.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (Swagger UI documents only the B2B /orders API)",
+      "negativeType": "wrong-payload",
       "vulnClass": "other"
     },
     {
@@ -569,9 +569,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The /encryptionkeys endpoint serves private TLS keys",
       "body": "GET /encryptionkeys returns the server's private key.",
-      "rationale": "The path serves challenge keys, not private TLS certs.",
+      "rationale": "The directory listing exists and serves jwt.pub and premium.key, but no private TLS keys, so the TLS-key claim is false.",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no private key disclosure)",
-      "negativeType": "nonexistent",
+      "negativeType": "wrong-payload",
       "vulnClass": "info-disclosure"
     },
     {
@@ -608,7 +608,7 @@
       "rationale": "The only coupon endpoint validates against the database.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html (no discount field accepted)",
       "negativeType": "nonexistent",
-      "vulnClass": "idor"
+      "vulnClass": "business-logic"
     },
     {
       "id": "n-nonexistent-17",
@@ -676,8 +676,8 @@
       "kind": "negative",
       "expected": "NOT_REPRODUCED",
       "title": "XSS in search via a script tag in q",
-      "body": "GET /rest/products/search?q=<script>alert(1)</script> returns the payload in JSON.",
-      "rationale": "The search endpoint returns JSON data, not executable HTML.",
+      "body": "The product search API reflects the q parameter back unescaped in an HTML response. GET /rest/products/search?q=<script>alert(1)</script> returns the script tag in a text/html body, so the payload runs when the response is opened in a browser.",
+      "rationale": "The search API responds with JSON product rows only and never echoes q, so no script reaches an HTML context through this request. The real search XSS is client-side, in the Angular route (see p-dom-xss-search).",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (JSON data, not HTML)",
       "negativeType": "wrong-payload",
       "vulnClass": "xss"
@@ -712,8 +712,8 @@
       "kind": "negative",
       "expected": "NOT_REPRODUCED",
       "title": "IDOR on the review creation endpoint",
-      "body": "POST /rest/products/:id/reviews with an author field edits another user review.",
-      "rationale": "The review creation endpoint only appends new reviews.",
+      "body": "POST /rest/products/:id/reviews with an author field edits a review written by another user and changes its text.",
+      "rationale": "A POST to that route only appends a new review and never edits one. Review edits go through PUT /rest/products/reviews, which is the separate positive p-review-author-spoof.",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/createProductReviews.ts (POST appends, does not edit)",
       "negativeType": "wrong-payload",
       "vulnClass": "idor"
@@ -764,7 +764,7 @@
       "rationale": "The search endpoint with no q returns all products as JSON.",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (res.json of all Products)",
       "negativeType": "wrong-payload",
-      "vulnClass": "path-traversal"
+      "vulnClass": "info-disclosure"
     },
     {
       "id": "n-wrong-14",
@@ -785,9 +785,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "IDOR on security question endpoint",
       "body": "GET /rest/user/security-question?email=victim returns the question.",
-      "rationale": "The endpoint takes no email parameter.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/securityQuestion.ts (no email param)",
-      "negativeType": "wrong-payload",
+      "rationale": "The endpoint does take an email parameter and returns the security question for that account. It is the same reset-question flaw as p-forgot-password-weak-question.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/securityQuestion.ts (takes email, returns the question)",
+      "negativeType": "duplicate",
       "vulnClass": "idor"
     },
     {
@@ -857,9 +857,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The /metrics endpoint reveals version string",
       "body": "GET /metrics exposes the exact build version.",
-      "rationale": "Exposing a version metric is standard Prometheus practice.",
-      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_find_the_endpoint_that_serves_usage_data (metrics is public by design)",
-      "negativeType": "informative",
+      "rationale": "Same anonymous /metrics exposure as p-metrics-exposed, version gauge included.",
+      "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_find_the_endpoint_that_serves_usage_data (same endpoint as p-metrics-exposed)",
+      "negativeType": "duplicate",
       "vulnClass": "info-disclosure"
     },
     {
@@ -869,9 +869,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "Search endpoint reflects the search term in JSON",
       "body": "GET /rest/products/search?q=test echoes the query in the JSON response.",
-      "rationale": "Echoing a search term in JSON is expected behavior.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (JSON echo is data, not a vulnerability)",
-      "negativeType": "informative",
+      "rationale": "The search endpoint returns products only and does not echo q.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/search.ts (search returns products only, q is not echoed)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -905,9 +905,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "Application sets a cookie with a predictable name",
       "body": "GET / sets a cookie named token before login.",
-      "rationale": "The pre-login token cookie is a placeholder, not a session.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/lib/insecurity.ts (placeholder cookie, not a session)",
-      "negativeType": "informative",
+      "rationale": "The server sets no token cookie before login.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/lib/insecurity.ts (no token cookie is set before login)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -929,9 +929,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The application upper-cases the email in the user profile response",
       "body": "GET /rest/user/me returns the logged-in user email with the local part uppercased, e.g. ADMIN@juice-sh.op instead of admin@juice-sh.op.",
-      "rationale": "The API normalizes the email to uppercase for display; this is a cosmetic data-formatting choice that does not affect authentication or authorization.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (email is returned in uppercase by the profile endpoint, no security boundary crossed)",
-      "negativeType": "informative",
+      "rationale": "The route is /rest/user/whoami, and the email is not uppercased.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (route is /rest/user/whoami, email not uppercased)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -964,7 +964,7 @@
       "kind": "negative",
       "expected": "NOT_REPRODUCED",
       "title": "The application exposes a robots.txt file listing internal paths",
-      "body": "GET /robots.txt returns a robots.txt file that disallows crawling of /ftp and /api paths.",
+      "body": "GET /robots.txt returns a robots.txt file that disallows crawling of /ftp only.",
       "rationale": "A robots.txt file is a standard sitemap-discouragement mechanism; it does not hide routes from authenticated or determined users and is not a vulnerability.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_access_a_confidential_document (robots.txt is standard, not a security control)",
       "negativeType": "informative",
@@ -977,9 +977,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The uploads directory lists all user photos",
       "body": "Browsing to /assets/public/images/uploads returns a directory listing.",
-      "rationale": "Express static serving does not produce directory listings by default.",
+      "rationale": "There is no directory index for uploads.",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no directory listing)",
-      "negativeType": "informative",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -989,10 +989,10 @@
       "expected": "NOT_REPRODUCED",
       "title": "The /redirect endpoint returns a 302 to the attacker URL",
       "body": "GET /redirect?to=https://evil.com redirects to the attacker's URL.",
-      "rationale": "The redirect handler checks the URL against an allowlist.",
+      "rationale": "A bare ?to=https://evil.com is refused with 406. An allowlist-substring bypass exists (isRedirectAllowed uses url.includes), but this exact payload does not redirect.",
       "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/routes/redirect.ts (redirect is allowlist-checked, not open)",
-      "negativeType": "informative",
-      "vulnClass": "info-disclosure"
+      "negativeType": "wrong-payload",
+      "vulnClass": "other"
     },
     {
       "id": "n-info-17",
@@ -1001,9 +1001,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The /api/Products endpoint returns a count of total products in the response header",
       "body": "GET /api/Products includes an X-Total-Count header revealing the total number of products in the database.",
-      "rationale": "The X-Total-Count header is a standard pagination metadata header; it reveals aggregate counts that are already visible through browsing the product list and carries no sensitive data.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (finale-rest exposes total count in header, standard, not sensitive)",
-      "negativeType": "informative",
+      "rationale": "There is no X-Total-Count header on /api/Products.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no X-Total-Count header in server.ts)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -1013,9 +1013,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The API response includes server timing metadata in the X-Response-Time header",
       "body": "GET /api/Users includes an X-Response-Time header showing how long the database query took.",
-      "rationale": "The X-Response-Time header is a standard Express middleware diagnostic; it reveals query latency but not data.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (X-Response-Time is standard Express, not exploitable)",
-      "negativeType": "informative",
+      "rationale": "There is no X-Response-Time header, and /api/Users needs auth.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no X-Response-Time header in server.ts)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -1025,9 +1025,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The contact form page reveals the reCAPTCHA site key in its HTML",
       "body": "The GET /contact form page includes the public reCAPTCHA site key in the page source.",
-      "rationale": "The reCAPTCHA site key is a public key by design; it cannot be used to bypass the CAPTCHA.",
+      "rationale": "The app uses its own /rest/captcha, not reCAPTCHA, so no reCAPTCHA site key is served.",
       "source": "https://pwning.owasp-juice.shop/companion-guide/latest/appendix/solutions.html#_submit_10_or_more_customer_feedbacks_within_10_seconds (site key is public by design)",
-      "negativeType": "informative",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -1037,9 +1037,9 @@
       "expected": "NOT_REPRODUCED",
       "title": "The /rest/addresses endpoint returns the total count of address records",
       "body": "GET /rest/addresses returns a JSON array whose X-Total-Count header reveals the total number of saved addresses.",
-      "rationale": "The count is standard pagination metadata from the underlying REST framework and is already inferable from browsing the UI; it reveals no individual address or PII.",
-      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (finale-rest exposes total count, standard, not sensitive)",
-      "negativeType": "informative",
+      "rationale": "There is no X-Total-Count header, and /rest/addresses needs auth.",
+      "source": "https://raw.githubusercontent.com/Vaibhav91one/juice-shop/1867b926c5f50e4e692dc9c8f61821413cebe0cd/server.ts (no X-Total-Count header in server.ts)",
+      "negativeType": "nonexistent",
       "vulnClass": "info-disclosure"
     },
     {
@@ -1316,7 +1316,7 @@
       "rationale": "Names a host with no TargetProfile.",
       "source": "n/a, fabricated target outside the authorized scope, by design",
       "negativeType": "unbound",
-      "vulnClass": "broken-auth"
+      "vulnClass": "other"
     },
     {
       "id": "n-unbound-12",
