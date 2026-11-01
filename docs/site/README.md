@@ -5,12 +5,12 @@ mobile app. Open `mvp-mindmap.html` in a browser. Every page links to the others
 Pages menu in the top right corner, and nothing needs a server or a build step.
 
 The mobile app is a proposal. It is not built, and nothing under `screens/` is app code. Those
-are HTML mockups of the 28 phone screens, used to agree on the design before any React Native
+are HTML mockups of the 30 phone screens, including the loading and empty state rules (`m29`, `m30`): a loading state is an animated mascot, spinner and label, an empty state is an animated mascot, heading and body text, never bare text, used to agree on the design before any React Native
 work starts. The tracking issue for building it is linked from the PR that added this folder.
 
 ## What is here
 
-- `mvp-mindmap.html` is the mobile app flow, all 28 screens grouped by journey.
+- `mvp-mindmap.html` is the mobile app flow, all 30 screens grouped by journey.
 - `prototype.html` shows every screen on iOS and Android side by side. A tap in either phone moves
   both. It has toggles for large text, a screen reader view and a touch target check,
   and buttons that play the back swipe, sheet, pull to refresh, long press and push notification.
