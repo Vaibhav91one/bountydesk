@@ -168,10 +168,18 @@ async function listGhcrTags(namespace: string, token: string): Promise<RegistryT
     if (!packages) continue;
     const out: RegistryTag[] = [];
     for (const pkg of packages) {
-      const versions = await pagedGhcr<GhcrPackageVersion & { created_at?: string }>(
-        `${root}/container/${encodeURIComponent(pkg.name)}/versions`,
-        headers,
-      );
+      // One package the token may not read (a 403 on its versions) must not abort the sweep for every
+      // other package: skip it and say which one, so the rest still get reclaimed.
+      let versions: (GhcrPackageVersion & { created_at?: string })[] | null;
+      try {
+        versions = await pagedGhcr<GhcrPackageVersion & { created_at?: string }>(
+          `${root}/container/${encodeURIComponent(pkg.name)}/versions`,
+          headers,
+        );
+      } catch (error) {
+        console.warn(`skipping ghcr package ${pkg.name}: ${error instanceof Error ? error.message : String(error)}`);
+        continue;
+      }
       for (const version of versions ?? []) {
         for (const tag of version.metadata?.container?.tags ?? []) {
           out.push({
