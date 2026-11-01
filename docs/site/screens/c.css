@@ -65,6 +65,8 @@
    .scrim            injected by c.js (tap to dismiss)
    .lp-hit .lift .menu   long press overlay, built by c.js from data-lp
    Empty and chat
+   .loading          floating mascot (.float), .spinner and label; .inline = in flow
+                     <div class="loading"><img class="float" src="../assets/mascot/scanning.svg" alt=""><div class="lbl" role="status"><span class="spinner" aria-hidden="true"></span>Loading case file</div></div>
    .empty            mascot, h2, p, action; .inline = in flow
                      <div class="empty"><img src="../assets/mascot/greeting.svg" alt=""><h2>No reports yet</h2><p>Line.</p></div>
    .arrow .cap       hand drawn arrow + caption (first run) <svg class="arrow">..</svg><span class="cap">Connect a repository</span>
@@ -381,6 +383,15 @@ svg.i{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.8;stro
 .empty :is(h1,h2){font:700 1.5rem/1.2 var(--font-sans);letter-spacing:-.03em;margin-top:18px}
 .empty p{font-size:.9375rem;line-height:1.45;color:var(--muted);margin-top:10px;letter-spacing:0;max-width:300px}
 .empty .btn{margin-top:22px;min-width:160px}
+/* loading state: floating mascot, spinner, label. Never bare text. .inline = in flow */
+.loading{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;padding:220px 40px 0;text-align:center}
+.loading.inline{position:static;padding:36px 40px}
+.loading img{width:180px;height:180px}.loading.inline img{width:96px;height:96px}
+.loading .lbl{display:flex;align-items:center;gap:10px;margin-top:18px;font-size:.9375rem;font-weight:500;color:var(--muted);letter-spacing:0}
+.spinner{width:18px;height:18px;border-radius:50%;border:2.5px solid var(--fill);border-top-color:var(--brand);animation:spin 1s linear infinite}
+@keyframes spin{to{rotate:360deg}}
+@media (prefers-reduced-motion:no-preference){.spinner{animation-duration:.8s}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:spin-soft 1.6s ease-in-out infinite;border-color:var(--brand)}@keyframes spin-soft{0%,100%{opacity:.35}50%{opacity:1}}}
 .arrow{position:absolute;left:0;top:0;z-index:25;pointer-events:none}
 .cap{position:absolute;z-index:25;left:0;right:0;top:566px;text-align:center;font-size:.9375rem;font-weight:500;color:var(--brand-soft);letter-spacing:0}
 
