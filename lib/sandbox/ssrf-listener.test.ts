@@ -44,6 +44,7 @@ let createSandboxThrows = false;
 let clearFails = false;
 let orphans: Sandbox[] = [];
 let lastReadCommand = "";
+let lastStartCommand = "";
 
 function fakeExecute(_sandbox: Sandbox, command: string): ExecResult {
   if (command.includes("command -v curl")) return { exitCode: 0, result: "TOOL=curl\n" };
@@ -58,6 +59,7 @@ function fakeExecute(_sandbox: Sandbox, command: string): ExecResult {
       : { exitCode: 0, result: `${markerValue}\n` };
   }
   if (command.includes("bountydesk-oob-server.js")) {
+    lastStartCommand = command;
     return startSucceeds
       ? { exitCode: 0, result: "BOUNTYDESK_OOB_LISTENER_READY\n" }
       : { exitCode: 1, result: "" };
@@ -125,6 +127,9 @@ test("startOobListener links to the target sandbox, verifies no egress and marke
     { linkParent: "target-sandbox-1", override: "ghcr.io/bountydesk/browser:test-sha" },
   ]);
   assert.equal(started.session.callbackUrl, "http://oob-listener-sandbox-1:8080");
+  // A bare `cmd &` keeps the exec session open on Daytona until the 408 exec timeout; the server must
+  // be detached in a subshell with stdin closed so the readiness loop returns.
+  assert.match(lastStartCommand, /\(nohup node \/tmp\/bountydesk-oob-server\.js <\/dev\/null >\/dev\/null 2>&1 &\);/);
 
   assert.deepEqual(await started.session.sawCanary("canary-123"), { ok: true, found: false });
 
