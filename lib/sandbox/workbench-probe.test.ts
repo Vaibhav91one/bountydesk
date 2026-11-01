@@ -9,7 +9,7 @@ process.env.BOUNTYDESK_WORKBENCH_SNAPSHOT = "workbench-snap";
 process.env.BOUNTYDESK_WORKBENCH_IMAGE_REF = "ghcr.io/bountydesk/workbench@sha256:" + "c".repeat(64);
 process.env.BOUNTYDESK_WORKBENCH_IMAGE_NAME = "ghcr.io/bountydesk/workbench:test-sha";
 
-const EXPECTED_MARKER = "workbench-out-2";
+const EXPECTED_MARKER = "workbench-out-3";
 
 const FAKE_WORKBENCH_SANDBOX: Sandbox = {
   id: "workbench-sandbox-1",
