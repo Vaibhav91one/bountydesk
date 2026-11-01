@@ -12,7 +12,7 @@
  * own recorded request log and checks for the run's unpredictable `canary` string on the host side.
  */
 import { buildMarkerCheck } from "./build-marker";
-import { createSandbox, execute, getSandbox, type Sandbox } from "./daytona";
+import { createSandbox, execute, getSandbox, listSandboxes, type Sandbox } from "./daytona";
 import {
   ensureSnapshotActive,
   rethrowIfAborted,
@@ -55,11 +55,15 @@ export function oobListenerConfig(): OobListenerConfig | null {
     process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME ?? process.env.BOUNTYDESK_BROWSER_IMAGE_NAME
   )?.trim();
   if (!snapshotId || !imageRef || !imageName) return null;
+  // The dedicated listener image carries its own marker; only the shared browser image defaults.
+  const dedicatedImage = process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME?.trim();
+  const marker = process.env.BOUNTYDESK_OOB_LISTENER_BUILD_MARKER?.trim();
+  if (dedicatedImage && !marker) return null;
   return {
     snapshotId,
     imageRef,
     imageName,
-    expectedBuildMarker: DEFAULT_EXPECTED_MARKER,
+    expectedBuildMarker: marker || DEFAULT_EXPECTED_MARKER,
   };
 }
 
@@ -107,7 +111,27 @@ function startListenerCommand(port: number): string {
 }
 
 const CLEAR_LOG_COMMAND = `: > ${LOG_PATH} && echo BOUNTYDESK_OOB_CLEARED`;
-const READ_LOG_COMMAND = `echo ${LOG_BEGIN_SENTINEL} && head -c ${MAX_LOG_CHARS} ${LOG_PATH} && echo "" && echo ${LOG_END_SENTINEL}`;
+const SNAPSHOT_PATH = "/tmp/bountydesk-oob.snap";
+const SAFE_CANARY = /^[A-Za-z0-9_-]{1,128}$/;
+const DEFAULT_SETTLE_MS = 1_500;
+
+/**
+ * Only lines carrying the canary are returned, so the size cap cannot hide a callback behind junk
+ * the target logged first. With `drain`, the log is moved aside and replaced in the same exec, so a
+ * callback that lands after the read goes to the fresh log and none is erased unread.
+ */
+function readLogCommand(canary: string, drain: boolean): string {
+  const source = drain ? SNAPSHOT_PATH : LOG_PATH;
+  return (
+    (drain ? `mv -f ${LOG_PATH} ${SNAPSHOT_PATH} && touch ${LOG_PATH} && ` : "") +
+    `echo ${LOG_BEGIN_SENTINEL} && { grep -aF -- '${canary}' ${source} | head -c ${MAX_LOG_CHARS}; true; } && echo "" && echo ${LOG_END_SENTINEL}`
+  );
+}
+
+function settleMs(): number {
+  const raw = Number(process.env.BOUNTYDESK_OOB_SETTLE_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_SETTLE_MS;
+}
 
 function extractLogBody(stdout: string): string | null {
   const start = stdout.indexOf(LOG_BEGIN_SENTINEL);
@@ -123,8 +147,12 @@ export type OobListenerSession = {
   callbackUrl: string;
   /** Reset the recorded request log between the negative control and the exploit leg. */
   clearLog: (signal?: AbortSignal) => Promise<boolean>;
-  /** Return true when the listener recorded a request carrying `canary` in its URL, headers, or body. */
-  sawCanary: (canary: string, signal?: AbortSignal) => Promise<{ ok: true; found: boolean } | { ok: false }>;
+  /**
+   * Return true when the listener recorded a request carrying `canary` in its URL, headers, or body.
+   * `drain` is for the negative control: wait a settle window for late callbacks, then read and
+   * reset the log in one exec so nothing arriving later is erased unread.
+   */
+  sawCanary: (canary: string, signal?: AbortSignal, opts?: { drain?: boolean }) => Promise<{ ok: true; found: boolean } | { ok: false }>;
   /** Tear down the listener sandbox. */
   close: (cancellationInFlight: boolean) => Promise<void>;
 };
@@ -141,6 +169,7 @@ export async function startOobListener(
   const listenPort = validPort(port);
 
   let sandbox: Sandbox | undefined;
+  const parentLabel = { "bountydesk.oobListener.parent": targetSandboxId.slice(0, 63) };
   try {
     throwIfAborted(opts?.signal);
     const snapshotInfo = await ensureSnapshotActive(config.snapshotId, "oob listener", opts?.signal);
@@ -153,7 +182,7 @@ export async function startOobListener(
         memoryGb: snapshotInfo.mem ?? 0,
         diskGb: snapshotInfo.disk ?? 0,
         ttlMinutes: LISTENER_SANDBOX_TTL_MINUTES,
-        labels: { "bountydesk.purpose.oobListener": "1" },
+        labels: { "bountydesk.purpose.oobListener": "1", ...parentLabel },
       },
       config.imageName,
       { parentSandboxId: targetSandboxId },
@@ -199,9 +228,16 @@ export async function startOobListener(
         sawCanary: async (
           canary: string,
           signal?: AbortSignal,
+          readOpts?: { drain?: boolean },
         ): Promise<{ ok: true; found: boolean } | { ok: false }> => {
           throwIfAborted(signal);
-          const readRes = await execute(activeSandbox, READ_LOG_COMMAND, 15);
+          if (!SAFE_CANARY.test(canary)) return { ok: false };
+          const drain = readOpts?.drain === true;
+          if (drain) {
+            await new Promise((resolve) => setTimeout(resolve, settleMs()));
+            throwIfAborted(signal);
+          }
+          const readRes = await execute(activeSandbox, readLogCommand(canary, drain), 15);
           throwIfAborted(signal);
           if (readRes.exitCode !== 0) return { ok: false };
           const body = extractLogBody(readRes.result);
@@ -213,6 +249,15 @@ export async function startOobListener(
     };
   } catch (error) {
     if (sandbox) await teardownSandbox(sandbox.id, opts?.signal?.aborted === true);
+    else {
+      // createSandbox may have created the remote sandbox before throwing, with no id to hand back;
+      // sweep this run's listener by label rather than leave it to the TTL. Best effort.
+      try {
+        for (const orphan of await listSandboxes(parentLabel)) await teardownSandbox(orphan.id, true);
+      } catch {
+        // the TTL is the backstop
+      }
+    }
     rethrowIfAborted(error, opts?.signal);
     return {
       ok: false,

@@ -72,10 +72,7 @@ function substituteCanary(value: unknown, canary: string): unknown {
     return value
       .split("{{canary}}")
       .join(canary)
-      .split("%7B%7Bcanary%7D%7D")
-      .join(canary)
-      .split("%7b%7bcanary%7d%7d")
-      .join(canary);
+      .replace(/%7b%7bcanary%7d%7d/gi, () => canary);
   }
   if (Array.isArray(value)) return value.map((item) => substituteCanary(item, canary));
   if (value !== null && typeof value === "object") {
@@ -510,19 +507,24 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
             defaultIsAcceptableStatus(status) || recipe.negativeControlAcceptedStatuses!.includes(status)
         : undefined;
       const activeOob = oobSession;
-      const legOracleCheck: ReproductionRecipe["oracleCheck"] = activeOob
-        ? async (_response, legCanary) => {
-            const seen = await activeOob.sawCanary(legCanary, opts?.signal);
-            if (!seen.ok) throw new Error("OOB listener log read failed");
-            return seen.found;
-          }
-        : recipe.oracleCheck;
+      const oobOracle = (drain: boolean): ReproductionRecipe["oracleCheck"] | undefined =>
+        activeOob
+          ? async (_response, legCanary) => {
+              // Control legs drain (settle, then read and reset in one exec) so a late callback is
+              // attributed to the control. The exploit leg reads without resetting.
+              const seen = await activeOob.sawCanary(legCanary, opts?.signal, { drain });
+              if (!seen.ok) throw new Error("OOB listener log read failed");
+              return seen.found;
+            }
+          : undefined;
+      const controlOracleCheck = oobOracle(true) ?? recipe.oracleCheck;
+      const exploitOracleCheck = oobOracle(false) ?? recipe.oracleCheck;
 
       negativeControl = await runLeg(
         preview,
         recipe.negativeControl,
         canary,
-        legOracleCheck,
+        controlOracleCheck,
         opts?.signal,
         negativeControlIsAcceptable,
         capturedVars,
@@ -538,7 +540,7 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
             preview,
             extra.request,
             canary,
-            legOracleCheck,
+            controlOracleCheck,
             opts?.signal,
             accepted ? (status: number) => defaultIsAcceptableStatus(status) || accepted.includes(status) : undefined,
             capturedVars,
@@ -568,9 +570,11 @@ export function createReproducer(authorizeTarget: AuthorizeReproductionTargetFn 
                 preview,
                 recipe.exploit,
                 canary,
-                legOracleCheck,
+                exploitOracleCheck,
                 opts?.signal,
-                activeOob ? negativeControlIsAcceptable : undefined,
+                // In OOB mode the listener decides, not the exploit's HTTP status: a callback
+                // followed by a 500 is still a callback. A failed send still fails closed.
+                activeOob ? () => true : undefined,
                 capturedVars,
               );
         }
