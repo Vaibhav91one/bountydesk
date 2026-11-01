@@ -834,13 +834,24 @@ test("a finished upload profile's snapshots are reclaimable, a live or repo one 
   const mixed = await profile("upload-mixed", "ru-mixed", "connectionless");
   await bound(mixed, "DELIVERED", old);
   await bound(mixed, "REPRODUCING", old);
+  const day = 24 * 60 * 60_000;
+  const idleAnalysis = await profile("upload-idle-analysis", "ru-idle-analysis", "connectionless");
+  await bound(idleAnalysis, "ANALYSIS_ONLY", new Date(Date.now() - 15 * day));
+  const freshAnalysis = await profile("upload-fresh-analysis", "ru-fresh-analysis", "connectionless");
+  await bound(freshAnalysis, "ANALYSIS_ONLY", new Date(Date.now() - 13 * day));
+  const mixedAnalysis = await profile("upload-mixed-analysis", "ru-mixed-analysis", "connectionless");
+  await bound(mixedAnalysis, "ANALYSIS_ONLY", new Date(Date.now() - 15 * day));
+  await bound(mixedAnalysis, "REPRODUCING", new Date(Date.now() - 15 * day));
+  const repoAnalysis = await profile("acme-analysis", "ru-repo-analysis", "github");
+  await bound(repoAnalysis, "ANALYSIS_ONLY", new Date(Date.now() - 15 * day));
   await profile("upload-unbound", "ru-unbound", "connectionless");
   const repo = await profile("acme-widget", "ru-repo", "github");
   await bound(repo, "DELIVERED", old);
 
   const ids = await worker.collectProtectedSnapshotIds();
   assert.equal(ids.has("ru-done"), false, "terminal and old: reclaimable");
-  for (const kept of ["ru-recent", "ru-live", "ru-mixed", "ru-unbound", "ru-repo"]) {
+  assert.equal(ids.has("ru-idle-analysis"), false, "ANALYSIS_ONLY idle past 14 days: reclaimable");
+  for (const kept of ["ru-recent", "ru-live", "ru-mixed", "ru-unbound", "ru-repo", "ru-fresh-analysis", "ru-mixed-analysis", "ru-repo-analysis"]) {
     assert.ok(ids.has(kept), `${kept} stays protected`);
   }
 });
