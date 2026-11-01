@@ -198,6 +198,26 @@ test("listTags on GHCR walks packages and versions, falls back to the user endpo
   }
 });
 
+test("deleteImage on ghcr deletes the whole package when the tagged version is its only one", async () => {
+  const original = globalThis.fetch;
+  const deletes: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (init?.method === "DELETE") {
+      deletes.push(url);
+      return new Response(null, { status: 204 });
+    }
+    return Response.json([{ id: 7, metadata: { container: { tags: ["bountydesk-onboarding"] } } }]);
+  }) as typeof fetch;
+  try {
+    const registry = createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/acme", pushToken: "p", deleteToken: "d" });
+    await registry.deleteImage("ghcr.io/acme/widget:bountydesk-onboarding");
+    assert.deepEqual(deletes, ["https://api.github.com/orgs/acme/packages/container/widget"]);
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("listTags on a v2 registry reads the catalog under the namespace and never leaks the token in an error", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: string | URL | Request) => {
