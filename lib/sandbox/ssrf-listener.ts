@@ -1,7 +1,7 @@
 /**
  * An in-mesh out-of-band (OOB) HTTP listener peer for confirming SSRF without internet egress.
  *
- * The listener boots in its own reproduction-grade sandbox (`networkBlockAll: true`, `public: false`,
+ * The listener boots in its own reproduction-grade sandbox (offline, `public: false`,
  * torn down in `finally`) link-joined to the target sandbox, so the target can reach it by
  * `http://<listener-sandbox-id>:<port>/<canary>` over the private in-group link route while neither
  * sandbox can reach the internet.
@@ -115,7 +115,8 @@ function startListenerCommand(port: number): string {
 const CLEAR_LOG_COMMAND = `: > ${LOG_PATH} && echo BOUNTYDESK_OOB_CLEARED`;
 const SNAPSHOT_PATH = "/tmp/bountydesk-oob.snap";
 const SAFE_CANARY = /^[A-Za-z0-9_-]{1,128}$/;
-const DEFAULT_SETTLE_MS = 1_500;
+const DEFAULT_SETTLE_MS = 10_000;
+const POLL_MS = 1_000;
 
 /**
  * Only lines carrying the canary are returned, so the size cap cannot hide a callback behind junk
@@ -235,17 +236,32 @@ export async function startOobListener(
           throwIfAborted(signal);
           if (!SAFE_CANARY.test(canary)) return { ok: false };
           const drain = readOpts?.drain === true;
-          // Both legs settle first: a target can send its HTTP response before its own outbound
-          // fetch reaches the listener, so reading at once would miss the exploit's callback and
-          // call it NOT_REPRODUCED, or leave a late control callback for the exploit window.
-          await new Promise((resolve) => setTimeout(resolve, settleMs()));
-          throwIfAborted(signal);
-          const readRes = await execute(activeSandbox, readLogCommand(canary, drain), 15);
-          throwIfAborted(signal);
-          if (readRes.exitCode !== 0) return { ok: false };
-          const body = extractLogBody(readRes.result);
-          if (body === null) return { ok: false };
-          return { ok: true, found: body.includes(canary) };
+          // A target can send its HTTP response well before its own outbound fetch reaches the
+          // listener (seen live: Juice Shop's callback sometimes lands seconds after its 302). A
+          // control leg waits the whole settle window before its draining read, so a late control
+          // callback is still charged to the control. The exploit leg polls and stops as soon as
+          // the canary shows up, so the window only costs time when nothing arrives.
+          const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+          const read = async (): Promise<{ ok: true; found: boolean } | { ok: false }> => {
+            throwIfAborted(signal);
+            const readRes = await execute(activeSandbox, readLogCommand(canary, drain), 15);
+            throwIfAborted(signal);
+            if (readRes.exitCode !== 0) return { ok: false };
+            const body = extractLogBody(readRes.result);
+            if (body === null) return { ok: false };
+            return { ok: true, found: body.includes(canary) };
+          };
+          const deadline = Date.now() + settleMs();
+          if (drain) {
+            await sleep(settleMs());
+            return read();
+          }
+          for (;;) {
+            const seen = await read();
+            const left = deadline - Date.now();
+            if (!seen.ok || seen.found || left <= 0) return seen;
+            await sleep(Math.min(POLL_MS, left));
+          }
         },
         close,
       },

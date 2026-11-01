@@ -1,5 +1,7 @@
 import { requireSecret } from "@/lib/env";
 
+import { LINK_NETWORK_CIDR } from "./link-network";
+
 /**
  * The smallest boundary BountyDesk needs against Daytona.
  *
@@ -8,8 +10,8 @@ import { requireSecret } from "@/lib/env";
  * calls, and five calls should not cost twenty dependencies.
  *
  * This module provisions two kinds of sandbox. The reproduction sandbox (createSandbox) has no
- * network at all: networkBlockAll is a constant there, not an argument, so no caller can ask for
- * network by supplying a field. The build sandbox (createBuildSandbox) is the one place that
+ * internet: its egress policy (LINK_NETWORK_CIDR only) is a constant there, not an argument, so no
+ * caller can ask for network by supplying a field. The build sandbox (createBuildSandbox) is the one place that
  * grants egress, and only to a caller-supplied allow-list that must come from a server-held
  * source (lib/build-onboarding), never from report text, a cloned repo's own scripts, or model
  * output. An empty allow-list is refused rather than treated as "network open": an allow-list
@@ -18,6 +20,7 @@ import { requireSecret } from "@/lib/env";
  * purpose: nothing that grants network can be reached from the reproduction path.
  */
 const API = "https://app.daytona.io/api";
+
 
 /** Long enough for a slow provision, short enough that a hung call cannot wedge a worker. */
 const TIMEOUT_MS = 30_000;
@@ -89,9 +92,9 @@ export type Sandbox = {
  * probes is the parent, and every dependency (a database, a cache) is created linked to it: the
  * child lands on the parent's runner and joins a link network the two share, so the app can reach
  * the dependency by its sandbox id while both stay internet-blocked (proven in
- * scripts/spike-linked-sandboxes.ts). The link changes nothing about egress: a linked child is
- * still networkBlockAll with no allow-list, exactly like any other reproduction sandbox. It only
- * adds a private route to its own group, which is isolated from every sandbox outside it.
+ * scripts/spike-linked-sandboxes.ts). The link changes nothing about egress: a linked child has the
+ * same LINK_NETWORK_CIDR-only policy as any other reproduction sandbox. It only adds a private
+ * route to its own group, which is isolated from every sandbox outside it.
  */
 export type LinkSpec = {
   /** The parent reproduction sandbox this child joins. Its id, from an earlier createSandbox. */
@@ -236,8 +239,8 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 /**
  * Provision one ephemeral reproduction sandbox.
  *
- * `networkBlockAll` is a constant here, not an argument, so no caller can ask for a sandbox
- * with network by supplying one more field. `env` and `secrets` are never sent: the hostile
+ * The egress policy (networkBlockAll false, networkAllowList LINK_NETWORK_CIDR only) is a constant
+ * here, not an argument, so no caller can ask for a sandbox with network by supplying one more field. `env` and `secrets` are never sent: the hostile
  * runtime holds no GitHub token, database URL, webhook secret, model key or Daytona key, and
  * the way to guarantee that is to have no code path that puts one there.
  *
@@ -281,11 +284,13 @@ export async function createSandbox(
   const body = {
     snapshot: snapshot.id,
     ttlMinutes: spec.ttlMinutes,
-    networkBlockAll: true,
+    // Not networkBlockAll: that now also refuses in-group link traffic. See LINK_NETWORK_CIDR.
+    networkBlockAll: false,
+    networkAllowList: LINK_NETWORK_CIDR,
     public: false,
     autoDeleteInterval: 0,
     labels: { ...spec.labels, [PURPOSE_LABEL]: PURPOSE },
-    // A dependency service joins its app's link group. networkBlockAll stays true above: linking
+    // A dependency service joins its app's link group. The policy above is unchanged: linking
     // adds a private in-group route, never internet egress. ephemeral ties the child's lifetime
     // to the group so it cannot outlive the run that made it.
     ...(link ? { linkedSandbox: link.parentSandboxId, ephemeral: true } : {}),

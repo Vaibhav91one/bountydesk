@@ -20,6 +20,7 @@
 import { requireSecret } from "@/lib/env";
 import { isValidImageDigest } from "@/lib/targets/validation";
 import { buildMarkerCheck } from "./build-marker";
+import { LINK_NETWORK_CIDR } from "./link-network";
 import { createSandbox, DaytonaError, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox, type SnapshotInfo } from "./daytona";
 import {
   SNAPSHOT_ACTIVATION_POLL_MS,
@@ -290,10 +291,13 @@ async function waitForAppReady(
  */
 export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);
-  if (!sandbox.networkBlockAll) {
-    throw new Error("reproduction sandbox came up with networkBlockAll false");
+  // Two policies count as offline: networkBlockAll with no allow list, or networkBlockAll false
+  // with the link subnet as the only allowed range (what createSandbox now sends; see
+  // LINK_NETWORK_CIDR). Anything else, including any domain allow list, fails closed.
+  if (!sandbox.networkBlockAll && sandbox.networkAllowList !== LINK_NETWORK_CIDR) {
+    throw new Error("reproduction sandbox came up with networkBlockAll false and an allow list other than the link network");
   }
-  if (sandbox.networkAllowList || sandbox.domainAllowList) {
+  if (sandbox.domainAllowList || (sandbox.networkBlockAll && sandbox.networkAllowList)) {
     throw new Error("reproduction sandbox came up with a non-empty egress allow list");
   }
 
@@ -302,8 +306,8 @@ export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Pr
   const tool = await httpProbeTool(sandbox, signal);
   if (tool === "none") {
     // The image ships no curl or wget, so there is no way to attempt an outbound fetch from
-    // inside the sandbox. Accepting this is safe: networkBlockAll was already asserted true and
-    // the egress allow lists empty above, and that platform guarantee is the actual egress
+    // inside the sandbox. Accepting this is safe: the offline policy was already asserted above,
+    // and that platform guarantee is the actual egress
     // control. The in-sandbox outbound attempt below is only belt-and-suspenders confirmation of
     // it, so the confirmation is skipped rather than replaced with a weaker check that a leaky
     // sandbox could pass. Anything ambiguous still fails closed; a missing client is not ambiguous.

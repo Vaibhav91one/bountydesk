@@ -158,7 +158,8 @@ async function sendToSandbox(
 ): Promise<SentRequest> {
   const withCanary = request.body === undefined ? undefined : substituteCanary(request.body, canary);
   const body = withCanary === undefined ? undefined : substituteVars(withCanary, vars);
-  const bodyText = body === undefined ? undefined : JSON.stringify(body);
+  const form = request.method !== "GET" && request.bodyEncoding === "form";
+  const bodyText = body === undefined ? undefined : form ? formEncode(body) : JSON.stringify(body);
   const path = substituteVars(substituteCanary(request.path, canary), vars) as string;
   const url = `${preview.url.replace(/\/$/, "")}${path}`;
 
@@ -168,7 +169,7 @@ async function sendToSandbox(
       request.headers &&
         (substituteVars(substituteCanary(request.headers, canary), vars) as Record<string, string>),
       preview.token,
-      bodyText !== undefined,
+      bodyText === undefined ? undefined : form ? "application/x-www-form-urlencoded" : "application/json",
     ),
     body: bodyText,
     redirect: "manual",
@@ -185,13 +186,27 @@ async function sendToSandbox(
   };
 }
 
+/** A "form" body must be a flat object of strings; anything else is a recipe bug, so it throws
+ * (the leg then counts as not run) rather than sending a guessed encoding. */
+function formEncode(body: unknown): string {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new Error("a form-encoded recipe body must be an object");
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value !== "string") throw new Error(`form field ${key} must be a string`);
+    params.append(key, value);
+  }
+  return params.toString();
+}
+
 function sandboxRequestHeaders(
   recipeHeaders: Record<string, string> | undefined,
   previewToken: string,
-  hasBody: boolean,
+  contentType: string | undefined,
 ): Headers {
   const headers = new Headers(recipeHeaders);
-  if (hasBody) headers.set("content-type", "application/json");
+  if (contentType) headers.set("content-type", contentType);
   headers.set("x-daytona-preview-token", previewToken);
   return headers;
 }

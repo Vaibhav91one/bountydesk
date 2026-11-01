@@ -468,6 +468,7 @@ test("ssrf-profile-image recipe configures an oobListener, captures userToken, a
     path: "/profile/image/url",
     headers: { Cookie: "token={{userToken}}" },
     body: { imageUrl: "{{oobUrl}}/{{canary}}.jpg" },
+    bodyEncoding: "form",
   });
 });
 

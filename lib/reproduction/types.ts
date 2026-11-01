@@ -36,6 +36,10 @@ export type ReproductionRequest =
       /** May contain the literal string "{{canary}}", substituted by the orchestrator with a
        * freshly generated value before the request is sent. */
       body?: JsonValue;
+      /** How the body is sent. Omitted means JSON. "form" sends a flat object of strings as
+       * application/x-www-form-urlencoded, for endpoints that ignore a JSON body (Juice Shop's
+       * /profile/image/url reads imageUrl only from a form field). */
+      bodyEncoding?: "form";
     };
 
 export type ReproductionProbeResult = {
