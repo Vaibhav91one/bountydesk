@@ -1,7 +1,8 @@
 name: Deploy
 
-# After CI passes on main, apply pending migrations to production, then push the Zerops worker. The
-# Next.js app deploys on its own through Vercel's Git integration and is not handled here.
+# After CI passes on main, apply pending migrations to production, then push the Zerops worker, and
+# the TrueForge harness when its deployed files changed. The Next.js app deploys on its own through
+# Vercel's Git integration and is not handled here.
 #
 # This runs on workflow_run, not on push, so a merge only reaches production once its CI run has
 # actually gone green: a squash commit that fails build never migrates the database. The gate below
@@ -15,6 +16,8 @@ on:
 
 permissions:
   contents: read
+  # The trueforge job reads the last successful deploy run to find what changed since then.
+  actions: read
 
 # One deploy at a time, in merge order. A run is never cancelled part way, because a migration
 # stopped half applied or a worker push abandoned mid-deploy is worse than a late deploy. GitHub
@@ -94,3 +97,57 @@ jobs:
         env:
           ZEROPS_TOKEN: ${{ secrets.ZEROPS_TOKEN }}
         run: '"$RUNNER_TEMP/zcli" push bdworker -P 7G5ck3U4RCuulHTz8Dchkw --no-git'
+
+  trueforge:
+    needs: migrate
+    # Same gate as worker: only after a green CI push to main (or a manual dispatch from main) and a
+    # clean migration.
+    if: >-
+      needs.migrate.result == 'success'
+      && ((github.event_name == 'workflow_run'
+            && github.event.workflow_run.conclusion == 'success'
+            && github.event.workflow_run.event == 'push'
+            && github.event.workflow_run.head_branch == 'main')
+        || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ZCLI_VERSION: v1.1.2
+      ZCLI_SHA256: b85d5cda8158d2be2e4eb42f4ed27ed0896f5d03ad31366c0da8fba48f49ffd7
+    steps:
+      # Full history so the diff below can reach the last deployed commit.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+      # Restarting the harness is not free, so push it only when a file it deploys (zerops.yml's
+      # trueforge deployFiles, or zerops.yml itself) changed since the last successful deploy. That
+      # base is the last green deploy run, not HEAD~1: a burst of merges collapses into one deploy
+      # run that carries every earlier commit. With no usable base, or on a manual dispatch, push.
+      # On start the harness's bootstrap re-applies agent/*.agent.json, the skills and connectors.
+      - name: Did the harness's files change?
+        id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then echo "push=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          base=$(gh run list --repo "${{ github.repository }}" --workflow deploy.yml --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then echo "push=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --name-only "$base" HEAD -- agent skills ops/trueforge scripts/run-trueforge-proxy.mjs scripts/bootstrap-trueforge.mjs zerops.yml | grep -q .; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install zcli
+        if: steps.changed.outputs.push == 'true'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/zcli" \
+            "https://github.com/zeropsio/zcli/releases/download/${ZCLI_VERSION}/zcli-linux-amd64"
+          echo "${ZCLI_SHA256}  $RUNNER_TEMP/zcli" | sha256sum -c -
+          chmod +x "$RUNNER_TEMP/zcli"
+      - name: Push trueforge
+        if: steps.changed.outputs.push == 'true'
+        env:
+          ZEROPS_TOKEN: ${{ secrets.ZEROPS_TOKEN }}
+        run: '"$RUNNER_TEMP/zcli" push trueforge -P 7G5ck3U4RCuulHTz8Dchkw --no-git'
