@@ -198,7 +198,7 @@ test("listTags on GHCR walks packages and versions, falls back to the user endpo
   }
 });
 
-test("deleteImage on ghcr deletes the whole package when the tagged version is its only one", async () => {
+test("deleteImage on ghcr deletes the whole package when ours is its only tagged version", async () => {
   const original = globalThis.fetch;
   const deletes: string[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -207,7 +207,11 @@ test("deleteImage on ghcr deletes the whole package when the tagged version is i
       deletes.push(url);
       return new Response(null, { status: 204 });
     }
-    return Response.json([{ id: 7, metadata: { container: { tags: ["bountydesk-onboarding"] } } }]);
+    // An untagged attestation version sits next to the tagged image, as a real buildx push leaves.
+    return Response.json([
+      { id: 7, metadata: { container: { tags: ["bountydesk-onboarding"] } } },
+      { id: 8, metadata: { container: { tags: [] } } },
+    ]);
   }) as typeof fetch;
   try {
     const registry = createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/acme", pushToken: "p", deleteToken: "d" });
