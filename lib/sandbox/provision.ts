@@ -20,7 +20,7 @@
 import { requireSecret } from "@/lib/env";
 import { isValidImageDigest } from "@/lib/targets/validation";
 import { buildMarkerCheck } from "./build-marker";
-import { createSandbox, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox, type SnapshotInfo } from "./daytona";
+import { createSandbox, DaytonaError, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox, type SnapshotInfo } from "./daytona";
 import {
   SNAPSHOT_ACTIVATION_POLL_MS,
   SNAPSHOT_ACTIVATION_TIMEOUT_MS,
@@ -96,6 +96,19 @@ export class ProvisionCouldNotDeployError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "ProvisionCouldNotDeployError";
+  }
+}
+
+/**
+ * The snapshot is gone from Daytona (a 404), not parked or failed. An idle upload target's
+ * snapshot is reclaimed by the sweep, so this is the expected shape of a late re-check. It is a
+ * ProvisionCouldNotDeployError so existing callers treat it the same way; the re-check worker
+ * names it to the reviewer.
+ */
+export class SnapshotMissingError extends ProvisionCouldNotDeployError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SnapshotMissingError";
   }
 }
 
@@ -523,7 +536,16 @@ export async function ensureSnapshotActive(
   signal?: AbortSignal,
 ): Promise<SnapshotInfo> {
   throwIfAborted(signal);
-  let info = await abortable(getSnapshot(snapshotId), signal);
+  let info: SnapshotInfo;
+  try {
+    info = await abortable(getSnapshot(snapshotId), signal);
+  } catch (error) {
+    rethrowIfAborted(error, signal);
+    if (error instanceof DaytonaError && error.status === 404) {
+      throw new SnapshotMissingError(`snapshot ${snapshotId} for ${owner} no longer exists`);
+    }
+    throw error;
+  }
   throwIfAborted(signal);
 
   let activated = false;
@@ -639,6 +661,7 @@ export async function provisionTarget(
   } catch (error) {
     if (sandbox) await teardownSandbox(sandbox.id, opts?.signal?.aborted === true);
     rethrowIfAborted(error, opts?.signal);
+    if (error instanceof SnapshotMissingError) throw error;
     throw new ProvisionCouldNotDeployError(errorMessage(error));
   }
 
