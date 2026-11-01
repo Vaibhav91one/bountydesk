@@ -718,9 +718,7 @@ export async function createSnapshot(spec: CreateSnapshotSpec): Promise<Snapshot
  * delete that races another is swallowed.
  */
 export async function deleteSnapshotByName(name: string): Promise<void> {
-  const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>("/snapshots?limit=200");
-  const items = Array.isArray(listed) ? listed : (listed.items ?? []);
-  for (const snapshot of items) {
+  for (const snapshot of await liveSweepOps.list()) {
     if (snapshot.name === name && snapshot.id) {
       await call(`/snapshots/${encodeURIComponent(snapshot.id)}`, { method: "DELETE" }).catch(() => undefined);
     }
@@ -765,10 +763,30 @@ export type SnapshotSweepOps = {
   deleteById(id: string): Promise<void>;
 };
 
+const SNAPSHOT_PAGE_SIZE = 200;
+const SNAPSHOT_MAX_PAGES = 50;
+
+/** Fetch pages 1.. until a short page (or the page cap) so a sweep sees every snapshot, not the first 200. */
+export async function listAllPages<T>(
+  fetchPage: (page: number) => Promise<T[]>,
+  pageSize = SNAPSHOT_PAGE_SIZE,
+  maxPages = SNAPSHOT_MAX_PAGES,
+): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const items = await fetchPage(page);
+    all.push(...items);
+    if (items.length < pageSize) break;
+  }
+  return all;
+}
+
 const liveSweepOps: SnapshotSweepOps = {
   async list() {
-    const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>("/snapshots?limit=200");
-    return Array.isArray(listed) ? listed : (listed.items ?? []);
+    return listAllPages(async (page) => {
+      const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>(`/snapshots?page=${page}&limit=${SNAPSHOT_PAGE_SIZE}`);
+      return Array.isArray(listed) ? listed : (listed.items ?? []);
+    });
   },
   async deleteById(id) {
     // Let a failed delete throw: the sweep logs it and the snapshot stays listed for the next pass.
