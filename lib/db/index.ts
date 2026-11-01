@@ -42,6 +42,10 @@ const isLoopback = isLoopbackHost(url);
 
 const client = postgres(url, {
   prepare: false,
+  // postgres.js otherwise reads every array type from pg_type on each new connection, and with
+  // idle_timeout retiring connections every 30s that one query was nearly all of the database
+  // egress. Drizzle parses array columns itself (parsePgArray), so nothing here needs the list.
+  fetch_types: false,
   ssl: isLoopback ? false : "require",
   max: Number(process.env.DATABASE_POOL_MAX ?? 10),
   // Seconds, all three. A connection the Supabase pooler drops without a FIN still looks open
