@@ -102,7 +102,7 @@ touch.
 
 **Image** (new, forked from `sandbox-images/browser/Dockerfile`):
 `FROM node:20-bookworm-slim`, install nuclei, httpx, newman, bake marker
-`workbench-out-1` to `/etc/bountydesk-build-marker`,
+`workbench-out-4` to `/etc/bountydesk-build-marker`,
 `CMD ["sleep","infinity"]`. Same manual operator build/push flow as the
 browser image (`docs/browser-probe.md`); only CI-built image is the target
 (`.github/workflows/build-daytona-target.yml`).

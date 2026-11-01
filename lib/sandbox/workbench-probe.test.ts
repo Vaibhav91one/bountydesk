@@ -9,7 +9,7 @@ process.env.BOUNTYDESK_WORKBENCH_SNAPSHOT = "workbench-snap";
 process.env.BOUNTYDESK_WORKBENCH_IMAGE_REF = "ghcr.io/bountydesk/workbench@sha256:" + "c".repeat(64);
 process.env.BOUNTYDESK_WORKBENCH_IMAGE_NAME = "ghcr.io/bountydesk/workbench:test-sha";
 
-const EXPECTED_MARKER = "workbench-out-1";
+const EXPECTED_MARKER = "workbench-out-4";
 
 const FAKE_WORKBENCH_SANDBOX: Sandbox = {
   id: "workbench-sandbox-1",
@@ -217,6 +217,13 @@ test("runWorkbench drops a nuclei tag that is not lowercase-alnum-hyphen", async
   await mod.runWorkbench(TARGET, { tool: "nuclei", path: "/", tags: ["cve-2021", "DROP TABLE", "ok-tag"] });
   const params = decodeParams(lastRunnerCommand);
   assert.deepEqual(params.tags, ["cve-2021", "ok-tag"]);
+});
+
+test("runWorkbench gives a rate-limited nuclei scan the timeout cap by default, other tools 60s", async () => {
+  await mod.runWorkbench(TARGET, { tool: "nuclei", path: "/" });
+  assert.equal((decodeParams(lastRunnerCommand) as { timeoutMs?: number }).timeoutMs, 120_000);
+  await mod.runWorkbench(TARGET, { tool: "httpx", path: "/" });
+  assert.equal((decodeParams(lastRunnerCommand) as { timeoutMs?: number }).timeoutMs, 60_000);
 });
 
 test("runWorkbench caps stdout and reports truncation", async () => {

@@ -13,6 +13,9 @@ import { workbenchProbeConfig } from "@/lib/sandbox/workbench-probe";
 
 // node:crypto and the Postgres connection publishVerdict opens both need the Node runtime.
 export const runtime = "nodejs";
+// probe_workbench runs a rate-limited nuclei scan that can take about two minutes end to end
+// (sandbox boot plus the 120s tool budget), so ask for the longest function the host allows.
+export const maxDuration = 300;
 
 /** Same shape as unseal()'s cookie check in lib/auth/session.ts: compare lengths before
  * timingSafeEqual, since the function throws on a length mismatch rather than returning
