@@ -300,15 +300,18 @@ async function deleteGhcrImage(pullableTag: string, token: string): Promise<void
       console.warn(`origin image ${pullableTag} has no version tagged ${ref.tag}; nothing to delete`);
       return;
     }
-    // GitHub answers 400 to deleting a package's only version ("delete the package instead"), and each
-    // onboarding image is its own package, so the usual case is exactly one version: delete the package.
-    const deleted = await fetch(versions.length === 1 ? base : `${base}/versions/${id}`, {
+    // GitHub answers 400 to deleting a package's last tagged version ("delete the package instead").
+    // A push also leaves untagged attestation versions, so count tagged ones: when ours is the only
+    // tagged version, delete the whole package.
+    const tagged = versions.filter((v) => (v.metadata?.container?.tags?.length ?? 0) > 0).length;
+    const deleted = await fetch(tagged <= 1 ? base : `${base}/versions/${id}`, {
       method: "DELETE",
       headers,
       signal: AbortSignal.timeout(15_000),
     });
     if (!deleted.ok && deleted.status !== 404) {
-      console.warn(`could not delete ${pullableTag} (version ${id}): ${deleted.status}`);
+      const detail = (await deleted.text().catch(() => "")).slice(0, 200);
+      console.warn(`could not delete ${pullableTag} (version ${id}): ${deleted.status} ${detail}`);
     }
     return;
   }
