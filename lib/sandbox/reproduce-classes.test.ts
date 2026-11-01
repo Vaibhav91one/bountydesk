@@ -349,6 +349,10 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
   process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT = "snap";
   process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF = "ghcr.io/vaibhav91one/juice-shop@sha256:" + "a".repeat(64);
   process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop:test-oob";
+  // A dedicated listener image needs its own marker, or the listener refuses to start and the run
+  // ends ANALYSIS_ONLY before the no-callback path this test is about is ever reached.
+  process.env.BOUNTYDESK_OOB_LISTENER_BUILD_MARKER = "oob-test-marker";
+  process.env.BOUNTYDESK_OOB_SETTLE_MS = "0";
 
   const recipe = recipeById("juice-shop-ssrf-profile-image");
   authorizeWith(recipe);
@@ -367,7 +371,7 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
   executeImpl = async (sb, command) => {
     executeCalls.push(`${sb.id}:${command}`);
     if (sb.id === "oob-listener-peer" && command.includes(BUILD_MARKER_COMMAND_FRAGMENT)) {
-      return { exitCode: 0, result: "browser-out-1\n" };
+      return { exitCode: 0, result: "oob-test-marker\n" };
     }
     if (command.includes("bountydesk-oob-server.js")) {
       return { exitCode: 0, result: "BOUNTYDESK_OOB_LISTENER_READY\n" };
@@ -409,10 +413,15 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
   try {
     const outcome = await withFetch(stub, () => reproduce(reproduceInput(recipe)));
     assert.equal(outcome.outcome, "NOT_REPRODUCED");
+    // The listener log was actually read, so NOT_REPRODUCED came from an empty log, not a listener
+    // that never started.
+    assert.ok(executeCalls.some((c) => c.startsWith("oob-listener-peer:") && c.includes("BOUNTYDESK_OOB_LOG_BEGIN")));
     assert.deepEqual(deleteSandboxCalls, ["oob-listener-peer", FAKE_SANDBOX.id]);
   } finally {
     delete process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT;
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF;
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME;
+    delete process.env.BOUNTYDESK_OOB_LISTENER_BUILD_MARKER;
+    delete process.env.BOUNTYDESK_OOB_SETTLE_MS;
   }
 });
