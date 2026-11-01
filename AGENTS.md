@@ -202,18 +202,17 @@ checks each result against the repository and reports status, evidence, and unre
 orchestrator. A manager must report a worker failure plainly; it must not invent output or silently
 retry a failed task.
 
-A worker is an execution profile, not a source of authority. The roster has seven workers, each a
+A worker is an execution profile, not a source of authority. The roster has six workers, each a
 one-shot CLI process launched from the repo root:
 
 - `opencode`, `opencode-work`, `opencode-personal`: `opencode run --agent <a> --model
   opencode/muse-spark-1.3-contributor-free --variant xhigh "<task>"`. The variant supplies the
   model's reasoning effort, so do not pass a separate `--effort` flag.
-- `dsh-worker.sh ro|rw [timeout_s] "<task>"`: DSH on `vyceai/deepseek-v4.1`, effort not pinned.
 - `claude-worker.sh 1|2|3 ro|rw [timeout_s] "<task>"`: the three Claude ExpLabs profiles on
   `gpt-5.6-luna`. Profile 1 runs at high effort, 2 and 3 at the default. Profile 3 has a $1/month
   cap.
 
-Substantive tasks dispatch to the three OpenCode commands in parallel. The other four are failover
+Substantive tasks dispatch to the three OpenCode commands in parallel. The other three are failover
 targets. Resolve each command and read each profile's configured model before dispatch, because
 free catalogs change. A shell wrapper selects an isolated config and credential store, but does not
 prove that the accounts have separate quotas. A zero-cost catalog entry does not guarantee capacity
@@ -228,10 +227,9 @@ Worker invocation rules:
   edit permission stated explicitly. For OpenCode, pass `--agent`, `--model`, and `--variant xhigh`
   explicitly. Use a separate process for each worker, preserve each exit status, stdout, and
   stderr, and wait for all required branches to reach a terminal result before synthesis.
-- For read-only discovery and planning, prefer the tool-enforced modes (`dsh-worker.sh ro`,
-  `claude-worker.sh N ro`) or OpenCode `--agent explore`. `explore` is not a write barrier, so run
-  it in a disposable checkout. For edits use `rw` mode in the worker's own worktree, and never
-  `danger-full-access`. Claude `rw` has no Bash, and DSH `rw` is sandboxed to the cwd.
+- For read-only discovery and planning, prefer the tool-enforced mode (`claude-worker.sh N ro`) or
+  OpenCode `--agent explore`. `explore` is not a write barrier, so run it in a disposable checkout. For edits use `rw` mode in the worker's own worktree, and never
+  `danger-full-access`. Claude `rw` has no Bash.
 - Never pass secrets, private keys, database URLs, capability tokens, or target credentials in a
   prompt. Workers read approved local environment only through their profile wrapper.
 - Give mutating workers their own worktree, database, backend, and ports. Planning workers must not
@@ -276,10 +274,10 @@ Retry and failover, per worker branch:
   fails over immediately.
 - A task failure, where the worker ran but the answer is wrong, gets no retry and no failover. It
   is recorded and verified as evidence like any other output.
-- Failover order is `opencode`, `opencode-work`, `opencode-personal`, ExpLabs 1, DSH, ExpLabs 2,
+- Failover order is `opencode`, `opencode-work`, `opencode-personal`, ExpLabs 1, ExpLabs 2,
   ExpLabs 3. Skip any worker already tried for the branch. When a provider is rate-limited, its
   siblings get one probe attempt, not ten.
-- Each worker is tried at most once per branch. When all seven are exhausted, record `FAILED`,
+- Each worker is tried at most once per branch. When all six are exhausted, record `FAILED`,
   report it, and stop.
 - A failed-over edit branch restarts in a clean worktree.
 - Report every attempt (worker, attempt count, failure class, exit code) and every failover to the
