@@ -147,7 +147,7 @@ if (tool === "httpx") {
   writeFileSync(COLLECTION_PATH, JSON.stringify(collection), "utf8");
   const result = runTool(
     "newman",
-    ["run", COLLECTION_PATH, "--reporters", "cli", "--no-color", "--timeout-request", "10000"],
+    ["run", COLLECTION_PATH, "--reporters", "cli", "--color", "off", "--timeout-request", "10000"],
     timeoutMs,
   );
   emit({ tool: "newman", ...result });

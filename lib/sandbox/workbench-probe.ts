@@ -56,7 +56,7 @@ const PARAMS_PATH = "/tmp/bountydesk-workbench-params.json";
 /** Baked into sandbox-images/workbench/Dockerfile. Hardcoded, not read from env, for the same
  * reason browser-probe.ts hardcodes its own marker: a value the environment could set would let
  * a repointed snapshot vouch for itself. */
-const EXPECTED_WORKBENCH_BUILD_MARKER = "workbench-out-1";
+const EXPECTED_WORKBENCH_BUILD_MARKER = "workbench-out-2";
 
 export type WorkbenchProbeConfig = { snapshotId: string; imageRef: string; imageName: string };
 

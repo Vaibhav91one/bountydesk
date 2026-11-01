@@ -66,7 +66,7 @@ RUN npm install -g newman@6.2.1
 
 # Build-identity marker read back from inside the booted sandbox (build-marker.ts's MARKER_PATH).
 # Must match EXPECTED_WORKBENCH_BUILD_MARKER in lib/sandbox/workbench-probe.ts.
-RUN printf %s 'workbench-out-1' > /etc/bountydesk-build-marker
+RUN printf %s 'workbench-out-2' > /etc/bountydesk-build-marker
 
 COPY workbench-runner.mjs /opt/bountydesk/workbench-runner.mjs
 
