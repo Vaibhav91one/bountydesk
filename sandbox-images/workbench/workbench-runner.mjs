@@ -118,7 +118,11 @@ if (tool === "httpx") {
   if (!templatesPresent(NUCLEI_TEMPLATES_DIR)) {
     fail("nuclei", `nuclei templates missing or empty at ${NUCLEI_TEMPLATES_DIR}; refusing a zero-template scan`);
   }
-  const args = ["-u", targetUrl, "-t", NUCLEI_TEMPLATES_DIR, "-jsonl", "-silent", "-nc", "-duc", "-ni"];
+  // Rate-limited: at nuclei's default 150 req/s an exposure scan (about 5.5k requests) took Juice
+  // Shop down in its 1 GiB sandbox, leaving the session no target to probe. At 50 req/s the full
+  // scan finished in about 76s with the target healthy (live, 2026-11-01), inside the 120s budget
+  // workbench-probe.ts gives nuclei.
+  const args = ["-u", targetUrl, "-t", NUCLEI_TEMPLATES_DIR, "-jsonl", "-silent", "-nc", "-duc", "-ni", "-rl", "50"];
   if (Array.isArray(params.tags) && params.tags.length > 0) {
     const safeTags = params.tags.filter((t) => typeof t === "string" && /^[a-z0-9-]+$/.test(t));
     if (safeTags.length > 0) {
@@ -147,7 +151,7 @@ if (tool === "httpx") {
   writeFileSync(COLLECTION_PATH, JSON.stringify(collection), "utf8");
   const result = runTool(
     "newman",
-    ["run", COLLECTION_PATH, "--reporters", "cli", "--no-color", "--timeout-request", "10000"],
+    ["run", COLLECTION_PATH, "--reporters", "cli", "--color", "off", "--timeout-request", "10000"],
     timeoutMs,
   );
   emit({ tool: "newman", ...result });
