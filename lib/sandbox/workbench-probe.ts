@@ -56,7 +56,7 @@ const PARAMS_PATH = "/tmp/bountydesk-workbench-params.json";
 /** Baked into sandbox-images/workbench/Dockerfile. Hardcoded, not read from env, for the same
  * reason browser-probe.ts hardcodes its own marker: a value the environment could set would let
  * a repointed snapshot vouch for itself. */
-const EXPECTED_WORKBENCH_BUILD_MARKER = "workbench-out-3";
+const EXPECTED_WORKBENCH_BUILD_MARKER = "workbench-out-4";
 
 export type WorkbenchProbeConfig = { snapshotId: string; imageRef: string; imageName: string };
 
@@ -180,7 +180,13 @@ export async function runWorkbench(
   }
 
   const timeoutMs = Math.min(
-    typeof request.timeoutMs === "number" && request.timeoutMs > 0 ? request.timeoutMs : DEFAULT_TOOL_TIMEOUT_MS,
+    typeof request.timeoutMs === "number" && request.timeoutMs > 0
+      ? request.timeoutMs
+      : // nuclei is rate-limited in the runner so it cannot take the target down, which makes a
+        // tagged scan outlast the 60s default (seen live); give it the cap by default.
+        request.tool === "nuclei"
+        ? MAX_TOOL_TIMEOUT_MS
+        : DEFAULT_TOOL_TIMEOUT_MS,
     MAX_TOOL_TIMEOUT_MS,
   );
   const tags =

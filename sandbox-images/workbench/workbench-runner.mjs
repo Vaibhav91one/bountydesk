@@ -118,9 +118,11 @@ if (tool === "httpx") {
   if (!templatesPresent(NUCLEI_TEMPLATES_DIR)) {
     fail("nuclei", `nuclei templates missing or empty at ${NUCLEI_TEMPLATES_DIR}; refusing a zero-template scan`);
   }
-  // Rate-limited: at nuclei's default 150 req/s an exposure scan took Juice Shop down in its 1 GiB
-  // sandbox (seen live 2026-11-01), which would leave the session with no target to probe.
-  const args = ["-u", targetUrl, "-t", NUCLEI_TEMPLATES_DIR, "-jsonl", "-silent", "-nc", "-duc", "-ni", "-rl", "30", "-c", "10"];
+  // Rate-limited: at nuclei's default 150 req/s an exposure scan (about 5.5k requests) took Juice
+  // Shop down in its 1 GiB sandbox, leaving the session no target to probe. At 50 req/s the full
+  // scan finished in about 76s with the target healthy (live, 2026-11-01), inside the 120s budget
+  // workbench-probe.ts gives nuclei.
+  const args = ["-u", targetUrl, "-t", NUCLEI_TEMPLATES_DIR, "-jsonl", "-silent", "-nc", "-duc", "-ni", "-rl", "50"];
   if (Array.isArray(params.tags) && params.tags.length > 0) {
     const safeTags = params.tags.filter((t) => typeof t === "string" && /^[a-z0-9-]+$/.test(t));
     if (safeTags.length > 0) {
