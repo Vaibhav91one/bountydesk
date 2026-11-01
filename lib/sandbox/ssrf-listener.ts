@@ -105,7 +105,9 @@ function startListenerCommand(port: number): string {
   return (
     `printf %s '${encoded}' | base64 -d > /tmp/bountydesk-oob-server.js && ` +
     `rm -f ${PID_PATH} ${LOG_PATH} && ` +
-    `nohup node /tmp/bountydesk-oob-server.js >/dev/null 2>&1 & ` +
+    // Detach in a subshell with stdin closed: a bare `node ... &` keeps Daytona's exec session open
+    // until its 408 timeout, so the listener never reported ready (seen live 2026-11-01).
+    `(nohup node /tmp/bountydesk-oob-server.js </dev/null >/dev/null 2>&1 &); ` +
     `for i in $(seq 1 30); do if [ -f ${PID_PATH} ]; then echo ${READY_SENTINEL}; exit 0; fi; sleep 0.1; done; exit 1`
   );
 }
