@@ -9,3 +9,22 @@
  * networkBlockAll.
  */
 export const LINK_NETWORK_CIDR = "172.25.0.0/16";
+
+/**
+ * Why a sandbox's reported egress policy is not offline, or null when it is. Two policies count:
+ * networkBlockAll with no allow list, or networkBlockAll false with LINK_NETWORK_CIDR as the only
+ * allowed range (what createSandbox sends). Anything else, including any domain allow list, is not.
+ */
+export function offlinePolicyError(sandbox: {
+  networkBlockAll: boolean;
+  networkAllowList: string | null;
+  domainAllowList: string | null;
+}): string | null {
+  if (!sandbox.networkBlockAll && sandbox.networkAllowList !== LINK_NETWORK_CIDR) {
+    return "networkBlockAll false and an allow list other than the link network";
+  }
+  if (sandbox.domainAllowList || (sandbox.networkBlockAll && sandbox.networkAllowList)) {
+    return "a non-empty egress allow list";
+  }
+  return null;
+}

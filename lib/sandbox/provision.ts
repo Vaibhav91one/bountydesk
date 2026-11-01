@@ -20,7 +20,7 @@
 import { requireSecret } from "@/lib/env";
 import { isValidImageDigest } from "@/lib/targets/validation";
 import { buildMarkerCheck } from "./build-marker";
-import { LINK_NETWORK_CIDR } from "./link-network";
+import { offlinePolicyError } from "./link-network";
 import { createSandbox, DaytonaError, deleteSandbox, execute, getSandbox, getSnapshot, type Sandbox, type SnapshotInfo } from "./daytona";
 import {
   SNAPSHOT_ACTIVATION_POLL_MS,
@@ -291,15 +291,8 @@ async function waitForAppReady(
  */
 export async function verifyNoEgress(sandbox: Sandbox, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal);
-  // Two policies count as offline: networkBlockAll with no allow list, or networkBlockAll false
-  // with the link subnet as the only allowed range (what createSandbox now sends; see
-  // LINK_NETWORK_CIDR). Anything else, including any domain allow list, fails closed.
-  if (!sandbox.networkBlockAll && sandbox.networkAllowList !== LINK_NETWORK_CIDR) {
-    throw new Error("reproduction sandbox came up with networkBlockAll false and an allow list other than the link network");
-  }
-  if (sandbox.domainAllowList || (sandbox.networkBlockAll && sandbox.networkAllowList)) {
-    throw new Error("reproduction sandbox came up with a non-empty egress allow list");
-  }
+  const policyError = offlinePolicyError(sandbox);
+  if (policyError) throw new Error(`reproduction sandbox came up with ${policyError}`);
 
   // The outbound probe needs an HTTP client inside the target image. curl is preferred; minimal
   // bases (busybox, alpine) ship wget instead, so it is accepted as a fallback.
