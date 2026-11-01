@@ -1,6 +1,9 @@
 /**
- * The private subnet Daytona puts a link group on (each group is its own network; seen as
- * 172.25.0.x and 172.25.1.x). As of 2026-11-01 Daytona refuses every in-group connection, in both
+ * The private subnet Daytona puts a link group on. Each group is its own isolated bridge network
+ * drawn from this range: two concurrent groups were both handed 172.25.0.2 and 172.25.0.3, so an
+ * address in this range only ever routes inside the caller's own group, and a sandbox in no group
+ * reached nothing in it (verified live, 2026-11-01). The range cannot be narrowed per group because
+ * the policy is set at create time, before Daytona assigns the group's addresses. As of 2026-11-01 Daytona refuses every in-group connection, in both
  * directions, while networkBlockAll is true, which silently broke the browser probe, the OOB
  * listener, the workbench and mesh targets. networkBlockAll false with this as the only
  * networkAllowList entry restores in-group traffic while every internet address still gets
