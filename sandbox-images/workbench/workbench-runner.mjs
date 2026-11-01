@@ -8,10 +8,22 @@
 // server-bound targetOrigin before any tool executes.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const RESULT_SENTINEL = "BOUNTYDESK_WORKBENCH_RESULT ";
 const COLLECTION_PATH = "/tmp/bountydesk-newman-collection.json";
+
+// Baked at build time (see the Dockerfile). The sandbox is offline and -duc skips updates, so this
+// directory is the only source of nuclei templates.
+const NUCLEI_TEMPLATES_DIR = process.env.BOUNTYDESK_NUCLEI_TEMPLATES_DIR || "/opt/nuclei-templates";
+
+function templatesPresent(dir) {
+  try {
+    return existsSync(dir) && readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
 
 const OFFLINE_ENV = {
   ...process.env,
@@ -102,7 +114,11 @@ if (tool === "httpx") {
   );
   emit({ tool: "httpx", ...result });
 } else if (tool === "nuclei") {
-  const args = ["-u", targetUrl, "-jsonl", "-silent", "-nc", "-duc", "-ni"];
+  // A zero-template scan would look exactly like "no findings", so refuse loudly instead.
+  if (!templatesPresent(NUCLEI_TEMPLATES_DIR)) {
+    fail("nuclei", `nuclei templates missing or empty at ${NUCLEI_TEMPLATES_DIR}; refusing a zero-template scan`);
+  }
+  const args = ["-u", targetUrl, "-t", NUCLEI_TEMPLATES_DIR, "-jsonl", "-silent", "-nc", "-duc", "-ni"];
   if (Array.isArray(params.tags) && params.tags.length > 0) {
     const safeTags = params.tags.filter((t) => typeof t === "string" && /^[a-z0-9-]+$/.test(t));
     if (safeTags.length > 0) {
