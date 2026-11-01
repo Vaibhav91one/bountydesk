@@ -68,9 +68,7 @@ export default function ConnectionDetailScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <ScreenHeader back backLabel="Connections" />
-        <ScrollView style={styles.scroll} contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]} showsVerticalScrollIndicator={false}>
-          <EmptyState heading="Connection not found" inline />
-        </ScrollView>
+        <EmptyState heading="Connection not found" />
       </View>
     )
   }
