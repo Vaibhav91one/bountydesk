@@ -7,7 +7,9 @@ import { mcpServerSecret } from "@/lib/env";
 import { publishVerdict, publishVerdictInputSchema } from "@/lib/mcp/publish-verdict";
 import { readCodeReviewFindings, readCodeReviewFindingsInputSchema } from "@/lib/mcp/read-code-review-findings";
 import { probeBrowser, probeBrowserInputSchema } from "@/lib/mcp/probe-browser";
+import { probeWorkbench, probeWorkbenchInputSchema } from "@/lib/mcp/probe-workbench";
 import { probeTarget, probeTargetReadInputSchema, probeTargetWriteInputSchema } from "@/lib/mcp/probe-target";
+import { workbenchProbeConfig } from "@/lib/sandbox/workbench-probe";
 
 // node:crypto and the Postgres connection publishVerdict opens both need the Node runtime.
 export const runtime = "nodejs";
@@ -129,6 +131,43 @@ function buildServer(): McpServer {
       };
     },
   );
+
+  // Flag-gated (BOUNTYDESK_WORKBENCH_ENABLED, default off, issue #327 Phase 0): the tool is not
+  // registered at all unless the deployment turned it on, so an agent on a deployment where it is
+  // off never sees it in its tool list, rather than seeing it and getting a runtime refusal.
+  if (workbenchProbeConfig()) {
+    server.registerTool(
+      "probe_workbench",
+      {
+        description:
+          "Run one allowlisted recon tool (httpx, nuclei, or newman) from an isolated, offline sandbox against a same-origin path on this session's provisioned target, and get back its raw output. Evidence only: a hit here is a lead to confirm with probe_target, never a verdict by itself. Give capability, tool, a same-origin path, and for nuclei an optional tags list; never a URL, host or token. Refuses cleanly when no sandbox was provisioned.",
+        inputSchema: probeWorkbenchInputSchema.shape,
+      },
+      async ({ capability, tool, path, tags }) => {
+        const result = await probeWorkbench({ capability, tool, path, tags });
+        if (result.ok) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  tool: result.tool,
+                  exitCode: result.exitCode,
+                  stdout: result.stdout,
+                  stderr: result.stderr,
+                  truncated: result.truncated,
+                }),
+              },
+            ],
+          };
+        }
+        return {
+          isError: true,
+          content: [{ type: "text", text: result.reason }],
+        };
+      },
+    );
+  }
 
   server.registerTool(
     "read_code_review_findings",
