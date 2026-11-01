@@ -174,6 +174,27 @@ test("v2 delete does not throw when the registry is unreachable", async () => {
   }
 });
 
+test("listTags on GHCR skips a package whose versions answer 403 and still lists the rest", async () => {
+  const original = globalThis.fetch;
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input);
+    if (url.includes("/orgs/")) return new Response("{}", { status: 404 });
+    if (url.includes("/container/locked/versions")) return new Response("{}", { status: 403 });
+    if (url.includes("/versions")) return Response.json([{ id: 1, metadata: { container: { tags: ["bountydesk-abc"] } } }]);
+    return Response.json([{ name: "locked" }, { name: "widget" }]);
+  }) as typeof fetch;
+  try {
+    const registry = createRegistry({ host: "ghcr.io", user: "bountydesk", namespace: "ghcr.io/acme", pushToken: "p", deleteToken: "d" });
+    const tags = await registry.listTags();
+    assert.deepEqual(tags.map((t) => t.ref), ["ghcr.io/acme/widget:bountydesk-abc"]);
+  } finally {
+    globalThis.fetch = original;
+    console.warn = originalWarn;
+  }
+});
+
 test("listTags on GHCR walks packages and versions, falls back to the user endpoint, and keeps created_at", async () => {
   const urls: string[] = [];
   const original = globalThis.fetch;
