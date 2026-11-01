@@ -20,6 +20,7 @@ import {
   execute,
   listSandboxes,
   sweepTrialSnapshots,
+  listAllPages,
   type SandboxSpec,
   type SnapshotInfo,
 } from "./daytona";
@@ -803,4 +804,17 @@ test("the live sweep counts a DELETE answered with 200 and an empty body as dele
     },
   );
   assert.deepEqual(methods, ["GET", "DELETE"]);
+});
+
+test("listAllPages follows full pages until a short one and honours the page cap", async () => {
+  const pages: number[] = [];
+  const all = await listAllPages(async (p) => {
+    pages.push(p);
+    return p < 3 ? [p, p] : [p];
+  }, 2);
+  assert.deepEqual(pages, [1, 2, 3]);
+  assert.deepEqual(all, [1, 1, 2, 2, 3]);
+  let calls = 0;
+  await listAllPages(async () => (calls++, [1, 2]), 2, 4);
+  assert.equal(calls, 4);
 });
