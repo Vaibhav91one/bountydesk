@@ -718,9 +718,7 @@ export async function createSnapshot(spec: CreateSnapshotSpec): Promise<Snapshot
  * delete that races another is swallowed.
  */
 export async function deleteSnapshotByName(name: string): Promise<void> {
-  const listed = await call<{ items?: SnapshotInfo[] } | SnapshotInfo[]>("/snapshots?limit=200");
-  const items = Array.isArray(listed) ? listed : (listed.items ?? []);
-  for (const snapshot of items) {
+  for (const snapshot of await liveSweepOps.list()) {
     if (snapshot.name === name && snapshot.id) {
       await call(`/snapshots/${encodeURIComponent(snapshot.id)}`, { method: "DELETE" }).catch(() => undefined);
     }
