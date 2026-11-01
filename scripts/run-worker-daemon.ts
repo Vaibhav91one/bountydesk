@@ -413,6 +413,7 @@ async function main(): Promise<void> {
     signal: controller.signal,
     onProgress: (name, outcome) => heartbeat.record(name, Date.now(), outcome),
     sweepTimeoutMs: FAST_LOOP_TIMEOUT_MS,
+    sweepStaggerMs: 2_000,
     idleBackoffMs: IDLE_BACKOFF_MS,
   });
   console.log("worker daemon stopped");

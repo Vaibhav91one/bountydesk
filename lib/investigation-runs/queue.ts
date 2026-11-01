@@ -24,7 +24,7 @@ import { hasActiveRepositoryGrant, type RepositoryGrantSnapshot } from "@/lib/ta
 import { targetProvisioningFromConfig } from "@/lib/targets/registry";
 import { targetIdentityHash } from "@/lib/targets/identity";
 import { createTrueForgeClient, type TrueForgeClient } from "@/lib/trueforge/client";
-import { provisionMesh, provisionTarget, teardownSandbox } from "@/lib/sandbox/provision";
+import { provisionMesh, provisionTarget, SnapshotMissingError, teardownSandbox } from "@/lib/sandbox/provision";
 
 import { GUIDANCE_MAX_LENGTH } from "./recheck";
 import {
@@ -39,6 +39,8 @@ export const RECHECK_MAX_ATTEMPTS = 8;
 export const RECHECK_PENDING_TIMEOUT_MS = 15 * 60 * 1000;
 
 const RECHECK_FAILURE_EVENT = "agent.recheck_failed";
+export const RECHECK_SNAPSHOT_RECLAIMED_REASON =
+  "the target snapshot was reclaimed after this report sat idle; resubmit the material to rebuild the target";
 
 export type RecheckRunLease = {
   runId: string;
@@ -492,7 +494,15 @@ export async function runRecheckOnce(
     });
   } catch (error) {
     console.error(`re-check run ${lease.runId}: sandbox provisioning failed: ${safeErrorText(error)}`);
-    await failRecheckRun(lease, "sandbox provisioning failed");
+    // The reviewer sees this reason, so a reclaimed snapshot gets its own message instead of the
+    // generic one. An ANALYSIS_ONLY upload report idle for 14 days loses its snapshot (see
+    // uploadProfileIsDone); rebuilding it is a new upload build, not something a re-check does.
+    await failRecheckRun(
+      lease,
+      error instanceof SnapshotMissingError
+        ? RECHECK_SNAPSHOT_RECLAIMED_REASON
+        : "sandbox provisioning failed",
+    );
     return lease.runId;
   }
   if (!provisioned) {

@@ -155,6 +155,8 @@ export type RunSweeperOptions = {
   /** Fail a sweep that has not returned in this long. A sweep is a single UPDATE, so any long
    *  wait is a hung connection, not real work. */
   sweepTimeoutMs?: number;
+  /** Wait this long before the first sweep. Abortable, so shutdown during it exits at once. */
+  initialDelayMs?: number;
 };
 
 /**
@@ -171,6 +173,8 @@ export async function runSweeper(
   const sleep = opts.sleep ?? defaultSleep;
   const logger = opts.logger ?? console;
   const intervalMs = opts.intervalMs ?? 30_000;
+
+  if (opts.initialDelayMs) await sleep(opts.initialDelayMs, opts.signal);
 
   while (!opts.signal.aborted) {
     let outcome: Outcome = "ok";
@@ -211,6 +215,11 @@ export type RunDaemonOptions = {
   onProgress?: OnProgress;
   /** Timeout applied to every sweep, since all sweeps are a single fast UPDATE. */
   sweepTimeoutMs?: number;
+  /** Queue i's first sweep waits i * this long. At boot every loop and sweeper starts at once
+   *  against a small DB pool (while the previous process may still hold connections), so the
+   *  first sweeps queue for a slot and trip their timeout. Claim loops are not staggered: they
+   *  are the real work and start promptly, the sweeps only recover leftovers and can wait. */
+  sweepStaggerMs?: number;
 };
 
 /**
@@ -220,7 +229,7 @@ export type RunDaemonOptions = {
  */
 export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Promise<void> {
   await Promise.all(
-    queues.flatMap((queue) => [
+    queues.flatMap((queue, index) => [
       runLoop(queue.name, queue.claimOnce, {
         signal: opts.signal,
         sleep: opts.sleep,
@@ -238,6 +247,7 @@ export async function runDaemon(queues: QueueSpec[], opts: RunDaemonOptions): Pr
         intervalMs: opts.sweepIntervalMs,
         onProgress: opts.onProgress,
         sweepTimeoutMs: opts.sweepTimeoutMs,
+        initialDelayMs: index * (opts.sweepStaggerMs ?? 0),
       }),
     ]),
   );

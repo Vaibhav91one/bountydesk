@@ -604,12 +604,16 @@ function meshSnapshotIds(value: unknown): string[] {
   return ids;
 }
 
+/** An ANALYSIS_ONLY report can still be re-checked, so its snapshot is kept this long after the last update. */
+export const IDLE_ANALYSIS_ONLY_DAYS = 14;
+
 /**
  * SQL predicate: this upload-built profile can never start a sandbox again, so its snapshots can be
  * reclaimed. An upload profile is named `upload-<reportId>` and bound to that one report (and, for a
  * retest, to its own child report), and a rebuild of the same upload reuses the profile, not a new
  * one. It is done when it has at least one bound report, every bound report is terminal (a terminal
  * report has no legal move back to REPRODUCING, see lib/reports/states.ts) and untouched for a day,
+ * or ANALYSIS_ONLY (a re-check can still revive it) and untouched for IDLE_ANALYSIS_ONLY_DAYS,
  * and no investigation run on it is still live. A profile with no bound report is kept: the bind
  * may not have happened yet. Repository onboarding profiles never match (origin and name).
  */
@@ -621,7 +625,8 @@ function uploadProfileIsDone() {
     and not exists (
       select 1 from report r
       where r.target_profile_id = ${targetProfile.id}
-        and (r.state::text not in (${terminal}) or r.updated_at > now() - interval '1 day'))
+        and (r.state::text not in (${terminal}, 'ANALYSIS_ONLY') or r.updated_at > now() - interval '1 day'
+          or (r.state::text = 'ANALYSIS_ONLY' and r.updated_at > now() - make_interval(days => ${IDLE_ANALYSIS_ONLY_DAYS}))))
     and not exists (
       select 1 from investigation_run ir
       where ir.target_profile_id = ${targetProfile.id}
