@@ -149,8 +149,8 @@ export type OobListenerSession = {
   clearLog: (signal?: AbortSignal) => Promise<boolean>;
   /**
    * Return true when the listener recorded a request carrying `canary` in its URL, headers, or body.
-   * `drain` is for the negative control: wait a settle window for late callbacks, then read and
-   * reset the log in one exec so nothing arriving later is erased unread.
+   * Every read first waits a settle window for late callbacks. `drain` is for the negative control:
+   * it reads and resets the log in one exec so nothing arriving later is erased unread.
    */
   sawCanary: (canary: string, signal?: AbortSignal, opts?: { drain?: boolean }) => Promise<{ ok: true; found: boolean } | { ok: false }>;
   /** Tear down the listener sandbox. */
@@ -233,10 +233,11 @@ export async function startOobListener(
           throwIfAborted(signal);
           if (!SAFE_CANARY.test(canary)) return { ok: false };
           const drain = readOpts?.drain === true;
-          if (drain) {
-            await new Promise((resolve) => setTimeout(resolve, settleMs()));
-            throwIfAborted(signal);
-          }
+          // Both legs settle first: a target can send its HTTP response before its own outbound
+          // fetch reaches the listener, so reading at once would miss the exploit's callback and
+          // call it NOT_REPRODUCED, or leave a late control callback for the exploit window.
+          await new Promise((resolve) => setTimeout(resolve, settleMs()));
+          throwIfAborted(signal);
           const readRes = await execute(activeSandbox, readLogCommand(canary, drain), 15);
           throwIfAborted(signal);
           if (readRes.exitCode !== 0) return { ok: false };
