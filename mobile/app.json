@@ -16,8 +16,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#ffffff",
-        "foregroundImage": "./assets/images/icon.png"
+        "backgroundColor": "#0A0A0A",
+        "foregroundImage": "./assets/images/adaptive-icon.png"
       },
       "package": "dev.bountydesk.mobile",
       "predictiveBackGestureEnabled": false,
@@ -53,9 +53,9 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#0b0b0d",
+          "backgroundColor": "#0A0A0A",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 96
         }
       ],
       "expo-secure-store",
