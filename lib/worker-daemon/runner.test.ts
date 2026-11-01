@@ -348,3 +348,69 @@ test("runDaemon reports progress under each loop's own name", async () => {
     ["a-sweep:ok", "a:ok", "b-sweep:ok", "b:ok"],
   );
 });
+
+test("runSweeper waits its initial delay before the first sweep", async () => {
+  const controller = new AbortController();
+  const events: string[] = [];
+
+  await runSweeper(
+    "t-sweep",
+    async () => {
+      events.push("sweep");
+      controller.abort();
+    },
+    {
+      signal: controller.signal,
+      sleep: async (ms) => {
+        events.push(`sleep:${ms}`);
+      },
+      logger: silentLogger(),
+      initialDelayMs: 4_000,
+    },
+  );
+
+  assert.deepEqual(events, ["sleep:4000", "sweep"]);
+});
+
+test("runSweeper aborted during its initial delay exits promptly without sweeping", async () => {
+  const controller = new AbortController();
+  let sweeps = 0;
+  setTimeout(() => controller.abort(), 10);
+
+  const started = Date.now();
+  await runSweeper(
+    "t-sweep",
+    async () => {
+      sweeps += 1;
+    },
+    { signal: controller.signal, logger: silentLogger(), initialDelayMs: 60_000 },
+  );
+
+  assert.equal(sweeps, 0);
+  assert.ok(Date.now() - started < 1_000);
+});
+
+test("runDaemon staggers each queue's first sweep by its index", async () => {
+  const controller = new AbortController();
+  const delays: number[] = [];
+  const queue = (name: string): QueueSpec => ({
+    name,
+    claimOnce: async () => {
+      controller.abort();
+      return null;
+    },
+    sweepOnce: async () => {},
+  });
+
+  await runDaemon([queue("a"), queue("b"), queue("c")], {
+    signal: controller.signal,
+    sleep: async (ms) => {
+      delays.push(ms);
+    },
+    logger: silentLogger(),
+    sweepStaggerMs: 2_000,
+  });
+
+  // Queue "a" has delay 0 (no sleep); b and c wait 2s and 4s.
+  assert.deepEqual(delays.filter((ms) => ms === 2_000 || ms === 4_000).sort(), [2_000, 4_000]);
+});
