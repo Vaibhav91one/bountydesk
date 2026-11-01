@@ -9,7 +9,7 @@ import { ScrollView, View, Text, StyleSheet } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile, CaseEvent } from "@/lib/types"
-import { ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState, LoadingState } from "@/components/primitives"
 import { ListCard } from "@/components/ReportList"
 import { BottomFade, Note } from "@/components/CaseUi"
 import { useTheme } from "@/theme"
@@ -120,7 +120,7 @@ export default function TimelineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
   const { colors, phase } = useTheme()
-  const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
+  const { data: report, error, isError, isLoading } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   // The shared query hook signs out or redirects on 401/403; render nothing until it does.
@@ -129,6 +129,15 @@ export default function TimelineScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.error, { color: colors.red }]}>{error?.message}</Text>
+      </View>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back backLabel="Case file" />
+        <LoadingState label="Loading timeline" />
       </View>
     )
   }

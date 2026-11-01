@@ -10,7 +10,7 @@ import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile } from "@/lib/types"
-import { ScreenHeader, ScreenTitle } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, LoadingState } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, KvLine, Note } from "@/components/CaseUi"
 import { Icon } from "@/components/icons"
@@ -69,7 +69,7 @@ export default function SandboxDiagramScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
   const { colors } = useTheme()
-  const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
+  const { data: report, error, isError, isLoading } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (isAuthError) return null
@@ -77,6 +77,15 @@ export default function SandboxDiagramScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.error, { color: colors.red }]}>{error?.message}</Text>
+      </View>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back backLabel="Case file" />
+        <LoadingState label="Loading sandbox" />
       </View>
     )
   }

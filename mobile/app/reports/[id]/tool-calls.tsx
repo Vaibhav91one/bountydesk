@@ -9,7 +9,7 @@ import { View, Text, ScrollView, StyleSheet } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFile, CaseEvent } from "@/lib/types"
-import { ScreenHeader, ScreenTitle, EmptyState, PhasePill } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState, LoadingState, PhasePill } from "@/components/primitives"
 import { Pill } from "@/components/ui/Pill"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
@@ -82,7 +82,7 @@ export default function ToolCallsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
   const { colors } = useTheme()
-  const { data: report, error, isError } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
+  const { data: report, error, isError, isLoading } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (isAuthError) return null
@@ -90,6 +90,15 @@ export default function ToolCallsScreen() {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
         <Text style={[styles.error, { color: colors.red }]}>{error?.message}</Text>
+      </View>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back backLabel="Case file" />
+        <LoadingState label="Loading tool calls" />
       </View>
     )
   }

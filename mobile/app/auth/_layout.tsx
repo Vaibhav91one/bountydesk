@@ -9,6 +9,7 @@
 import { useAuth } from "@/lib/auth-hooks"
 import { Redirect, Stack, useSegments } from "expo-router"
 
+import { LoadingState } from "@/components/primitives"
 import { authRedirect } from "@/lib/auth"
 import { fixturesEnabled } from "@/lib/fixtures"
 
@@ -17,7 +18,7 @@ export default function AuthLayout() {
   const segments = useSegments()
 
   if (!isLoaded) {
-    return null
+    return <LoadingState label="Signing you in" />
   }
 
   // Fixture mode (dev only) is always signed in; it lets the auth screens be opened directly.

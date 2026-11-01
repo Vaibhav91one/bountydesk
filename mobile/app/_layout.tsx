@@ -13,10 +13,10 @@ import { Stack, useRouter } from "expo-router"
 import * as Notifications from "expo-notifications"
 import * as WebBrowser from "expo-web-browser"
 import { useEffect, useState } from "react"
-import { View, ActivityIndicator } from "react-native"
+import { View } from "react-native"
 
 import { ClerkTokenBridge } from "@/components/clerk-token-bridge"
-import { ToastProvider } from "@/components/primitives"
+import { LoadingState, ToastProvider } from "@/components/primitives"
 import { useFonts } from "@/hooks/useFonts"
 import { routeForNotification } from "@/lib/push"
 import { darkTheme, useTheme } from "@/theme"
@@ -62,7 +62,7 @@ export default function RootLayout() {
   if (showLoading) {
     return (
       <View style={{ flex: 1, backgroundColor: darkTheme.colors.background, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={darkTheme.colors.brand} />
+        <LoadingState />
       </View>
     )
   }

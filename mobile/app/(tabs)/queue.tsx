@@ -9,14 +9,14 @@
  * the Reports tab.
  */
 import { useState } from "react"
-import { View, Text, ScrollView, StyleSheet, Pressable, ActivityIndicator, Share } from "react-native"
+import { View, Text, ScrollView, StyleSheet, Pressable, Share } from "react-native"
 import { useRouter } from "expo-router"
 import * as Clipboard from "expo-clipboard"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { TopBarPill } from "@/components/TopBarPill"
-import { ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { ScreenTitle, LongPressMenu, EmptyState, LoadingState, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
 import { ListCard, ReportRow, SectionHead } from "@/components/ReportList"
 import { ageText } from "@/lib/age"
@@ -129,8 +129,8 @@ function QueueScreenContent() {
 
   if (!data && !isError && (isFetching || cols.length === 0)) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.brand} size="large" />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <LoadingState label="Loading queue" />
         <TopBarPill />
       </View>
     )
@@ -148,6 +148,9 @@ function QueueScreenContent() {
         {sections.map((s, si) => (
           <View key={s.key} style={styles.section}>
             <SectionHead title={s.label} count={s.count} />
+            {s.cards.length === 0 ? (
+              <EmptyState mascot="idle" heading="Nothing here" inline />
+            ) : (
             <ListCard>
               {s.cards.map((card, i) => (
                 <QueueRow
@@ -159,6 +162,7 @@ function QueueScreenContent() {
                 />
               ))}
             </ListCard>
+            )}
             {s.note ? <Text style={[styles.sectionNote, { color: colors.muted }]}>{s.note}</Text> : null}
             {si === sections.length - 1 ? (
               <Text style={[styles.note, { color: colors.muted }]}>

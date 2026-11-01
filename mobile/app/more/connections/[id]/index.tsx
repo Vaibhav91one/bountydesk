@@ -12,7 +12,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { PhasePill, ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { PhasePill, ScreenHeader, ScreenTitle, EmptyState, LoadingState } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, KvLine, Note } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
@@ -57,6 +57,7 @@ export default function ConnectionDetailScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }} testID="connection-loading">
         <ScreenHeader back backLabel="Connections" />
+        <LoadingState label="Loading connection" />
       </View>
     )
   }

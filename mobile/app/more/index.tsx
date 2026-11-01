@@ -13,7 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow, MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, PhasePill, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, PhasePill, useToast, LoadingState } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
 import { fixturesEnabled } from "@/lib/fixtures"
@@ -154,6 +154,9 @@ export default function SettingsScreen() {
         <ScreenTitle title="Settings" meta="Account and workspace" metaBottom={20} />
 
         <View style={styles.sect}>
+          {me.isLoading ? (
+            <LoadingState label="Loading account" inline />
+          ) : (
           <ListCard>
             <ItemLine
               minHeight={72}
@@ -167,6 +170,7 @@ export default function SettingsScreen() {
               trailing={<PhasePill phase={userRole === "read_only" ? "closed" : "delivered"} label={userRole === "read_only" ? "Read-only" : "Reviewer"} />}
             />
           </ListCard>
+          )}
         </View>
 
         <View style={styles.sect}>

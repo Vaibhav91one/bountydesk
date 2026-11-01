@@ -18,7 +18,7 @@ import { api } from "@/lib/api"
 import type { MobileCaseFile } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
-import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, ToastProvider, useToast } from "@/components/primitives"
+import { LoadingState, PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, ToastProvider, useToast } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, KvLine, Note } from "@/components/CaseUi"
 import { splitInlineCode } from "@/lib/inline-code"
@@ -175,7 +175,7 @@ function VerdictReviewInner() {
       </Pressable>
     </View>
   ) : !cf || !verdict ? (
-    <Text style={[styles.loading, { color: colors.muted }]}>Loading</Text>
+    <LoadingState label="Loading verdict" inline />
   ) : hashMismatch ? (
     <View style={styles.mismatchBox}>
       <Text style={[styles.mismatchTitle, { color: colors.foreground }]}>This verdict changed</Text>

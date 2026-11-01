@@ -71,7 +71,7 @@ describe("M12 Verdict approved", () => {
   it("renders loading state when data is not yet available", async () => {
     setMockData(null)
     const { queryByText } = await render(<VerdictApproved />)
-    expect(queryByText("Loading")).toBeTruthy()
+    expect(queryByText("Loading receipt")).toBeTruthy()
   })
 
   it("renders mascot, delivered title, report meta, receipt card and hash", async () => {

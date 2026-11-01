@@ -10,7 +10,7 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { IntegrationRow, EmailReviewer } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, PhasePill } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, PhasePill, EmptyState, LoadingState } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { ListCard, SectionHead } from "@/components/ReportList"
@@ -78,6 +78,11 @@ export default function IntegrationsScreen() {
         <ScreenTitle title="Integrations" meta="Where reports come in and verdicts go out" metaBottom={24} />
 
         <SectionHead title="Channels" />
+        {integrations.isLoading ? (
+          <LoadingState label="Loading channels" inline />
+        ) : items.length === 0 ? (
+          <EmptyState mascot="greeting" heading="No channels yet" body="Channels appear here once they are available." inline />
+        ) : (
         <ListCard>
           {items.map((integration, i) => (
             <Pressable key={integration.id} onPress={() => handlePress(integration)} accessibilityRole="button" accessibilityLabel={INTEGRATION_LABELS[integration.id] ?? integration.name}>
@@ -95,6 +100,7 @@ export default function IntegrationsScreen() {
             </Pressable>
           ))}
         </ListCard>
+        )}
         <Note>Each channel is independent. Email and upload need no GitHub connection to create and triage a report.</Note>
       </ScrollView>
       <BottomFade />

@@ -14,7 +14,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
-import { PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
+import { LoadingState, PhasePill, PrimaryButton, ScreenHeader, ScreenTitle, TopBarButton } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, ItemValue, KvLine, Note, shortCommit } from "@/components/CaseUi"
 import { ageText } from "@/lib/age"
@@ -153,8 +153,9 @@ export default function CaseFileScreen() {
   // Only the first load shows the placeholder; a background refetch keeps the rendered file.
   if (!file) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
-        <Text style={[styles.meta, { color: colors.muted }]}>Loading case file</Text>
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back />
+        <LoadingState label="Loading case file" />
       </View>
     )
   }

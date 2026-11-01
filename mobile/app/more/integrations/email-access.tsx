@@ -12,7 +12,7 @@ import { useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
 import type { EmailReviewer, MobileMe } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, PhasePill, useToast } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, PhasePill, useToast, EmptyState, LoadingState } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
 import { ageText } from "@/lib/age"
@@ -99,6 +99,11 @@ export default function EmailAccessScreen() {
         {/* 27 not 28: three 61.8pt rows round up to the pixel grid by about a point, which this takes back. */}
         <View style={[styles.sect, { marginBottom: 27 }]}>
           <SectionHead title="Reviewers" />
+          {reviewers.isLoading ? (
+            <LoadingState label="Loading reviewers" inline />
+          ) : (reviewers.data ?? []).length === 0 ? (
+            <EmptyState mascot="greeting" heading="No reviewers yet" body="Add an address below to allow it." inline />
+          ) : (
           <ListCard>
             {(reviewers.data ?? []).map((reviewer, i) => (
               <Pressable key={reviewer.email} disabled={reviewer.verified} onPress={() => handlePendingTap(reviewer)}>
@@ -116,6 +121,7 @@ export default function EmailAccessScreen() {
               </Pressable>
             ))}
           </ListCard>
+          )}
           <Note>Only a verified address can act as a reviewer. Tap a pending address to enter its code.</Note>
         </View>
 

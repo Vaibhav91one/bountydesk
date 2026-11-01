@@ -10,7 +10,7 @@ import { useRouter } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { InboxResponse, InboxCard } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState, LoadingState } from "@/components/primitives"
 import type { PhaseKey } from "@/components/primitives"
 import { ListCard, ReportRow, SectionHead } from "@/components/ReportList"
 import { BottomFade, Note } from "@/components/CaseUi"
@@ -96,7 +96,9 @@ export default function InboxScreen() {
 
         <View style={styles.sect}>
           <SectionHead title="Needs you" />
-          {needsYou.length > 0 ? (
+          {inbox.isLoading ? (
+            <LoadingState label="Loading inbox" inline />
+          ) : needsYou.length > 0 ? (
             <ListCard>
               {needsYou.map((card, i) => (
                 <InboxRow key={card.id} card={card} divider={i > 0} />

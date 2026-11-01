@@ -10,7 +10,7 @@ import { useLocalSearchParams } from "expo-router"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { MobileCaseFileWithScope } from "@/lib/types"
 import { useTheme } from "@/theme"
-import { PhasePill, ScreenHeader, EmptyState, ScreenTitle } from "@/components/primitives"
+import { PhasePill, ScreenHeader, EmptyState, LoadingState, ScreenTitle } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, KvLine, Note, shortCommit } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
@@ -25,7 +25,7 @@ function ruleValue(entry: unknown): string {
 export default function TargetAndScopeScreen() {
   const { colors } = useTheme()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { data: caseFile, error } = useApiQuery<MobileCaseFileWithScope>(`/reports/${id}`)
+  const { data: caseFile, error, isLoading } = useApiQuery<MobileCaseFileWithScope>(`/reports/${id}`)
 
   const isAuthError = error instanceof ApiError && (error.status === 401 || error.status === 403)
   if (error && !isAuthError) {
@@ -37,6 +37,15 @@ export default function TargetAndScopeScreen() {
   }
 
   if (error) return null
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <ScreenHeader back backLabel="Case file" />
+        <LoadingState label="Loading target and scope" />
+      </View>
+    )
+  }
 
   const target = caseFile?.target ?? null
   const scope = caseFile?.targetScope

@@ -26,7 +26,7 @@ import {
 } from "react-native"
 import { useLocalSearchParams, useRouter } from "expo-router"
 import { useApiQuery, useApiMutation, ApiError } from "@/lib/use-query"
-import { ScreenHeader, ScreenTitle, EmptyState } from "@/components/primitives"
+import { ScreenHeader, ScreenTitle, EmptyState, LoadingState } from "@/components/primitives"
 import { Icon } from "@/components/icons"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
@@ -114,7 +114,7 @@ export default function ChatScreen() {
   // retry send) keeps the same clientRequestId; the server dedupes by it.
   const pendingSendRef = useRef<{ body: string; clientRequestId: string } | null>(null)
 
-  const { data: status, error, isError, refetch, isFetching } = useApiQuery<ChatStatus>(
+  const { data: status, error, isError, refetch, isFetching, isLoading } = useApiQuery<ChatStatus>(
     `/reports/${id}/chat`,
   )
   const { data: report } = useApiQuery<MobileCaseFile>(`/reports/${id}`)
@@ -269,7 +269,11 @@ export default function ChatScreen() {
           ListHeaderComponent={<ScreenTitle title="Ask the agent" meta={meta} metaBottom={12} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <EmptyState heading="No messages yet" body="Ask about this report to start." inline />
+              {isLoading ? (
+                <LoadingState label="Loading chat" inline />
+              ) : (
+                <EmptyState heading="No messages yet" body="Ask about this report to start." inline />
+              )}
             </View>
           }
           ListFooterComponent={
