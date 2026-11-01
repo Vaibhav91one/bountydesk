@@ -201,8 +201,10 @@ test("the request blocks all network, names the resolved id, and carries no secr
 
   const [body] = sent;
 
-  // No argument grants network, so there is nothing a caller can pass to get one.
-  assert.equal(body.networkBlockAll, true);
+  // No argument grants network, so there is nothing a caller can pass to get one. The only allowed
+  // range is the private link subnet (see LINK_NETWORK_CIDR).
+  assert.equal(body.networkBlockAll, false);
+  assert.equal(body.networkAllowList, "172.25.0.0/16");
   assert.equal("domainAllowList" in body, false);
 
   // The caller passed a display name; the create names the immutable id the lookup returned,
@@ -253,9 +255,9 @@ test("a linked child names its parent, stays internet-blocked, and is ephemeral"
   assert.equal(body.linkedSandbox, "sb-parent", "the child must name the parent it links to");
   assert.equal(body.ephemeral, true, "a child must not outlive its group");
   // Linking is not a way to widen egress: the child is as blocked as any reproduction sandbox.
-  assert.equal(body.networkBlockAll, true);
+  assert.equal(body.networkBlockAll, false);
+  assert.equal(body.networkAllowList, "172.25.0.0/16");
   assert.equal("domainAllowList" in body, false);
-  assert.equal("networkAllowList" in body, false);
   assert.equal(body.public, false);
 });
 

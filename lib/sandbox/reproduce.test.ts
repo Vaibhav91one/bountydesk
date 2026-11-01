@@ -1095,6 +1095,17 @@ test("verifyNoEgress accepts a clientless image when networkBlockAll is verified
     () => verifyNoEgress({ ...FAKE_SANDBOX, networkBlockAll: false }),
     /networkBlockAll false/,
   );
+
+  // The link-network policy is the one accepted alternative; any other range or a domain list fails.
+  await verifyNoEgress({ ...FAKE_SANDBOX, networkBlockAll: false, networkAllowList: "172.25.0.0/16" });
+  await assert.rejects(
+    () => verifyNoEgress({ ...FAKE_SANDBOX, networkBlockAll: false, networkAllowList: "0.0.0.0/0" }),
+    /networkBlockAll false/,
+  );
+  await assert.rejects(
+    () => verifyNoEgress({ ...FAKE_SANDBOX, networkBlockAll: false, networkAllowList: "172.25.0.0/16", domainAllowList: "example.com" }),
+    /non-empty egress allow list/,
+  );
 });
 
 function withFollowUpAuthorization() {

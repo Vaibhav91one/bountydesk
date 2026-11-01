@@ -11,6 +11,7 @@ import {
   toolCheckCommand,
 } from "@/lib/sandbox/capability-probe";
 import { buildMarkerCheck } from "@/lib/sandbox/build-marker";
+import { offlinePolicyError } from "@/lib/sandbox/link-network";
 import { EXPECTED_BUILD_MARKER } from "@/lib/targets/configure";
 import {
   PURPOSE,
@@ -222,10 +223,8 @@ function inspectSandbox(sandbox: Sandbox): void {
     sandboxClass: sandbox.sandboxClass,
   });
 
-  if (!sandbox.networkBlockAll) throw new Error("sandbox came up with networkBlockAll false");
-  if (sandbox.networkAllowList || sandbox.domainAllowList) {
-    throw new Error("sandbox came up with a non-empty egress allow list");
-  }
+  const policyError = offlinePolicyError(sandbox);
+  if (policyError) throw new Error(`sandbox came up with ${policyError}`);
   if (sandbox.public !== false) throw new Error("sandbox is not private");
 }
 

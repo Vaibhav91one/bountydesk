@@ -33,6 +33,7 @@ import {
   listSandboxes,
   type Sandbox,
 } from "@/lib/sandbox/daytona";
+import { offlinePolicyError } from "@/lib/sandbox/link-network";
 
 const SPIKE_LABEL = "bountydesk.spike";
 /**
@@ -175,12 +176,8 @@ async function main(): Promise<void> {
     if (sandbox.snapshot !== info.id && sandbox.snapshot !== info.name) {
       throw new Error(`booted snapshot ${sandbox.snapshot} is neither ${info.id} nor ${info.name}`);
     }
-    if (!sandbox.networkBlockAll) {
-      throw new Error("reproduction sandbox came up with networkBlockAll false");
-    }
-    if (sandbox.networkAllowList || sandbox.domainAllowList) {
-      throw new Error("reproduction sandbox came up with a non-empty egress allow list");
-    }
+    const policyError = offlinePolicyError(sandbox);
+    if (policyError) throw new Error(`reproduction sandbox came up with ${policyError}`);
 
     // The control plane exposes no resolved image digest, so record what it does expose and
     // leave the digest to an in-sandbox check. See the conclusion in the PR.

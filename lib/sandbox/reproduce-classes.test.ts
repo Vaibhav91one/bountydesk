@@ -386,7 +386,8 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
   };
 
   let userToken: string | null = null;
-  const stub = (async (input: string | URL | Request) => {
+  let exploitInit: RequestInit | undefined;
+  const stub = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith("/preview-url")) {
       return new Response(JSON.stringify({ url: "https://3000-sandbox.example", token: "tok" }), { status: 200 });
@@ -403,6 +404,7 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
       return new Response("", { status: 302 });
     }
     if (parsed.pathname === "/profile/image/url") {
+      exploitInit = init;
       // The target accepts the request and redirects like any other submission, but never
       // actually calls out to the listener.
       return new Response("", { status: 302 });
@@ -413,6 +415,9 @@ test("ssrf oob listener: end to end, no recorded callback is NOT_REPRODUCED", as
   try {
     const outcome = await withFetch(stub, () => reproduce(reproduceInput(recipe)));
     assert.equal(outcome.outcome, "NOT_REPRODUCED");
+    // Juice Shop reads imageUrl only from a form field, so the exploit must be form-encoded.
+    assert.equal(new Headers(exploitInit?.headers).get("content-type"), "application/x-www-form-urlencoded");
+    assert.match(String(exploitInit?.body), /^imageUrl=http%3A%2F%2Foob-listener-peer%3A8080%2F[^&]+\.jpg$/);
     // The listener log was actually read, so NOT_REPRODUCED came from an empty log, not a listener
     // that never started.
     assert.ok(executeCalls.some((c) => c.startsWith("oob-listener-peer:") && c.includes("BOUNTYDESK_OOB_LOG_BEGIN")));

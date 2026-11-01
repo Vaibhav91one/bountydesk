@@ -114,6 +114,39 @@ Sequence, with evidence:
 This is the first live run of the current agent-authored path; the August 2026 proof under the
 deterministic canary pipeline still stands as a separate, earlier proof and is not superseded.
 
+## Class oracles (#343), live proof 2026-11-01
+
+Each recipe ran through the real reproducer (`createReproducer` in `lib/sandbox/reproduce.ts`)
+against a fresh sandbox from the pinned `juice-shop-v17.3.0` snapshot (`739692d0`), with the
+target profile row read from production read-only and no agent, database writes or delivery in
+the loop. That is the oracle path a reproduction run takes; `bench/run.ts` adds the agent and
+intake around it and was not needed to prove the oracles. Each run seeds its own canary, runs the
+negative control, then the exploit, and tears the sandboxes down.
+
+| Recipe | Class | Outcome | Negative control | Exploit | Sandbox |
+|---|---|---|---|---|---|
+| `juice-shop-idor-basket` | IDOR (two principals) | REPRODUCED | clean | canary seen | `35330991` |
+| `juice-shop-product-tampering-unauth` | broken auth | REPRODUCED | clean | canary seen | `01963e7c` |
+| `juice-shop-ftp-poison-null-byte` | path traversal | REPRODUCED | clean | canary seen | `4e7de270` |
+| `juice-shop-ssrf-profile-image` | SSRF (OOB listener) | REPRODUCED, 3 of 3 runs | clean | callback seen | `599f8709`, `03329e07`, `bd0bc5ff` |
+| `juice-shop-dom-xss-search` | DOM XSS (browser probe) | REPRODUCED | clean | canary in title | `506b0682` |
+
+The first live pass found four defects, all fixed before the run above:
+
+- Daytona now refuses every connection between linked sandboxes while `networkBlockAll` is true,
+  in both directions. The browser probe, the OOB listener, the workbench and mesh targets all
+  failed silently. Reproduction sandboxes now set `networkBlockAll: false` with the link subnet
+  `172.25.0.0/16` as the only allowed range (`lib/sandbox/link-network.ts`); internet addresses
+  still get the "Internet is restricted" denial and `verifyNoEgress` accepts only that exact policy.
+- The OOB listener started its server with a bare `nohup node ... &`, which held Daytona's exec
+  open until a 408, so the listener never reported ready (#452).
+- Juice Shop's `/profile/image/url` reads `imageUrl` only from a form field and ignores a JSON
+  body, so the SSRF exploit never triggered a fetch. Recipe requests can now set
+  `bodyEncoding: "form"`.
+- Juice Shop answers the upload before its own fetch lands, sometimes by several seconds, so the
+  1.5 s settle window missed about one callback in three. The exploit read now polls up to a 10 s
+  window and stops at the first hit; the control read still waits the whole window.
+
 ## Cleanup performed this round
 
 - Three test advisories on juice-shop closed (`GHSA-qr4w`, `GHSA-q5pc`, `GHSA-hh99`). GitHub has no

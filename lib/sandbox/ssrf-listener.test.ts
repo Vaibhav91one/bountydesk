@@ -211,3 +211,22 @@ test("a createSandbox failure sweeps any listener the provider created without r
   assert.equal(started.ok, false);
   assert.deepEqual(deleteSandboxCalls, ["orphan-listener"]);
 });
+
+test("the exploit read polls until a late callback lands, within the settle window", async () => {
+  process.env.BOUNTYDESK_OOB_SETTLE_MS = "3000";
+  try {
+    const started = await mod.startOobListener("target-sandbox-1", 8080);
+    assert.equal(started.ok, true);
+    if (!started.ok) return;
+    // The callback arrives after the first read, as Juice Shop's does when it answers before its fetch lands.
+    setTimeout(() => {
+      logContent = JSON.stringify({ method: "GET", url: "/late-canary.jpg" });
+    }, 300);
+    const t0 = Date.now();
+    assert.deepEqual(await started.session.sawCanary("late-canary"), { ok: true, found: true });
+    assert.ok(Date.now() - t0 < 3000, "a found canary must end the poll before the window closes");
+    await started.session.close(false);
+  } finally {
+    process.env.BOUNTYDESK_OOB_SETTLE_MS = "0";
+  }
+});

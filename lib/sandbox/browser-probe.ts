@@ -6,13 +6,13 @@
  * is an SSRF and exfiltration pivot: the page can `fetch()` anywhere, read cloud metadata, or
  * post out whatever it scraped. So the browser here never runs on the BountyDesk host, and never
  * in the same sandbox as the target. It runs in its own reproduction-grade sandbox
- * (networkBlockAll, no egress, torn down after the run) that is link-joined to the target's
+ * (offline, no egress, torn down after the run) that is link-joined to the target's
  * sandbox, so the only thing it can reach is the one target app, by the target's sandbox id, over
  * a private in-group route. verifyNoEgress proves the block held before any page loads, the same
  * proof provisionTarget already makes for the target sandbox. The browser's Chromium and driver
  * are baked into that sandbox image and run fully offline (see docs/browser-probe.md); the two
  * optional outbound calls the webcmd driver can make are both disabled by env and, even if they
- * were not, are denied by networkBlockAll like any other egress.
+ * were not, are denied by the sandbox's offline policy like any other egress.
  *
  * Why a separate sandbox, not the target's own. The run's canary must be unguessable to the
  * target. It rides in the URL fragment (never sent to the server) and lives only in this browser

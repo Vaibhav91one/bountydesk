@@ -557,6 +557,9 @@ function ssrfProfileImageRecipe(config: JuiceShopConfig): ReproductionRecipe {
       path: PROFILE_IMAGE_URL_UPLOAD_PATH,
       headers: { Cookie: "token={{userToken}}" },
       body: { imageUrl: `{{oobUrl}}/${CANARY_PLACEHOLDER}.jpg` },
+      // The route reads imageUrl only from a form field; a JSON body is ignored and no fetch
+      // happens (verified live on the pinned v17.3.0 image, 2026-11-01).
+      bodyEncoding: "form",
     },
     oracleCheck: () => false,
   };
