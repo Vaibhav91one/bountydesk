@@ -105,7 +105,7 @@ describe("M11 Sign the verdict", () => {
   it("renders loading state when data is not yet available", async () => {
     setMockData(null)
     const { queryByText } = await render(<SignTheVerdict />)
-    expect(queryByText("Loading")).toBeTruthy()
+    expect(queryByText("Loading verdict")).toBeTruthy()
   })
 
   it("renders the drafted comment, outcome, severity, delivery and correct content hash", async () => {

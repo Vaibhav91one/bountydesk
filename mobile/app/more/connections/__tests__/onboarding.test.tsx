@@ -73,6 +73,7 @@ jest.mock("@/components/primitives", () => {
     ScreenHeader: () => null,
     ScreenTitle: ({ title }: any) => React.createElement(Text, { "data-testid": "screenheader" }, title),
     Mono: ({ children, style }: any) => React.createElement(Text, { style, "data-testid": "mono" }, children),
+    LoadingState: ({ label }: any) => React.createElement(Text, { "data-testid": "loadingstate" }, label),
     EmptyState: ({ heading }: any) => React.createElement(Text, { "data-testid": "emptystate" }, heading),
   }
 })

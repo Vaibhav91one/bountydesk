@@ -12,7 +12,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import { fixturesEnabled } from "@/lib/fixtures"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
-import { PhasePill, PrimaryButton, TOP_INSET, TopFade } from "@/components/primitives"
+import { LoadingState, PhasePill, PrimaryButton, TOP_INSET, TopFade } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, KvLine, Note } from "@/components/CaseUi"
 import type { CaseFileWithDelivery } from "@/components/VerdictReview"
@@ -38,7 +38,7 @@ export default function VerdictApprovedScreen() {
   if (!cf) {
     return (
       <View style={[styles.centered, { backgroundColor: colors.background }]}>
-        <Text style={{ color: colors.muted }}>Loading</Text>
+        <LoadingState label="Loading receipt" />
       </View>
     )
   }

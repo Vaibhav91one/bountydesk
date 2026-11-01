@@ -10,6 +10,7 @@
  */
 import { useAuth } from "@/lib/auth-hooks"
 import { Redirect } from "expo-router"
+import { LoadingState } from "@/components/primitives"
 import { Tabs } from "expo-router/js-tabs"
 import { useEffect, useState } from "react"
 import { View, Text, StyleSheet } from "react-native"
@@ -51,11 +52,11 @@ export default function TabsLayout() {
       })
   }, [isSignedIn, allowlisted, handleApiError])
 
-  if (!isLoaded) return null
+  if (!isLoaded) return <LoadingState label="Signing you in" />
   if (!isSignedIn) return <Redirect href="/auth/splash" />
   if (allowlisted === false) return <Redirect href="/auth/not-authorized" />
   if (checkError) return <View style={styles.centered}><Text style={styles.error}>{checkError}</Text></View>
-  if (allowlisted === null) return null
+  if (allowlisted === null) return <LoadingState label="Checking access" />
 
   return <TabsShell />
 }

@@ -15,9 +15,8 @@ import type { QueueCard } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
-import { AnimatedMascot } from "@/components/AnimatedMascot"
 import { TopBarPill } from "@/components/TopBarPill"
-import { ScreenTitle, LongPressMenu, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
+import { ScreenTitle, LongPressMenu, EmptyState, LoadingState, ToastProvider, useToast, phaseLabel } from "@/components/primitives"
 import type { PhaseKey } from "@/lib/phases"
 import { ListCard, ReportRow } from "@/components/ReportList"
 import { ageText } from "@/lib/age"
@@ -152,8 +151,8 @@ function ReportsScreenContent() {
   // focused search field) mounted and shows the previous results until its own page arrives.
   if (pagesFor === null && !firstPage && !isError) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator color={colors.brand} size="large" />
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <LoadingState label="Loading reports" />
         <TopBarPill />
       </View>
     )
@@ -252,26 +251,13 @@ function ReportsScreenContent() {
               ))}
             </ListCard>
           ) : (
-            <View style={[styles.noResult, !hasFilter && styles.noResultNoFilter]}>
-              <AnimatedMascot name="scanning" size={150} float />
-              <Text style={[styles.noResultH, { color: colors.foreground }]}>
-                No reports match {needle ? `"${search.trim()}"` : ""}
-              </Text>
-              <Text style={[styles.noResultP, { color: colors.muted }]}>
-                Check the spelling, try a report id, or remove a filter.
-              </Text>
-              {hasFilter ? (
-                <Pressable
-                  onPress={() => {
-                    setSearch("")
-                    setActiveChip("all")
-                  }}
-                  style={({ pressed }) => [styles.clearBtn, { backgroundColor: colors.fill }, pressed && { opacity: 0.7 }]}
-                >
-                  <Text style={[styles.clearBtnText, { color: colors.foreground }]}>Clear search</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <EmptyState
+              mascot="scanning"
+              heading={`No reports match ${needle ? `"${search.trim()}"` : ""}`}
+              body="Check the spelling, try a report id, or remove a filter."
+              action={hasFilter ? { title: "Clear search", onPress: () => { setSearch(""); setActiveChip("all") } } : undefined}
+              inline
+            />
           )}
           {loadError ? (
             <Pressable onPress={() => { setLoadError(null); loadMore() }} style={styles.loadError}>
@@ -381,24 +367,6 @@ const styles = StyleSheet.create({
   fchipText: { fontFamily: font.medium, fontSize: 15, lineHeight: 15, top: 1 },
   listSection: { marginTop: 20 },
   note: { fontFamily: font.regular, fontSize: 13, lineHeight: 18.2, paddingHorizontal: 20, paddingTop: 10 },
-  noResult: {
-    alignItems: "center",
-    paddingVertical: 48,
-    paddingHorizontal: 40,
-  },
-  noResultNoFilter: { paddingTop: 120 },
-  noResultH: { fontFamily: font.bold, fontSize: 24, letterSpacing: -0.5, lineHeight: 29, textAlign: "center", marginTop: 18 },
-  noResultP: { fontFamily: font.regular, fontSize: 15, lineHeight: 23, textAlign: "center", maxWidth: 300, marginTop: 10 },
-  clearBtn: {
-    minHeight: 52,
-    paddingHorizontal: 22,
-    borderRadius: 26,
-    marginTop: 22,
-    minWidth: 160,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  clearBtnText: { fontFamily: font.semibold, fontSize: 17, },
   loadError: {
     paddingVertical: 12,
     alignItems: "center",

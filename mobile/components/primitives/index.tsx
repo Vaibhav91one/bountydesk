@@ -21,13 +21,14 @@ import {
   TextStyle,
   Animated,
   Easing,
+  ActivityIndicator,
 } from "react-native"
 import { LinearGradient } from "expo-linear-gradient"
 import { useRouter } from "expo-router"
 import { Icon } from "@/components/icons"
 import type { IconName } from "@/components/icons"
 import { SvgImage } from "@/components/SvgImage"
-import { AnimatedMascot } from "@/components/AnimatedMascot"
+import { AnimatedMascot, type MascotName } from "@/components/AnimatedMascot"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
 import { phaseLabel, usePhaseColor, phaseTint } from "@/lib/phases"
@@ -358,7 +359,7 @@ export function SectionHeader({ title, count, chevron = true, onSort }: SectionH
 // ---------------------------------------------------------------
 export interface EmptyStateProps {
   /** mascot asset name, e.g. "greeting" or "scanning" */
-  mascot?: "greeting" | "scanning" | "chilling" | "idle"
+  mascot?: MascotName
   heading: string
   body?: string
   action?: { title: string; onPress: () => void }
@@ -373,6 +374,28 @@ export function EmptyState({ mascot = "greeting", heading, body, action, inline 
       <Text style={[styles.emptyH, { color: colors.foreground }]}>{heading}</Text>
       {body ? <Text style={[styles.emptyP, { color: colors.muted }]}>{body}</Text> : null}
       {action ? <PrimaryButton title={action.title} onPress={action.onPress} /> : null}
+    </View>
+  )
+}
+
+export interface LoadingStateProps {
+  label?: string
+  mascot?: MascotName
+  inline?: boolean
+}
+
+export function LoadingState({ label, mascot = "scanning", inline = false }: LoadingStateProps) {
+  const { colors } = useTheme()
+  return (
+    <View
+      style={[inline ? styles.emptyInline : styles.empty, { backgroundColor: colors.background }]}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel={label}
+    >
+      <AnimatedMascot name={mascot} size={inline ? 120 : 160} float />
+      <ActivityIndicator color={colors.brand} />
+      {label ? <Text style={[styles.emptyP, { color: colors.muted }]}>{label}</Text> : null}
     </View>
   )
 }

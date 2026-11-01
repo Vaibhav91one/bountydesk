@@ -11,7 +11,7 @@ import * as Haptics from "expo-haptics"
 import { useApiQuery, ApiError } from "@/lib/use-query"
 import { api } from "@/lib/api"
 import { useTheme } from "@/theme"
-import { ToastProvider, useToast } from "@/components/primitives"
+import { LoadingState, ToastProvider, useToast } from "@/components/primitives"
 import { awaitsApproval, type CaseFileWithDelivery } from "@/components/VerdictReview"
 import { font } from "@/lib/fonts"
 
@@ -28,7 +28,7 @@ function DenySheet() {
   const { id } = params
   const { colors } = useTheme()
   const toast = useToast()
-  const { data: cf, isError, refetch } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
+  const { data: cf, isError, isLoading, refetch } = useApiQuery<CaseFileWithDelivery>(`/reports/${id}`)
 
   const [reason, setReason] = useState<string | null>(null)
   const [note, setNote] = useState("")
@@ -100,6 +100,8 @@ function DenySheet() {
             <Text style={[styles.changedTitle, { color: colors.foreground }]}>This verdict changed</Text>
             <Text style={[styles.changedBody, { color: colors.muted }]}>Refresh and review again.</Text>
           </View>
+        ) : isLoading ? (
+          <LoadingState label="Loading verdict" inline />
         ) : (
           <>
             <View style={[styles.reasons, { backgroundColor: colors["sheet-card"] }]} accessibilityRole="radiogroup">

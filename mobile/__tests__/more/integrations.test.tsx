@@ -432,7 +432,7 @@ describe("M24 Privacy", () => {
   it("renders title and meta", async () => {
     const { getAllByText } = await renderWithClient(<PrivacyScreen />)
     expect(getAllByText("Privacy").length).toBeGreaterThan(0)
-    expect(getAllByText("Last updated September 2026").length).toBeGreaterThan(0)
+    expect(getAllByText("Last updated October 2026").length).toBeGreaterThan(0)
   })
 
   it("renders article sections", async () => {

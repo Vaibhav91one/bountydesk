@@ -13,7 +13,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { HomeSummary, QueueColumnView } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { TopBarPill } from "@/components/TopBarPill"
-import { PhasePill, TOP_INSET, phaseLabel } from "@/components/primitives"
+import { EmptyState, LoadingState, PhasePill, TOP_INSET, phaseLabel } from "@/components/primitives"
 import { PopoverMenu, type AnchorRect } from "@/components/PopoverMenu"
 import { ListCard, ReportRow, SectionHead } from "@/components/ReportList"
 import { Icon } from "@/components/icons"
@@ -91,7 +91,7 @@ export default function HomeScreen() {
   const [sort, setSort] = useState<Sort>("newest")
   const [menuAnchor, setMenuAnchor] = useState<AnchorRect | null>(null)
   const { data: summary, error } = useApiQuery<HomeSummary>("/home")
-  const { data: queue, error: queueError } = useApiQuery<QueueResponse>("/queue?limit=50")
+  const { data: queue, error: queueError, isLoading: queueLoading } = useApiQuery<QueueResponse>("/queue?limit=50")
 
   const columns = queue?.columns ?? []
   const colByKey = (key: string) => columns.find((c) => c.key === key)
@@ -140,23 +140,23 @@ export default function HomeScreen() {
       >
         <View style={styles.section}>
           <SectionHead title="Needs you" count={awaitingTotal} onPress={() => router.push("/queue")} onMore={setMenuAnchor} />
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={CARD_WIDTH + RAIL_GAP}
-            decelerationRate="fast"
-            contentContainerStyle={styles.rail}
-          >
-            {awaitingCards.length === 0 ? (
-              <View style={[styles.nc, { backgroundColor: colors.card, boxShadow: `0 0 0 1px ${colors["glass-edge"]}` }]}>
-                <Text style={[styles.ncTitle, { color: colors.foreground }]}>Nothing needs you</Text>
-              </View>
-            ) : (
-              awaitingCards.map((c) => (
+          {queueLoading ? (
+            <LoadingState label="Loading your queue" inline />
+          ) : awaitingCards.length === 0 ? (
+            <EmptyState mascot="chilling" heading="Nothing needs you" inline />
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={CARD_WIDTH + RAIL_GAP}
+              decelerationRate="fast"
+              contentContainerStyle={styles.rail}
+            >
+              {awaitingCards.map((c) => (
                 <NeedYouCard key={c.id} card={c} onPress={() => router.push(`/reports/${c.id}/sign-the-verdict`)} />
-              ))
-            )}
-          </ScrollView>
+              ))}
+            </ScrollView>
+          )}
         </View>
 
         {active.length > 0 ? (

@@ -12,7 +12,7 @@ import { useApiQuery, ApiError } from "@/lib/use-query"
 import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { Icon } from "@/components/icons"
-import { ScreenHeader, EmptyState, ScreenTitle } from "@/components/primitives"
+import { ScreenHeader, EmptyState, LoadingState, ScreenTitle } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, KvLine, Note, shortCommit } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
@@ -114,6 +114,7 @@ export default function OnboardingScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <ScreenHeader back backLabel="Connections" />
+        <LoadingState label="Loading connection" />
       </View>
     )
   }

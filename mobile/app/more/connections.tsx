@@ -22,7 +22,7 @@ import type { ConnectionRow } from "@/lib/types"
 import { useTheme } from "@/theme"
 import { GlassBlur } from "@/components/GlassBlur"
 import { Icon } from "@/components/icons"
-import { PhasePill, PrimaryButton, ScreenHeader, ToastProvider, ScreenTitle, phaseTint } from "@/components/primitives"
+import { PhasePill, PrimaryButton, ScreenHeader, ToastProvider, ScreenTitle, phaseTint, EmptyState, LoadingState } from "@/components/primitives"
 import { ListCard, SectionHead } from "@/components/ReportList"
 import { BottomFade, ItemLine, Note } from "@/components/CaseUi"
 import { font } from "@/lib/fonts"
@@ -52,7 +52,7 @@ function InstallRow({ title, subtitle, onPress }: { title: string; subtitle: str
 
 export default function ConnectionsScreen() {
   const { colors } = useTheme()
-  const { data: rows, error } = useApiQuery<ConnectionRow[]>("/connections")
+  const { data: rows, error, isLoading } = useApiQuery<ConnectionRow[]>("/connections")
   // M27 is per repository, so the shortcut opens the first one with an onboarding record.
   const onboardingRepo = rows?.find((r) => r.onboardingDetail || r.onboardingProgress) ?? null
   const router = useRouter()
@@ -90,35 +90,37 @@ export default function ConnectionsScreen() {
 
           <View style={styles.sect}>
             <SectionHead title="Installation" />
-            <ListCard>
-              {accounts.length === 0 ? (
-                <InstallRow title="GitHub App not installed" subtitle="Install it to connect repositories" onPress={handleInstall} />
-              ) : (
-                accounts.map(({ account, count }) => (
+            {isLoading ? (
+              <LoadingState label="Loading connections" inline />
+            ) : accounts.length === 0 ? (
+              <EmptyState mascot="scanning" heading="GitHub App not installed" body="Install it to connect repositories" inline />
+            ) : (
+              <ListCard>
+                {accounts.map(({ account, count }) => (
                   <InstallRow
                     key={account}
                     title={account}
                     subtitle={`GitHub App installed · ${count} ${count === 1 ? "repository" : "repositories"}`}
                     onPress={handleInstall}
                   />
-                ))
-              )}
-            </ListCard>
+                ))}
+              </ListCard>
+            )}
           </View>
 
           <View style={styles.sect}>
             <SectionHead title="Repositories" />
-            <ListCard>
-              {rows && rows.length > 0 ? (
-                rows.map((row, i) => (
+            {isLoading ? (
+              <LoadingState label="Loading repositories" inline />
+            ) : rows && rows.length > 0 ? (
+              <ListCard>
+                {rows.map((row, i) => (
                   <RepoRow key={row.id} row={row} divider={i > 0} onPress={() => router.push(`/more/connections/${row.repoId}`)} />
-                ))
-              ) : (
-                <View style={styles.emptyRow}>
-                  <Text style={[styles.emptyText, { color: colors.muted }]}>No repositories connected</Text>
-                </View>
-              )}
-            </ListCard>
+                ))}
+              </ListCard>
+            ) : (
+              <EmptyState mascot="scanning" heading="No repositories connected" inline />
+            )}
             <Note>Reproduction needs a bound target. A repository without one stops at analysis only.</Note>
           </View>
 
@@ -213,8 +215,6 @@ const styles = StyleSheet.create({
   pill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 99 },
   pillDot: { width: 6, height: 6, borderRadius: 3 },
   pillLabel: { fontFamily: font.semibold, fontSize: 13, lineHeight: 13 },
-  emptyRow: { minHeight: 56, paddingHorizontal: 18, alignItems: "center", justifyContent: "center" },
-  emptyText: { fontFamily: font.regular, fontSize: 15 },
   fbar: { position: "absolute", left: 16, right: 16, bottom: 30, flexDirection: "row", gap: 6, padding: 6, borderRadius: 36, borderWidth: 1 },
   btn: { flex: 1 },
   centered: { flex: 1, alignItems: "center", justifyContent: "center" },
