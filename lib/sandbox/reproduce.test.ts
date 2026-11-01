@@ -13,6 +13,7 @@ process.env.DAYTONA_API_KEY = "dtn_test_key_not_a_real_one";
 // make every run of this file sit through a real timeout for no reason.
 process.env.BOUNTYDESK_REPRODUCE_READINESS_TIMEOUT_MS = "30";
 process.env.BOUNTYDESK_REPRODUCE_READINESS_POLL_MS = "5";
+process.env.BOUNTYDESK_OOB_SETTLE_MS = "0";
 
 const TARGET_PROFILE_ID = "profile-under-test";
 
@@ -124,6 +125,7 @@ mock.module("./daytona", {
     getSandbox: (id: string) => getSandboxImpl(id),
     execute: (sandbox: Sandbox, command: string) => executeImpl(sandbox, command),
     deleteSandbox: (id: string) => deleteSandboxImpl(id),
+    listSandboxes: async (): Promise<Sandbox[]> => [],
     getSnapshot: async (): Promise<SnapshotInfo> => FAKE_SNAPSHOT,
   },
 });
@@ -1666,11 +1668,29 @@ test("substituteCanary replaces {{canary}} and percent-encoded {{canary}} in req
   assert.ok(seenUrls.every((u) => !u.includes("{{canary}}") && !u.toLowerCase().includes("%7b%7bcanary%7d%7d")));
 });
 
-test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and reproduces when the listener records the canary", async () => {
+type OobRun = {
+  /** Log content the listener holds when the negative control is read (a late or foreign callback). */
+  logAtControl?: string;
+  exploitStatus?: number;
+  clearOk?: boolean;
+  listenerStarts?: boolean;
+  /** Whether the exploit request makes the target call back to the listener. */
+  exploitCallsBack?: boolean;
+  /** Write the exploit placeholder in mixed-case percent encoding. */
+  mixedCasePlaceholder?: boolean;
+};
+
+/** The canary the controller put in the listener read command (grep -aF -- '<canary>'). */
+function canaryFromCommand(command: string): string {
+  return /grep -aF -- '([^']+)'/.exec(command)?.[1] ?? "";
+}
+
+async function runOob(run: OobRun) {
   resetSpies();
   process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT = "snap";
   process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF = "ghcr.io/vaibhav91one/juice-shop@sha256:" + "a".repeat(64);
   process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME = "ghcr.io/vaibhav91one/juice-shop:test-oob";
+  process.env.BOUNTYDESK_OOB_LISTENER_BUILD_MARKER = "browser-out-1";
 
   const oobRecipe: ReproductionRecipe = {
     id: "ssrf-oob-test",
@@ -1694,7 +1714,7 @@ test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and repro
       method: "POST",
       path: "/profile/image/url",
       headers: { Cookie: "token={{userToken}}" },
-      body: { imageUrl: "{{oobUrl}}/{{canary}}.jpg" },
+      body: { imageUrl: `{{oobUrl}}/${run.mixedCasePlaceholder ? "%7b%7Bcanary%7D%7D" : "{{canary}}"}.jpg` },
     },
     oracleCheck: () => false,
   };
@@ -1706,6 +1726,7 @@ test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and repro
 
   let createdCount = 0;
   let listenerLog = "";
+  let controlSeeded = false;
   createSandboxImpl = async (spec, snapshotImageRefOverride) => {
     createSandboxCalls.push(spec);
     createSandboxImageOverrides.push(snapshotImageRefOverride);
@@ -1719,14 +1740,26 @@ test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and repro
       return { exitCode: 0, result: "browser-out-1\n" };
     }
     if (command.includes("bountydesk-oob-server.js")) {
-      return { exitCode: 0, result: "BOUNTYDESK_OOB_LISTENER_READY\n" };
+      return run.listenerStarts === false
+        ? { exitCode: 1, result: "" }
+        : { exitCode: 0, result: "BOUNTYDESK_OOB_LISTENER_READY\n" };
     }
     if (command.includes("BOUNTYDESK_OOB_CLEARED")) {
+      if (run.clearOk === false) return { exitCode: 1, result: "" };
       listenerLog = "";
       return { exitCode: 0, result: "BOUNTYDESK_OOB_CLEARED\n" };
     }
     if (command.includes("BOUNTYDESK_OOB_LOG_BEGIN")) {
-      return { exitCode: 0, result: `BOUNTYDESK_OOB_LOG_BEGIN\n${listenerLog}\nBOUNTYDESK_OOB_LOG_END\n` };
+      // The first (control) read sees whatever the scenario planted; a drain resets the log.
+      if (!controlSeeded) {
+        controlSeeded = true;
+        if (run.logAtControl !== undefined) {
+          listenerLog = run.logAtControl.replace("CANARY", canaryFromCommand(command));
+        }
+      }
+      const body = listenerLog;
+      if (command.includes("mv -f")) listenerLog = "";
+      return { exitCode: 0, result: `BOUNTYDESK_OOB_LOG_BEGIN\n${body}\nBOUNTYDESK_OOB_LOG_END\n` };
     }
     return defaultExecuteResult(command);
   };
@@ -1746,26 +1779,66 @@ test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and repro
     if (parsed.pathname === "/profile/image/url") {
       const body = JSON.parse(String(init?.body ?? "{}")) as { imageUrl?: string };
       // Target makes the SSRF request to the listener peer URL when exploited.
-      listenerLog = JSON.stringify({ method: "GET", url: body.imageUrl });
-      return new Response("", { status: 302 });
+      if (run.exploitCallsBack !== false) listenerLog = JSON.stringify({ method: "GET", url: body.imageUrl });
+      return new Response("", { status: run.exploitStatus ?? 302 });
     }
     return new Response("", { status: 404 });
   }) as typeof fetch;
 
   try {
     const outcome = await withFetch(stub, () => reproduce(reproduceInput({ recipe: oobRecipe })));
-    assert.equal(outcome.outcome, "REPRODUCED");
-    if (outcome.outcome !== "REPRODUCED") return;
-    assert.ok(listenerLog.includes("http://oob-listener-peer:8080/"));
-    assert.ok(!JSON.stringify(outcome).includes("http://oob-listener-peer:8080"));
-    assert.deepEqual(deleteSandboxCalls, ["oob-listener-peer", FAKE_SANDBOX.id]);
+    return { outcome, listenerLog };
   } finally {
     delete process.env.BOUNTYDESK_OOB_LISTENER_SNAPSHOT;
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_REF;
     delete process.env.BOUNTYDESK_OOB_LISTENER_IMAGE_NAME;
+    delete process.env.BOUNTYDESK_OOB_LISTENER_BUILD_MARKER;
   }
+}
+
+test("oobListener: provisions linked listener, substitutes {{oobUrl}}, and reproduces when the listener records the canary", async () => {
+  const { outcome, listenerLog } = await runOob({});
+  assert.equal(outcome.outcome, "REPRODUCED");
+  assert.ok(listenerLog.includes("http://oob-listener-peer:8080/"));
+  assert.ok(!JSON.stringify(outcome).includes("http://oob-listener-peer:8080"));
+  assert.deepEqual(deleteSandboxCalls, ["oob-listener-peer", FAKE_SANDBOX.id]);
 });
 
+test("oobListener: a dirty negative control (late callback) gives ANALYSIS_ONLY, never REPRODUCED", async () => {
+  const { outcome } = await runOob({ logAtControl: '{"method":"GET","url":"/CANARY.jpg"}' });
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+});
+
+test("oobListener: a log holding only another run's canary does not dirty the control", async () => {
+  const { outcome } = await runOob({ logAtControl: '{"method":"GET","url":"/some-other-runs-canary.jpg"}' });
+  assert.equal(outcome.outcome, "REPRODUCED");
+});
+
+test("oobListener: no callback from the exploit is never REPRODUCED", async () => {
+  const { outcome } = await runOob({ exploitCallsBack: false });
+  assert.notEqual(outcome.outcome, "REPRODUCED");
+});
+
+test("oobListener: the listener decides, so a callback followed by a 500 still reproduces", async () => {
+  const { outcome } = await runOob({ exploitStatus: 500 });
+  assert.equal(outcome.outcome, "REPRODUCED");
+});
+
+test("oobListener: a clearLog failure stops before the exploit and gives ANALYSIS_ONLY", async () => {
+  const { outcome } = await runOob({ clearOk: false });
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+});
+
+test("oobListener: a listener start failure gives ANALYSIS_ONLY and still tears the listener down", async () => {
+  const { outcome } = await runOob({ listenerStarts: false });
+  assert.equal(outcome.outcome, "ANALYSIS_ONLY");
+  assert.ok(deleteSandboxCalls.includes("oob-listener-peer"));
+});
+
+test("oobListener: a mixed-case percent-encoded canary placeholder is still substituted", async () => {
+  const { outcome } = await runOob({ mixedCasePlaceholder: true });
+  assert.equal(outcome.outcome, "REPRODUCED");
+});
 // Product tampering (juice-shop-product-tampering-unauth): the real recipe, not a stand-in. Its
 // control is a PUT to /api/Users/1 and its exploit and follow-up are PUT and GET on /api/Products/1,
 // so the stub routes on method and path together, which fetchStub above does not.
