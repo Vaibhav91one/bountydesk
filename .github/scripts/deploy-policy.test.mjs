@@ -25,7 +25,10 @@ test("zcli is a pinned release verified by checksum", () => {
 });
 
 test("the token is read-only and checkouts keep no credentials", () => {
-  assert.match(workflow, /^permissions:\n {2}contents: read\n\n/m);
+  // contents: read for the checkouts, actions: read so the trueforge job can find the last deploy.
+  // Both are read scopes; nothing here can write.
+  assert.match(workflow, /^permissions:\n {2}contents: read\n(?: {2}#[^\n]*\n)* {2}actions: read\n\n/m);
+  assert.doesNotMatch(workflow, /: write\b/, "no write scope");
   assert.equal((workflow.match(/permissions:/g) ?? []).length, 1, "no job widens the token");
   const checkouts = (workflow.match(/uses: actions\/checkout@/g) ?? []).length;
   assert.equal((workflow.match(/persist-credentials: false/g) ?? []).length, checkouts);
@@ -42,36 +45,43 @@ test("only a green CI run from a push to main reaches production", () => {
   assert.match(workflow, /^on:\n {2}workflow_run:\n {4}workflows: \[CI\]\n {4}types: \[completed\]$/m);
   assert.doesNotMatch(workflow, /^on:\n {2}push:/m, "deploy must not run straight from a push");
   assert.doesNotMatch(workflow, /pull_request/);
-  // Both jobs gate on the same three facts: CI succeeded, the run came from a push (not a pull
+  // Every deploying job gates on the same three facts: CI succeeded, the run came from a push (not a pull
   // request whose head_branch would be the PR branch), and it was on main.
   for (const guard of ["conclusion == 'success'", "workflow_run.event == 'push'", "head_branch == 'main'"]) {
     const count = (workflow.match(new RegExp(guard.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) ?? []).length;
-    assert.equal(count, 2, `${guard} must guard both jobs`);
+    assert.equal(count, 3, `${guard} must guard migrate, worker and trueforge`);
   }
-  assert.match(workflow, /^ {4}needs: migrate$/m);
+  assert.equal((workflow.match(/^ {4}needs: migrate$/gm) ?? []).length, 2, "worker and trueforge wait for migrate");
   // A custom if: removes the implicit needs-success gate, so the worker must re-check it or it
   // could push against a database whose migration failed.
-  assert.match(workflow, /needs\.migrate\.result == 'success'/, "worker must not run when migrate failed");
-  // A manual dispatch is still limited to main, and both jobs carry that guard.
+  assert.equal(
+    (workflow.match(/needs\.migrate\.result == 'success'/g) ?? []).length,
+    2,
+    "worker and trueforge must not run when migrate failed",
+  );
+  // A manual dispatch is still limited to main, and every job carries that guard.
   assert.equal(
     (workflow.match(/github\.event_name == 'workflow_dispatch' && github\.ref == 'refs\/heads\/main'/g) ?? []).length,
-    2,
+    3,
   );
 });
 
 test("secrets are referenced only where they are used, never inlined", () => {
   assert.deepEqual(
     [...workflow.matchAll(/\$\{\{ secrets\.(\w+) \}\}/g)].map((m) => m[1]).sort(),
-    ["DIRECT_URL", "ZEROPS_TOKEN"],
+    ["DIRECT_URL", "ZEROPS_TOKEN", "ZEROPS_TOKEN"],
   );
   assert.match(workflow, / {10}DIRECT_URL: \$\{\{ secrets\.DIRECT_URL \}\}\n {8}run: npm run db:migrate/);
   assert.match(workflow, / {10}ZEROPS_TOKEN: \$\{\{ secrets\.ZEROPS_TOKEN \}\}\n {8}run: .*zcli" push bdworker/);
+  assert.match(workflow, / {10}ZEROPS_TOKEN: \$\{\{ secrets\.ZEROPS_TOKEN \}\}\n {8}run: .*zcli" push trueforge/);
+  // github.token (read-only, see above) is the only other credential, used to list deploy runs.
+  assert.equal((workflow.match(/\$\{\{ github\.token \}\}/g) ?? []).length, 1);
   assert.doesNotMatch(workflow, /postgres(ql)?:\/\//, "no connection string");
   assert.doesNotMatch(workflow, /zcli" login/, "the token stays out of argv");
 });
 
 test("every job has a timeout", () => {
   const jobs = (workflow.match(/^ {4}runs-on: /gm) ?? []).length;
-  assert.equal(jobs, 2);
+  assert.equal(jobs, 3);
   assert.equal((workflow.match(/^ {4}timeout-minutes: \d+$/gm) ?? []).length, jobs);
 });
