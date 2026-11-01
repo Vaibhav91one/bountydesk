@@ -125,13 +125,7 @@ export default function OnboardingScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <ScreenHeader back backLabel="Connections" />
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
-          showsVerticalScrollIndicator={false}
-        >
-          <EmptyState heading="Connection not found" inline />
-        </ScrollView>
+        <EmptyState heading="Connection not found" />
       </View>
     )
   }
@@ -141,13 +135,7 @@ export default function OnboardingScreen() {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <ScreenHeader back backLabel="Connections" />
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={[styles.scrollContent, { alignItems: "center" }]}
-          showsVerticalScrollIndicator={false}
-        >
-          <EmptyState heading="Not onboarded yet" inline />
-        </ScrollView>
+        <EmptyState heading="Not onboarded yet" />
       </View>
     )
   }

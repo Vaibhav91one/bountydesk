@@ -30,7 +30,7 @@ export default function NotAuthorizedScreen() {
       <EmptyState
         mascot="out-of-scope"
         heading="You are not on the reviewer allowlist"
-        body="Your account signed in, but only allowlisted reviewers can open reports and sign verdicts. Ask an owner to add alex@example.com."
+        body="Your account signed in, but only allowlisted reviewers can open reports and sign verdicts. Ask an owner to add your email address."
         action={{ title: "Request access", onPress: handleRequestAccess }}
       />
       <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={handleSignOut} activeOpacity={0.9}>
