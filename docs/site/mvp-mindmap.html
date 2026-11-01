@@ -17,7 +17,7 @@
 const m = (name) => '<img class="mascot" src="assets/mascot/' + name + '.svg" alt="">';
 // Each phone node is one screen. The thumbnail loads assets/thumbs/mN.jpg (lightbox: mN.png); the engine prefixes
 // 'mindmap-thumbs/' to i, so '../assets/thumbs/mN' resolves to assets/thumbs/mN. A missing image shows the alt text, and the caption still links to screens/mN.html.
-const tree = {c:'BountyDesk mobile', n:'Proposed React Native app, 28 screens, not built\nReviewer on the go, plus the public submit path', root:true, mid:true, h:m('cowboy'), k:[
+const tree = {c:'BountyDesk mobile', n:'Proposed React Native app, 30 screens, not built\nReviewer on the go, plus the public submit path', root:true, mid:true, h:m('cowboy'), k:[
   {c:'Onboarding and auth', n:"Launch to a signed-in reviewer", side:-1, cls:'reporter', h:m('greeting'), flow:true, k:[
     {c:'M1 Splash', n:"Desktop: none. Trix greeting and lockup on the dark brand surface.", i:'../assets/thumbs/m1', s:'mindmap-thumbs/', url:'screens/m1.html', phone:true},
     {c:'M2 Sign in', n:"Desktop: /login. Google and GitHub through Clerk.", i:'../assets/thumbs/m2', s:'mindmap-thumbs/', url:'screens/m2.html', phone:true},
@@ -57,6 +57,10 @@ const tree = {c:'BountyDesk mobile', n:'Proposed React Native app, 28 screens, n
     {c:'M23 Inbox', n:"Mobile only. Opened from the bell: approvals needed and delivery receipts.", i:'../assets/thumbs/m23', s:'mindmap-thumbs/', url:'screens/m23.html', phone:true},
     {c:'M24 Privacy', n:"Desktop: /privacy. Legal, native reading layout.", i:'../assets/thumbs/m24', s:'mindmap-thumbs/', url:'screens/m24.html', phone:true},
     {c:'M25 Terms', n:"Desktop: /terms. Legal, native reading layout.", i:'../assets/thumbs/m25', s:'mindmap-thumbs/', url:'screens/m25.html', phone:true},
+  ]},
+  {c:'States', n:"Loading: animated mascot, spinner and label. Empty: animated mascot and text, never bare text.", side:-1, cls:'status', h:m('scanning'), flow:true, k:[
+    {c:'M29 Loading states', n:"Mobile only. Case file loader and an inline section loader.", i:'../assets/thumbs/m29', s:'mindmap-thumbs/', url:'screens/m29.html', phone:true},
+    {c:'M30 Empty states', n:"Mobile only. Full-screen inbox and inline timeline and queue examples.", i:'../assets/thumbs/m30', s:'mindmap-thumbs/', url:'screens/m30.html', phone:true},
   ]}
 ]};
 </script>
